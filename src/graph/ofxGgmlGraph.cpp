@@ -286,8 +286,8 @@ void ofxGgmlGraph::build(ofxGgmlTensor output) {
 
 void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
 	m_graph = ggml_new_graph(m_ctx);
-	for (const auto & t : outputs) {
-		ggml_build_forward_expand(m_graph, const_cast<struct ggml_tensor *>(t.raw()));
+	for (auto t : outputs) {
+		ggml_build_forward_expand(m_graph, t.raw());
 	}
 }
 
