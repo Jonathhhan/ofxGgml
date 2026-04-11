@@ -35,6 +35,8 @@ struct ggml_backend_buffer;
 /// @endcode
 class ofxGgml {
 public:
+	struct Impl;
+
 	ofxGgml();
 	~ofxGgml();
 
@@ -104,6 +106,5 @@ public:
 	struct ggml_backend_sched * getScheduler();
 
 private:
-	struct Impl;
 	std::unique_ptr<Impl> m_impl;
 };
