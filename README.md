@@ -46,7 +46,7 @@ Build ggml with CMake and install it into the addon's `libs/ggml` directory:
 git clone https://github.com/ggml-org/ggml
 cd ggml
 mkdir build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=<path-to>/ofxGgml/libs/ggml -DBUILD_SHARED_LIBS=ON -DGGML_BUILD_EXAMPLES=OFF -DGGML_BUILD_TESTS=OFF
+cmake .. -DCMAKE_INSTALL_PREFIX=C:/openFrameworks/addons/ofxGgml/libs/ggml -DBUILD_SHARED_LIBS=ON -DGGML_BUILD_EXAMPLES=OFF -DGGML_BUILD_TESTS=OFF
 cmake --build . --config Release -j 8
 cmake --install . --config Release
 ```
