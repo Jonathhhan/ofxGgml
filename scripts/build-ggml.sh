@@ -54,6 +54,35 @@ return 1
 esac
 }
 
+detect_of_platform() {
+case "$(uname -s 2>/dev/null || echo unknown):$(uname -m 2>/dev/null || echo unknown)" in
+Linux:x86_64)
+echo "linux64"
+;;
+Linux:armv6l)
+echo "linuxarmv6l"
+;;
+Linux:armv7l)
+echo "linuxarmv7l"
+;;
+Darwin:*)
+echo "osx"
+;;
+MINGW*:*)
+echo "msys2"
+;;
+MSYS*:*)
+echo "msys2"
+;;
+CYGWIN*:*)
+echo "msys2"
+;;
+*)
+echo "linux64"
+;;
+esac
+}
+
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
@@ -197,17 +226,55 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Copy headers to addon libs/ directory (optional, for OF project generator)
+# Copy headers and compiled libraries to addon libs/ directory for OF projects
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ADDON_GGML_ROOT="$ADDON_ROOT/ofxGgml"
+OF_GGML_ROOT="$ADDON_ROOT/libs/ggml"
+OF_INCLUDE_DIR="$OF_GGML_ROOT/include"
+OF_PLATFORM="$(detect_of_platform)"
+OF_LIB_DIR="$OF_GGML_ROOT/lib/$OF_PLATFORM"
 
-if [[ -d "$ADDON_GGML_ROOT" ]]; then
-write_step "Copying ggml headers to $ADDON_GGML_ROOT/libs/ggml/include..."
-mkdir -p "$ADDON_GGML_ROOT/libs/ggml/include"
-cp -v "$SOURCE_DIR/include/"*.h "$ADDON_GGML_ROOT/libs/ggml/include/"
+write_step "Copying ggml headers to $OF_INCLUDE_DIR..."
+mkdir -p "$OF_INCLUDE_DIR"
+find "$SOURCE_DIR/include" -maxdepth 1 -type f -name '*.h' -exec cp -v {} "$OF_INCLUDE_DIR/" \;
+
+write_step "Copying ggml libraries to $OF_LIB_DIR..."
+mkdir -p "$OF_LIB_DIR"
+LIB_SEARCH_DIRS=(
+	"$BUILD_DIR/src"
+	"$BUILD_DIR/lib"
+	"$BUILD_DIR/bin"
+	"$EFFECTIVE_INSTALL_PREFIX/lib"
+	"$EFFECTIVE_INSTALL_PREFIX/lib64"
+	"$EFFECTIVE_INSTALL_PREFIX/bin"
+)
+LIB_PATTERNS=(
+	"libggml*.a"
+	"libggml*.so"
+	"libggml*.so.*"
+	"libggml*.dylib"
+	"libggml*.dll"
+	"ggml*.dll"
+	"ggml*.lib"
+)
+copied_libs=0
+shopt -s nullglob
+for lib_dir in "${LIB_SEARCH_DIRS[@]}"; do
+	[[ -d "$lib_dir" ]] || continue
+	for pattern in "${LIB_PATTERNS[@]}"; do
+		for lib_path in "$lib_dir"/$pattern; do
+			[[ -f "$lib_path" ]] || continue
+			cp -v "$lib_path" "$OF_LIB_DIR/"
+			copied_libs=1
+		done
+	done
+done
+shopt -u nullglob
+
+if [[ "$copied_libs" -eq 0 ]]; then
+	write_step "Warning: no ggml libraries were found to copy into $OF_LIB_DIR."
 fi
 
 # ---------------------------------------------------------------------------
