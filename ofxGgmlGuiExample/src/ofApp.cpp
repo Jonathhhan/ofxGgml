@@ -26,25 +26,11 @@ const char * ofApp::modeLabels[kModeCount] = {
 void ofApp::initModelPresets() {
 modelPresets = {
 {
-"Qwen2.5-0.5B Instruct Q4_K_M",
-"qwen2.5-0.5b-instruct-q4_k_m.gguf",
-"https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
-"Alibaba Qwen2.5 — tiny, fast chat model",
-"~400 MB", "chat, general (fast)"
-},
-{
 "Qwen2.5-1.5B Instruct Q4_K_M",
 "qwen2.5-1.5b-instruct-q4_k_m.gguf",
 "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
 "Alibaba Qwen2.5 — balanced chat model",
-"~1.0 GB", "chat, general (balanced)"
-},
-{
-"Qwen2.5-3B Instruct Q4_K_M",
-"qwen2.5-3b-instruct-q4_k_m.gguf",
-"https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
-"Alibaba Qwen2.5 — strong reasoning for its size",
-"~2.0 GB", "reasoning, code, chat"
+"~1.0 GB", "chat, general"
 },
 {
 "Qwen2.5-Coder-1.5B Instruct Q4_K_M",
@@ -52,20 +38,6 @@ modelPresets = {
 "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
 "Alibaba Qwen2.5-Coder — optimized for code generation",
 "~1.0 GB", "scripting, code generation"
-},
-{
-"SmolLM2-1.7B Instruct Q8_0",
-"SmolLM2-1.7B-Instruct-Q8_0.gguf",
-"https://huggingface.co/bartowski/SmolLM2-1.7B-Instruct-GGUF/resolve/main/SmolLM2-1.7B-Instruct-Q8_0.gguf",
-"HuggingFace SmolLM2 — compact general purpose",
-"~1.7 GB", "chat, summarize, writing"
-},
-{
-"Gemma-2-2B Instruct Q4_K_M",
-"gemma-2-2b-it-Q4_K_M.gguf",
-"https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
-"Google Gemma 2 — general purpose",
-"~1.5 GB", "chat, summarize, writing"
 }
 };
 }

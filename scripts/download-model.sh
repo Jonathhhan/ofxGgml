@@ -8,7 +8,7 @@
 #
 # Options:
 #   --model  URL   Direct URL to a GGUF model file.
-#                  Default: Qwen2.5-0.5B Instruct Q4_K_M
+#                  Default: Qwen2.5-1.5B Instruct Q4_K_M
 #   --preset N     Select a model by preset number (see --list)
 #   --task   NAME  Select the preferred model for a task: chat, script,
 #                  summarize, write, translate, custom  (matches the GUI
@@ -19,20 +19,16 @@
 #   --help         Show this help message
 #
 # Recommended models (small enough for development):
-#   1. Qwen2.5-0.5B Instruct Q4_K_M    (~400 MB)  — chat, general (fast)
-#   2. Qwen2.5-1.5B Instruct Q4_K_M    (~1.0 GB)  — chat, general (balanced)
-#   3. Qwen2.5-3B Instruct Q4_K_M      (~2.0 GB)  — reasoning, code, chat
-#   4. Qwen2.5-Coder-1.5B Instruct Q4_K_M (~1.0 GB) — scripting, code generation
-#   5. SmolLM2-1.7B Instruct Q8_0      (~1.7 GB)  — chat, summarize, writing
-#   6. Gemma-2-2B Instruct Q4_K_M      (~1.5 GB)  — chat, summarize, writing
+#   1. Qwen2.5-1.5B Instruct Q4_K_M       (~1.0 GB) — chat, general
+#   2. Qwen2.5-Coder-1.5B Instruct Q4_K_M (~1.0 GB) — scripting, code generation
 #
 # Preferred models per example task:
-#   chat       → preset 1  Qwen2.5-0.5B Instruct Q4_K_M
-#   script     → preset 4  Qwen2.5-Coder-1.5B Instruct Q4_K_M
-#   summarize  → preset 6  Gemma-2-2B Instruct Q4_K_M
-#   write      → preset 5  SmolLM2-1.7B Instruct Q8_0
-#   translate  → preset 2  Qwen2.5-1.5B Instruct Q4_K_M
-#   custom     → preset 3  Qwen2.5-3B Instruct Q4_K_M
+#   chat       → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   script     → preset 2  Qwen2.5-Coder-1.5B Instruct Q4_K_M
+#   summarize  → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   write      → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   translate  → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   custom     → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -41,36 +37,20 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 PRESET_NAMES=(
-	"Qwen2.5-0.5B Instruct Q4_K_M"
 	"Qwen2.5-1.5B Instruct Q4_K_M"
-	"Qwen2.5-3B Instruct Q4_K_M"
 	"Qwen2.5-Coder-1.5B Instruct Q4_K_M"
-	"SmolLM2-1.7B Instruct Q8_0"
-	"Gemma-2-2B Instruct Q4_K_M"
 )
 PRESET_URLS=(
-	"https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
 	"https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
-	"https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
 	"https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
-	"https://huggingface.co/bartowski/SmolLM2-1.7B-Instruct-GGUF/resolve/main/SmolLM2-1.7B-Instruct-Q8_0.gguf"
-	"https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf"
 )
 PRESET_SIZES=(
-	"~400 MB"
 	"~1.0 GB"
-	"~2.0 GB"
 	"~1.0 GB"
-	"~1.7 GB"
-	"~1.5 GB"
 )
 PRESET_BESTFOR=(
-	"chat, general (fast)"
-	"chat, general (balanced)"
-	"reasoning, code, chat"
+	"chat, general"
 	"scripting, code generation"
-	"chat, summarize, writing"
-	"chat, summarize, writing"
 )
 
 # ---------------------------------------------------------------------------
@@ -79,11 +59,11 @@ PRESET_BESTFOR=(
 
 declare -A TASK_PRESET
 TASK_PRESET[chat]=1
-TASK_PRESET[script]=4
-TASK_PRESET[summarize]=6
-TASK_PRESET[write]=5
-TASK_PRESET[translate]=2
-TASK_PRESET[custom]=3
+TASK_PRESET[script]=2
+TASK_PRESET[summarize]=1
+TASK_PRESET[write]=1
+TASK_PRESET[translate]=1
+TASK_PRESET[custom]=1
 
 MODEL_URL=""
 OUTPUT_DIR=""
@@ -123,10 +103,10 @@ list_models() {
 	done
 	echo ""
 	echo "Usage:"
-	echo "  ./scripts/download-model.sh --preset 1      # Qwen2.5-0.5B (default)"
-	echo "  ./scripts/download-model.sh --preset 4      # Qwen2.5-Coder for scripting"
-	echo "  ./scripts/download-model.sh --task script   # same as --preset 4"
-	echo "  ./scripts/download-model.sh --task chat     # Qwen2.5-0.5B for chat"
+	echo "  ./scripts/download-model.sh --preset 1      # Qwen2.5-1.5B (default)"
+	echo "  ./scripts/download-model.sh --preset 2      # Qwen2.5-Coder for scripting"
+	echo "  ./scripts/download-model.sh --task script   # same as --preset 2"
+	echo "  ./scripts/download-model.sh --task chat     # Qwen2.5-1.5B for chat"
 	echo "  ./scripts/download-model.sh --model <URL>   # custom URL"
 	exit 0
 }
