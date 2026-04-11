@@ -124,10 +124,16 @@ Clone, compile, and install the ggml library from source:
 ./scripts/build-ggml.sh
 
 # With CUDA support
-./scripts/build-ggml.sh --gpu
+./scripts/build-ggml.sh --cuda
 
 # Custom install prefix
 ./scripts/build-ggml.sh --prefix $HOME/.local --jobs 8
+
+# Install directly into this addon's local libs path (libs/ggml)
+./scripts/build-ggml.sh --cuda --addon-lib-install
+
+# Install into a custom addon-local path
+./scripts/build-ggml.sh --cuda --addon-lib-path /path/to/ofxGgml/libs/ggml
 ```
 
 ### `scripts/download-model.sh`

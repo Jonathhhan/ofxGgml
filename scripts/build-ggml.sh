@@ -3,14 +3,18 @@
 # build-ggml.sh — Clone, compile, and install the ggml tensor library.
 #
 # Usage:
-#   ./scripts/build-ggml.sh [--prefix /usr/local] [--jobs 8] [--gpu]
+#   ./scripts/build-ggml.sh [--prefix /usr/local] [--jobs 8] [--cuda] [--addon-lib-install]
 #
 # Options:
 #   --prefix DIR   Install prefix (default: /usr/local)
 #   --jobs N       Parallel build jobs (default: number of CPU cores)
-#   --gpu          Enable CUDA backend (requires CUDA toolkit)
+#   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 #   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
 #   --metal        Enable Metal backend (macOS only)
+#   --addon-lib-install
+#                  Install ggml into addon local path (default: <repo>/libs/ggml)
+#   --addon-lib-path DIR
+#                  Custom addon local install path (implies --addon-lib-install)
 #   --clean        Remove build directory before building
 #   --help         Show this help message
 # ---------------------------------------------------------------------------
@@ -27,6 +31,8 @@ JOBS=""
 ENABLE_CUDA=0
 ENABLE_VULKAN=0
 ENABLE_METAL=0
+INSTALL_TO_ADDON_LIBS=0
+ADDON_LIB_PATH=""
 CLEAN=0
 
 write_step() {
@@ -70,22 +76,32 @@ shift 2
 JOBS="$2"
 shift 2
 ;;
---gpu|--cuda)
-ENABLE_CUDA=1
-shift
-;;
+	--gpu|--cuda)
+		ENABLE_CUDA=1
+		shift
+		;;
 --vulkan)
 ENABLE_VULKAN=1
 shift
 ;;
---metal)
-ENABLE_METAL=1
-shift
-;;
---clean)
-CLEAN=1
-shift
-;;
+	--metal)
+		ENABLE_METAL=1
+		shift
+		;;
+	--addon-lib-install)
+		INSTALL_TO_ADDON_LIBS=1
+		shift
+		;;
+	--addon-lib-path)
+		[[ $# -ge 2 ]] || die "--addon-lib-path requires a value"
+		ADDON_LIB_PATH="$2"
+		INSTALL_TO_ADDON_LIBS=1
+		shift 2
+		;;
+	--clean)
+		CLEAN=1
+		shift
+		;;
 --help|-h)
 usage
 ;;
@@ -104,6 +120,17 @@ elif command -v getconf >/dev/null 2>&1; then
 JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 else
 JOBS=4
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [[ "$INSTALL_TO_ADDON_LIBS" -eq 1 ]]; then
+	if [[ -z "$ADDON_LIB_PATH" ]]; then
+		ADDON_LIB_PATH="$ADDON_ROOT/libs/ggml"
+	fi
+	INSTALL_PREFIX="$ADDON_LIB_PATH"
+	write_step "Addon local install enabled: $INSTALL_PREFIX"
 fi
 fi
 
@@ -197,17 +224,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Copy headers to addon libs/ directory (optional, for OF project generator)
+# Copy headers to addon local include directory (optional)
 # ---------------------------------------------------------------------------
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ADDON_GGML_ROOT="$ADDON_ROOT/ofxGgml"
-
-if [[ -d "$ADDON_GGML_ROOT" ]]; then
-write_step "Copying ggml headers to $ADDON_GGML_ROOT/libs/ggml/include..."
-mkdir -p "$ADDON_GGML_ROOT/libs/ggml/include"
-cp -v "$SOURCE_DIR/include/"*.h "$ADDON_GGML_ROOT/libs/ggml/include/"
+if [[ "$INSTALL_TO_ADDON_LIBS" -eq 1 ]]; then
+	write_step "Copying ggml headers to $ADDON_LIB_PATH/include..."
+	mkdir -p "$ADDON_LIB_PATH/include"
+	cp -v "$SOURCE_DIR/include/"*.h "$ADDON_LIB_PATH/include/"
 fi
 
 # ---------------------------------------------------------------------------
