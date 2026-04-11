@@ -120,20 +120,17 @@ Two helper scripts are provided in the repository's `scripts/` directory:
 Clone, compile, and install the ggml library from source:
 
 ```bash
-# Basic CPU-only build
+# Install into this addon's libs/ggml (auto-detects CUDA)
+./scripts/build-ggml.sh --addon-lib-install
+
+# Basic CPU-only system install
 ./scripts/build-ggml.sh
 
-# With CUDA support
-./scripts/build-ggml.sh --cuda
+# System install with explicit CUDA support
+./scripts/build-ggml.sh --gpu
 
 # Custom install prefix
 ./scripts/build-ggml.sh --prefix $HOME/.local --jobs 8
-
-# Install directly into this addon's local libs path (libs/ggml)
-./scripts/build-ggml.sh --cuda --addon-lib-install
-
-# Install into a custom addon-local path
-./scripts/build-ggml.sh --cuda --addon-lib-path /path/to/ofxGgml/libs/ggml
 ```
 
 ### `scripts/download-model.sh`

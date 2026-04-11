@@ -3,7 +3,8 @@
 # build-ggml.sh — Clone, compile, and install the ggml tensor library.
 #
 # Usage:
-#   ./scripts/build-ggml.sh [--prefix /usr/local] [--jobs 8] [--cuda] [--addon-lib-install]
+#   ./scripts/build-ggml.sh [--prefix /usr/local] [--jobs 8] [--gpu]
+#   ./scripts/build-ggml.sh --addon-lib-install [--jobs 8]
 #
 # Options:
 #   --prefix DIR   Install prefix (default: /usr/local)
@@ -12,9 +13,9 @@
 #   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
 #   --metal        Enable Metal backend (macOS only)
 #   --addon-lib-install
-#                  Install ggml into addon local path (default: <repo>/libs/ggml)
-#   --addon-lib-path DIR
-#                  Custom addon local install path (implies --addon-lib-install)
+#                  Install ggml into this addon's libs/ggml directory.
+#                  Automatically detects CUDA and builds with GPU support
+#                  when available, otherwise falls back to CPU.
 #   --clean        Remove build directory before building
 #   --help         Show this help message
 # ---------------------------------------------------------------------------
@@ -32,7 +33,6 @@ ENABLE_CUDA=0
 ENABLE_VULKAN=0
 ENABLE_METAL=0
 INSTALL_TO_ADDON_LIBS=0
-ADDON_LIB_PATH=""
 CLEAN=0
 
 write_step() {
@@ -58,6 +58,23 @@ return 0
 return 1
 ;;
 esac
+}
+
+detect_cuda() {
+# Check for nvcc (CUDA compiler) first, then nvidia-smi as fallback.
+if command -v nvcc >/dev/null 2>&1; then
+return 0
+fi
+if command -v nvidia-smi >/dev/null 2>&1; then
+return 0
+fi
+# Check common CUDA toolkit paths
+for cuda_dir in /usr/local/cuda /opt/cuda; do
+if [[ -x "$cuda_dir/bin/nvcc" ]]; then
+return 0
+fi
+done
+return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -92,12 +109,6 @@ shift
 		INSTALL_TO_ADDON_LIBS=1
 		shift
 		;;
-	--addon-lib-path)
-		[[ $# -ge 2 ]] || die "--addon-lib-path requires a value"
-		ADDON_LIB_PATH="$2"
-		INSTALL_TO_ADDON_LIBS=1
-		shift 2
-		;;
 	--clean)
 		CLEAN=1
 		shift
@@ -121,17 +132,25 @@ JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 else
 JOBS=4
 fi
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [[ "$INSTALL_TO_ADDON_LIBS" -eq 1 ]]; then
-	if [[ -z "$ADDON_LIB_PATH" ]]; then
-		ADDON_LIB_PATH="$ADDON_ROOT/libs/ggml"
-	fi
+	ADDON_LIB_PATH="$ADDON_ROOT/libs/ggml"
 	INSTALL_PREFIX="$ADDON_LIB_PATH"
 	write_step "Addon local install enabled: $INSTALL_PREFIX"
-fi
+
+	# Auto-detect CUDA when using --addon-lib-install (unless already set via --gpu/--cuda)
+	if [[ "$ENABLE_CUDA" -eq 0 ]]; then
+		if detect_cuda; then
+			ENABLE_CUDA=1
+			write_step "CUDA toolkit detected — building with GPU support."
+		else
+			write_step "CUDA toolkit not found — building CPU-only."
+		fi
+	fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -210,7 +229,10 @@ cmake --build . --config Release -j "$JOBS"
 
 write_step "Installing ggml to $INSTALL_PREFIX..."
 EFFECTIVE_INSTALL_PREFIX="$INSTALL_PREFIX"
-if [[ -w "$INSTALL_PREFIX" ]]; then
+if [[ "$INSTALL_TO_ADDON_LIBS" -eq 1 ]]; then
+	mkdir -p "$INSTALL_PREFIX"
+	cmake --install .
+elif [[ -w "$INSTALL_PREFIX" ]]; then
 	cmake --install .
 elif command -v sudo >/dev/null 2>&1 && ! is_windows_like; then
 	write_step "Requires elevated permissions for $INSTALL_PREFIX — using sudo."
