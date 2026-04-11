@@ -26,46 +26,18 @@ const char * ofApp::modeLabels[kModeCount] = {
 void ofApp::initModelPresets() {
 modelPresets = {
 {
-"TinyLlama 1.1B Chat Q4_0",
-"tinyllama-1.1b-chat-v1.0.Q4_0.gguf",
-"https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf",
-"Fast, small chat model — good starting point",
-"~600 MB", "chat, general"
+"Qwen2.5-1.5B Instruct Q4_K_M",
+"qwen2.5-1.5b-instruct-q4_k_m.gguf",
+"https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+"Alibaba Qwen2.5 — balanced chat model",
+"~1.0 GB", "chat, general"
 },
 {
-"TinyLlama 1.1B Chat Q8_0",
-"tinyllama-1.1b-chat-v1.0.Q8_0.gguf",
-"https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q8_0.gguf",
-"Higher quality TinyLlama variant",
-"~1.1 GB", "chat, general"
-},
-{
-"Phi-2 Q4_0",
-"phi-2.Q4_0.gguf",
-"https://huggingface.co/TheBloke/phi-2-GGUF/resolve/main/phi-2.Q4_0.gguf",
-"Microsoft Phi-2 — strong reasoning for its size",
-"~1.6 GB", "reasoning, code, chat"
-},
-{
-"CodeLlama 7B Instruct Q4_0",
-"codellama-7b-instruct.Q4_0.gguf",
-"https://huggingface.co/TheBloke/CodeLlama-7B-Instruct-GGUF/resolve/main/codellama-7b-instruct.Q4_0.gguf",
-"Meta CodeLlama — optimized for code generation",
-"~3.8 GB", "scripting, code generation"
-},
-{
-"DeepSeek Coder 1.3B Instruct Q4_0",
-"deepseek-coder-1.3b-instruct.Q4_0.gguf",
-"https://huggingface.co/TheBloke/deepseek-coder-1.3b-instruct-GGUF/resolve/main/deepseek-coder-1.3b-instruct.Q4_0.gguf",
-"Small but capable code model",
-"~0.8 GB", "scripting, code"
-},
-{
-"Gemma 2B Instruct Q4_0",
-"gemma-2b-it-Q4_0.gguf",
-"https://huggingface.co/second-state/Gemma-2b-it-GGUF/resolve/main/gemma-2b-it-Q4_0.gguf",
-"Google Gemma — general purpose",
-"~1.4 GB", "chat, summarize, writing"
+"Qwen2.5-Coder-1.5B Instruct Q4_K_M",
+"qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+"https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+"Alibaba Qwen2.5-Coder — optimized for code generation",
+"~1.0 GB", "scripting, code generation"
 }
 };
 }
@@ -1514,6 +1486,14 @@ std::strncpy(buf, text.c_str(), bufSize - 1);
 buf[bufSize - 1] = '\0';
 };
 
+// Safe integer/float parsers — return default on invalid input.
+auto safeStoi = [](const std::string & s, int fallback = 0) -> int {
+try { return std::stoi(s); } catch (...) { return fallback; }
+};
+auto safeStof = [](const std::string & s, float fallback = 0.0f) -> float {
+try { return std::stof(s); } catch (...) { return fallback; }
+};
+
 while (std::getline(in, line)) {
 if (line == "[/session_v1]") break;
 
@@ -1522,33 +1502,39 @@ if (eq == std::string::npos) continue;
 std::string key = line.substr(0, eq);
 std::string value = line.substr(eq + 1);
 
-if (key == "mode") activeMode = static_cast<AiMode>(std::stoi(value));
+if (key == "mode") {
+	int m = std::clamp(safeStoi(value), 0, kModeCount - 1);
+	activeMode = static_cast<AiMode>(m);
+}
 else if (key == "model") {
-	int maxIdx = static_cast<int>(modelPresets.size()) - 1;
-	selectedModelIndex = std::clamp(std::stoi(value), 0, maxIdx);
+	int maxIdx = std::max(0, static_cast<int>(modelPresets.size()) - 1);
+	selectedModelIndex = std::clamp(safeStoi(value), 0, maxIdx);
 }
 else if (key == "language") {
-	int maxIdx = static_cast<int>(scriptLanguages.size()) - 1;
-	selectedLanguageIndex = std::clamp(std::stoi(value), 0, maxIdx);
+	int maxIdx = std::max(0, static_cast<int>(scriptLanguages.size()) - 1);
+	selectedLanguageIndex = std::clamp(safeStoi(value), 0, maxIdx);
 }
-else if (key == "maxTokens") maxTokens = std::clamp(std::stoi(value), 32, 4096);
-else if (key == "temperature") temperature = std::clamp(std::stof(value), 0.0f, 2.0f);
-else if (key == "topP") topP = std::clamp(std::stof(value), 0.0f, 1.0f);
-else if (key == "repeatPenalty") repeatPenalty = std::clamp(std::stof(value), 1.0f, 2.0f);
-else if (key == "contextSize") contextSize = std::clamp(std::stoi(value), 256, 16384);
-else if (key == "batchSize") batchSize = std::clamp(std::stoi(value), 32, 4096);
-else if (key == "gpuLayers") gpuLayers = std::clamp(std::stoi(value), 0, 128);
-else if (key == "seed") seed = std::clamp(std::stoi(value), -1, 99999);
-else if (key == "numThreads") numThreads = std::clamp(std::stoi(value), 1, 32);
-else if (key == "selectedBackend") selectedBackendIndex = std::clamp(std::stoi(value), 0, 2);
+else if (key == "maxTokens") maxTokens = std::clamp(safeStoi(value, 256), 32, 4096);
+else if (key == "temperature") temperature = std::clamp(safeStof(value, 0.7f), 0.0f, 2.0f);
+else if (key == "topP") topP = std::clamp(safeStof(value, 0.9f), 0.0f, 1.0f);
+else if (key == "repeatPenalty") repeatPenalty = std::clamp(safeStof(value, 1.1f), 1.0f, 2.0f);
+else if (key == "contextSize") contextSize = std::clamp(safeStoi(value, 2048), 256, 16384);
+else if (key == "batchSize") batchSize = std::clamp(safeStoi(value, 512), 32, 4096);
+else if (key == "gpuLayers") gpuLayers = std::clamp(safeStoi(value), 0, 128);
+else if (key == "seed") seed = std::clamp(safeStoi(value, -1), -1, 99999);
+else if (key == "numThreads") numThreads = std::clamp(safeStoi(value, 4), 1, 32);
+else if (key == "selectedBackend") selectedBackendIndex = std::clamp(safeStoi(value), 0, 2);
 else if (key == "theme") {
-	themeIndex = std::clamp(std::stoi(value), 0, 2);
+	themeIndex = std::clamp(safeStoi(value), 0, 2);
 	applyTheme(themeIndex);
 }
-else if (key == "mirostatMode") mirostatMode = std::clamp(std::stoi(value), 0, 2);
-else if (key == "mirostatTau") mirostatTau = std::clamp(std::stof(value), 0.0f, 10.0f);
-else if (key == "mirostatEta") mirostatEta = std::clamp(std::stof(value), 0.0f, 1.0f);
-else if (key == "scriptSourceType") scriptSourceType = static_cast<ScriptSourceType>(std::stoi(value));
+else if (key == "mirostatMode") mirostatMode = std::clamp(safeStoi(value), 0, 2);
+else if (key == "mirostatTau") mirostatTau = std::clamp(safeStof(value, 5.0f), 0.0f, 10.0f);
+else if (key == "mirostatEta") mirostatEta = std::clamp(safeStof(value, 0.1f), 0.0f, 1.0f);
+else if (key == "scriptSourceType") {
+	int t = std::clamp(safeStoi(value), 0, 2);
+	scriptSourceType = static_cast<ScriptSourceType>(t);
+}
 else if (key == "scriptSourcePath") scriptSourcePath = unescapeSessionText(value);
 else if (key == "scriptSourceGitHub") copyToBuf(scriptSourceGitHub, sizeof(scriptSourceGitHub), value);
 else if (key == "scriptSourceBranch") copyToBuf(scriptSourceBranch, sizeof(scriptSourceBranch), value);
@@ -1557,8 +1543,8 @@ else if (key == "scriptInput") copyToBuf(scriptInput, sizeof(scriptInput), value
 else if (key == "summarizeInput") copyToBuf(summarizeInput, sizeof(summarizeInput), value);
 else if (key == "writeInput") copyToBuf(writeInput, sizeof(writeInput), value);
 else if (key == "translateInput") copyToBuf(translateInput, sizeof(translateInput), value);
-else if (key == "translateSourceLang") translateSourceLang = std::clamp(std::stoi(value), 0, kTranslateLangCount - 1);
-else if (key == "translateTargetLang") translateTargetLang = std::clamp(std::stoi(value), 0, kTranslateLangCount - 1);
+else if (key == "translateSourceLang") translateSourceLang = std::clamp(safeStoi(value), 0, kTranslateLangCount - 1);
+else if (key == "translateTargetLang") translateTargetLang = std::clamp(safeStoi(value, 1), 0, kTranslateLangCount - 1);
 else if (key == "customInput") copyToBuf(customInput, sizeof(customInput), value);
 else if (key == "customSystemPrompt") copyToBuf(customSystemPrompt, sizeof(customSystemPrompt), value);
 else if (key == "scriptOutput") scriptOutput = unescapeSessionText(value);
@@ -1574,7 +1560,7 @@ size_t sep2 = value.find('|', sep1 + 1);
 if (sep2 != std::string::npos) {
 Message msg;
 msg.role = unescapeSessionText(value.substr(0, sep1));
-msg.timestamp = std::stof(value.substr(sep1 + 1, sep2 - sep1 - 1));
+msg.timestamp = safeStof(value.substr(sep1 + 1, sep2 - sep1 - 1));
 msg.text = unescapeSessionText(value.substr(sep2 + 1));
 chatMessages.push_back(msg);
 }
