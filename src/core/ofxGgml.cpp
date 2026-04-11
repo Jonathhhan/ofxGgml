@@ -189,7 +189,26 @@ void ofxGgml::getTensorData(ofxGgmlTensor tensor, void * data, size_t bytes) con
 //  Computation
 // --------------------------------------------------------------------------
 
-ofxGgmlComputeResult ofxGgml::compute(ofxGgmlGraph & graph) {
+bool ofxGgml::allocGraph(ofxGgmlGraph & graph) {
+	if (m_impl->state != ofxGgmlState::Ready) {
+		m_impl->log(2, "ofxGgml: not ready");
+		return false;
+	}
+	if (!graph.raw()) {
+		m_impl->log(2, "ofxGgml: graph not built (call graph.build() first)");
+		return false;
+	}
+
+	ggml_backend_sched_reset(m_impl->sched);
+
+	if (!ggml_backend_sched_alloc_graph(m_impl->sched, graph.raw())) {
+		m_impl->log(2, "ofxGgml: graph allocation failed");
+		return false;
+	}
+	return true;
+}
+
+ofxGgmlComputeResult ofxGgml::computeGraph(ofxGgmlGraph & graph) {
 	ofxGgmlComputeResult result;
 
 	if (m_impl->state != ofxGgmlState::Ready) {
@@ -205,14 +224,6 @@ ofxGgmlComputeResult ofxGgml::compute(ofxGgmlGraph & graph) {
 
 	auto t0 = std::chrono::steady_clock::now();
 
-	ggml_backend_sched_reset(m_impl->sched);
-
-	if (!ggml_backend_sched_alloc_graph(m_impl->sched, graph.raw())) {
-		m_impl->state = ofxGgmlState::Ready;
-		result.error = "ofxGgml: graph allocation failed";
-		return result;
-	}
-
 	enum ggml_status status = ggml_backend_sched_graph_compute(m_impl->sched, graph.raw());
 
 	auto t1 = std::chrono::steady_clock::now();
@@ -227,6 +238,17 @@ ofxGgmlComputeResult ofxGgml::compute(ofxGgmlGraph & graph) {
 
 	m_impl->state = ofxGgmlState::Ready;
 	return result;
+}
+
+ofxGgmlComputeResult ofxGgml::compute(ofxGgmlGraph & graph) {
+	ofxGgmlComputeResult result;
+
+	if (!allocGraph(graph)) {
+		result.error = "ofxGgml: graph allocation failed";
+		return result;
+	}
+
+	return computeGraph(graph);
 }
 
 // --------------------------------------------------------------------------

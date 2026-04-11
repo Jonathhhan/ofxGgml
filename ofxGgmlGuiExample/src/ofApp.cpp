@@ -1757,12 +1757,15 @@ std::vector<float> bData(outputDim);
 for (auto & v : wData) v = dist(rng);
 for (auto & v : bData) v = dist(rng) * 0.1f;
 
+// Allocate backend buffers before setting tensor data.
+ggml.allocGraph(graph);
+
 ggml.setTensorData(inputTensor, features.data(), features.size() * sizeof(float));
 ggml.setTensorData(weights, wData.data(), wData.size() * sizeof(float));
 ggml.setTensorData(bias, bData.data(), bData.size() * sizeof(float));
 
 // Compute.
-auto result = ggml.compute(graph);
+auto result = ggml.computeGraph(graph);
 
 if (!result.success) {
 return "[Error] Computation failed: " + result.error;

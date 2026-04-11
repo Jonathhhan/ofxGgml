@@ -31,7 +31,10 @@ struct ggml_backend_buffer;
 ///   graph.setOutput(result);
 ///   graph.build(result);
 ///
-///   auto r = ggml.compute(graph);        // execute on chosen backend
+///   ggml.allocGraph(graph);              // allocate tensor buffers
+///   ggml.setTensorData(a, dataA, size);  // set input data
+///   ggml.setTensorData(b, dataB, size);
+///   auto r = ggml.computeGraph(graph);   // execute on chosen backend
 /// @endcode
 class ofxGgml {
 public:
@@ -83,7 +86,20 @@ public:
 	//  Computation
 	// ------------------------------------------------------------------
 
-	/// Allocate backend buffers and compute the graph synchronously.
+	/// Allocate backend buffers for all tensors in the graph.
+	/// Must be called before setTensorData() / computeGraph().
+	/// Returns true on success.
+	bool allocGraph(ofxGgmlGraph & graph);
+
+	/// Compute an already-allocated graph synchronously.
+	/// Call allocGraph() first, then setTensorData() for inputs,
+	/// then this method.
+	ofxGgmlComputeResult computeGraph(ofxGgmlGraph & graph);
+
+	/// Convenience: allocate buffers and compute in one call.
+	/// Only suitable for graphs whose input tensors do not need
+	/// external data set via setTensorData() between allocation
+	/// and computation.
 	ofxGgmlComputeResult compute(ofxGgmlGraph & graph);
 
 	// ------------------------------------------------------------------
