@@ -90,6 +90,9 @@ void ofApp::runInference() {
 	graph.setOutput(output);
 	graph.build(output);
 
+	// Allocate backend buffers before setting tensor data.
+	ggml.allocGraph(graph);
+
 	// Set tensor data.
 	ggml.setTensorData(input, s_input.data(),  s_input.size()  * sizeof(float));
 	ggml.setTensorData(w1,    s_w1.data(),     s_w1.size()     * sizeof(float));
@@ -97,7 +100,7 @@ void ofApp::runInference() {
 	ggml.setTensorData(w2,    s_w2.data(),     s_w2.size()     * sizeof(float));
 	ggml.setTensorData(b2,    s_b2.data(),     s_b2.size()     * sizeof(float));
 
-	auto r = ggml.compute(graph);
+	auto r = ggml.computeGraph(graph);
 
 	if (r.success) {
 		logLines.push_back("Inference OK (" + ofToString(r.elapsedMs, 2) + " ms)");

@@ -43,6 +43,9 @@ void ofApp::setup() {
 	graph.setOutput(result);
 	graph.build(result);
 
+	// Allocate backend buffers before setting tensor data.
+	ggml.allocGraph(graph);
+
 	// Set data.
 	float matA[] = { 2, 8, 5, 1, 4, 2, 8, 6 };
 	float matB[] = { 10, 5, 9, 9, 5, 4 };
@@ -50,7 +53,7 @@ void ofApp::setup() {
 	ggml.setTensorData(b, matB, sizeof(matB));
 
 	// Compute.
-	auto r = ggml.compute(graph);
+	auto r = ggml.computeGraph(graph);
 
 	if (r.success) {
 		logLines.push_back("Compute OK (" + ofToString(r.elapsedMs, 2) + " ms)");
