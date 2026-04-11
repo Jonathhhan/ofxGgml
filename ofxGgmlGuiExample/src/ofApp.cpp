@@ -26,46 +26,46 @@ const char * ofApp::modeLabels[kModeCount] = {
 void ofApp::initModelPresets() {
 modelPresets = {
 {
-"TinyLlama 1.1B Chat Q4_0",
-"tinyllama-1.1b-chat-v1.0.Q4_0.gguf",
-"https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf",
-"Fast, small chat model — good starting point",
-"~600 MB", "chat, general"
+"Qwen2.5-0.5B Instruct Q4_K_M",
+"qwen2.5-0.5b-instruct-q4_k_m.gguf",
+"https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+"Alibaba Qwen2.5 — tiny, fast chat model",
+"~400 MB", "chat, general (fast)"
 },
 {
-"TinyLlama 1.1B Chat Q8_0",
-"tinyllama-1.1b-chat-v1.0.Q8_0.gguf",
-"https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q8_0.gguf",
-"Higher quality TinyLlama variant",
-"~1.1 GB", "chat, general"
+"Qwen2.5-1.5B Instruct Q4_K_M",
+"qwen2.5-1.5b-instruct-q4_k_m.gguf",
+"https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+"Alibaba Qwen2.5 — balanced chat model",
+"~1.0 GB", "chat, general (balanced)"
 },
 {
-"Phi-2 Q4_0",
-"phi-2.Q4_0.gguf",
-"https://huggingface.co/TheBloke/phi-2-GGUF/resolve/main/phi-2.Q4_0.gguf",
-"Microsoft Phi-2 — strong reasoning for its size",
-"~1.6 GB", "reasoning, code, chat"
+"Qwen2.5-3B Instruct Q4_K_M",
+"qwen2.5-3b-instruct-q4_k_m.gguf",
+"https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+"Alibaba Qwen2.5 — strong reasoning for its size",
+"~2.0 GB", "reasoning, code, chat"
 },
 {
-"CodeLlama 7B Instruct Q4_0",
-"codellama-7b-instruct.Q4_0.gguf",
-"https://huggingface.co/TheBloke/CodeLlama-7B-Instruct-GGUF/resolve/main/codellama-7b-instruct.Q4_0.gguf",
-"Meta CodeLlama — optimized for code generation",
-"~3.8 GB", "scripting, code generation"
+"Qwen2.5-Coder-1.5B Instruct Q4_K_M",
+"qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+"https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+"Alibaba Qwen2.5-Coder — optimized for code generation",
+"~1.0 GB", "scripting, code generation"
 },
 {
-"DeepSeek Coder 1.3B Instruct Q4_0",
-"deepseek-coder-1.3b-instruct.Q4_0.gguf",
-"https://huggingface.co/TheBloke/deepseek-coder-1.3b-instruct-GGUF/resolve/main/deepseek-coder-1.3b-instruct.Q4_0.gguf",
-"Small but capable code model",
-"~0.8 GB", "scripting, code"
+"SmolLM2-1.7B Instruct Q8_0",
+"SmolLM2-1.7B-Instruct-Q8_0.gguf",
+"https://huggingface.co/bartowski/SmolLM2-1.7B-Instruct-GGUF/resolve/main/SmolLM2-1.7B-Instruct-Q8_0.gguf",
+"HuggingFace SmolLM2 — compact general purpose",
+"~1.7 GB", "chat, summarize, writing"
 },
 {
-"Gemma 2B Instruct Q4_0",
-"gemma-2b-it-Q4_0.gguf",
-"https://huggingface.co/second-state/Gemma-2b-it-GGUF/resolve/main/gemma-2b-it-Q4_0.gguf",
-"Google Gemma — general purpose",
-"~1.4 GB", "chat, summarize, writing"
+"Gemma-2-2B Instruct Q4_K_M",
+"gemma-2-2b-it-Q4_K_M.gguf",
+"https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
+"Google Gemma 2 — general purpose",
+"~1.5 GB", "chat, summarize, writing"
 }
 };
 }

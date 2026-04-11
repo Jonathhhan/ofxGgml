@@ -106,7 +106,7 @@ auto r = ggml.compute(graph);
 - **ofxGgmlExample** — Matrix multiplication with console output.
 - **ofxGgmlNeuralExample** — Simple feedforward neural network visualized in the OF window.
 - **ofxGgmlGuiExample** — Full ImGui-based AI Studio with six modes (Chat, Script, Summarize, Write, Translate, Custom).  Features include:
-  - **Model preselection** — choose from 6 recommended GGUF models (TinyLlama, Phi-2, CodeLlama, DeepSeek Coder, Gemma) via a sidebar combo.
+  - **Model preselection** — choose from 6 recommended GGUF models (Qwen2.5, Qwen2.5-Coder, SmolLM2, Gemma-2) via a sidebar combo.
   - **Script language selector** — 8 language presets (C++, Python, JavaScript, Rust, GLSL, Go, Bash, TypeScript) that set language-specific system prompts.
   - **Script source browser** — connect to a **local folder** or **GitHub repository** to browse, load, and save script files directly from the scripting panel.
   - **Session persistence** — auto-saves on exit, auto-loads on startup.  Full File → Save/Load Session support.  Saves all inputs, outputs, chat history, settings, model/language selections, and script source state.
@@ -138,43 +138,43 @@ Clone, compile, and install the ggml library from source:
 Download a GGUF model file for inference.  Supports model presets and task-based selection:
 
 ```bash
-# Download default model (TinyLlama 1.1B Chat Q4_0, ~600 MB)
+# Download default model (Qwen2.5-0.5B Instruct Q4_K_M, ~400 MB)
 ./scripts/download-model.sh
 
 # Select by preset number
-./scripts/download-model.sh --preset 4    # CodeLlama 7B — best for scripting
+./scripts/download-model.sh --preset 4    # Qwen2.5-Coder — best for scripting
 
 # Select the preferred model for a task (matches GUI example modes)
-./scripts/download-model.sh --task script     # CodeLlama 7B
-./scripts/download-model.sh --task chat       # TinyLlama 1.1B
-./scripts/download-model.sh --task summarize  # Gemma 2B
+./scripts/download-model.sh --task script     # Qwen2.5-Coder-1.5B
+./scripts/download-model.sh --task chat       # Qwen2.5-0.5B
+./scripts/download-model.sh --task summarize  # Gemma-2-2B
 
 # List all presets with details
 ./scripts/download-model.sh --list
 
 # Download a specific model by URL
-./scripts/download-model.sh --model https://huggingface.co/TheBloke/phi-2-GGUF/resolve/main/phi-2.Q4_0.gguf
+./scripts/download-model.sh --model https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf
 ```
 
 Available presets:
 | # | Model | Size | Best for |
 |---|-------|------|----------|
-| 1 | TinyLlama 1.1B Chat Q4_0 | ~600 MB | chat, general |
-| 2 | TinyLlama 1.1B Chat Q8_0 | ~1.1 GB | chat, general (higher quality) |
-| 3 | Phi-2 Q4_0 | ~1.6 GB | reasoning, code, chat |
-| 4 | CodeLlama 7B Instruct Q4_0 | ~3.8 GB | scripting, code generation |
-| 5 | DeepSeek Coder 1.3B Q4_0 | ~0.8 GB | scripting, code |
-| 6 | Gemma 2B Instruct Q4_0 | ~1.4 GB | chat, summarize, writing |
+| 1 | Qwen2.5-0.5B Instruct Q4_K_M | ~400 MB | chat, general (fast) |
+| 2 | Qwen2.5-1.5B Instruct Q4_K_M | ~1.0 GB | chat, general (balanced) |
+| 3 | Qwen2.5-3B Instruct Q4_K_M | ~2.0 GB | reasoning, code, chat |
+| 4 | Qwen2.5-Coder-1.5B Instruct Q4_K_M | ~1.0 GB | scripting, code generation |
+| 5 | SmolLM2-1.7B Instruct Q8_0 | ~1.7 GB | chat, summarize, writing |
+| 6 | Gemma-2-2B Instruct Q4_K_M | ~1.5 GB | chat, summarize, writing |
 
 Preferred models per example task (`--task NAME`):
 | Task | Preset | Model |
 |------|--------|-------|
-| chat | 1 | TinyLlama 1.1B Chat Q4_0 |
-| script | 4 | CodeLlama 7B Instruct Q4_0 |
-| summarize | 6 | Gemma 2B Instruct Q4_0 |
-| write | 6 | Gemma 2B Instruct Q4_0 |
-| translate | 6 | Gemma 2B Instruct Q4_0 |
-| custom | 3 | Phi-2 Q4_0 |
+| chat | 1 | Qwen2.5-0.5B Instruct Q4_K_M |
+| script | 4 | Qwen2.5-Coder-1.5B Instruct Q4_K_M |
+| summarize | 6 | Gemma-2-2B Instruct Q4_K_M |
+| write | 5 | SmolLM2-1.7B Instruct Q8_0 |
+| translate | 2 | Qwen2.5-1.5B Instruct Q4_K_M |
+| custom | 3 | Qwen2.5-3B Instruct Q4_K_M |
 
 ## License
 
