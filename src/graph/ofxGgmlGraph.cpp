@@ -59,7 +59,7 @@ ofxGgmlTensor ofxGgmlGraph::newTensor4d(ofxGgmlType type, int64_t ne0, int64_t n
 }
 
 void ofxGgmlGraph::setParam(ofxGgmlTensor tensor) {
-	if (tensor.raw()) ggml_set_param(m_ctx, tensor.raw());
+	if (tensor.raw()) ggml_set_param(tensor.raw());
 }
 
 void ofxGgmlGraph::setInput(ofxGgmlTensor tensor) {
@@ -264,7 +264,7 @@ ofxGgmlTensor ofxGgmlGraph::pool2d(ofxGgmlTensor a, int kernelSize, int stride, 
 }
 
 ofxGgmlTensor ofxGgmlGraph::upscale(ofxGgmlTensor a, int scaleFactor) {
-	return ofxGgmlTensor(ggml_upscale(m_ctx, a.raw(), scaleFactor));
+	return ofxGgmlTensor(ggml_upscale(m_ctx, a.raw(), scaleFactor, GGML_SCALE_MODE_NEAREST));
 }
 
 // --------------------------------------------------------------------------
@@ -286,7 +286,7 @@ void ofxGgmlGraph::build(ofxGgmlTensor output) {
 
 void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
 	m_graph = ggml_new_graph(m_ctx);
-	for (auto & t : outputs) {
+	for (auto t : outputs) {
 		ggml_build_forward_expand(m_graph, t.raw());
 	}
 }
