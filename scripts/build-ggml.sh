@@ -78,7 +78,7 @@ CYGWIN*:*)
 echo "msys2"
 ;;
 *)
-echo "linux64"
+echo "unknown"
 ;;
 esac
 }
@@ -233,7 +233,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OF_GGML_ROOT="$ADDON_ROOT/libs/ggml"
 OF_INCLUDE_DIR="$OF_GGML_ROOT/include"
-OF_PLATFORM="$(detect_of_platform)"
+OF_PLATFORM="${OF_PLATFORM_OVERRIDE:-$(detect_of_platform)}"
+if [[ "$OF_PLATFORM" == "unknown" ]]; then
+	die "Unsupported platform for OF library layout. Set OF_PLATFORM_OVERRIDE to a target folder name (for example: linux64, osx, msys2)."
+fi
 OF_LIB_DIR="$OF_GGML_ROOT/lib/$OF_PLATFORM"
 
 write_step "Copying ggml headers to $OF_INCLUDE_DIR..."
@@ -266,15 +269,17 @@ for lib_dir in "${LIB_SEARCH_DIRS[@]}"; do
 	for pattern in "${LIB_PATTERNS[@]}"; do
 		for lib_path in "$lib_dir"/$pattern; do
 			[[ -f "$lib_path" ]] || continue
-			cp -v "$lib_path" "$OF_LIB_DIR/"
-			copied_libs=1
+			lib_name="$(basename "$lib_path")"
+			[[ -f "$OF_LIB_DIR/$lib_name" ]] && continue
+			cp -v "$lib_path" "$OF_LIB_DIR/$lib_name"
+			copied_libs=$((copied_libs + 1))
 		done
 	done
 done
 shopt -u nullglob
 
-if [[ "$copied_libs" -eq 0 ]]; then
-	write_step "Warning: no ggml libraries were found to copy into $OF_LIB_DIR."
+if (( copied_libs == 0 )); then
+	die "No ggml libraries were found to copy into $OF_LIB_DIR. Check build output and install prefix."
 fi
 
 # ---------------------------------------------------------------------------
