@@ -74,6 +74,9 @@ constexpr size_t kMaxLogMessages = 500;
 constexpr float kDefaultTemp = 0.7f;
 constexpr float kDefaultTopP = 0.9f;
 constexpr float kDefaultRepeatPenalty = 1.1f;
+constexpr int kBackendAuto = 0;
+constexpr int kBackendCpu = 1;
+constexpr int kBackendGpu = 2;
 
 #ifdef _WIN32
 std::string quoteWindowsArg(const std::string & arg) {
@@ -392,9 +395,9 @@ lastSessionPath = ofFilePath::join(sessionDir, "autosave.session");
 // Initialize ggml with the selected backend preference.
 ofxGgmlSettings settings;
 settings.threads = numThreads;
-if (selectedBackendIndex == 2) {
+	if (selectedBackendIndex == kBackendGpu) {
 settings.preferredBackend = ofxGgmlBackendType::Gpu;
-} else if (selectedBackendIndex == 1) {
+	} else if (selectedBackendIndex == kBackendCpu) {
 settings.preferredBackend = ofxGgmlBackendType::Cpu;
 }
 settings.graphSize = static_cast<size_t>(contextSize);
@@ -1855,16 +1858,26 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	}
 
 	static std::atomic<int> llamaCliState{-1}; // -1 unknown, 0 unavailable, 1 available
+	static std::string llamaCliCommand = "llama-cli";
 	if (llamaCliState.load(std::memory_order_relaxed) == 0) {
-		error = "llama-cli not found in PATH.";
+		error = "llama-cli/llama not found in PATH.";
 		return false;
 	}
 	if (llamaCliState.load(std::memory_order_relaxed) < 0) {
 		std::string probeOut;
 		int probeExit = -1;
-		if (!runProcessCapture({"llama-cli", "--version"}, probeOut, probeExit) || probeExit != 0) {
+		const std::vector<std::string> candidates = {"llama-cli", "llama"};
+		bool found = false;
+		for (const auto & candidate : candidates) {
+			if (runProcessCapture({candidate, "--version"}, probeOut, probeExit) && probeExit == 0) {
+				llamaCliCommand = candidate;
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
 			llamaCliState.store(0, std::memory_order_relaxed);
-			error = "llama-cli not found in PATH.";
+			error = "llama-cli/llama not found in PATH.";
 			return false;
 		}
 		llamaCliState.store(1, std::memory_order_relaxed);
@@ -1896,30 +1909,52 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	const float safeTopP = (std::isfinite(topP) ? std::clamp(topP, 0.0f, 1.0f) : kDefaultTopP);
 	const float safeRepeatPenalty = (std::isfinite(repeatPenalty) ? std::clamp(repeatPenalty, 1.0f, 2.0f) : kDefaultRepeatPenalty);
 	const int safeThreads = std::clamp(numThreads, 1, 128);
+	const int safeContext = std::clamp(contextSize, 256, 16384);
+	const int safeBatch = std::clamp(batchSize, 32, 4096);
+	const int safeGpuLayers = std::clamp(gpuLayers, 0, 128);
+	int effectiveGpuLayers = safeGpuLayers;
+	if (selectedBackendIndex == kBackendCpu) {
+		effectiveGpuLayers = 0;
+	}
 
 	std::ostringstream tempStr, topPStr, repeatPenaltyStr;
 	tempStr << std::fixed << std::setprecision(3) << safeTemp;
 	topPStr << std::fixed << std::setprecision(3) << safeTopP;
 	repeatPenaltyStr << std::fixed << std::setprecision(3) << safeRepeatPenalty;
 
-	std::vector<std::string> args = {
-		"llama-cli",
-		"-m", modelPath,
-		"--file", promptPath,
-		"-n", ofToString(safeMaxTokens),
-		"--temp", tempStr.str(),
-		"--top-p", topPStr.str(),
-		"--repeat-penalty", repeatPenaltyStr.str(),
-		"--threads", ofToString(safeThreads)
+	auto makeArgs = [&](bool shortFlags) {
+		std::vector<std::string> out = {
+			llamaCliCommand,
+			"-m", modelPath,
+			(shortFlags ? "-f" : "--file"), promptPath,
+			"-n", ofToString(safeMaxTokens),
+			"-c", ofToString(safeContext),
+			"-b", ofToString(safeBatch),
+			"-ngl", ofToString(effectiveGpuLayers),
+			"--temp", tempStr.str(),
+			"--top-p", topPStr.str(),
+			"--repeat-penalty", repeatPenaltyStr.str(),
+			(shortFlags ? "-t" : "--threads"), ofToString(safeThreads)
+		};
+		if (seed >= 0) {
+			out.push_back("--seed");
+			out.push_back(ofToString(seed));
+		}
+		return out;
 	};
-	if (seed >= 0) {
-		args.push_back("--seed");
-		args.push_back(ofToString(seed));
-	}
+	std::vector<std::string> args = makeArgs(false);
 
 	std::string raw;
 	int ret = -1;
 	const bool started = runProcessCapture(args, raw, ret);
+	if (started && ret != 0) {
+		const std::string lowered = ofToLower(raw);
+		if (lowered.find("unknown argument") != std::string::npos ||
+			lowered.find("unrecognized option") != std::string::npos) {
+			args = makeArgs(true);
+			runProcessCapture(args, raw, ret);
+		}
+	}
 
 	std::error_code ec;
 	std::filesystem::remove(promptPath, ec);
@@ -1931,7 +1966,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 
 	if (!started) {
 		llamaCliState.store(0, std::memory_order_relaxed);
-		error = "llama-cli not found in PATH.";
+		error = "llama-cli/llama not found in PATH.";
 		return false;
 	}
 
@@ -1940,7 +1975,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		if (lowered.find("not found") != std::string::npos ||
 			lowered.find("no such file or directory") != std::string::npos) {
 			llamaCliState.store(0, std::memory_order_relaxed);
-			error = "llama-cli not found in PATH.";
+			error = "llama-cli/llama not found in PATH.";
 			return false;
 		}
 		error = "llama-cli failed. Output:\n" + trim(stripAnsi(raw));
