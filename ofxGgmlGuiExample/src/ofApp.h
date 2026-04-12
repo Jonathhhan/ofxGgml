@@ -226,6 +226,10 @@ private:
 	// -- graph execution helper --
 	void runInference(AiMode mode, const std::string & userText,
 		const std::string & systemPrompt = "");
+	bool runRealInference(const std::string & prompt, std::string & output, std::string & error);
+	std::string buildPromptForMode(AiMode mode, const std::string & userText,
+		const std::string & systemPrompt) const;
+	std::string getSelectedModelPath() const;
 	void applyPendingOutput();
 	void stopGeneration();
 

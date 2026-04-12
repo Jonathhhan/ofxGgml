@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -18,6 +20,56 @@
 const char * ofApp::modeLabels[kModeCount] = {
 "Chat", "Script", "Summarize", "Write", "Translate", "Custom"
 };
+
+namespace {
+
+std::string shellQuote(const std::string & s) {
+	std::string out = "'";
+	for (char c : s) {
+		if (c == '\'') {
+			out += "'\"'\"'";
+		} else {
+			out += c;
+		}
+	}
+	out += "'";
+	return out;
+}
+
+std::string stripAnsi(const std::string & text) {
+	std::string out;
+	out.reserve(text.size());
+	bool inEsc = false;
+	for (size_t i = 0; i < text.size(); i++) {
+		const char c = text[i];
+		if (!inEsc && c == '\x1b') {
+			inEsc = true;
+			continue;
+		}
+		if (inEsc) {
+			if ((c >= '@' && c <= '~') || c == 'm') {
+				inEsc = false;
+			}
+			continue;
+		}
+		out += c;
+	}
+	return out;
+}
+
+std::string trim(const std::string & s) {
+	size_t start = 0;
+	while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start]))) {
+		start++;
+	}
+	size_t end = s.size();
+	while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) {
+		end--;
+	}
+	return s.substr(start, end - start);
+}
+
+}
 
 // ---------------------------------------------------------------------------
 // Presets — models
@@ -1593,6 +1645,125 @@ loadSession(lastSessionPath);
 // Inference — background thread
 // ---------------------------------------------------------------------------
 
+std::string ofApp::getSelectedModelPath() const {
+	if (modelPresets.empty()) return "";
+	if (selectedModelIndex < 0 || selectedModelIndex >= static_cast<int>(modelPresets.size())) return "";
+	const auto & preset = modelPresets[static_cast<size_t>(selectedModelIndex)];
+	return ofToDataPath(ofFilePath::join("models", preset.filename), true);
+}
+
+std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
+	const std::string & systemPrompt) const {
+	std::ostringstream oss;
+
+	if (!systemPrompt.empty()) {
+		oss << "System:\n" << systemPrompt << "\n\n";
+	}
+
+	switch (mode) {
+	case AiMode::Chat:
+		oss << "User:\n" << userText << "\n\nAssistant:\n";
+		break;
+	case AiMode::Script:
+		oss << "Generate high-quality code and short explanation for this request:\n"
+			<< userText << "\n\nAnswer:\n";
+		break;
+	case AiMode::Summarize:
+		oss << "Summarize this text concisely with key points:\n"
+			<< userText << "\n\nSummary:\n";
+		break;
+	case AiMode::Write:
+		oss << "Rewrite and improve this text:\n"
+			<< userText << "\n\nImproved text:\n";
+		break;
+	case AiMode::Translate:
+		oss << userText << "\n\nTranslation:\n";
+		break;
+	case AiMode::Custom:
+		oss << "User:\n" << userText << "\n\nAssistant:\n";
+		break;
+	}
+
+	return oss.str();
+}
+
+bool ofApp::runRealInference(const std::string & prompt, std::string & output, std::string & error) {
+	output.clear();
+	error.clear();
+
+	const std::string modelPath = getSelectedModelPath();
+	if (modelPath.empty()) {
+		error = "No model preset selected.";
+		return false;
+	}
+
+	if (!std::filesystem::exists(modelPath)) {
+		error = "Model file not found: " + modelPath;
+		return false;
+	}
+
+	if (std::system("llama-cli --version >/dev/null 2>&1") != 0) {
+		error = "llama-cli not found in PATH.";
+		return false;
+	}
+
+	const std::string dataDir = ofToDataPath("", true);
+	const std::string id = ofToString(ofGetSystemTimeMillis());
+	const std::string promptPath = ofFilePath::join(dataDir, "llama_prompt_" + id + ".txt");
+	const std::string outputPath = ofFilePath::join(dataDir, "llama_output_" + id + ".txt");
+
+	{
+		std::ofstream promptFile(promptPath);
+		if (!promptFile.is_open()) {
+			error = "Failed to create prompt file.";
+			return false;
+		}
+		promptFile << prompt;
+	}
+
+	std::ostringstream cmd;
+	cmd << "llama-cli"
+		<< " -m " << shellQuote(modelPath)
+		<< " --file " << shellQuote(promptPath)
+		<< " -n " << maxTokens
+		<< " --temp " << temperature
+		<< " --top-p " << topP
+		<< " --repeat-penalty " << repeatPenalty
+		<< " --threads " << std::max(1, numThreads);
+	if (seed >= 0) {
+		cmd << " --seed " << seed;
+	}
+	cmd << " > " << shellQuote(outputPath) << " 2>&1";
+
+	const int ret = std::system(cmd.str().c_str());
+
+	std::string raw;
+	{
+		std::ifstream in(outputPath);
+		if (in.is_open()) {
+			raw.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		}
+	}
+
+	std::error_code ec;
+	std::filesystem::remove(promptPath, ec);
+	ec.clear();
+	std::filesystem::remove(outputPath, ec);
+
+	if (ret != 0) {
+		error = "llama-cli failed. Output:\n" + trim(stripAnsi(raw));
+		return false;
+	}
+
+	output = trim(stripAnsi(raw));
+	if (output.empty()) {
+		error = "llama-cli returned empty output.";
+		return false;
+	}
+
+	return true;
+}
+
 void ofApp::runInference(AiMode mode, const std::string & userText,
 const std::string & systemPrompt) {
 if (generating.load() || !engineReady) return;
@@ -1605,8 +1776,15 @@ if (workerThread.joinable()) {
 workerThread.join();
 }
 
-workerThread = std::thread([this, mode, userText, systemPrompt]() {
-std::string result = runDemoComputation(userText, mode, systemPrompt);
+ workerThread = std::thread([this, mode, userText, systemPrompt]() {
+ std::string prompt = buildPromptForMode(mode, userText, systemPrompt);
+ std::string result;
+ std::string error;
+
+ if (!runRealInference(prompt, result, error)) {
+ std::string demo = runDemoComputation(userText, mode, systemPrompt);
+ result = "[Fallback: demo pipeline]\n" + error + "\n\n" + demo;
+ }
 
 {
 std::lock_guard<std::mutex> lock(outputMutex);
