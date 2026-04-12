@@ -167,7 +167,7 @@ private:
 	int detectedModelLayers = 0;                     // auto-detected from GGUF metadata (0=unknown)
 	int seed = -1;                                   // -1 = random
 	int numThreads = 4;
-	int selectedBackendIndex = 0;                    // 0=Auto, then indices into backendNames
+	int selectedBackendIndex = 0;                    // direct index into backendNames
 	std::vector<std::string> backendNames;           // raw ggml device names (populated at setup)
 	int themeIndex = 0;                              // 0=Dark, 1=Light, 2=Classic
 	int mirostatMode = 0;                            // 0=off, 1=Mirostat, 2=Mirostat 2.0
