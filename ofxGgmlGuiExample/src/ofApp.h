@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -150,6 +151,10 @@ private:
 	std::string pendingOutput;
 	std::string pendingRole;
 	AiMode pendingMode = AiMode::Chat;
+	AiMode activeGenerationMode = AiMode::Chat;
+	float generationStartTime = 0.0f;
+	std::string streamingOutput;
+	std::mutex streamMutex;
 
 	// -- settings --
 	int maxTokens = 256;
@@ -231,7 +236,8 @@ private:
 	void reinitBackend();
 	void runInference(AiMode mode, const std::string & userText,
 		const std::string & systemPrompt = "");
-	bool runRealInference(const std::string & prompt, std::string & output, std::string & error);
+	bool runRealInference(const std::string & prompt, std::string & output, std::string & error,
+		std::function<void(const std::string &)> onStreamData = nullptr);
 	std::string buildPromptForMode(AiMode mode, const std::string & userText,
 		const std::string & systemPrompt) const;
 	std::string getSelectedModelPath() const;
