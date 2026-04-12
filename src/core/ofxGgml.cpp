@@ -62,8 +62,20 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	ggml_backend_load_all();
 
 	// Initialize the preferred backend.
-	m_impl->backend = ggml_backend_init_by_type(
-		static_cast<enum ggml_backend_dev_type>(settings.preferredBackend), nullptr);
+	if (settings.deviceIndex >= 0) {
+		// A specific device index was requested — try to initialise it.
+		const size_t devCount = ggml_backend_dev_count();
+		if (static_cast<size_t>(settings.deviceIndex) < devCount) {
+			ggml_backend_dev_t dev = ggml_backend_dev_get(
+				static_cast<size_t>(settings.deviceIndex));
+			m_impl->backend = ggml_backend_dev_init(dev, nullptr);
+		}
+	}
+
+	if (!m_impl->backend) {
+		m_impl->backend = ggml_backend_init_by_type(
+			static_cast<enum ggml_backend_dev_type>(settings.preferredBackend), nullptr);
+	}
 
 	if (!m_impl->backend) {
 		// Fall back to the best available.
