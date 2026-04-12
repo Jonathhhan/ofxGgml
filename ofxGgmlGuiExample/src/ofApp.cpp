@@ -2584,7 +2584,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	// prompt before the generated text.  Return only the generated part.
 	{
 		const std::string trimmedPrompt = trim(prompt);
-		if (!trimmedPrompt.empty() && output.size() > trimmedPrompt.size()) {
+		if (!trimmedPrompt.empty() && output.size() >= trimmedPrompt.size()) {
 			if (output.compare(0, trimmedPrompt.size(), trimmedPrompt) == 0) {
 				output = trim(output.substr(trimmedPrompt.size()));
 			} else {
@@ -2673,7 +2673,7 @@ workerThread.join();
  }
 
  const std::string trimmedPrompt = trim(prompt);
- auto streamCb = [this, &trimmedPrompt](const std::string & partial) {
+ auto streamCb = [this, trimmedPrompt](const std::string & partial) {
  std::string cleaned = stripAnsi(partial);
  // Strip the prompt echo so only generated text is shown during streaming.
  if (!trimmedPrompt.empty()) {
