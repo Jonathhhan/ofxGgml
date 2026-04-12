@@ -74,6 +74,9 @@ constexpr size_t kMaxLogMessages = 500;
 constexpr float kDefaultTemp = 0.7f;
 constexpr float kDefaultTopP = 0.9f;
 constexpr float kDefaultRepeatPenalty = 1.1f;
+constexpr int kBackendAuto = 0;
+constexpr int kBackendCpu = 1;
+constexpr int kBackendGpu = 2;
 
 #ifdef _WIN32
 std::string quoteWindowsArg(const std::string & arg) {
@@ -392,9 +395,9 @@ lastSessionPath = ofFilePath::join(sessionDir, "autosave.session");
 // Initialize ggml with the selected backend preference.
 ofxGgmlSettings settings;
 settings.threads = numThreads;
-if (selectedBackendIndex == 2) {
+	if (selectedBackendIndex == kBackendGpu) {
 settings.preferredBackend = ofxGgmlBackendType::Gpu;
-} else if (selectedBackendIndex == 1) {
+	} else if (selectedBackendIndex == kBackendCpu) {
 settings.preferredBackend = ofxGgmlBackendType::Cpu;
 }
 settings.graphSize = static_cast<size_t>(contextSize);
@@ -1900,7 +1903,8 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	const int safeBatch = std::clamp(batchSize, 32, 4096);
 	const int safeGpuLayers = std::clamp(gpuLayers, 0, 128);
 	const int effectiveGpuLayers =
-		(selectedBackendIndex == 1) ? 0 : ((selectedBackendIndex == 2) ? std::max(1, safeGpuLayers) : safeGpuLayers);
+		(selectedBackendIndex == kBackendCpu) ? 0
+			: ((selectedBackendIndex == kBackendGpu) ? std::max(1, safeGpuLayers) : safeGpuLayers);
 
 	std::ostringstream tempStr, topPStr, repeatPenaltyStr;
 	tempStr << std::fixed << std::setprecision(3) << safeTemp;
