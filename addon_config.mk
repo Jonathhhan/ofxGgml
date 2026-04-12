@@ -22,20 +22,31 @@ linux64:
 	ADDON_PKG_CONFIG_LIBRARIES = ggml
 
 linux:
+	ADDON_PKG_CONFIG_LIBRARIES = ggml
 
 linuxarmv6l:
+	ADDON_PKG_CONFIG_LIBRARIES = ggml
 
 linuxarmv7l:
+	ADDON_PKG_CONFIG_LIBRARIES = ggml
 
 msys2:
+	ADDON_PKG_CONFIG_LIBRARIES = ggml
 
 vs:
+	ADDON_LIBS  = libs/ggml/lib/ggml.lib
+	ADDON_LIBS += libs/ggml/lib/ggml-base.lib
+	ADDON_LIBS += libs/ggml/lib/ggml-cpu.lib
+	ADDON_DLLS_TO_COPY = libs/ggml/bin/
 
 android/armeabi:
 
 android/armeabi-v7a:
 
 osx:
+	ADDON_LIBS  = libs/ggml/lib/libggml.dylib
+	ADDON_LIBS += libs/ggml/lib/libggml-base.dylib
+	ADDON_LIBS += libs/ggml/lib/libggml-cpu.dylib
 
 ios:
 

@@ -25,16 +25,53 @@ An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https:/
 
 ### Installing ggml
 
+The easiest way is to use the included build script which installs ggml into the addon's `libs/ggml` directory:
+
+```bash
+./scripts/build-ggml.sh --addon-lib-install
+```
+
+#### Linux (system-wide install)
+
 ```bash
 git clone https://github.com/ggml-org/ggml
-cd ggml
-mkdir build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
+cd ggml && mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_SHARED_LIBS=ON
 cmake --build . --config Release -j 8
 sudo cmake --install .
 ```
 
 On Linux the addon uses `pkg-config` to locate the library automatically.
+
+#### Windows (Visual Studio)
+
+Build ggml and install it into the addon's `libs/ggml` directory.  From a Developer Command Prompt or PowerShell:
+
+```bat
+git clone https://github.com/ggml-org/ggml
+cd ggml
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=<path-to-addons>/ofxGgml/libs/ggml -DBUILD_SHARED_LIBS=ON
+cmake --build . --config Release
+cmake --install . --config Release
+```
+
+Replace `<path-to-addons>` with the absolute path to your openFrameworks `addons` folder.  After installation, the addon expects:
+- **Headers** in `libs/ggml/include/`
+- **Import libraries** (`ggml.lib`, `ggml-base.lib`, `ggml-cpu.lib`) in `libs/ggml/lib/`
+- **DLLs** (`ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll`) in `libs/ggml/bin/`
+
+The DLLs from `libs/ggml/bin/` must be in your executable's directory at runtime.  The addon's `ADDON_DLLS_TO_COPY` setting handles this automatically when using the openFrameworks project generator.
+
+#### macOS
+
+```bash
+git clone https://github.com/ggml-org/ggml
+cd ggml && mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=<path-to-addons>/ofxGgml/libs/ggml -DBUILD_SHARED_LIBS=ON
+cmake --build . --config Release -j 8
+cmake --install .
+```
 
 ## Usage
 
