@@ -233,32 +233,108 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 }
 
 // ---------------------------------------------------------------------------
-// Probe for llama-cli / llama in PATH.
-// Updates llamaCliState and llamaCliCommand.  Safe to call from any thread.
+// Probe for llama-cli / llama.
+// Checks a user-supplied custom path first, then PATH, then common
+// installation directories.  Updates llamaCliState and llamaCliCommand.
 // ---------------------------------------------------------------------------
 
-static void probeLlamaCli(std::mutex & logMutex, std::deque<std::string> & logMessages) {
+static bool probeCandidate(const std::string & candidate,
+                           const std::vector<std::string> & flags,
+                           std::string & probeOut, int & probeExit) {
+	for (const auto & flag : flags) {
+		if (runProcessCapture({candidate, flag}, probeOut, probeExit)
+			&& probeExit != kExecNotFound) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void probeLlamaCli(std::mutex & logMutex,
+                          std::deque<std::string> & logMessages,
+                          const std::string & customPath = "") {
 	std::string probeOut;
 	int probeExit = -1;
-	const std::vector<std::string> candidates = {"llama-cli", "llama"};
 	const std::vector<std::string> probeFlags = {"--version", "--help"};
 	bool found = false;
-	for (const auto & candidate : candidates) {
-		for (const auto & flag : probeFlags) {
-			if (runProcessCapture({candidate, flag}, probeOut, probeExit)
-				&& probeExit != kExecNotFound) {
-				llamaCliCommand = candidate;
+
+	// 1. Try user-supplied custom path first.
+	if (!customPath.empty()) {
+		std::error_code ec;
+		if (std::filesystem::exists(customPath, ec) && !ec) {
+			if (probeCandidate(customPath, probeFlags, probeOut, probeExit)) {
+				llamaCliCommand = customPath;
+				found = true;
+			}
+		}
+	}
+
+	// 2. Try bare names via PATH (execvp search).
+	if (!found) {
+		const std::vector<std::string> bareNames = {"llama-cli", "llama"};
+		for (const auto & name : bareNames) {
+			if (probeCandidate(name, probeFlags, probeOut, probeExit)) {
+				llamaCliCommand = name;
 				found = true;
 				break;
 			}
 		}
-		if (found) break;
 	}
+
+	// 3. Try common installation directories.
+	if (!found) {
+		std::vector<std::string> searchDirs;
+#ifdef _WIN32
+		// On Windows, also check common Program Files locations.
+		const char * progFiles = std::getenv("ProgramFiles");
+		if (progFiles) {
+			searchDirs.push_back(std::string(progFiles) + "\\llama.cpp");
+			searchDirs.push_back(std::string(progFiles) + "\\LlamaCpp");
+		}
+		const char * localAppData = std::getenv("LOCALAPPDATA");
+		if (localAppData) {
+			searchDirs.push_back(std::string(localAppData) + "\\llama.cpp");
+		}
+#else
+		// Common POSIX install directories that may not be in PATH
+		// when launched from a GUI / IDE.
+		searchDirs.push_back("/usr/local/bin");
+		searchDirs.push_back("/usr/bin");
+#ifdef __APPLE__
+		searchDirs.push_back("/opt/homebrew/bin");
+#endif
+		const char * home = std::getenv("HOME");
+		if (home) {
+			searchDirs.push_back(std::string(home) + "/.local/bin");
+		}
+		searchDirs.push_back("/snap/bin");
+#endif
+		const std::vector<std::string> exeNames = {"llama-cli", "llama"};
+		for (const auto & dir : searchDirs) {
+			for (const auto & exe : exeNames) {
+				std::string fullPath = dir +
+#ifdef _WIN32
+					"\\" + exe + ".exe";
+#else
+					"/" + exe;
+#endif
+				std::error_code ec;
+				if (!std::filesystem::exists(fullPath, ec) || ec) continue;
+				if (probeCandidate(fullPath, probeFlags, probeOut, probeExit)) {
+					llamaCliCommand = fullPath;
+					found = true;
+					break;
+				}
+			}
+			if (found) break;
+		}
+	}
+
 	if (!found) {
 		llamaCliState.store(0, std::memory_order_relaxed);
 		{
 			std::lock_guard<std::mutex> lock(logMutex);
-			logMessages.push_back("[info] llama-cli/llama not found in PATH.");
+			logMessages.push_back("[info] llama-cli/llama not found in PATH or common directories.");
 			if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
 		}
 		return;
@@ -464,18 +540,21 @@ logMessages.pop_front();
 }
 });
 
-// Detect llama-cli / llama at startup.
-probeLlamaCli(logMutex, logMessages);
+// Auto-load last session if available (before CLI probe so that a
+// persisted custom CLI path is available).
+autoLoadSession();
 
-// Pre-fill example system prompt.
+// Detect llama-cli / llama at startup.
+probeLlamaCli(logMutex, logMessages, customCliPath);
+
+// Pre-fill example system prompt only if not restored from session.
+if (customSystemPrompt[0] == '\0') {
 std::strncpy(customSystemPrompt,
 "You are a helpful assistant. Respond concisely.", sizeof(customSystemPrompt) - 1);
+}
 
 // Apply default theme.
 applyTheme(themeIndex);
-
-// Auto-load last session if available.
-autoLoadSession();
 }
 
 void ofApp::update() {
@@ -716,7 +795,18 @@ ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "CLI: %s", llamaCliCommand.c_
 ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.2f, 1.0f), "CLI: not detected");
 }
 if (ImGui::Button("Re-detect CLI", ImVec2(-1, 0))) {
-probeLlamaCli(logMutex, logMessages);
+probeLlamaCli(logMutex, logMessages, customCliPath);
+}
+
+// Custom CLI path override.
+ImGui::Text("Custom CLI path:");
+ImGui::SetNextItemWidth(-1);
+if (ImGui::InputText("##CliPath", customCliPath, sizeof(customCliPath),
+	ImGuiInputTextFlags_EnterReturnsTrue)) {
+probeLlamaCli(logMutex, logMessages, customCliPath);
+}
+if (ImGui::IsItemHovered()) {
+ImGui::SetTooltip("Full path to llama-cli binary (press Enter to apply)");
 }
 
 if (generating.load()) {
@@ -1693,6 +1783,9 @@ out << "mirostatMode=" << mirostatMode << "\n";
 out << "mirostatTau=" << ofToString(mirostatTau, 4) << "\n";
 out << "mirostatEta=" << ofToString(mirostatEta, 4) << "\n";
 
+// Custom CLI path.
+out << "customCliPath=" << escapeSessionText(customCliPath) << "\n";
+
 // Script source.
 out << "scriptSourceType=" << static_cast<int>(scriptSourceType) << "\n";
 out << "scriptSourcePath=" << escapeSessionText(scriptSourcePath) << "\n";
@@ -1796,6 +1889,7 @@ else if (key == "theme") {
 else if (key == "mirostatMode") mirostatMode = std::clamp(safeStoi(value), 0, 2);
 else if (key == "mirostatTau") mirostatTau = std::clamp(safeStof(value, 5.0f), 0.0f, 10.0f);
 else if (key == "mirostatEta") mirostatEta = std::clamp(safeStof(value, 0.1f), 0.0f, 1.0f);
+else if (key == "customCliPath") copyToBuf(customCliPath, sizeof(customCliPath), value);
 else if (key == "scriptSourceType") {
 	int t = std::clamp(safeStoi(value), 0, 2);
 	scriptSourceType = static_cast<ScriptSourceType>(t);
@@ -1920,9 +2014,9 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	// so the user can install llama-cli without restarting the app.
 
 	if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-		probeLlamaCli(logMutex, logMessages);
+		probeLlamaCli(logMutex, logMessages, customCliPath);
 		if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-			error = "llama-cli/llama not found in PATH.";
+			error = "llama-cli/llama not found. Set a custom CLI path in the sidebar.";
 			return false;
 		}
 	}
