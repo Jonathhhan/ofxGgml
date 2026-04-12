@@ -4,12 +4,24 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <numeric>
 #include <random>
 #include <sstream>
+#include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // Static data
@@ -18,6 +30,198 @@
 const char * ofApp::modeLabels[kModeCount] = {
 "Chat", "Script", "Summarize", "Write", "Translate", "Custom"
 };
+
+namespace {
+
+std::string stripAnsi(const std::string & text) {
+	std::string out;
+	out.reserve(text.size());
+	bool inEsc = false;
+	for (size_t i = 0; i < text.size(); i++) {
+		const char c = text[i];
+		if (!inEsc && c == '\x1b') {
+			inEsc = true;
+			continue;
+		}
+		if (inEsc) {
+			if ((c >= '@' && c <= '~') || c == 'm') {
+				inEsc = false;
+			}
+			continue;
+		}
+		out += c;
+	}
+	return out;
+}
+
+std::string trim(const std::string & s) {
+	size_t start = 0;
+	while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start]))) {
+		start++;
+	}
+	size_t end = s.size();
+	while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) {
+		end--;
+	}
+	return s.substr(start, end - start);
+}
+
+std::string formatFallbackOutput(const std::string & reason, const std::string & demoOutput) {
+	return "[Fallback: demo pipeline]\n" + reason + "\n\n" + demoOutput;
+}
+
+constexpr size_t kMaxLogMessages = 500;
+constexpr float kDefaultTemp = 0.7f;
+constexpr float kDefaultTopP = 0.9f;
+constexpr float kDefaultRepeatPenalty = 1.1f;
+
+#ifdef _WIN32
+std::string quoteWindowsArg(const std::string & arg) {
+	bool needsQuotes = arg.find_first_of(" \t\"%^&|<>") != std::string::npos;
+	if (!needsQuotes) return arg;
+	std::string out = "\"";
+	size_t backslashes = 0;
+	for (char c : arg) {
+		if (c == '\\') {
+			backslashes++;
+			continue;
+		}
+		if (c == '"') {
+			out.append(backslashes * 2 + 1, '\\');
+			out.push_back('"');
+			backslashes = 0;
+			continue;
+		}
+		if (backslashes > 0) {
+			out.append(backslashes, '\\');
+			backslashes = 0;
+		}
+		out.push_back(c);
+	}
+	if (backslashes > 0) {
+		out.append(backslashes * 2, '\\');
+	}
+	out.push_back('"');
+	return out;
+}
+#endif
+
+bool runProcessCapture(const std::vector<std::string> & args, std::string & output, int & exitCode) {
+	output.clear();
+	exitCode = -1;
+	if (args.empty() || args[0].empty()) return false;
+
+#ifdef _WIN32
+	SECURITY_ATTRIBUTES sa{};
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = TRUE;
+	sa.lpSecurityDescriptor = nullptr;
+
+	HANDLE readPipe = nullptr;
+	HANDLE writePipe = nullptr;
+	if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) return false;
+	if (!SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0)) {
+		CloseHandle(readPipe);
+		CloseHandle(writePipe);
+		return false;
+	}
+
+	STARTUPINFOA si{};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESTDHANDLES;
+	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+	si.hStdOutput = writePipe;
+	si.hStdError = writePipe;
+
+	PROCESS_INFORMATION pi{};
+	std::string cmdLine;
+	for (size_t i = 0; i < args.size(); i++) {
+		if (i > 0) cmdLine += " ";
+		cmdLine += quoteWindowsArg(args[i]);
+	}
+	std::vector<char> mutableCmd(cmdLine.begin(), cmdLine.end());
+	mutableCmd.push_back('\0');
+
+	BOOL ok = CreateProcessA(
+		nullptr,
+		mutableCmd.data(),
+		nullptr,
+		nullptr,
+		TRUE,
+		CREATE_NO_WINDOW,
+		nullptr,
+		nullptr,
+		&si,
+		&pi
+	);
+	CloseHandle(writePipe);
+	if (!ok) {
+		CloseHandle(readPipe);
+		return false;
+	}
+
+	char buffer[4096];
+	DWORD bytesRead = 0;
+	while (ReadFile(readPipe, buffer, static_cast<DWORD>(sizeof(buffer)), &bytesRead, nullptr) && bytesRead > 0) {
+		output.append(buffer, bytesRead);
+	}
+	CloseHandle(readPipe);
+
+	WaitForSingleObject(pi.hProcess, INFINITE);
+	DWORD code = 1;
+	GetExitCodeProcess(pi.hProcess, &code);
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+	exitCode = static_cast<int>(code);
+	return true;
+#else
+	int pipefd[2];
+	if (pipe(pipefd) != 0) return false;
+
+	pid_t pid = fork();
+	if (pid < 0) {
+		close(pipefd[0]);
+		close(pipefd[1]);
+		return false;
+	}
+
+	if (pid == 0) {
+		dup2(pipefd[1], STDOUT_FILENO);
+		dup2(pipefd[1], STDERR_FILENO);
+		close(pipefd[0]);
+		close(pipefd[1]);
+
+		std::vector<std::string> mutableArgs = args;
+		std::vector<char *> argv;
+		argv.reserve(mutableArgs.size() + 1);
+		for (auto & a : mutableArgs) {
+			argv.push_back(a.empty() ? const_cast<char *>("") : &a[0]);
+		}
+		argv.push_back(nullptr);
+		execvp(argv[0], argv.data());
+		_exit(127);
+	}
+
+	close(pipefd[1]);
+	char buffer[4096];
+	ssize_t n = 0;
+	while ((n = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
+		output.append(buffer, static_cast<size_t>(n));
+	}
+	close(pipefd[0]);
+
+	int status = 0;
+	if (waitpid(pid, &status, 0) < 0) return false;
+	if (WIFEXITED(status)) {
+		exitCode = WEXITSTATUS(status);
+	} else {
+		exitCode = -1;
+	}
+	return true;
+#endif
+}
+
+}
 
 // ---------------------------------------------------------------------------
 // Presets — models
@@ -1593,6 +1797,166 @@ loadSession(lastSessionPath);
 // Inference — background thread
 // ---------------------------------------------------------------------------
 
+std::string ofApp::getSelectedModelPath() const {
+	if (modelPresets.empty()) return "";
+	if (selectedModelIndex < 0 || selectedModelIndex >= static_cast<int>(modelPresets.size())) return "";
+	const auto & preset = modelPresets[static_cast<size_t>(selectedModelIndex)];
+	return ofToDataPath(ofFilePath::join("models", preset.filename), true);
+}
+
+std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
+	const std::string & systemPrompt) const {
+	std::ostringstream oss;
+
+	if (!systemPrompt.empty()) {
+		oss << "System:\n" << systemPrompt << "\n\n";
+	}
+
+	switch (mode) {
+	case AiMode::Chat:
+		oss << "User:\n" << userText << "\n\nAssistant:\n";
+		break;
+	case AiMode::Script:
+		oss << "Generate high-quality code and short explanation for this request:\n"
+			<< userText << "\n\nAnswer:\n";
+		break;
+	case AiMode::Summarize:
+		oss << "Summarize this text concisely with key points:\n"
+			<< userText << "\n\nSummary:\n";
+		break;
+	case AiMode::Write:
+		oss << "Rewrite and improve this text:\n"
+			<< userText << "\n\nImproved text:\n";
+		break;
+	case AiMode::Translate:
+		oss << userText << "\n\nTranslation:\n";
+		break;
+	case AiMode::Custom:
+		oss << "User:\n" << userText << "\n\nAssistant:\n";
+		break;
+	}
+
+	return oss.str();
+}
+
+bool ofApp::runRealInference(const std::string & prompt, std::string & output, std::string & error) {
+	output.clear();
+	error.clear();
+
+	const std::string modelPath = getSelectedModelPath();
+	if (modelPath.empty()) {
+		error = "No model preset selected.";
+		return false;
+	}
+
+	if (!std::filesystem::exists(modelPath)) {
+		error = "Model file not found: " + modelPath;
+		return false;
+	}
+
+	static std::atomic<int> llamaCliState{-1}; // -1 unknown, 0 unavailable, 1 available
+	if (llamaCliState.load(std::memory_order_relaxed) == 0) {
+		error = "llama-cli not found in PATH.";
+		return false;
+	}
+	if (llamaCliState.load(std::memory_order_relaxed) < 0) {
+		std::string probeOut;
+		int probeExit = -1;
+		if (!runProcessCapture({"llama-cli", "--version"}, probeOut, probeExit) || probeExit != 0) {
+			llamaCliState.store(0, std::memory_order_relaxed);
+			error = "llama-cli not found in PATH.";
+			return false;
+		}
+		llamaCliState.store(1, std::memory_order_relaxed);
+	}
+
+	std::error_code tempEc;
+	std::string dataDir = std::filesystem::temp_directory_path(tempEc).string();
+	if (tempEc || dataDir.empty()) {
+		dataDir = ofToDataPath("", true);
+	}
+	std::random_device rd;
+	const uint64_t nonceHi = static_cast<uint64_t>(rd());
+	const uint64_t nonceLo = static_cast<uint64_t>(rd());
+	const uint64_t nonce = (nonceHi << 32) | nonceLo;
+	const std::string id = ofToString(ofGetSystemTimeMillis()) + "_" + ofToString(nonce);
+	const std::string promptPath = ofFilePath::join(dataDir, "llama_prompt_" + id + ".txt");
+
+	{
+		std::ofstream promptFile(promptPath);
+		if (!promptFile.is_open()) {
+			error = "Failed to create prompt file.";
+			return false;
+		}
+		promptFile << prompt;
+	}
+
+	const int safeMaxTokens = std::clamp(maxTokens, 1, 8192);
+	const float safeTemp = (std::isfinite(temperature) ? std::clamp(temperature, 0.0f, 2.0f) : kDefaultTemp);
+	const float safeTopP = (std::isfinite(topP) ? std::clamp(topP, 0.0f, 1.0f) : kDefaultTopP);
+	const float safeRepeatPenalty = (std::isfinite(repeatPenalty) ? std::clamp(repeatPenalty, 1.0f, 2.0f) : kDefaultRepeatPenalty);
+	const int safeThreads = std::clamp(numThreads, 1, 128);
+
+	std::ostringstream tempStr, topPStr, repeatPenaltyStr;
+	tempStr << std::fixed << std::setprecision(3) << safeTemp;
+	topPStr << std::fixed << std::setprecision(3) << safeTopP;
+	repeatPenaltyStr << std::fixed << std::setprecision(3) << safeRepeatPenalty;
+
+	std::vector<std::string> args = {
+		"llama-cli",
+		"-m", modelPath,
+		"--file", promptPath,
+		"-n", ofToString(safeMaxTokens),
+		"--temp", tempStr.str(),
+		"--top-p", topPStr.str(),
+		"--repeat-penalty", repeatPenaltyStr.str(),
+		"--threads", ofToString(safeThreads)
+	};
+	if (seed >= 0) {
+		args.push_back("--seed");
+		args.push_back(ofToString(seed));
+	}
+
+	std::string raw;
+	int ret = -1;
+	const bool started = runProcessCapture(args, raw, ret);
+
+	std::error_code ec;
+	std::filesystem::remove(promptPath, ec);
+	if (ec) {
+		std::lock_guard<std::mutex> lock(logMutex);
+		logMessages.push_back("[warn] failed to remove temp prompt file: " + promptPath);
+		if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+	}
+
+	if (!started) {
+		llamaCliState.store(0, std::memory_order_relaxed);
+		error = "llama-cli not found in PATH.";
+		return false;
+	}
+
+	if (ret != 0) {
+		const std::string lowered = ofToLower(raw);
+		if (lowered.find("not found") != std::string::npos ||
+			lowered.find("no such file or directory") != std::string::npos) {
+			llamaCliState.store(0, std::memory_order_relaxed);
+			error = "llama-cli not found in PATH.";
+			return false;
+		}
+		error = "llama-cli failed. Output:\n" + trim(stripAnsi(raw));
+		return false;
+	}
+	llamaCliState.store(1, std::memory_order_relaxed);
+
+	output = trim(stripAnsi(raw));
+	if (output.empty()) {
+		error = "llama-cli returned empty output.";
+		return false;
+	}
+
+	return true;
+}
+
 void ofApp::runInference(AiMode mode, const std::string & userText,
 const std::string & systemPrompt) {
 if (generating.load() || !engineReady) return;
@@ -1605,8 +1969,15 @@ if (workerThread.joinable()) {
 workerThread.join();
 }
 
-workerThread = std::thread([this, mode, userText, systemPrompt]() {
-std::string result = runDemoComputation(userText, mode, systemPrompt);
+ workerThread = std::thread([this, mode, userText, systemPrompt]() {
+ std::string prompt = buildPromptForMode(mode, userText, systemPrompt);
+ std::string result;
+ std::string error;
+
+ if (!runRealInference(prompt, result, error)) {
+ std::string demo = runDemoComputation(userText, mode, systemPrompt);
+ result = formatFallbackOutput(error, demo);
+ }
 
 {
 std::lock_guard<std::mutex> lock(outputMutex);

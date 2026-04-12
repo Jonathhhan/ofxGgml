@@ -194,6 +194,15 @@ Preferred models per example task (`--task NAME`):
 | translate | 1 | Qwen2.5-1.5B Instruct Q4_K_M |
 | custom | 1 | Qwen2.5-1.5B Instruct Q4_K_M |
 
+### Real inference in `ofxGgmlGuiExample`
+
+`ofxGgmlGuiExample` now attempts real text generation via `llama-cli` using the selected preset model file:
+
+- Expected model location: `ofxGgmlGuiExample/bin/data/models/<preset>.gguf`
+- Runtime requirement: `llama-cli` available in your `PATH`
+
+If either prerequisite is missing, the app falls back to the built-in demo compute pipeline and shows the reason in the output.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
