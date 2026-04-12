@@ -411,33 +411,19 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 }
 
 // ---------------------------------------------------------------------------
-// Helper: ImGui::InputTextMultiline wrapper for std::string.
-// Uses the CallbackResize mechanism so the string grows as the user types.
+// Map raw ggml backend names (e.g. "CUDA0", "Metal", "Vulkan") to a
+// user-friendly label.  "CPU" stays as-is; anything GPU-like becomes "GPU".
 // ---------------------------------------------------------------------------
 
-static int StdStringResizeCallback(ImGuiInputTextCallbackData * data) {
-	if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
-		std::string * str = static_cast<std::string *>(data->UserData);
-		str->resize(static_cast<size_t>(data->BufTextLen));
-		data->Buf = &(*str)[0];
-	}
-	return 0;
+static std::string friendlyBackendName(const std::string & raw) {
+	if (raw.empty() || raw == "none") return raw;
+	// Keep CPU as-is.
+	if (raw == "CPU") return raw;
+	// Everything else (CUDA0, Metal, Vulkan, OpenCL, …) is a GPU backend.
+	return "GPU";
 }
 
-static bool InputTextMultilineString(const char * label, std::string * str,
-	const ImVec2 & size = ImVec2(0, 0),
-	ImGuiInputTextFlags flags = 0) {
-	flags |= ImGuiInputTextFlags_CallbackResize;
-	// Ensure the string has at least 1 byte of capacity so &(*str)[0] is valid.
-	if (str->empty()) str->reserve(64);
-	// Pass capacity()+1 so ImGui knows the full writable buffer size
-	// (same pattern as imgui_stdlib.cpp).  The resize callback fires
-	// whenever more space is needed.
-	return ImGui::InputTextMultiline(label, &(*str)[0], str->capacity() + 1,
-		size, flags, StdStringResizeCallback,
-		static_cast<void *>(str));
-}
-
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Probe for llama-completion / llama-cli / llama.
 // Checks a user-supplied custom path first, then PATH, then common
@@ -799,9 +785,9 @@ settings.preferredBackend = ofxGgmlBackendType::Cpu;
 settings.graphSize = static_cast<size_t>(contextSize);
 engineReady = ggml.setup(settings);
 if (engineReady) {
-engineStatus = "Ready (" + ggml.getBackendName() + ")";
+engineStatus = "Ready (" + friendlyBackendName(ggml.getBackendName()) + ")";
 devices = ggml.listDevices();
-lastBackendUsed = ggml.getBackendName();
+lastBackendUsed = friendlyBackendName(ggml.getBackendName());
 } else {
 engineStatus = "Failed to initialize ggml engine";
 }
@@ -1103,7 +1089,7 @@ ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "Engine: OK");
 } else {
 ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.2f, 1.0f), "Engine: Error");
 }
-ImGui::Text("Backend: %s", ggml.getBackendName().c_str());
+ImGui::Text("Backend: %s", friendlyBackendName(ggml.getBackendName()).c_str());
 
 // CLI detection status and retry button.
 if (llamaCliState.load(std::memory_order_relaxed) == 1) {
@@ -1185,15 +1171,7 @@ ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "AI:");
 } else {
 ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "System:");
 }
-float availWidth = ImGui::GetContentRegionAvail().x;
-ImVec2 textSize = ImGui::CalcTextSize(msg.text.c_str(), nullptr, false, availWidth);
-// Height = rendered text + frame padding (top & bottom) + one extra line
-// for the cursor when editing at the end of the text.
-float fieldHeight = std::max(textSize.y + ImGui::GetStyle().FramePadding.y * 2
-	+ ImGui::GetTextLineHeight(), ImGui::GetTextLineHeight() * 2);
-char label[32];
-snprintf(label, sizeof(label), "##ChatMsg%zu", i);
-InputTextMultilineString(label, &msg.text, ImVec2(-1, fieldHeight));
+ImGui::TextWrapped("%s", msg.text.c_str());
 ImGui::Spacing();
 }
 // Show streaming output while generating in Chat mode.
@@ -1446,8 +1424,9 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-InputTextMultilineString("##ScriptOut", &scriptOutput,
-	ImGui::GetContentRegionAvail());
+ImGui::BeginChild("##ScriptOut", ImVec2(0, 0), true);
+ImGui::TextWrapped("%s", scriptOutput.c_str());
+ImGui::EndChild();
 }
 }
 
@@ -1808,8 +1787,9 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-InputTextMultilineString("##SumOut", &summarizeOutput,
-	ImGui::GetContentRegionAvail());
+ImGui::BeginChild("##SumOut2", ImVec2(0, 0), true);
+ImGui::TextWrapped("%s", summarizeOutput.c_str());
+ImGui::EndChild();
 }
 }
 
@@ -1879,8 +1859,9 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-InputTextMultilineString("##WriteOut", &writeOutput,
-	ImGui::GetContentRegionAvail());
+ImGui::BeginChild("##WriteOut2", ImVec2(0, 0), true);
+ImGui::TextWrapped("%s", writeOutput.c_str());
+ImGui::EndChild();
 }
 }
 
@@ -1960,8 +1941,9 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-InputTextMultilineString("##TransOut", &translateOutput,
-	ImGui::GetContentRegionAvail());
+ImGui::BeginChild("##TransOut2", ImVec2(0, 0), true);
+ImGui::TextWrapped("%s", translateOutput.c_str());
+ImGui::EndChild();
 }
 }
 
@@ -2038,8 +2020,9 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-InputTextMultilineString("##CustOut", &customOutput,
-	ImGui::GetContentRegionAvail());
+ImGui::BeginChild("##CustOut2", ImVec2(0, 0), true);
+ImGui::TextWrapped("%s", customOutput.c_str());
+ImGui::EndChild();
 }
 }
 
@@ -2099,7 +2082,7 @@ ImGui::End();
 void ofApp::drawDeviceInfoWindow() {
 ImGui::SetNextWindowSize(ImVec2(420, 300), ImGuiCond_FirstUseEver);
 if (ImGui::Begin("Device Info", &showDeviceInfo)) {
-ImGui::Text("Backend: %s", ggml.getBackendName().c_str());
+ImGui::Text("Backend: %s", friendlyBackendName(ggml.getBackendName()).c_str());
 ImGui::Text("State: %s", ofxGgmlHelpers::stateName(ggml.getState()).c_str());
 ImGui::Separator();
 
@@ -2701,9 +2684,9 @@ settings.graphSize = static_cast<size_t>(contextSize);
 
 engineReady = ggml.setup(settings);
 if (engineReady) {
-	engineStatus = "Ready (" + ggml.getBackendName() + ")";
+	engineStatus = "Ready (" + friendlyBackendName(ggml.getBackendName()) + ")";
 	devices = ggml.listDevices();
-	lastBackendUsed = ggml.getBackendName();
+	lastBackendUsed = friendlyBackendName(ggml.getBackendName());
 } else {
 	engineStatus = "Failed to initialize ggml engine";
 	devices.clear();
