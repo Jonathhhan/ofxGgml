@@ -59,7 +59,15 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	ggml_log_set(ggmlLogCallback, m_impl.get());
 
 	// Load all available backend libraries (CUDA, Metal, Vulkan, …).
-	ggml_backend_load_all();
+	// Guard: only load once per process to avoid triggering the
+	// GGML_ASSERT(prev != ggml_uncaught_exception) in ggml.cpp:22
+	// when backend shared libraries are loaded via dlopen(RTLD_LOCAL)
+	// and pull in a second copy of libggml-base.
+	static bool backendsLoaded = false;
+	if (!backendsLoaded) {
+		ggml_backend_load_all();
+		backendsLoaded = true;
+	}
 
 	// Initialize the preferred backend.
 	if (settings.deviceIndex >= 0) {

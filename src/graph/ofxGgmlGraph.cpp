@@ -28,7 +28,8 @@ void ofxGgmlGraph::reset() {
 
 void ofxGgmlGraph::ensureContext() {
 	if (m_ctx) return;
-	const size_t bufSize = ggml_tensor_overhead() * m_maxNodes + ggml_graph_overhead();
+	const size_t bufSize = ggml_tensor_overhead() * m_maxNodes
+		+ ggml_graph_overhead_custom(m_maxNodes, false);
 	m_buf.resize(bufSize);
 	struct ggml_init_params params = {
 		/*.mem_size   =*/ bufSize,
@@ -36,6 +37,10 @@ void ofxGgmlGraph::ensureContext() {
 		/*.no_alloc   =*/ true,
 	};
 	m_ctx = ggml_init(params);
+	if (!m_ctx) {
+		throw std::runtime_error("ofxGgmlGraph: ggml_init failed — "
+			"buffer too small or ggml not linked correctly");
+	}
 }
 
 // --------------------------------------------------------------------------
@@ -280,12 +285,12 @@ ofxGgmlTensor ofxGgmlGraph::crossEntropyLoss(ofxGgmlTensor logits, ofxGgmlTensor
 // --------------------------------------------------------------------------
 
 void ofxGgmlGraph::build(ofxGgmlTensor output) {
-	m_graph = ggml_new_graph(m_ctx);
+	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
 	ggml_build_forward_expand(m_graph, output.raw());
 }
 
 void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
-	m_graph = ggml_new_graph(m_ctx);
+	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
 	for (auto t : outputs) {
 		ggml_build_forward_expand(m_graph, t.raw());
 	}

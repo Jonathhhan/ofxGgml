@@ -31,9 +31,11 @@ msys2:
 	ADDON_PKG_CONFIG_LIBRARIES = ggml
 
 vs:
+	# Link only ggml.lib — it transitively depends on ggml-base and
+	# ggml-cpu.  Listing all three can cause duplicate static
+	# initialisers (the GGML_ASSERT at ggml.cpp:22) when building
+	# with static libraries.
 	ADDON_LIBS += libs/ggml/lib/ggml.lib
-	ADDON_LIBS += libs/ggml/lib/ggml-base.lib
-	ADDON_LIBS += libs/ggml/lib/ggml-cpu.lib
 
 android/armeabi:
 

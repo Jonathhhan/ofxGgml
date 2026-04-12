@@ -21,6 +21,9 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 #endif
 
 // ---------------------------------------------------------------------------
@@ -67,6 +70,7 @@ std::string trim(const std::string & s) {
 }
 
 constexpr size_t kMaxLogMessages = 500;
+constexpr size_t kExePathBufSize = 4096; // buffer for resolving the executable path
 constexpr float kDefaultTemp = 0.7f;
 constexpr float kDefaultTopP = 0.9f;
 constexpr float kDefaultRepeatPenalty = 1.1f;
@@ -290,6 +294,36 @@ static void probeLlamaCli(std::mutex & logMutex,
 	if (!found) {
 		std::vector<std::string> searchDirs;
 
+		// Check the directory of the running executable.
+		// This handles the case where llama-completion was installed
+		// next to the application binary (common deployment layout).
+		{
+#ifdef _WIN32
+			std::vector<char> exeBuf(kExePathBufSize);
+			DWORD len = GetModuleFileNameA(nullptr, exeBuf.data(), static_cast<DWORD>(exeBuf.size()));
+			if (len > 0 && len < exeBuf.size()) {
+				auto exeDir = std::filesystem::path(std::string(exeBuf.data(), len)).parent_path();
+				searchDirs.push_back(exeDir.string());
+			}
+#elif defined(__linux__) || defined(__FreeBSD__)
+			std::vector<char> exeBuf(kExePathBufSize);
+			ssize_t exeLen = readlink("/proc/self/exe", exeBuf.data(), exeBuf.size());
+			if (exeLen > 0 && static_cast<size_t>(exeLen) < exeBuf.size()) {
+				auto exeDir = std::filesystem::path(std::string(exeBuf.data(), static_cast<size_t>(exeLen))).parent_path();
+				searchDirs.push_back(exeDir.string());
+			}
+#elif defined(__APPLE__)
+			// On macOS, use _NSGetExecutablePath or the current working
+			// directory; the latter is usually the bundle's Contents/MacOS.
+			char macBuf[kExePathBufSize];
+			uint32_t macBufSize = sizeof(macBuf);
+			if (_NSGetExecutablePath(macBuf, &macBufSize) == 0) {
+				auto exeDir = std::filesystem::path(macBuf).parent_path();
+				searchDirs.push_back(exeDir.string());
+			}
+#endif
+		}
+
 		// Check addon-local libs/llama/bin directory.  This is the
 		// default install prefix used by scripts/build-llama-cli.sh on
 		// Windows-like shells and can be used on any platform by
@@ -300,6 +334,23 @@ static void probeLlamaCli(std::mutex & logMutex,
 			auto addonRoot = std::filesystem::weakly_canonical(srcPath / ".." / "..", srcEc);
 			if (!srcEc) {
 				searchDirs.push_back((addonRoot / "libs" / "llama" / "bin").string());
+			}
+		}
+
+		// Also check relative to the current working directory in
+		// case __FILE__ resolved to a path that no longer exists at
+		// runtime (common with out-of-tree builds).
+		{
+			std::error_code ec;
+			auto cwd = std::filesystem::current_path(ec);
+			if (!ec) {
+				searchDirs.push_back(cwd.string());
+				// Try one level up from cwd (e.g., cwd is bin/,
+				// llama-completion is in ../libs/llama/bin/).
+				auto cwdParent = std::filesystem::weakly_canonical(cwd / "..", ec);
+				if (!ec) {
+					searchDirs.push_back((cwdParent / "libs" / "llama" / "bin").string());
+				}
 			}
 		}
 

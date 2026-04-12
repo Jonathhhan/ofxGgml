@@ -56,7 +56,7 @@ cmake --install . --config Release
 The addon expects the following files after installation:
 
 - `libs/ggml/include/` — ggml headers
-- `libs/ggml/lib/ggml.lib`, `ggml-base.lib`, `ggml-cpu.lib` — import libraries
+- `libs/ggml/lib/ggml.lib` — import library (`ggml` transitively depends on `ggml-base` and `ggml-cpu`)
 - `libs/ggml/bin/ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll` — runtime DLLs
 
 Copy the DLLs from `libs/ggml/bin/` into your project's `bin/` directory (next to the .exe) so they can be found at runtime.
@@ -266,6 +266,40 @@ Or install them into the addon tree for automatic detection:
 ```
 
 If either prerequisite is missing, the app shows an error with setup instructions.
+
+## Troubleshooting
+
+### GGML_ASSERT at ggml.cpp:22
+
+If you see an assertion like `GGML_ASSERT(prev != ggml_uncaught_exception)` at `ggml.cpp:22`, this means ggml's static initializer ran twice in the same process.  Common causes:
+
+- **Duplicate linking**: linking `ggml`, `ggml-base`, and `ggml-cpu` simultaneously when `ggml` already depends on the other two. The addon's `addon_config.mk` now links only `ggml.lib` on Visual Studio to avoid this.
+- **Multiple ggml installations**: a system-wide ggml and a local copy in the addon's `libs/` directory both being loaded at runtime. Remove one or ensure library paths are consistent.
+- **Dynamic backend loading**: `ggml_backend_load_all()` uses `dlopen(RTLD_LOCAL)` which can load a second copy of `libggml-base`. The addon now guards this call to run only once per process.
+
+**Workaround**: set the environment variable `GGML_NO_BACKTRACE=1` before launching the app to skip the problematic terminate-handler initializer entirely.
+
+### llama-completion not found
+
+The GUI example searches for `llama-completion`, `llama-cli`, or `llama` in this order:
+
+1. A custom path supplied in the GUI settings
+2. The system `PATH`
+3. The running executable's directory
+4. The addon-local `libs/llama/bin/` directory
+5. Common directories (`/usr/local/bin`, `~/.local/bin`, etc.)
+
+If the tool is not found, build it with:
+
+```bash
+./scripts/build-llama-cli.sh
+```
+
+Or install into the addon tree:
+
+```bash
+./scripts/build-llama-cli.sh --prefix ./libs/llama
+```
 
 ## License
 
