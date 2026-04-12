@@ -24,7 +24,6 @@ SOURCE_DIR="$TMP_ROOT/ggml-source"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEFAULT_INSTALL_PREFIX="/usr/local"
-INSTALL_PREFIX=""
 JOBS=""
 ENABLE_CUDA=0
 ENABLE_VULKAN=0
