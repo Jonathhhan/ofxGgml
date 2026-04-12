@@ -167,7 +167,7 @@ auto r = ggml.compute(graph);
 
 ## Build Scripts
 
-Two helper scripts are provided in the repository's `scripts/` directory:
+Three helper scripts are provided in the repository's `scripts/` directory:
 
 ### `scripts/build-ggml.sh`
 
@@ -182,6 +182,24 @@ Clone, compile, and install the ggml library from source:
 
 # Custom install prefix
 ./scripts/build-ggml.sh --prefix $HOME/.local --jobs 8
+```
+
+### `scripts/build-llama-cli.sh`
+
+Clone, compile, and install the [llama.cpp](https://github.com/ggml-org/llama.cpp) CLI tools (`llama-completion` and `llama-cli`).  `ofxGgmlGuiExample` uses these tools for real text generation:
+
+```bash
+# Basic CPU-only system install
+./scripts/build-llama-cli.sh
+
+# System install with CUDA support
+./scripts/build-llama-cli.sh --gpu
+
+# Install into the addon's libs directory (auto-detected by the GUI example)
+./scripts/build-llama-cli.sh --prefix ./libs/llama
+
+# Custom install prefix
+./scripts/build-llama-cli.sh --prefix $HOME/.local --jobs 8
 ```
 
 ### `scripts/download-model.sh`
@@ -227,10 +245,24 @@ Preferred models per example task (`--task NAME`):
 
 ### Real inference in `ofxGgmlGuiExample`
 
-`ofxGgmlGuiExample` now attempts real text generation via `llama-cli` using the selected preset model file:
+`ofxGgmlGuiExample` now attempts real text generation using [llama.cpp](https://github.com/ggml-org/llama.cpp) CLI tools with the selected preset model file:
 
 - Expected model location: `ofxGgmlGuiExample/bin/data/models/<preset>.gguf`
-- Runtime requirement: `llama-cli` available in your `PATH`
+- Runtime requirement: `llama-completion` (preferred) or `llama-cli` available in your `PATH`, a common install directory, or the addon-local `libs/llama/bin/` directory
+
+The app prefers `llama-completion` (one-shot text completion) over `llama-cli` (interactive chat mode since [llama.cpp PR #17824](https://github.com/ggml-org/llama.cpp/pull/17824)).  Both tools are built by the build script.
+
+You can build the llama.cpp CLI tools locally with:
+
+```bash
+./scripts/build-llama-cli.sh
+```
+
+Or install them into the addon tree for automatic detection:
+
+```bash
+./scripts/build-llama-cli.sh --prefix ./libs/llama
+```
 
 If either prerequisite is missing, the app falls back to the built-in demo compute pipeline and shows the reason in the output.
 

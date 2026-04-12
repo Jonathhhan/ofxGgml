@@ -82,7 +82,7 @@ constexpr int kExecNotFound = 127; // POSIX convention when execvp fails
 // Llama CLI detection state shared between probe and UI.
 // -1 = unknown / needs probe, 0 = probed but not found, 1 = available.
 std::atomic<int> llamaCliState{-1};
-std::string llamaCliCommand = "llama-cli";
+std::string llamaCliCommand = "llama-completion";
 
 #ifdef _WIN32
 std::string quoteWindowsArg(const std::string & arg) {
@@ -233,9 +233,11 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 }
 
 // ---------------------------------------------------------------------------
-// Probe for llama-cli / llama.
+// Probe for llama-completion / llama-cli / llama.
 // Checks a user-supplied custom path first, then PATH, then common
 // installation directories.  Updates llamaCliState and llamaCliCommand.
+// Prefers llama-completion (one-shot text completion) over llama-cli
+// (interactive chat mode since llama.cpp PR #17824).
 // ---------------------------------------------------------------------------
 
 static bool probeCandidate(const std::string & candidate,
@@ -274,8 +276,10 @@ static void probeLlamaCli(std::mutex & logMutex,
 	}
 
 	// 2. Try bare names via PATH (execvp search).
+	// Prefer llama-completion (one-shot text completion) over llama-cli
+	// (interactive chat, server-based since llama.cpp PR #17824).
 	if (!found) {
-		const std::vector<std::string> bareNames = {"llama-cli", "llama"};
+		const std::vector<std::string> bareNames = {"llama-completion", "llama-cli", "llama"};
 		for (const auto & name : bareNames) {
 			if (probeCandidate(name, probeFlags, probeOut, probeExit)) {
 				llamaCliCommand = name;
@@ -288,6 +292,20 @@ static void probeLlamaCli(std::mutex & logMutex,
 	// 3. Try common installation directories.
 	if (!found) {
 		std::vector<std::string> searchDirs;
+
+		// Check addon-local libs/llama/bin directory.  This is the
+		// default install prefix used by scripts/build-llama-cli.sh on
+		// Windows-like shells and can be used on any platform by
+		// passing --prefix <addon>/libs/llama to the script.
+		{
+			std::error_code srcEc;
+			auto srcPath = std::filesystem::path(__FILE__).parent_path();  // .../ofxGgmlGuiExample/src
+			auto addonRoot = std::filesystem::weakly_canonical(srcPath / ".." / "..", srcEc);
+			if (!srcEc) {
+				searchDirs.push_back((addonRoot / "libs" / "llama" / "bin").string());
+			}
+		}
+
 #ifdef _WIN32
 		// On Windows, also check common Program Files locations.
 		const char * progFiles = std::getenv("ProgramFiles");
@@ -313,7 +331,7 @@ static void probeLlamaCli(std::mutex & logMutex,
 		}
 		searchDirs.push_back("/snap/bin");
 #endif
-		const std::vector<std::string> exeNames = {"llama-cli", "llama"};
+		const std::vector<std::string> exeNames = {"llama-completion", "llama-cli", "llama"};
 		for (const auto & dir : searchDirs) {
 			for (const auto & exe : exeNames) {
 				std::string fullPath = dir +
@@ -338,7 +356,7 @@ static void probeLlamaCli(std::mutex & logMutex,
 		llamaCliState.store(0, std::memory_order_relaxed);
 		{
 			std::lock_guard<std::mutex> lock(logMutex);
-			logMessages.push_back("[info] llama-cli/llama not found in PATH or common directories.");
+			logMessages.push_back("[info] llama-completion/llama-cli/llama not found in PATH or common directories.");
 			if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
 		}
 		return;
@@ -548,7 +566,7 @@ logMessages.pop_front();
 // persisted custom CLI path is available).
 autoLoadSession();
 
-// Detect llama-cli / llama at startup.
+// Detect llama-completion / llama-cli / llama at startup.
 probeLlamaCli(logMutex, logMessages, customCliPath);
 
 // Pre-fill example system prompt only if not restored from session.
@@ -810,7 +828,7 @@ if (ImGui::InputText("##CliPath", customCliPath, sizeof(customCliPath),
 probeLlamaCli(logMutex, logMessages, customCliPath);
 }
 if (ImGui::IsItemHovered()) {
-ImGui::SetTooltip("Full path to llama-cli binary (press Enter to apply)");
+ImGui::SetTooltip("Full path to llama-completion or llama-cli binary (press Enter to apply)");
 }
 
 if (generating.load()) {
@@ -2013,14 +2031,15 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		return false;
 	}
 
-	// Probe for llama-cli/llama if not already found.  Unlike earlier
-	// revisions this no longer permanently caches a "not-found" result
-	// so the user can install llama-cli without restarting the app.
+	// Probe for llama-completion/llama-cli/llama if not already found.
+	// Unlike earlier revisions this no longer permanently caches a
+	// "not-found" result so the user can install the tools without
+	// restarting the app.
 
 	if (llamaCliState.load(std::memory_order_relaxed) != 1) {
 		probeLlamaCli(logMutex, logMessages, customCliPath);
 		if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-			error = "llama-cli/llama not found. Set a custom CLI path in the sidebar.";
+			error = "llama-completion/llama-cli not found. Build with scripts/build-llama-cli.sh or set a custom CLI path in the sidebar.";
 			return false;
 		}
 	}
@@ -2122,18 +2141,18 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	if (!started || ret == kExecNotFound) {
 		// Binary truly missing — invalidate cache so next call re-probes.
 		llamaCliState.store(-1, std::memory_order_relaxed);
-		error = "llama-cli/llama not found in PATH.";
+		error = "llama-completion/llama-cli not found in PATH.";
 		return false;
 	}
 
 	if (ret != 0) {
-		error = "llama-cli exited with code " + ofToString(ret) + ". Output:\n" + trim(stripAnsi(raw));
+		error = llamaCliCommand + " exited with code " + ofToString(ret) + ". Output:\n" + trim(stripAnsi(raw));
 		return false;
 	}
 
 	output = trim(stripAnsi(raw));
 	if (output.empty()) {
-		error = "llama-cli returned empty output.";
+		error = llamaCliCommand + " returned empty output.";
 		return false;
 	}
 

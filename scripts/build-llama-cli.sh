@@ -1,0 +1,325 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# build-llama-cli.sh — Clone, compile, and install llama.cpp CLI tools.
+#
+# Builds both llama-cli (interactive chat) and llama-completion (one-shot
+# text completion) from the llama.cpp project.  The ofxGgmlGuiExample uses
+# llama-completion for inference and falls back to llama-cli for older
+# installations.
+#
+# Usage:
+#   ./scripts/build-llama-cli.sh [--prefix DIR] [--jobs 8] [--gpu]
+#
+# Options:
+#   --prefix DIR   Install prefix (default: /usr/local on Unix,
+#                  addon-local libs/llama on Windows-like shells)
+#   --jobs N       Parallel build jobs (default: number of CPU cores)
+#   --gpu, --cuda  Enable CUDA backend
+#   --vulkan       Enable Vulkan backend
+#   --metal        Enable Metal backend (macOS only)
+#   --clean        Remove build directory before building
+#   --help         Show this help message
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
+LLAMA_BRANCH="master"
+TMP_ROOT="${TMPDIR:-/tmp}"
+BUILD_DIR="$TMP_ROOT/llama-cpp-build"
+SOURCE_DIR="$TMP_ROOT/llama-cpp-source"
+DEFAULT_INSTALL_PREFIX="/usr/local"
+JOBS=""
+ENABLE_CUDA=0
+ENABLE_VULKAN=0
+ENABLE_METAL=0
+CLEAN=0
+
+write_step() {
+	printf '==> %s\n' "$1"
+}
+
+die() {
+	printf 'Error: %s\n' "$1" >&2
+	exit 1
+}
+
+usage() {
+	sed -n '2,/^# ---/{ /^# ---/d; s/^# //; s/^#//; p }' "$0"
+	exit 0
+}
+
+is_windows_like() {
+	case "$(uname -s 2>/dev/null || echo unknown)" in
+		MINGW*|MSYS*|CYGWIN*)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+if is_windows_like; then
+	ADDON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+	DEFAULT_INSTALL_PREFIX="$ADDON_ROOT/libs/llama"
+fi
+INSTALL_PREFIX="$DEFAULT_INSTALL_PREFIX"
+
+# ---------------------------------------------------------------------------
+# Parse arguments
+# ---------------------------------------------------------------------------
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--prefix)
+			[[ $# -ge 2 ]] || die "--prefix requires a value"
+			INSTALL_PREFIX="$2"
+			shift 2
+			;;
+		--jobs)
+			[[ $# -ge 2 ]] || die "--jobs requires a value"
+			JOBS="$2"
+			shift 2
+			;;
+		--gpu|--cuda)
+			ENABLE_CUDA=1
+			shift
+			;;
+		--vulkan)
+			ENABLE_VULKAN=1
+			shift
+			;;
+		--metal)
+			ENABLE_METAL=1
+			shift
+			;;
+		--clean)
+			CLEAN=1
+			shift
+			;;
+		--help|-h)
+			usage
+			;;
+		*)
+			die "Unknown option: $1"
+			;;
+	esac
+done
+
+if [[ -z "$JOBS" ]]; then
+	if command -v nproc >/dev/null 2>&1; then
+		JOBS="$(nproc)"
+	elif command -v sysctl >/dev/null 2>&1; then
+		JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+	elif command -v getconf >/dev/null 2>&1; then
+		JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+	else
+		JOBS=4
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Prerequisites
+# ---------------------------------------------------------------------------
+
+for cmd in git cmake; do
+	command -v "$cmd" >/dev/null 2>&1 || die "Required command not found: $cmd"
+done
+
+# ---------------------------------------------------------------------------
+# Clone / update source
+# ---------------------------------------------------------------------------
+
+if [[ "$CLEAN" -eq 1 ]]; then
+	write_step "Cleaning previous build..."
+	rm -rf "$BUILD_DIR" "$SOURCE_DIR"
+fi
+
+if [[ -d "$SOURCE_DIR/.git" ]]; then
+	write_step "Updating existing llama.cpp source in $SOURCE_DIR..."
+	cd "$SOURCE_DIR"
+	git fetch origin
+	git checkout "$LLAMA_BRANCH"
+	git pull origin "$LLAMA_BRANCH"
+else
+	write_step "Cloning llama.cpp from $LLAMA_REPO..."
+	rm -rf "$SOURCE_DIR"
+	git clone --branch "$LLAMA_BRANCH" --depth 1 "$LLAMA_REPO" "$SOURCE_DIR"
+fi
+
+# ---------------------------------------------------------------------------
+# Configure
+# ---------------------------------------------------------------------------
+
+write_step "Configuring llama.cpp build..."
+
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+
+# LLAMA_BUILD_SERVER=ON is required because the new llama-cli (interactive
+# chat mode, merged via ggml-org/llama.cpp#17824) depends on server-context.
+# llama-completion (one-shot text completion) builds without it, but we
+# enable it so both tools are available.
+CMAKE_ARGS=(
+	-DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
+	-DCMAKE_BUILD_TYPE=Release
+	-DBUILD_SHARED_LIBS=OFF
+	-DLLAMA_BUILD_TESTS=OFF
+	-DLLAMA_BUILD_EXAMPLES=OFF
+	-DLLAMA_BUILD_SERVER=ON
+	-DLLAMA_CURL=OFF
+)
+
+if [[ "$ENABLE_CUDA" -eq 1 ]]; then
+	write_step "CUDA backend enabled."
+	CMAKE_ARGS+=(-DGGML_CUDA=ON)
+fi
+
+if [[ "$ENABLE_VULKAN" -eq 1 ]]; then
+	write_step "Vulkan backend enabled."
+	CMAKE_ARGS+=(-DGGML_VULKAN=ON)
+fi
+
+if [[ "$ENABLE_METAL" -eq 1 ]]; then
+	write_step "Metal backend enabled."
+	CMAKE_ARGS+=(-DGGML_METAL=ON)
+fi
+
+cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}"
+
+# ---------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------
+
+# Build llama-completion (one-shot text completion — used by ofxGgmlGuiExample)
+# and llama-cli (interactive chat mode).
+write_step "Building llama-completion and llama-cli with $JOBS parallel jobs..."
+cmake --build . --config Release --target llama-completion llama-cli -j "$JOBS"
+
+# ---------------------------------------------------------------------------
+# Install
+# ---------------------------------------------------------------------------
+
+write_step "Installing llama tools to $INSTALL_PREFIX/bin..."
+EFFECTIVE_INSTALL_PREFIX="$INSTALL_PREFIX"
+
+if [[ -e "$INSTALL_PREFIX" ]] && [[ ! -d "$INSTALL_PREFIX" ]]; then
+	die "Install prefix '$INSTALL_PREFIX' exists but is not a directory."
+fi
+
+# Locate built binaries.
+find_binary() {
+	local name="$1"
+	for candidate in \
+		"$BUILD_DIR/bin/$name" \
+		"$BUILD_DIR/bin/${name}.exe" \
+		"$BUILD_DIR/bin/Release/${name}.exe" \
+		"$BUILD_DIR/$name" \
+		"$BUILD_DIR/${name}.exe"; do
+		if [[ -f "$candidate" ]]; then
+			echo "$candidate"
+			return 0
+		fi
+	done
+	return 1
+}
+
+BUILT_COMPLETION=""
+BUILT_CLI=""
+BUILT_COMPLETION=$(find_binary "llama-completion") || true
+BUILT_CLI=$(find_binary "llama-cli") || true
+
+if [[ -z "$BUILT_COMPLETION" ]] && [[ -z "$BUILT_CLI" ]]; then
+	die "Could not find any built llama binaries under $BUILD_DIR"
+fi
+
+install_binary() {
+	local src="$1"
+	local dest_dir="$2/bin"
+	local bin_name
+	bin_name="$(basename "$src")"
+	local dest_file="$dest_dir/$bin_name"
+	mkdir -p "$dest_dir"
+	cp "$src" "$dest_file"
+	chmod +x "$dest_file"
+	write_step "Installed: $dest_file"
+}
+
+install_binary_sudo() {
+	local src="$1"
+	local dest_dir="$2/bin"
+	local bin_name
+	bin_name="$(basename "$src")"
+	sudo mkdir -p "$dest_dir"
+	sudo cp "$src" "$dest_dir/"
+	sudo chmod +x "$dest_dir/$bin_name"
+	write_step "Installed: $dest_dir/$bin_name"
+}
+
+do_install() {
+	local prefix="$1"
+	local use_sudo="${2:-false}"
+	for binary in "$BUILT_COMPLETION" "$BUILT_CLI"; do
+		if [[ -n "$binary" ]]; then
+			if [[ "$use_sudo" == "true" ]]; then
+				install_binary_sudo "$binary" "$prefix"
+			else
+				install_binary "$binary" "$prefix"
+			fi
+		fi
+	done
+}
+
+if [[ ! -d "$INSTALL_PREFIX" ]]; then
+	INSTALL_PREFIX_PARENT="$(dirname "$INSTALL_PREFIX")"
+	if [[ -w "$INSTALL_PREFIX_PARENT" ]]; then
+		mkdir -p "$INSTALL_PREFIX"
+	fi
+fi
+
+if [[ -d "$INSTALL_PREFIX" ]] && [[ -w "$INSTALL_PREFIX" ]]; then
+	do_install "$INSTALL_PREFIX"
+elif command -v sudo >/dev/null 2>&1 && ! is_windows_like; then
+	write_step "Requires elevated permissions for $INSTALL_PREFIX — using sudo."
+	do_install "$INSTALL_PREFIX" true
+elif [[ "$INSTALL_PREFIX" == "$DEFAULT_INSTALL_PREFIX" ]] && [[ -n "${HOME:-}" ]]; then
+	EFFECTIVE_INSTALL_PREFIX="${HOME}/.local"
+	write_step "Install prefix '$INSTALL_PREFIX' is not writable; falling back to '$EFFECTIVE_INSTALL_PREFIX'."
+	do_install "$EFFECTIVE_INSTALL_PREFIX"
+else
+	die "Install prefix '$INSTALL_PREFIX' is not writable. Use --prefix to a writable location."
+fi
+
+# ---------------------------------------------------------------------------
+# Verify
+# ---------------------------------------------------------------------------
+
+write_step "Verifying installation..."
+INSTALLED_TOOLS=0
+for tool_name in llama-completion llama-cli; do
+	local_path="$EFFECTIVE_INSTALL_PREFIX/bin/$tool_name"
+	if is_windows_like; then
+		local_path="${local_path}.exe"
+	fi
+	if [[ -x "$local_path" ]]; then
+		write_step "$tool_name found at $local_path"
+		if "$local_path" --version >/dev/null 2>&1 || "$local_path" --help >/dev/null 2>&1; then
+			write_step "$tool_name runs successfully."
+		else
+			write_step "Warning: $tool_name exists but did not respond to --version or --help."
+		fi
+		INSTALLED_TOOLS=$((INSTALLED_TOOLS + 1))
+	fi
+done
+
+if [[ "$INSTALLED_TOOLS" -eq 0 ]]; then
+	write_step "Warning: could not verify any installed tools under $EFFECTIVE_INSTALL_PREFIX/bin."
+fi
+
+write_step "Done! llama.cpp tools have been built and installed to $EFFECTIVE_INSTALL_PREFIX/bin."
+write_step ""
+write_step "Next steps:"
+write_step "  1. Ensure $EFFECTIVE_INSTALL_PREFIX/bin is in your PATH, or set the"
+write_step "     custom CLI path in the ofxGgmlGuiExample sidebar."
+write_step "  2. Run scripts/download-model.sh to fetch a GGUF model (if not done)."
+write_step "  3. Build and run your OF project with ofxGgml."
