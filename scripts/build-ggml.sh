@@ -200,7 +200,18 @@ cmake --build . --config Release -j "$JOBS"
 
 write_step "Installing ggml to $INSTALL_PREFIX..."
 EFFECTIVE_INSTALL_PREFIX="$INSTALL_PREFIX"
-if [[ -w "$INSTALL_PREFIX" ]]; then
+if [[ -e "$INSTALL_PREFIX" ]] && [[ ! -d "$INSTALL_PREFIX" ]]; then
+	die "Install prefix '$INSTALL_PREFIX' exists but is not a directory."
+fi
+
+if [[ ! -d "$INSTALL_PREFIX" ]]; then
+	install_parent="$(dirname "$INSTALL_PREFIX")"
+	if [[ -w "$install_parent" ]]; then
+		mkdir -p "$INSTALL_PREFIX"
+	fi
+fi
+
+if [[ -d "$INSTALL_PREFIX" ]] && [[ -w "$INSTALL_PREFIX" ]]; then
 	cmake --install .
 elif command -v sudo >/dev/null 2>&1 && ! is_windows_like; then
 	write_step "Requires elevated permissions for $INSTALL_PREFIX — using sudo."
