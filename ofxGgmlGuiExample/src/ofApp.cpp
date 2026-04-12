@@ -801,6 +801,8 @@ ImGui::MenuItem("Device Info    (F1)", nullptr, &showDeviceInfo);
 ImGui::MenuItem("Engine Log     (F2)", nullptr, &showLog);
 ImGui::MenuItem("Performance    (F3)", nullptr, &showPerformance);
 ImGui::MenuItem("Script Source Panel", nullptr, &showScriptSourcePanel);
+ImGui::Separator();
+ImGui::MenuItem("Verbose Console Output", nullptr, &verbose);
 ImGui::EndMenu();
 }
 if (ImGui::BeginMenu("Settings")) {
@@ -2156,6 +2158,7 @@ out << "theme=" << themeIndex << "\n";
 out << "mirostatMode=" << mirostatMode << "\n";
 out << "mirostatTau=" << ofToString(mirostatTau, 4) << "\n";
 out << "mirostatEta=" << ofToString(mirostatEta, 4) << "\n";
+out << "verbose=" << (verbose ? 1 : 0) << "\n";
 
 // Custom CLI path.
 out << "customCliPath=" << escapeSessionText(customCliPath) << "\n";
@@ -2264,6 +2267,7 @@ else if (key == "theme") {
 else if (key == "mirostatMode") mirostatMode = std::clamp(safeStoi(value), 0, 2);
 else if (key == "mirostatTau") mirostatTau = std::clamp(safeStof(value, 5.0f), 0.0f, 10.0f);
 else if (key == "mirostatEta") mirostatEta = std::clamp(safeStof(value, 0.1f), 0.0f, 1.0f);
+else if (key == "verbose") verbose = (safeStoi(value) != 0);
 else if (key == "customCliPath") copyToBuf(customCliPath, sizeof(customCliPath), value);
 else if (key == "scriptSourceType") {
 	int t = std::clamp(safeStoi(value), 0, 2);
@@ -2354,8 +2358,10 @@ void ofApp::detectModelLayers() {
 		int32_t layers = model.getMetadataInt32(arch + ".block_count", 0);
 		if (layers > 0) {
 			detectedModelLayers = layers;
-			fprintf(stderr, "[ofxGgml] Detected %d layers in model (%s)\n",
-				detectedModelLayers, arch.c_str());
+			if (verbose) {
+				fprintf(stderr, "[ofxGgml] Detected %d layers in model (%s)\n",
+					detectedModelLayers, arch.c_str());
+			}
 		}
 	}
 
@@ -2371,8 +2377,10 @@ void ofApp::detectModelLayers() {
 			int32_t layers = model.getMetadataInt32(std::string(name) + ".block_count", 0);
 			if (layers > 0) {
 				detectedModelLayers = layers;
-				fprintf(stderr, "[ofxGgml] Detected %d layers in model (%s)\n",
-					detectedModelLayers, name);
+				if (verbose) {
+					fprintf(stderr, "[ofxGgml] Detected %d layers in model (%s)\n",
+						detectedModelLayers, name);
+				}
 				break;
 			}
 		}
@@ -2523,7 +2531,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	std::vector<std::string> args = makeArgs(false);
 
 	// Print the command line to console for debugging.
-	{
+	if (verbose) {
 		std::string cmdLine;
 		for (size_t i = 0; i < args.size(); i++) {
 			if (i > 0) cmdLine += " ";
@@ -2535,8 +2543,10 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	std::string raw;
 	int ret = -1;
 	const bool started = runProcessCapture(args, raw, ret, true, onStreamData);
-	fprintf(stderr, "[ofxGgml] Process %s, exit code: %d\n",
-		started ? "started" : "failed to start", ret);
+	if (verbose) {
+		fprintf(stderr, "[ofxGgml] Process %s, exit code: %d\n",
+			started ? "started" : "failed to start", ret);
+	}
 	if (started && ret != 0) {
 		const std::string lowered = ofToLower(raw);
 		if (lowered.find("unknown argument") != std::string::npos ||
@@ -2638,9 +2648,11 @@ workerThread.join();
  std::string result;
  std::string error;
 
+ if (verbose) {
  fprintf(stderr, "\n[ofxGgml] === Generation started ===\n");
  fprintf(stderr, "[ofxGgml] Mode: %s\n", modeLabels[static_cast<int>(mode)]);
  fprintf(stderr, "[ofxGgml] Prompt (%zu chars):\n%s\n", prompt.size(), prompt.c_str());
+ }
 
  auto streamCb = [this](const std::string & partial) {
  std::string cleaned = stripAnsi(partial);
@@ -2649,20 +2661,19 @@ workerThread.join();
  };
 
  if (!runRealInference(prompt, result, error, streamCb)) {
+ if (verbose) {
  fprintf(stderr, "[ofxGgml] Inference error: %s\n", error.c_str());
- std::ostringstream oss;
- oss << "[Error] " << error << "\n\n"
-     << "To run inference, complete these setup steps:\n"
-     << "  1. Build ggml:          ./scripts/build-ggml.sh\n"
-     << "  2. Download a model:    ./scripts/download-model.sh\n"
-     << "  3. Build llama.cpp CLI: ./scripts/build-llama-cli.sh\n\n"
-     << "See README.md for details.";
- result = oss.str();
+ }
+ result = "[Error] " + error;
  } else {
+ if (verbose) {
  fprintf(stderr, "[ofxGgml] Output (%zu chars):\n%s\n", result.size(), result.c_str());
  }
+ }
 
+ if (verbose) {
  fprintf(stderr, "[ofxGgml] === Generation finished ===\n\n");
+ }
 
 {
 std::lock_guard<std::mutex> lock(outputMutex);
@@ -2679,13 +2690,17 @@ streamingOutput.clear();
 }
 
  } catch (const std::exception & e) {
+ if (verbose) {
  fprintf(stderr, "[ofxGgml] Exception in worker thread: %s\n", e.what());
+ }
  std::lock_guard<std::mutex> lock(outputMutex);
  pendingOutput = std::string("[Error] Internal exception: ") + e.what();
  pendingRole = "assistant";
  pendingMode = mode;
  } catch (...) {
+ if (verbose) {
  fprintf(stderr, "[ofxGgml] Unknown exception in worker thread\n");
+ }
  std::lock_guard<std::mutex> lock(outputMutex);
  pendingOutput = "[Error] Unknown internal exception occurred.";
  pendingRole = "assistant";
