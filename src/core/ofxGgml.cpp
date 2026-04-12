@@ -252,6 +252,68 @@ ofxGgmlComputeResult ofxGgml::compute(ofxGgmlGraph & graph) {
 }
 
 // --------------------------------------------------------------------------
+//  Model weight loading
+// --------------------------------------------------------------------------
+
+bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
+	if (m_impl->state != ofxGgmlState::Ready) {
+		m_impl->log(2, "ofxGgml: not ready");
+		return false;
+	}
+	if (!model.isLoaded()) {
+		m_impl->log(2, "ofxGgml: model not loaded");
+		return false;
+	}
+
+	struct ggml_context * modelCtx = model.ggmlContext();
+	if (!modelCtx) {
+		m_impl->log(2, "ofxGgml: model has no ggml context");
+		return false;
+	}
+
+	// The model was loaded with no_alloc=false, so every tensor's
+	// data pointer currently points into the ggml_context's host
+	// memory buffer.  We need to:
+	//   1. Save each tensor's current (host) data pointer.
+	//   2. Allocate a backend buffer (which reassigns data pointers).
+	//   3. Copy the saved host data into the backend buffer.
+
+	// Step 1 — snapshot host pointers for every tensor.
+	struct TensorSnapshot {
+		struct ggml_tensor * tensor;
+		const void * hostData;
+		size_t      bytes;
+	};
+	std::vector<TensorSnapshot> snapshots;
+
+	for (struct ggml_tensor * cur = ggml_get_first_tensor(modelCtx);
+		cur != nullptr;
+		cur = ggml_get_next_tensor(modelCtx, cur))
+	{
+		if (cur->data) {
+			snapshots.push_back({cur, cur->data, ggml_nbytes(cur)});
+		}
+	}
+
+	// Step 2 — allocate a backend buffer for all context tensors.
+	ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(modelCtx, m_impl->backend);
+	if (!buf) {
+		m_impl->log(2, "ofxGgml: failed to allocate backend buffer for model weights");
+		return false;
+	}
+
+	// Step 3 — copy host data into the (possibly GPU-resident) buffer.
+	for (const auto & snap : snapshots) {
+		ggml_backend_tensor_set(snap.tensor, snap.hostData, 0, snap.bytes);
+	}
+
+	m_impl->log(0, std::string("ofxGgml: model weights loaded (") +
+		std::to_string(snapshots.size()) + " tensors on backend: " +
+		ggml_backend_name(m_impl->backend) + ")");
+	return true;
+}
+
+// --------------------------------------------------------------------------
 //  Logging
 // --------------------------------------------------------------------------
 

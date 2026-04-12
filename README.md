@@ -5,6 +5,7 @@ An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https:/
 ## Features
 
 - **Backend management** — Automatic discovery and initialization of CPU, CUDA, Metal, Vulkan, and other ggml backends.
+- **GGUF model loading** (`ofxGgmlModel`) — Load GGUF model files, inspect metadata and tensor information, and upload weights to backend buffers for inference.
 - **Tensor wrapper** (`ofxGgmlTensor`) — Lightweight, non-owning wrapper with OF-friendly data access (read/write float vectors, fill, etc.).
 - **Computation graph builder** (`ofxGgmlGraph`) — Fluent API for building ggml computation graphs:
   - Element-wise arithmetic: add, sub, mul, div, scale, clamp, sqr, sqrt
@@ -60,6 +61,35 @@ The addon expects the following files after installation:
 Copy the DLLs from `libs/ggml/bin/` into your project's `bin/` directory (next to the .exe) so they can be found at runtime.
 
 ## Usage
+
+### Loading a GGUF model
+
+```cpp
+#include "ofxGgml.h"
+
+ofxGgml ggml;
+ggml.setup();
+
+// Load a GGUF model file.
+ofxGgmlModel model;
+if (!model.load("path/to/model.gguf")) {
+    // handle error — file not found, corrupt, etc.
+}
+
+// Inspect metadata.
+std::string arch = model.getMetadataString("general.architecture");
+int32_t ctxLen   = model.getMetadataInt32("llama.context_length");
+
+// List tensors in the model.
+for (int64_t i = 0; i < model.getNumTensors(); i++) {
+    std::string name = model.getTensorName(i);
+    auto tensor = model.getTensor(name);
+    // tensor.getType(), tensor.getDimSize(0), etc.
+}
+
+// Upload weights to the backend (CPU, CUDA, Metal, …).
+ggml.loadModelWeights(model);
+```
 
 ### Basic matrix multiplication
 
@@ -118,7 +148,8 @@ auto r = ggml.compute(graph);
 
 | Class | Purpose |
 |---|---|
-| `ofxGgml` | Backend init, device enumeration, compute scheduling |
+| `ofxGgml` | Backend init, device enumeration, compute scheduling, model weight loading |
+| `ofxGgmlModel` | Load GGUF model files, inspect metadata and tensor information |
 | `ofxGgmlGraph` | Build computation graphs (tensor creation + operations) |
 | `ofxGgmlTensor` | Non-owning tensor handle with metadata + data access |
 | `ofxGgmlTypes.h` | Enums and settings (`ofxGgmlType`, `ofxGgmlBackendType`, …) |
