@@ -172,13 +172,23 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 				(devName ? devName : "?") + " — " +
 				(devDesc ? devDesc : "") + " (" + typeLabel + ")\n");
 		}
-		if (!hasGpu && settings.preferredBackend != ofxGgmlBackendType::Cpu) {
+		if (!hasGpu && settings.preferredBackendName.empty() &&
+			settings.preferredBackend != ofxGgmlBackendType::Cpu) {
 			m_impl->log(GGML_LOG_LEVEL_WARN,
 				"ofxGgml: no usable GPU found — will fall back to CPU\n");
 		}
 	}
 
 	// Initialize the preferred backend.
+	if (!m_impl->backend && !settings.preferredBackendName.empty()) {
+		m_impl->backend = ggml_backend_init_by_name(
+			settings.preferredBackendName.c_str(), nullptr);
+		if (!m_impl->backend) {
+			m_impl->log(GGML_LOG_LEVEL_WARN,
+				"ofxGgml: backend \"" + settings.preferredBackendName +
+				"\" not found — trying fallback\n");
+		}
+	}
 	if (!m_impl->backend) {
 		m_impl->backend = ggml_backend_init_by_type(
 			static_cast<enum ggml_backend_dev_type>(settings.preferredBackend), nullptr);

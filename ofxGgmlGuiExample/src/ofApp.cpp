@@ -158,8 +158,6 @@ constexpr float kDefaultTemp = 0.7f;
 constexpr float kDefaultTopP = 0.9f;
 constexpr float kDefaultRepeatPenalty = 1.1f;
 constexpr int kBackendAuto = 0;
-constexpr int kBackendCpu = 1;
-constexpr int kBackendGpu = 2;
 constexpr int kExecNotFound = 127; // POSIX convention when execvp fails
 constexpr float kSpinnerInterval = 0.15f;       // seconds per spinner frame
 constexpr float kDotsAnimationSpeed = 3.0f;     // dots cycle speed multiplier
@@ -791,10 +789,9 @@ lastSessionPath = ofFilePath::join(sessionDir, "autosave.session");
 // Initialize ggml with the selected backend preference.
 ofxGgmlSettings settings;
 settings.threads = numThreads;
-	if (selectedBackendIndex == kBackendGpu) {
-settings.preferredBackend = ofxGgmlBackendType::Gpu;
-	} else if (selectedBackendIndex == kBackendCpu) {
-settings.preferredBackend = ofxGgmlBackendType::Cpu;
+if (selectedBackendIndex > 0 &&
+	selectedBackendIndex - 1 < static_cast<int>(backendNames.size())) {
+	settings.preferredBackendName = backendNames[selectedBackendIndex - 1];
 }
 settings.graphSize = static_cast<size_t>(contextSize);
 engineReady = ggml.setup(settings);
@@ -802,6 +799,11 @@ if (engineReady) {
 engineStatus = "Ready (" + ggml.getBackendName() + ")";
 devices = ggml.listDevices();
 lastBackendUsed = ggml.getBackendName();
+// Populate backend names from discovered devices.
+backendNames.clear();
+for (const auto & d : devices) {
+	backendNames.push_back(d.name);
+}
 } else {
 engineStatus = "Failed to initialize ggml engine";
 }
@@ -982,9 +984,17 @@ ImGui::SameLine();
 if (ImGui::SmallButton("All##settgpu")) gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
 }
 
-const char * backendLabels[] = { "Auto", "CPU", "GPU" };
-if (ImGui::Combo("Backend", &selectedBackendIndex, backendLabels, 3)) {
+{
+std::vector<std::string> labels;
+labels.push_back("Auto");
+for (const auto & n : backendNames) labels.push_back(n);
+auto getter = [](void * data, int idx) -> const char * {
+	return (*static_cast<std::vector<std::string>*>(data))[idx].c_str();
+};
+if (ImGui::Combo("Backend", &selectedBackendIndex, getter, &labels,
+	static_cast<int>(labels.size()))) {
 reinitBackend();
+}
 }
 
 ImGui::SeparatorText("Appearance");
@@ -1087,10 +1097,18 @@ ImGui::Spacing();
 
 // Backend preference.
 ImGui::Text("Backend:");
-const char * backendLabels[] = { "Auto", "CPU", "GPU" };
+{
+std::vector<std::string> labels;
+labels.push_back("Auto");
+for (const auto & n : backendNames) labels.push_back(n);
+auto getter = [](void * data, int idx) -> const char * {
+	return (*static_cast<std::vector<std::string>*>(data))[idx].c_str();
+};
 ImGui::SetNextItemWidth(-1);
-if (ImGui::Combo("##Backend", &selectedBackendIndex, backendLabels, 3)) {
+if (ImGui::Combo("##Backend", &selectedBackendIndex, getter, &labels,
+	static_cast<int>(labels.size()))) {
 reinitBackend();
+}
 }
 
 ImGui::Spacing();
@@ -2211,6 +2229,14 @@ out << "gpuLayers=" << gpuLayers << "\n";
 out << "seed=" << seed << "\n";
 out << "numThreads=" << numThreads << "\n";
 out << "selectedBackend=" << selectedBackendIndex << "\n";
+{
+std::string selectedName;
+if (selectedBackendIndex > 0 &&
+	selectedBackendIndex - 1 < static_cast<int>(backendNames.size())) {
+	selectedName = backendNames[selectedBackendIndex - 1];
+}
+out << "selectedBackendName=" << escapeSessionText(selectedName) << "\n";
+}
 out << "theme=" << themeIndex << "\n";
 out << "mirostatMode=" << mirostatMode << "\n";
 out << "mirostatTau=" << ofToString(mirostatTau, 4) << "\n";
@@ -2315,7 +2341,27 @@ else if (key == "batchSize") batchSize = std::clamp(safeStoi(value, 512), 32, 40
 else if (key == "gpuLayers") gpuLayers = std::clamp(safeStoi(value), 0, 128);
 else if (key == "seed") seed = std::clamp(safeStoi(value, -1), -1, 99999);
 else if (key == "numThreads") numThreads = std::clamp(safeStoi(value, 4), 1, 32);
-else if (key == "selectedBackend") selectedBackendIndex = std::clamp(safeStoi(value), 0, 2);
+else if (key == "selectedBackend") {
+	// Legacy numeric index — kept for backward compatibility but
+	// overridden by selectedBackendName when present.
+	int maxIdx = static_cast<int>(backendNames.size());
+	selectedBackendIndex = std::clamp(safeStoi(value), 0, maxIdx);
+}
+else if (key == "selectedBackendName") {
+	std::string name = unescapeSessionText(value);
+	if (name.empty()) {
+		selectedBackendIndex = 0; // Auto
+	} else {
+		int found = 0; // default to Auto
+		for (int i = 0; i < static_cast<int>(backendNames.size()); i++) {
+			if (backendNames[i] == name) {
+				found = i + 1;
+				break;
+			}
+		}
+		selectedBackendIndex = found;
+	}
+}
 else if (key == "theme") {
 	themeIndex = std::clamp(safeStoi(value), 0, 2);
 	applyTheme(themeIndex);
@@ -2539,8 +2585,15 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	const int safeBatch = std::clamp(batchSize, 32, 4096);
 	const int safeGpuLayers = std::clamp(gpuLayers, 0, 128);
 	int effectiveGpuLayers = safeGpuLayers;
-	if (selectedBackendIndex == kBackendCpu) {
-		effectiveGpuLayers = 0;
+	{
+		// Force zero GPU layers when the user explicitly selected a CPU
+		// backend by checking the device type from the discovered list.
+		bool isCpuBackend = false;
+		if (selectedBackendIndex > 0 &&
+			selectedBackendIndex - 1 < static_cast<int>(devices.size())) {
+			isCpuBackend = (devices[selectedBackendIndex - 1].type == ofxGgmlBackendType::Cpu);
+		}
+		if (isCpuBackend) effectiveGpuLayers = 0;
 	}
 
 	std::ostringstream tempStr, topPStr, repeatPenaltyStr;
@@ -2692,10 +2745,9 @@ ggml.close();
 
 ofxGgmlSettings settings;
 settings.threads = numThreads;
-if (selectedBackendIndex == kBackendGpu) {
-	settings.preferredBackend = ofxGgmlBackendType::Gpu;
-} else if (selectedBackendIndex == kBackendCpu) {
-	settings.preferredBackend = ofxGgmlBackendType::Cpu;
+if (selectedBackendIndex > 0 &&
+	selectedBackendIndex - 1 < static_cast<int>(backendNames.size())) {
+	settings.preferredBackendName = backendNames[selectedBackendIndex - 1];
 }
 settings.graphSize = static_cast<size_t>(contextSize);
 
@@ -2704,6 +2756,11 @@ if (engineReady) {
 	engineStatus = "Ready (" + ggml.getBackendName() + ")";
 	devices = ggml.listDevices();
 	lastBackendUsed = ggml.getBackendName();
+	// Refresh backend names from discovered devices.
+	backendNames.clear();
+	for (const auto & d : devices) {
+		backendNames.push_back(d.name);
+	}
 } else {
 	engineStatus = "Failed to initialize ggml engine";
 	devices.clear();
@@ -2880,8 +2937,14 @@ ImGui::Spacing();
 
 ImGui::Text("Configuration:");
 ImGui::Separator();
-const char * backendLabels[] = { "Auto", "CPU", "GPU" };
-ImGui::Text("  Preference: %s", backendLabels[selectedBackendIndex]);
+{
+std::string prefLabel = "Auto";
+if (selectedBackendIndex > 0 &&
+	selectedBackendIndex - 1 < static_cast<int>(backendNames.size())) {
+	prefLabel = backendNames[selectedBackendIndex - 1];
+}
+ImGui::Text("  Preference: %s", prefLabel.c_str());
+}
 ImGui::Text("  Threads:    %d", numThreads);
 ImGui::Text("  Context:    %d", contextSize);
 ImGui::Text("  Batch:      %d", batchSize);
