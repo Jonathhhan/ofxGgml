@@ -236,7 +236,7 @@ if [[ "$DOWNLOAD_BOTH" == true ]]; then
 	write_step "Downloading both recommended presets"
 	for i in "${RECOMMENDED_PRESET_INDICES[@]}"; do
 		if [[ $i -lt 0 ]] || [[ $i -ge ${#PRESET_URLS[@]} ]]; then
-			die "--both references preset index $i, but only ${#PRESET_URLS[@]} preset(s) are configured"
+			die "Recommended preset index $i is out of range, but only ${#PRESET_URLS[@]} preset(s) are configured"
 		fi
 		write_step "Preset $((i + 1)): ${PRESET_NAMES[$i]} (${PRESET_SIZES[$i]})"
 		download_model "${PRESET_URLS[$i]}" "$(basename "${PRESET_URLS[$i]}")"
