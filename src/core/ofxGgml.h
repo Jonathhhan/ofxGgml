@@ -3,6 +3,7 @@
 #include "../support/ofxGgmlTypes.h"
 #include "../tensor/ofxGgmlTensor.h"
 #include "../graph/ofxGgmlGraph.h"
+#include "../model/ofxGgmlModel.h"
 
 #include <cstddef>
 #include <memory>
@@ -101,6 +102,18 @@ public:
 	/// external data set via setTensorData() between allocation
 	/// and computation.
 	ofxGgmlComputeResult compute(ofxGgmlGraph & graph);
+
+	// ------------------------------------------------------------------
+	//  Model weight loading
+	// ------------------------------------------------------------------
+
+	/// Allocate a backend buffer for all tensors in the loaded model and
+	/// upload the tensor data from host memory.  This makes the model's
+	/// weight tensors ready for use in computation graphs.
+	///
+	/// Returns true on success.  On failure the model weights remain in
+	/// host memory and must be transferred manually.
+	bool loadModelWeights(ofxGgmlModel & model);
 
 	// ------------------------------------------------------------------
 	//  Logging
