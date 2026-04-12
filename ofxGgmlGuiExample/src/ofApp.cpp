@@ -21,6 +21,7 @@
 #else
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
 #ifdef __APPLE__
@@ -170,7 +171,12 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 	STARTUPINFOA si{};
 	si.cb = sizeof(si);
 	si.dwFlags = STARTF_USESTDHANDLES;
-	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+	// Redirect stdin to NUL so that interactive / conversation modes
+	// receive EOF and exit automatically after generation.
+	HANDLE nullInput = CreateFileA("NUL", GENERIC_READ, 0, &sa,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	si.hStdInput = (nullInput != INVALID_HANDLE_VALUE)
+		? nullInput : GetStdHandle(STD_INPUT_HANDLE);
 	si.hStdOutput = writePipe;
 	si.hStdError = writePipe;
 
@@ -196,6 +202,7 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 		&pi
 	);
 	CloseHandle(writePipe);
+	if (nullInput != INVALID_HANDLE_VALUE) CloseHandle(nullInput);
 	if (!ok) {
 		CloseHandle(readPipe);
 		return false;
@@ -237,6 +244,14 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 	}
 
 	if (pid == 0) {
+		// Redirect stdin to /dev/null so that interactive / conversation
+		// modes (e.g. llama-cli) receive EOF and exit automatically
+		// after generation instead of blocking for more input.
+		int devNull = open("/dev/null", O_RDONLY);
+		if (devNull >= 0) {
+			dup2(devNull, STDIN_FILENO);
+			if (devNull != STDIN_FILENO) close(devNull);
+		}
 		dup2(pipefd[1], STDOUT_FILENO);
 		dup2(pipefd[1], STDERR_FILENO);
 		close(pipefd[0]);
@@ -676,8 +691,11 @@ autoLoadSession();
 // Detect llama-completion / llama-cli / llama at startup.
 probeLlamaCli(logMutex, logMessages, customCliPath);
 
-// Detect model layer count for GPU layers slider.
+// Detect model layer count for GPU layers slider and default to all layers.
 detectModelLayers();
+if (detectedModelLayers > 0) {
+gpuLayers = detectedModelLayers;
+}
 
 // Pre-fill example system prompt only if not restored from session.
 if (customSystemPrompt[0] == '\0') {
@@ -920,6 +938,9 @@ std::string label = preset.name + "  " + preset.sizeMB;
 if (ImGui::Selectable(label.c_str(), isSelected)) {
 selectedModelIndex = i;
 detectModelLayers();
+if (detectedModelLayers > 0) {
+gpuLayers = detectedModelLayers;
+}
 }
 if (ImGui::IsItemHovered()) {
 ImGui::SetTooltip("%s\nBest for: %s\nFile: %s",
