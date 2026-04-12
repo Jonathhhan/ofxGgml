@@ -42,20 +42,26 @@ namespace {
 std::string stripAnsi(const std::string & text) {
 	std::string out;
 	out.reserve(text.size());
-	bool inEsc = false;
-	for (size_t i = 0; i < text.size(); i++) {
-		const char c = text[i];
-		if (!inEsc && c == '\x1b') {
-			inEsc = true;
-			continue;
-		}
-		if (inEsc) {
-			if ((c >= '@' && c <= '~') || c == 'm') {
-				inEsc = false;
+	size_t i = 0;
+	while (i < text.size()) {
+		if (text[i] == '\x1b') {
+			i++; // skip ESC
+			if (i < text.size() && text[i] == '[') {
+				// CSI sequence: ESC [ <params> <final_byte>
+				// Skip parameter bytes (0x30-0x3F) and intermediate
+				// bytes (0x20-0x2F), then the final byte (0x40-0x7E).
+				i++; // skip '['
+				while (i < text.size() && text[i] < 0x40) {
+					i++;
+				}
+				if (i < text.size()) i++; // skip the final byte (e.g. 'm')
+			} else if (i < text.size()) {
+				i++; // two-byte escape sequence (e.g. ESC =), skip second byte
 			}
-			continue;
+		} else {
+			out += text[i];
+			i++;
 		}
-		out += c;
 	}
 	return out;
 }
@@ -70,6 +76,79 @@ std::string trim(const std::string & s) {
 		end--;
 	}
 	return s.substr(start, end - start);
+}
+
+// Strip common chat-template role markers and prompt artefacts that
+// llama-completion may emit around the actual generated text.
+// Examples of markers removed: "user", "assistant", "system",
+// "<|...|>" ChatML tokens, and leading/trailing ">" prompt chars.
+std::string cleanChatOutput(const std::string & text) {
+	std::string out = text;
+
+	// Strip <|...|> ChatML-style tokens (e.g. <|assistant|>, <|end|>).
+	{
+		std::string cleaned;
+		cleaned.reserve(out.size());
+		size_t i = 0;
+		while (i < out.size()) {
+			if (i + 1 < out.size() && out[i] == '<' && out[i + 1] == '|') {
+				size_t end = out.find("|>", i + 2);
+				if (end != std::string::npos) {
+					i = end + 2;
+					continue;
+				}
+			}
+			cleaned += out[i];
+			i++;
+		}
+		out = cleaned;
+	}
+
+	// Strip leading lines that are just a role label or prompt marker.
+	// The llama chat template may prepend "user\n", "assistant\n", etc.
+	auto startsWithWord = [](const std::string & s, const std::string & word) {
+		if (s.size() < word.size()) return false;
+		if (s.compare(0, word.size(), word) != 0) return false;
+		if (s.size() == word.size()) return true;
+		const char after = s[word.size()];
+		return after == '\n' || after == '\r' || after == ':' || after == ' ';
+	};
+
+	bool changed = true;
+	while (changed) {
+		changed = false;
+		out = trim(out);
+		const std::vector<std::string> roleLabels = {
+			"user", "assistant", "system", "User", "Assistant", "System",
+			"A:", "> "
+		};
+		for (const auto & label : roleLabels) {
+			if (startsWithWord(out, label)) {
+				out = out.substr(label.size());
+				// Also strip an optional ':' delimiter after the role label.
+				out = trim(out);
+				if (!out.empty() && out[0] == ':') {
+					out = out.substr(1);
+				}
+				out = trim(out);
+				changed = true;
+				break;
+			}
+		}
+		// Strip a leading ">" on its own (interactive prompt marker).
+		if (!out.empty() && out[0] == '>') {
+			out = trim(out.substr(1));
+			changed = true;
+		}
+	}
+
+	// Strip trailing ">" prompt markers.
+	while (!out.empty() && out.back() == '>') {
+		out.pop_back();
+	}
+	out = trim(out);
+
+	return out;
 }
 
 constexpr size_t kMaxLogMessages = 500;
@@ -2530,7 +2609,9 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 			"--temp", tempStr.str(),
 			"--top-p", topPStr.str(),
 			"--repeat-penalty", repeatPenaltyStr.str(),
-			(shortFlags ? "-t" : "--threads"), ofToString(safeThreads)
+			(shortFlags ? "-t" : "--threads"), ofToString(safeThreads),
+			"--no-display-prompt",
+			"--simple-io"
 		};
 		if (seed >= 0) {
 			out.push_back("--seed");
@@ -2588,7 +2669,11 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	// Exit code 130 (128 + SIGINT) is expected when the interactive-
 	// mode CLI receives EOF on stdin and shuts down.  Treat it as
 	// success when we captured valid generated output.
-	if (started && ret == 130 && !trim(stripAnsi(raw)).empty()) {
+	// Also tolerate crash-on-exit codes (e.g. Windows
+	// STATUS_STACK_BUFFER_OVERRUN 0xC0000409 = -1073740791) that can
+	// occur during cleanup after generation already produced output.
+	if (started && ret != 0 && ret != kExecNotFound
+		&& !trim(stripAnsi(raw)).empty()) {
 		ret = 0;
 	}
 
@@ -2630,6 +2715,9 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 			}
 		}
 	}
+
+	// Clean chat-template role markers and prompt artefacts.
+	output = cleanChatOutput(output);
 
 	if (output.empty()) {
 		error = llamaCliCommand + " returned empty output.";
@@ -2719,6 +2807,7 @@ workerThread.join();
  cleaned.clear();
  }
  }
+ cleaned = cleanChatOutput(cleaned);
  std::lock_guard<std::mutex> lock(streamMutex);
  streamingOutput = cleaned;
  };
