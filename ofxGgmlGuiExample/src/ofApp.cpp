@@ -2039,7 +2039,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	if (llamaCliState.load(std::memory_order_relaxed) != 1) {
 		probeLlamaCli(logMutex, logMessages, customCliPath);
 		if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-			error = "llama-completion/llama-cli not found. Build with scripts/build-llama-cli.sh or set a custom CLI path in the sidebar.";
+			error = "llama-completion/llama-cli/llama not found. Build with scripts/build-llama-cli.sh or set a custom CLI path in the sidebar.";
 			return false;
 		}
 	}
@@ -2141,7 +2141,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	if (!started || ret == kExecNotFound) {
 		// Binary truly missing — invalidate cache so next call re-probes.
 		llamaCliState.store(-1, std::memory_order_relaxed);
-		error = "llama-completion/llama-cli not found in PATH.";
+		error = "llama-completion/llama-cli/llama not found in PATH.";
 		return false;
 	}
 

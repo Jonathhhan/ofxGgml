@@ -297,13 +297,13 @@ fi
 write_step "Verifying installation..."
 INSTALLED_TOOLS=0
 for tool_name in llama-completion llama-cli; do
-	local_path="$EFFECTIVE_INSTALL_PREFIX/bin/$tool_name"
+	tool_path="$EFFECTIVE_INSTALL_PREFIX/bin/$tool_name"
 	if is_windows_like; then
-		local_path="${local_path}.exe"
+		tool_path="${tool_path}.exe"
 	fi
-	if [[ -x "$local_path" ]]; then
-		write_step "$tool_name found at $local_path"
-		if "$local_path" --version >/dev/null 2>&1 || "$local_path" --help >/dev/null 2>&1; then
+	if [[ -x "$tool_path" ]]; then
+		write_step "$tool_name found at $tool_path"
+		if "$tool_path" --version >/dev/null 2>&1 || "$tool_path" --help >/dev/null 2>&1; then
 			write_step "$tool_name runs successfully."
 		else
 			write_step "Warning: $tool_name exists but did not respond to --version or --help."
