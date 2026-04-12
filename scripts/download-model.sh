@@ -3,18 +3,19 @@
 # download-model.sh — Download a GGUF model for use with ofxGgml.
 #
 # Usage:
-#   ./scripts/download-model.sh [--model URL] [--preset N] [--task NAME]
+#   ./scripts/download-model.sh [--model URL] [--preset N] [--task NAME] [--both]
 #                               [--output DIR] [--name FILE]
 #
 # Options:
 #   --model  URL   Direct URL to a GGUF model file.
-#                  Default: Qwen2.5-1.5B Instruct Q4_K_M
+#                  Default with no selectors: download both recommended presets
 #   --preset N     Select a model by preset number (see --list)
 #   --task   NAME  Select the preferred model for a task: chat, script,
 #                  summarize, write, translate, custom  (matches the GUI
 #                  example modes)
 #   --output DIR   Directory to save the model (default: bin/data/models/)
 #   --name   FILE  Output file name (default: derived from URL)
+#   --both         Download both recommended presets (1 and 2)
 #   --list         List recommended models with preset numbers and exit
 #   --help         Show this help message
 #
@@ -52,6 +53,8 @@ PRESET_BESTFOR=(
 	"chat, general"
 	"scripting, code generation"
 )
+# Zero-based indices of presets downloaded by default / --both.
+RECOMMENDED_PRESET_INDICES=(0 1)
 
 # ---------------------------------------------------------------------------
 # Task → preferred preset mapping (matches GUI example AiMode enum)
@@ -70,6 +73,7 @@ OUTPUT_DIR=""
 OUTPUT_NAME=""
 PRESET_INDEX=""
 TASK_NAME=""
+DOWNLOAD_BOTH=false
 
 write_step() {
 	printf '==> %s\n' "$1"
@@ -103,8 +107,9 @@ list_models() {
 	done
 	echo ""
 	echo "Usage:"
-	echo "  ./scripts/download-model.sh --preset 1      # Qwen2.5-1.5B (default)"
+	echo "  ./scripts/download-model.sh                 # Download presets 1 and 2 (default)"
 	echo "  ./scripts/download-model.sh --preset 2      # Qwen2.5-Coder for scripting"
+	echo "  ./scripts/download-model.sh --both          # Download presets 1 and 2"
 	echo "  ./scripts/download-model.sh --task script   # same as --preset 2"
 	echo "  ./scripts/download-model.sh --task chat     # Qwen2.5-1.5B for chat"
 	echo "  ./scripts/download-model.sh --model <URL>   # custom URL"
@@ -137,6 +142,10 @@ while [[ $# -gt 0 ]]; do
 			OUTPUT_NAME="$2"
 			shift 2
 			;;
+		--both)
+			DOWNLOAD_BOTH=true
+			shift
+			;;
 		--list)
 			list_models
 			;;
@@ -148,6 +157,96 @@ while [[ $# -gt 0 ]]; do
 			;;
 	esac
 done
+
+if [[ "$DOWNLOAD_BOTH" != true ]] && [[ -z "$MODEL_URL" ]] && [[ -z "$PRESET_INDEX" ]] && [[ -z "$TASK_NAME" ]]; then
+	DOWNLOAD_BOTH=true
+	write_step "No --model/--preset/--task specified, defaulting to both recommended presets"
+fi
+
+if [[ "$DOWNLOAD_BOTH" == true ]]; then
+	if [[ -n "$MODEL_URL" ]] || [[ -n "$PRESET_INDEX" ]] || [[ -n "$TASK_NAME" ]]; then
+		die "Cannot combine --both with --model, --preset, or --task"
+	fi
+	if [[ -n "$OUTPUT_NAME" ]]; then
+		die "Cannot use --name with --both"
+	fi
+fi
+
+if [[ -z "$OUTPUT_DIR" ]]; then
+	# Try to find the example's bin/data directory.
+	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+	GUI_EXAMPLE="$ADDON_ROOT/ofxGgmlGuiExample/bin/data"
+	if [[ -d "$(dirname "$GUI_EXAMPLE")" ]]; then
+		OUTPUT_DIR="$GUI_EXAMPLE/models"
+	else
+		OUTPUT_DIR="$(pwd)/models"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Prerequisites
+# ---------------------------------------------------------------------------
+
+DOWNLOAD_CMD=""
+if command -v curl >/dev/null 2>&1; then
+	DOWNLOAD_CMD="curl"
+elif command -v wget >/dev/null 2>&1; then
+	DOWNLOAD_CMD="wget"
+else
+	die "Neither curl nor wget found. Please install one."
+fi
+
+download_model() {
+	local model_url="$1"
+	local output_name="$2"
+	local output_path="$OUTPUT_DIR/$output_name"
+
+	if [[ -f "$output_path" ]]; then
+		write_step "Model already exists at $output_path (skipping)"
+		return 0
+	fi
+
+	write_step "Downloading model..."
+	write_step "  URL:  $model_url"
+	write_step "  Dest: $output_path"
+	write_step ""
+
+	if [[ "$DOWNLOAD_CMD" == "curl" ]]; then
+		curl -L --progress-bar -o "$output_path" "$model_url"
+	elif [[ "$DOWNLOAD_CMD" == "wget" ]]; then
+		wget --show-progress -O "$output_path" "$model_url"
+	fi
+
+	if [[ ! -s "$output_path" ]]; then
+		rm -f "$output_path"
+		die "Downloaded file is empty. Check the URL and try again."
+	fi
+
+	local FILE_SIZE
+	FILE_SIZE=$(wc -c < "$output_path" 2>/dev/null || echo 0)
+	write_step "Download complete!  Size: $(numfmt --to=iec "$FILE_SIZE" 2>/dev/null || echo "$FILE_SIZE bytes")"
+	write_step "Model saved to: $output_path"
+	write_step ""
+}
+
+mkdir -p "$OUTPUT_DIR"
+
+if [[ "$DOWNLOAD_BOTH" == true ]]; then
+	write_step "Downloading both recommended presets"
+	for i in "${RECOMMENDED_PRESET_INDICES[@]}"; do
+		if [[ $i -lt 0 ]] || [[ $i -ge ${#PRESET_URLS[@]} ]]; then
+			die "Recommended preset index $i is out of range, but only ${#PRESET_URLS[@]} preset entries are configured"
+		fi
+		write_step "Preset $((i + 1)): ${PRESET_NAMES[$i]} (${PRESET_SIZES[$i]})"
+		download_model "${PRESET_URLS[$i]}" "$(basename "${PRESET_URLS[$i]}")"
+	done
+	write_step "Next steps:"
+	write_step "  1. Build ggml with scripts/build-ggml.sh (if not done)."
+	write_step "  2. Build and run your OF project with ofxGgml."
+	write_step "  3. Point the model path to files under: $OUTPUT_DIR"
+	exit 0
+fi
 
 # Resolve --task to a preset number.
 if [[ -n "$TASK_NAME" ]]; then
@@ -178,73 +277,12 @@ if [[ -z "$MODEL_URL" ]]; then
 	write_step "No --model or --preset specified, using default: ${PRESET_NAMES[0]}"
 fi
 
-if [[ -z "$OUTPUT_DIR" ]]; then
-	# Try to find the example's bin/data directory.
-	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-	ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-	GUI_EXAMPLE="$ADDON_ROOT/ofxGgmlGuiExample/bin/data"
-	if [[ -d "$(dirname "$GUI_EXAMPLE")" ]]; then
-		OUTPUT_DIR="$GUI_EXAMPLE/models"
-	else
-		OUTPUT_DIR="$(pwd)/models"
-	fi
-fi
-
 if [[ -z "$OUTPUT_NAME" ]]; then
 	OUTPUT_NAME="$(basename "$MODEL_URL")"
 fi
 
-# ---------------------------------------------------------------------------
-# Prerequisites
-# ---------------------------------------------------------------------------
-
-DOWNLOAD_CMD=""
-if command -v curl >/dev/null 2>&1; then
-	DOWNLOAD_CMD="curl"
-elif command -v wget >/dev/null 2>&1; then
-	DOWNLOAD_CMD="wget"
-else
-	die "Neither curl nor wget found. Please install one."
-fi
-
-# ---------------------------------------------------------------------------
-# Download
-# ---------------------------------------------------------------------------
-
-mkdir -p "$OUTPUT_DIR"
-OUTPUT_PATH="$OUTPUT_DIR/$OUTPUT_NAME"
-
-if [[ -f "$OUTPUT_PATH" ]]; then
-	write_step "Model already exists at $OUTPUT_PATH"
-	write_step "Delete it first if you want to re-download."
-	exit 0
-fi
-
-write_step "Downloading model..."
-write_step "  URL:  $MODEL_URL"
-write_step "  Dest: $OUTPUT_PATH"
-write_step ""
-
-if [[ "$DOWNLOAD_CMD" == "curl" ]]; then
-	curl -L --progress-bar -o "$OUTPUT_PATH" "$MODEL_URL"
-elif [[ "$DOWNLOAD_CMD" == "wget" ]]; then
-	wget --show-progress -O "$OUTPUT_PATH" "$MODEL_URL"
-fi
-
-# ---------------------------------------------------------------------------
-# Verify
-# ---------------------------------------------------------------------------
-
-if [[ ! -s "$OUTPUT_PATH" ]]; then
-	rm -f "$OUTPUT_PATH"
-	die "Downloaded file is empty. Check the URL and try again."
-fi
-
-FILE_SIZE=$(wc -c < "$OUTPUT_PATH" 2>/dev/null || echo 0)
-write_step "Download complete!  Size: $(numfmt --to=iec "$FILE_SIZE" 2>/dev/null || echo "$FILE_SIZE bytes")"
-write_step "Model saved to: $OUTPUT_PATH"
-write_step ""
+download_model "$MODEL_URL" "$OUTPUT_NAME"
 write_step "Next steps:"
 write_step "  1. Build ggml with scripts/build-ggml.sh (if not done)."
 write_step "  2. Build and run your OF project with ofxGgml."
-write_step "  3. Point the model path to: $OUTPUT_PATH"
+write_step "  3. Point the model path to: $OUTPUT_DIR/$OUTPUT_NAME"
