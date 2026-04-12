@@ -411,6 +411,31 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 }
 
 // ---------------------------------------------------------------------------
+// Helper: ImGui::InputTextMultiline wrapper for std::string.
+// Uses the CallbackResize mechanism so the string grows as the user types.
+// ---------------------------------------------------------------------------
+
+static int StdStringResizeCallback(ImGuiInputTextCallbackData * data) {
+	if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+		std::string * str = static_cast<std::string *>(data->UserData);
+		str->resize(static_cast<size_t>(data->BufTextLen));
+		data->Buf = &(*str)[0];
+	}
+	return 0;
+}
+
+static bool InputTextMultilineString(const char * label, std::string * str,
+	const ImVec2 & size = ImVec2(0, 0),
+	ImGuiInputTextFlags flags = 0) {
+	flags |= ImGuiInputTextFlags_CallbackResize;
+	// Ensure the string has at least 1 byte of capacity so &(*str)[0] is valid.
+	if (str->empty()) str->reserve(64);
+	return ImGui::InputTextMultiline(label, &(*str)[0], str->capacity() + 1,
+		size, flags, StdStringResizeCallback,
+		static_cast<void *>(str));
+}
+
+// ---------------------------------------------------------------------------
 // Probe for llama-completion / llama-cli / llama.
 // Checks a user-supplied custom path first, then PATH, then common
 // installation directories.  Updates llamaCliState and llamaCliCommand.
@@ -1148,7 +1173,8 @@ ImGui::Separator();
 // Message history.
 float inputH = 60.0f;
 ImGui::BeginChild("##ChatHistory", ImVec2(0, -inputH), true);
-for (const auto & msg : chatMessages) {
+for (size_t i = 0; i < chatMessages.size(); i++) {
+auto & msg = chatMessages[i];
 if (msg.role == "user") {
 ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "You:");
 } else if (msg.role == "assistant") {
@@ -1156,8 +1182,13 @@ ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "AI:");
 } else {
 ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "System:");
 }
-ImGui::SameLine();
-ImGui::TextWrapped("%s", msg.text.c_str());
+float availWidth = ImGui::GetContentRegionAvail().x;
+ImVec2 textSize = ImGui::CalcTextSize(msg.text.c_str(), nullptr, false, availWidth);
+float fieldHeight = std::max(textSize.y + ImGui::GetStyle().FramePadding.y * 2
+	+ ImGui::GetTextLineHeight(), ImGui::GetTextLineHeight() * 2);
+char label[32];
+snprintf(label, sizeof(label), "##ChatMsg%zu", i);
+InputTextMultilineString(label, &msg.text, ImVec2(-1, fieldHeight));
 ImGui::Spacing();
 }
 // Show streaming output while generating in Chat mode.
@@ -1395,8 +1426,8 @@ if (ImGui::SmallButton("Clear##ScriptClear")) scriptOutput.clear();
 ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(scriptOutput.size()));
 }
-ImGui::BeginChild("##ScriptOut", ImVec2(0, 0), true);
 if (generating.load() && activeGenerationMode == AiMode::Script) {
+ImGui::BeginChild("##ScriptOut", ImVec2(0, 0), true);
 std::string partial;
 {
 std::lock_guard<std::mutex> lock(streamMutex);
@@ -1408,10 +1439,11 @@ ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 } else {
 ImGui::TextWrapped("%s", partial.c_str());
 }
-} else {
-ImGui::TextWrapped("%s", scriptOutput.empty() ? "(no output yet)" : scriptOutput.c_str());
-}
 ImGui::EndChild();
+} else {
+InputTextMultilineString("##ScriptOut", &scriptOutput,
+	ImGui::GetContentRegionAvail());
+}
 }
 
 // ---------------------------------------------------------------------------
@@ -1756,8 +1788,8 @@ if (ImGui::SmallButton("Clear##SumClear")) summarizeOutput.clear();
 ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(summarizeOutput.size()));
 }
-ImGui::BeginChild("##SumOut", ImVec2(0, 0), true);
 if (generating.load() && activeGenerationMode == AiMode::Summarize) {
+ImGui::BeginChild("##SumOut", ImVec2(0, 0), true);
 std::string partial;
 {
 std::lock_guard<std::mutex> lock(streamMutex);
@@ -1769,10 +1801,11 @@ ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 } else {
 ImGui::TextWrapped("%s", partial.c_str());
 }
-} else {
-ImGui::TextWrapped("%s", summarizeOutput.empty() ? "(no output yet)" : summarizeOutput.c_str());
-}
 ImGui::EndChild();
+} else {
+InputTextMultilineString("##SumOut", &summarizeOutput,
+	ImGui::GetContentRegionAvail());
+}
 }
 
 // ---------------------------------------------------------------------------
@@ -1826,8 +1859,8 @@ if (ImGui::SmallButton("Clear##WriteClear")) writeOutput.clear();
 ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(writeOutput.size()));
 }
-ImGui::BeginChild("##WriteOut", ImVec2(0, 0), true);
 if (generating.load() && activeGenerationMode == AiMode::Write) {
+ImGui::BeginChild("##WriteOut", ImVec2(0, 0), true);
 std::string partial;
 {
 std::lock_guard<std::mutex> lock(streamMutex);
@@ -1839,10 +1872,11 @@ ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 } else {
 ImGui::TextWrapped("%s", partial.c_str());
 }
-} else {
-ImGui::TextWrapped("%s", writeOutput.empty() ? "(no output yet)" : writeOutput.c_str());
-}
 ImGui::EndChild();
+} else {
+InputTextMultilineString("##WriteOut", &writeOutput,
+	ImGui::GetContentRegionAvail());
+}
 }
 
 // ---------------------------------------------------------------------------
@@ -1906,8 +1940,8 @@ if (ImGui::SmallButton("Clear##TransClear")) translateOutput.clear();
 ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(translateOutput.size()));
 }
-ImGui::BeginChild("##TransOut", ImVec2(0, 0), true);
 if (generating.load() && activeGenerationMode == AiMode::Translate) {
+ImGui::BeginChild("##TransOut", ImVec2(0, 0), true);
 std::string partial;
 {
 std::lock_guard<std::mutex> lock(streamMutex);
@@ -1919,10 +1953,11 @@ ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 } else {
 ImGui::TextWrapped("%s", partial.c_str());
 }
-} else {
-ImGui::TextWrapped("%s", translateOutput.empty() ? "(no output yet)" : translateOutput.c_str());
-}
 ImGui::EndChild();
+} else {
+InputTextMultilineString("##TransOut", &translateOutput,
+	ImGui::GetContentRegionAvail());
+}
 }
 
 // ---------------------------------------------------------------------------
@@ -1983,8 +2018,8 @@ if (ImGui::SmallButton("Clear##CustClear")) customOutput.clear();
 ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(customOutput.size()));
 }
-ImGui::BeginChild("##CustOut", ImVec2(0, 0), true);
 if (generating.load() && activeGenerationMode == AiMode::Custom) {
+ImGui::BeginChild("##CustOut", ImVec2(0, 0), true);
 std::string partial;
 {
 std::lock_guard<std::mutex> lock(streamMutex);
@@ -1996,10 +2031,11 @@ ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 } else {
 ImGui::TextWrapped("%s", partial.c_str());
 }
-} else {
-ImGui::TextWrapped("%s", customOutput.empty() ? "(no output yet)" : customOutput.c_str());
-}
 ImGui::EndChild();
+} else {
+InputTextMultilineString("##CustOut", &customOutput,
+	ImGui::GetContentRegionAvail());
+}
 }
 
 // ---------------------------------------------------------------------------
