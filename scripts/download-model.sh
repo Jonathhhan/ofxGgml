@@ -53,6 +53,7 @@ PRESET_BESTFOR=(
 	"chat, general"
 	"scripting, code generation"
 )
+# Zero-based indices of presets downloaded by default / --both.
 RECOMMENDED_PRESET_INDICES=(0 1)
 
 # ---------------------------------------------------------------------------
@@ -157,7 +158,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-if [[ "$DOWNLOAD_BOTH" == false ]] && [[ -z "$MODEL_URL" ]] && [[ -z "$PRESET_INDEX" ]] && [[ -z "$TASK_NAME" ]]; then
+if [[ "$DOWNLOAD_BOTH" != true ]] && [[ -z "$MODEL_URL" ]] && [[ -z "$PRESET_INDEX" ]] && [[ -z "$TASK_NAME" ]]; then
 	DOWNLOAD_BOTH=true
 	write_step "No --model/--preset/--task specified, defaulting to both recommended presets"
 fi
@@ -222,9 +223,9 @@ download_model() {
 		die "Downloaded file is empty. Check the URL and try again."
 	fi
 
-	local file_size
-	file_size=$(wc -c < "$output_path" 2>/dev/null || echo 0)
-	write_step "Download complete!  Size: $(numfmt --to=iec "$file_size" 2>/dev/null || echo "$file_size bytes")"
+	local FILE_SIZE
+	FILE_SIZE=$(wc -c < "$output_path" 2>/dev/null || echo 0)
+	write_step "Download complete!  Size: $(numfmt --to=iec "$FILE_SIZE" 2>/dev/null || echo "$FILE_SIZE bytes")"
 	write_step "Model saved to: $output_path"
 	write_step ""
 }
