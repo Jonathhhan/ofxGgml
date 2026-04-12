@@ -53,6 +53,7 @@ PRESET_BESTFOR=(
 	"chat, general"
 	"scripting, code generation"
 )
+RECOMMENDED_PRESET_COUNT=2
 
 # ---------------------------------------------------------------------------
 # Task → preferred preset mapping (matches GUI example AiMode enum)
@@ -231,12 +232,12 @@ download_model() {
 mkdir -p "$OUTPUT_DIR"
 
 if [[ "$DOWNLOAD_BOTH" == true ]]; then
-	if [[ ${#PRESET_URLS[@]} -lt 2 ]]; then
+	if [[ ${#PRESET_URLS[@]} -lt $RECOMMENDED_PRESET_COUNT ]]; then
 		die "--both requires at least two configured presets"
 	fi
 	write_step "Downloading both recommended presets"
 	# Intentionally only download presets 1 and 2 (the two recommended models).
-	for i in 0 1; do
+	for ((i = 0; i < RECOMMENDED_PRESET_COUNT; i++)); do
 		write_step "Preset $((i + 1)): ${PRESET_NAMES[$i]} (${PRESET_SIZES[$i]})"
 		download_model "${PRESET_URLS[$i]}" "$(basename "${PRESET_URLS[$i]}")"
 	done
