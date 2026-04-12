@@ -164,6 +164,7 @@ private:
 	int contextSize = 2048;
 	int batchSize = 512;
 	int gpuLayers = 0;
+	int detectedModelLayers = 0;                     // auto-detected from GGUF metadata (0=unknown)
 	int seed = -1;                                   // -1 = random
 	int numThreads = 4;
 	int selectedBackendIndex = 0;                    // 0=Auto, 1=CPU, 2=GPU
@@ -241,6 +242,7 @@ private:
 	std::string buildPromptForMode(AiMode mode, const std::string & userText,
 		const std::string & systemPrompt) const;
 	std::string getSelectedModelPath() const;
+	void detectModelLayers();
 	void applyPendingOutput();
 	void stopGeneration();
 

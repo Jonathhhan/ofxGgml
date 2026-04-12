@@ -676,6 +676,9 @@ autoLoadSession();
 // Detect llama-completion / llama-cli / llama at startup.
 probeLlamaCli(logMutex, logMessages, customCliPath);
 
+// Detect model layer count for GPU layers slider.
+detectModelLayers();
+
 // Pre-fill example system prompt only if not restored from session.
 if (customSystemPrompt[0] == '\0') {
 std::strncpy(customSystemPrompt,
@@ -811,9 +814,21 @@ ImGui::SeparatorText("Engine");
 ImGui::SliderInt("Threads", &numThreads, 1, 32);
 ImGui::SliderInt("Context Size", &contextSize, 256, 16384);
 ImGui::SliderInt("Batch Size", &batchSize, 32, 4096);
-ImGui::SliderInt("GPU Layers", &gpuLayers, 0, 128);
+{
+int settingsSliderMax = detectedModelLayers > 0 ? detectedModelLayers : 128;
+ImGui::SliderInt("GPU Layers", &gpuLayers, 0, settingsSliderMax);
 if (ImGui::IsItemHovered()) {
+if (detectedModelLayers > 0) {
+ImGui::SetTooltip("Number of model layers to offload to GPU\n"
+	"0 = all on CPU\nModel has %d layers", detectedModelLayers);
+} else {
 ImGui::SetTooltip("Number of model layers to offload to GPU\n0 = all on CPU");
+}
+}
+ImGui::SameLine();
+if (ImGui::SmallButton("None##settgpu")) gpuLayers = 0;
+ImGui::SameLine();
+if (ImGui::SmallButton("All##settgpu")) gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
 }
 
 const char * backendLabels[] = { "Auto", "CPU", "GPU" };
@@ -904,6 +919,7 @@ const auto & preset = modelPresets[static_cast<size_t>(i)];
 std::string label = preset.name + "  " + preset.sizeMB;
 if (ImGui::Selectable(label.c_str(), isSelected)) {
 selectedModelIndex = i;
+detectModelLayers();
 }
 if (ImGui::IsItemHovered()) {
 ImGui::SetTooltip("%s\nBest for: %s\nFile: %s",
@@ -929,7 +945,21 @@ ImGui::SliderFloat("##Temp", &temperature, 0.0f, 2.0f, "Temp: %.2f");
 ImGui::SetNextItemWidth(-1);
 ImGui::SliderFloat("##TopP", &topP, 0.0f, 1.0f, "Top-P: %.2f");
 ImGui::SetNextItemWidth(-1);
-ImGui::SliderInt("##GPULayers", &gpuLayers, 0, 128, "GPU Layers: %d");
+{
+int sliderMax = detectedModelLayers > 0 ? detectedModelLayers : 128;
+ImGui::SliderInt("##GPULayers", &gpuLayers, 0, sliderMax, "GPU Layers: %d");
+if (ImGui::IsItemHovered() && detectedModelLayers > 0) {
+ImGui::SetTooltip("Model has %d layers", detectedModelLayers);
+}
+// None / All quick buttons.
+if (ImGui::Button("None##gpu", ImVec2(ImGui::GetContentRegionAvail().x * 0.5f - 2, 0))) {
+gpuLayers = 0;
+}
+ImGui::SameLine();
+if (ImGui::Button("All##gpu", ImVec2(-1, 0))) {
+gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
+}
+}
 
 ImGui::Spacing();
 ImGui::Separator();
@@ -1940,7 +1970,11 @@ ImGui::SameLine();
 ImGui::Text(" | Tokens: %d  Temp: %.2f  Top-P: %.2f", maxTokens, temperature, topP);
 if (gpuLayers > 0) {
 ImGui::SameLine();
+if (detectedModelLayers > 0) {
+ImGui::Text(" | GPU: %d/%d layers", gpuLayers, detectedModelLayers);
+} else {
 ImGui::Text(" | GPU: %d layers", gpuLayers);
+}
 }
 if (generating.load()) {
 ImGui::SameLine();
@@ -2279,6 +2313,53 @@ std::string ofApp::getSelectedModelPath() const {
 	return ofToDataPath(ofFilePath::join("models", preset.filename), true);
 }
 
+void ofApp::detectModelLayers() {
+	detectedModelLayers = 0;
+	const std::string modelPath = getSelectedModelPath();
+	if (modelPath.empty()) return;
+
+	std::error_code ec;
+	if (!std::filesystem::exists(modelPath, ec) || ec) return;
+
+	// Use ofxGgmlModel to read GGUF metadata without loading tensor data.
+	// Common metadata keys for layer count:
+	//   <arch>.block_count  (e.g., llama.block_count, qwen2.block_count)
+	ofxGgmlModel model;
+	if (!model.load(modelPath)) return;
+
+	// Try to find the architecture name first.
+	std::string arch = model.getMetadataString("general.architecture");
+	if (!arch.empty()) {
+		int32_t layers = model.getMetadataInt32(arch + ".block_count", 0);
+		if (layers > 0) {
+			detectedModelLayers = layers;
+			fprintf(stderr, "[ofxGgml] Detected %d layers in model (%s)\n",
+				detectedModelLayers, arch.c_str());
+		}
+	}
+
+	// Fallback: try common architecture names.
+	// These are well-known GGUF architecture identifiers from llama.cpp.
+	// Update this list when new architectures are added to llama.cpp.
+	if (detectedModelLayers == 0) {
+		const char * archNames[] = {
+			"llama", "qwen2", "gemma", "phi", "starcoder",
+			"gpt2", "mpt", "falcon", "bloom", "mistral"
+		};
+		for (const auto & name : archNames) {
+			int32_t layers = model.getMetadataInt32(std::string(name) + ".block_count", 0);
+			if (layers > 0) {
+				detectedModelLayers = layers;
+				fprintf(stderr, "[ofxGgml] Detected %d layers in model (%s)\n",
+					detectedModelLayers, name);
+				break;
+			}
+		}
+	}
+
+	model.close();
+}
+
 std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
 	const std::string & systemPrompt) const {
 	std::ostringstream oss;
@@ -2420,9 +2501,21 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	};
 	std::vector<std::string> args = makeArgs(false);
 
+	// Print the command line to console for debugging.
+	{
+		std::string cmdLine;
+		for (size_t i = 0; i < args.size(); i++) {
+			if (i > 0) cmdLine += " ";
+			cmdLine += args[i];
+		}
+		fprintf(stderr, "[ofxGgml] Running: %s\n", cmdLine.c_str());
+	}
+
 	std::string raw;
 	int ret = -1;
 	const bool started = runProcessCapture(args, raw, ret, true, onStreamData);
+	fprintf(stderr, "[ofxGgml] Process %s, exit code: %d\n",
+		started ? "started" : "failed to start", ret);
 	if (started && ret != 0) {
 		const std::string lowered = ofToLower(raw);
 		if (lowered.find("unknown argument") != std::string::npos ||
@@ -2519,9 +2612,14 @@ workerThread.join();
 }
 
  workerThread = std::thread([this, mode, userText, systemPrompt]() {
+ try {
  std::string prompt = buildPromptForMode(mode, userText, systemPrompt);
  std::string result;
  std::string error;
+
+ fprintf(stderr, "\n[ofxGgml] === Generation started ===\n");
+ fprintf(stderr, "[ofxGgml] Mode: %s\n", modeLabels[static_cast<int>(mode)]);
+ fprintf(stderr, "[ofxGgml] Prompt (%zu chars):\n%s\n", prompt.size(), prompt.c_str());
 
  auto streamCb = [this](const std::string & partial) {
  std::string cleaned = stripAnsi(partial);
@@ -2530,6 +2628,7 @@ workerThread.join();
  };
 
  if (!runRealInference(prompt, result, error, streamCb)) {
+ fprintf(stderr, "[ofxGgml] Inference error: %s\n", error.c_str());
  std::ostringstream oss;
  oss << "[Error] " << error << "\n\n"
      << "To run inference, complete these setup steps:\n"
@@ -2538,7 +2637,11 @@ workerThread.join();
      << "  3. Build llama.cpp CLI: ./scripts/build-llama-cli.sh\n\n"
      << "See README.md for details.";
  result = oss.str();
+ } else {
+ fprintf(stderr, "[ofxGgml] Output (%zu chars):\n%s\n", result.size(), result.c_str());
  }
+
+ fprintf(stderr, "[ofxGgml] === Generation finished ===\n\n");
 
 {
 std::lock_guard<std::mutex> lock(outputMutex);
@@ -2553,6 +2656,20 @@ pendingMode = mode;
 std::lock_guard<std::mutex> lock(streamMutex);
 streamingOutput.clear();
 }
+
+ } catch (const std::exception & e) {
+ fprintf(stderr, "[ofxGgml] Exception in worker thread: %s\n", e.what());
+ std::lock_guard<std::mutex> lock(outputMutex);
+ pendingOutput = std::string("[Error] Internal exception: ") + e.what();
+ pendingRole = "assistant";
+ pendingMode = mode;
+ } catch (...) {
+ fprintf(stderr, "[ofxGgml] Unknown exception in worker thread\n");
+ std::lock_guard<std::mutex> lock(outputMutex);
+ pendingOutput = "[Error] Unknown internal exception occurred.";
+ pendingRole = "assistant";
+ pendingMode = mode;
+ }
 
 generating.store(false);
 });
@@ -2625,7 +2742,11 @@ ImGui::Text("  Device:     %s", selectedDeviceIndex < 0 ? "Auto" :
 ImGui::Text("  Threads:    %d", numThreads);
 ImGui::Text("  Context:    %d", contextSize);
 ImGui::Text("  Batch:      %d", batchSize);
+if (detectedModelLayers > 0) {
+ImGui::Text("  GPU Layers: %d / %d", gpuLayers, detectedModelLayers);
+} else {
 ImGui::Text("  GPU Layers: %d", gpuLayers);
+}
 ImGui::Text("  Seed:       %s", seed < 0 ? "random" : ofToString(seed).c_str());
 ImGui::Spacing();
 
