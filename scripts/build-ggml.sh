@@ -21,8 +21,6 @@ GGML_BRANCH="master"
 TMP_ROOT="${TMPDIR:-/tmp}"
 BUILD_DIR="$TMP_ROOT/ggml-build"
 SOURCE_DIR="$TMP_ROOT/ggml-source"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEFAULT_INSTALL_PREFIX="/usr/local"
 JOBS=""
 ENABLE_CUDA=0
@@ -56,6 +54,8 @@ esac
 }
 
 if is_windows_like; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEFAULT_INSTALL_PREFIX="$ADDON_ROOT/libs/ggml"
 fi
 INSTALL_PREFIX="$DEFAULT_INSTALL_PREFIX"
