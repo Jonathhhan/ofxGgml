@@ -260,10 +260,15 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 	close(pipefd[0]);
 
 	int status = 0;
-	waitpid(pid, &status, 0);
+	pid_t wp = waitpid(pid, &status, 0);
 
 	if (trackProcess) {
 		inferenceProcessPid.store(0);
+	}
+
+	if (wp < 0) {
+		exitCode = -1;
+		return false;
 	}
 
 	if (WIFEXITED(status)) {
