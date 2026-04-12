@@ -3,10 +3,10 @@
 # build-ggml.sh — Clone, compile, and install the ggml tensor library.
 #
 # Usage:
-#   ./scripts/build-ggml.sh [--prefix /usr/local] [--jobs 8] [--gpu]
+#   ./scripts/build-ggml.sh [--prefix DIR] [--jobs 8] [--gpu]
 #
 # Options:
-#   --prefix DIR   Install prefix (default: /usr/local)
+#   --prefix DIR   Install prefix (default: /usr/local on Unix, addon-local libs/ggml on Windows-like shells)
 #   --jobs N       Parallel build jobs (default: number of CPU cores)
 #   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 #   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
@@ -22,7 +22,6 @@ TMP_ROOT="${TMPDIR:-/tmp}"
 BUILD_DIR="$TMP_ROOT/ggml-build"
 SOURCE_DIR="$TMP_ROOT/ggml-source"
 DEFAULT_INSTALL_PREFIX="/usr/local"
-INSTALL_PREFIX="$DEFAULT_INSTALL_PREFIX"
 JOBS=""
 ENABLE_CUDA=0
 ENABLE_VULKAN=0
@@ -53,6 +52,12 @@ return 1
 ;;
 esac
 }
+
+if is_windows_like; then
+ADDON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_INSTALL_PREFIX="$ADDON_ROOT/libs/ggml"
+fi
+INSTALL_PREFIX="$DEFAULT_INSTALL_PREFIX"
 
 detect_cuda() {
 # Check for nvcc (CUDA compiler) first, then nvidia-smi as fallback.
