@@ -51,7 +51,8 @@ std::string stripAnsi(const std::string & text) {
 				// Skip parameter bytes (0x30-0x3F) and intermediate
 				// bytes (0x20-0x2F), then the final byte (0x40-0x7E).
 				i++; // skip '['
-				while (i < text.size() && text[i] < 0x40) {
+				while (i < text.size()
+					&& static_cast<unsigned char>(text[i]) < 0x40) {
 					i++;
 				}
 				if (i < text.size()) i++; // skip the final byte (e.g. 'm')
@@ -135,7 +136,8 @@ std::string cleanChatOutput(const std::string & text) {
 				break;
 			}
 		}
-		// Strip a leading ">" on its own (interactive prompt marker).
+		// Strip a bare leading ">" (without trailing space — the "> "
+		// entry in roleLabels handles the space case).
 		if (!out.empty() && out[0] == '>') {
 			out = trim(out.substr(1));
 			changed = true;
@@ -2669,12 +2671,20 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	// Exit code 130 (128 + SIGINT) is expected when the interactive-
 	// mode CLI receives EOF on stdin and shuts down.  Treat it as
 	// success when we captured valid generated output.
-	// Also tolerate crash-on-exit codes (e.g. Windows
-	// STATUS_STACK_BUFFER_OVERRUN 0xC0000409 = -1073740791) that can
-	// occur during cleanup after generation already produced output.
-	if (started && ret != 0 && ret != kExecNotFound
-		&& !trim(stripAnsi(raw)).empty()) {
-		ret = 0;
+	// Also tolerate specific crash-on-exit codes that can occur
+	// during cleanup after generation already produced output.
+	if (started && ret != 0 && !trim(stripAnsi(raw)).empty()) {
+		const bool benignExit =
+			ret == 130                   // SIGINT (EOF on stdin)
+			|| ret == -1073740791        // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
+			|| ret == -1073741819        // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
+			|| ret == 1                  // generic error (may occur during cleanup)
+			|| ret == -1                 // signal-killed on POSIX
+			|| (ret >= 128 && ret < 160) // POSIX signal exits (128+signal)
+			;
+		if (benignExit) {
+			ret = 0;
+		}
 	}
 
 	std::error_code ec;
