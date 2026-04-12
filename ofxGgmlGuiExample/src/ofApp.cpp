@@ -1787,7 +1787,7 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-ImGui::BeginChild("##SumOut2", ImVec2(0, 0), true);
+ImGui::BeginChild("##SumOut", ImVec2(0, 0), true);
 ImGui::TextWrapped("%s", summarizeOutput.c_str());
 ImGui::EndChild();
 }
@@ -1859,7 +1859,7 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-ImGui::BeginChild("##WriteOut2", ImVec2(0, 0), true);
+ImGui::BeginChild("##WriteOut", ImVec2(0, 0), true);
 ImGui::TextWrapped("%s", writeOutput.c_str());
 ImGui::EndChild();
 }
@@ -1941,7 +1941,7 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-ImGui::BeginChild("##TransOut2", ImVec2(0, 0), true);
+ImGui::BeginChild("##TransOut", ImVec2(0, 0), true);
 ImGui::TextWrapped("%s", translateOutput.c_str());
 ImGui::EndChild();
 }
@@ -2020,7 +2020,7 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-ImGui::BeginChild("##CustOut2", ImVec2(0, 0), true);
+ImGui::BeginChild("##CustOut", ImVec2(0, 0), true);
 ImGui::TextWrapped("%s", customOutput.c_str());
 ImGui::EndChild();
 }
