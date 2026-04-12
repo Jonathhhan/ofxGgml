@@ -3,7 +3,7 @@
 # build-llama-cli.sh — Clone, compile, and install llama.cpp CLI tools.
 #
 # Builds both llama-cli (interactive chat) and llama-completion (one-shot
-# text completion) from the llama.cpp project.  The example-gui uses
+# text completion) from the llama.cpp project.  The ofxGgmlGuiExample uses
 # llama-completion for inference and falls back to llama-cli for older
 # installations.
 #
@@ -239,7 +239,7 @@ cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}"
 # Build
 # ---------------------------------------------------------------------------
 
-# Build llama-completion (one-shot text completion — used by example-gui)
+# Build llama-completion (one-shot text completion — used by ofxGgmlGuiExample)
 # and llama-cli (interactive chat mode).
 write_step "Building llama-completion and llama-cli with $JOBS parallel jobs..."
 cmake --build . --config Release --target llama-completion llama-cli -j "$JOBS"
@@ -368,6 +368,6 @@ write_step "Done! llama.cpp tools have been built and installed to $EFFECTIVE_IN
 write_step ""
 write_step "Next steps:"
 write_step "  1. Ensure $EFFECTIVE_INSTALL_PREFIX/bin is in your PATH, or set the"
-write_step "     custom CLI path in the example-gui sidebar."
+write_step "     custom CLI path in the ofxGgmlGuiExample sidebar."
 write_step "  2. Run scripts/download-model.sh to fetch a GGUF model (if not done)."
 write_step "  3. Build and run your OF project with ofxGgml."

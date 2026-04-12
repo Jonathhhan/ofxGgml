@@ -116,9 +116,9 @@ ofxGgml/
 │   ├── build-ggml.sh         # build & install ggml
 │   ├── build-llama-cli.sh    # build & install llama.cpp CLI tools
 │   └── download-model.sh     # download GGUF model presets
-├── example-basic/            # matrix multiplication demo
-├── example-neural/           # feedforward neural network demo
-└── example-gui/              # full ImGui AI Studio
+├── ofxGgmlBasicExample/      # matrix multiplication demo
+├── ofxGgmlNeuralExample/     # feedforward neural network demo
+└── ofxGgmlGuiExample/        # full ImGui AI Studio
 ```
 
 ## Usage
@@ -217,22 +217,22 @@ auto r = ggml.computeGraph(graph);
 
 | Example | Description |
 |---------|-------------|
-| **example-basic/** | Matrix multiplication with console output |
-| **example-neural/** | Simple feedforward neural network visualized in the OF window |
-| **example-gui/** | Full ImGui-based AI Studio with six modes (Chat, Script, Summarize, Write, Translate, Custom) |
+| **ofxGgmlBasicExample/** | Matrix multiplication with console output |
+| **ofxGgmlNeuralExample/** | Simple feedforward neural network visualized in the OF window |
+| **ofxGgmlGuiExample/** | Full ImGui-based AI Studio with six modes (Chat, Script, Summarize, Write, Translate, Custom) |
 
-### example-gui features
+### ofxGgmlGuiExample features
 
 - **Model preselection** — choose from recommended GGUF models via sidebar
 - **Script language selector** — 8 language presets (C++, Python, JS, Rust, GLSL, Go, Bash, TS)
 - **Script source browser** — connect to a local folder or GitHub repository
 - **Session persistence** — auto-save/load, File → Save/Load Session
 
-### Real inference in example-gui
+### Real inference in ofxGgmlGuiExample
 
 The GUI example uses [llama.cpp](https://github.com/ggml-org/llama.cpp) CLI tools for text generation:
 
-- Expected model location: `example-gui/bin/data/models/<preset>.gguf`
+- Expected model location: `ofxGgmlGuiExample/bin/data/models/<preset>.gguf`
 - Runtime requirement: `llama-completion` or `llama-cli` in `PATH`, a common install directory, or `libs/llama/bin/`
 
 Build the tools with:
