@@ -100,7 +100,6 @@ public:
 
 	ofxGgmlTensor norm(ofxGgmlTensor a, float eps = 1e-5f);
 	ofxGgmlTensor rmsNorm(ofxGgmlTensor a, float eps = 1e-5f);
-	ofxGgmlTensor layerNorm(ofxGgmlTensor a, float eps = 1e-5f);
 
 	// ------------------------------------------------------------------
 	//  Activations
@@ -118,7 +117,12 @@ public:
 	// ------------------------------------------------------------------
 
 	/// Scaled-dot-product attention (flash attention when available).
-	ofxGgmlTensor flashAttn(ofxGgmlTensor q, ofxGgmlTensor k, ofxGgmlTensor v, bool masked = false);
+	/// When a valid mask tensor is provided it is used as the attention
+	/// mask (e.g. a causal mask filled with -INFINITY for masked
+	/// positions).  Pass an invalid (default-constructed) tensor for
+	/// unmasked attention.
+	ofxGgmlTensor flashAttn(ofxGgmlTensor q, ofxGgmlTensor k, ofxGgmlTensor v,
+		ofxGgmlTensor mask = ofxGgmlTensor());
 
 	/// Rotary position embedding.
 	ofxGgmlTensor rope(ofxGgmlTensor a, ofxGgmlTensor positions, int nDims, int mode = 0);
@@ -128,8 +132,11 @@ public:
 	// ------------------------------------------------------------------
 
 	ofxGgmlTensor conv1d(ofxGgmlTensor a, ofxGgmlTensor kernel, int stride = 1, int padding = 0, int dilation = 1);
-	ofxGgmlTensor pool1d(ofxGgmlTensor a, int kernelSize, int stride = 1, int padding = 0);
-	ofxGgmlTensor pool2d(ofxGgmlTensor a, int kernelSize, int stride = 1, int padding = 0);
+	ofxGgmlTensor convTranspose1d(ofxGgmlTensor a, ofxGgmlTensor kernel, int stride = 1, int padding = 0, int dilation = 1);
+	ofxGgmlTensor pool1d(ofxGgmlTensor a, int kernelSize, int stride = 1, int padding = 0,
+		ofxGgmlPoolType type = ofxGgmlPoolType::Avg);
+	ofxGgmlTensor pool2d(ofxGgmlTensor a, int kernelSize, int stride = 1, int padding = 0,
+		ofxGgmlPoolType type = ofxGgmlPoolType::Avg);
 	ofxGgmlTensor upscale(ofxGgmlTensor a, int scaleFactor);
 
 	// ------------------------------------------------------------------

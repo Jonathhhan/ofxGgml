@@ -32,6 +32,12 @@ enum class ofxGgmlType {
 	BF16 = 30
 };
 
+/// Pooling operation type — mirrors ggml_op_pool.
+enum class ofxGgmlPoolType {
+	Avg = 1,
+	Max = 0
+};
+
 /// Unary activation functions — mirrors ggml_unary_op.
 enum class ofxGgmlUnaryOp {
 	Abs,

@@ -82,6 +82,9 @@ struct ofxGgml::Impl {
 	ggml_backend_t cpuBackend = nullptr;
 	ggml_backend_sched_t sched = nullptr;
 
+	/// Backend buffer for uploaded model weights.
+	ggml_backend_buffer_t modelWeightBuf = nullptr;
+
 	/// Log callback — initialised to the built-in console logger so that
 	/// messages are visible by default.
 	ofxGgmlLogCallback logCb = defaultLogCallback;
@@ -258,6 +261,11 @@ void ofxGgml::close() {
 	if (m_impl->sched) {
 		ggml_backend_sched_free(m_impl->sched);
 		m_impl->sched = nullptr;
+	}
+	// Free model weight buffer before backends.
+	if (m_impl->modelWeightBuf) {
+		ggml_backend_buffer_free(m_impl->modelWeightBuf);
+		m_impl->modelWeightBuf = nullptr;
 	}
 	// Guard: if backend and cpuBackend point to the same allocation,
 	// only free once to avoid double-free.
@@ -436,11 +444,17 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	}
 
 	// Step 2 — allocate a backend buffer for all context tensors.
+	// Free any previously allocated model weight buffer.
+	if (m_impl->modelWeightBuf) {
+		ggml_backend_buffer_free(m_impl->modelWeightBuf);
+		m_impl->modelWeightBuf = nullptr;
+	}
 	ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(modelCtx, m_impl->backend);
 	if (!buf) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to allocate backend buffer for model weights\n");
 		return false;
 	}
+	m_impl->modelWeightBuf = buf;
 
 	// Step 3 — copy host data into the (possibly GPU-resident) buffer.
 	for (const auto & snap : snapshots) {
