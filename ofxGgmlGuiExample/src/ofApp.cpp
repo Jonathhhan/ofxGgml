@@ -266,6 +266,10 @@ static void probeLlamaCli(std::mutex & logMutex,
 				llamaCliCommand = customPath;
 				found = true;
 			}
+		} else {
+			std::lock_guard<std::mutex> lock(logMutex);
+			logMessages.push_back("[warn] custom CLI path not found: " + customPath);
+			if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
 		}
 	}
 
