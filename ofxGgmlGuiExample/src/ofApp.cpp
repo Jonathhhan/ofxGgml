@@ -148,7 +148,8 @@ std::string quoteWindowsArg(const std::string & arg) {
 
 bool runProcessCapture(const std::vector<std::string> & args, std::string & output, int & exitCode,
                        bool trackProcess = false,
-                       std::function<void(const std::string &)> onStreamData = nullptr) {
+                       std::function<void(const std::string &)> onStreamData = nullptr,
+                       bool mergeStderr = true) {
 	output.clear();
 	exitCode = -1;
 	if (args.empty() || args[0].empty()) return false;
@@ -178,7 +179,17 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 	si.hStdInput = (nullInput != INVALID_HANDLE_VALUE)
 		? nullInput : GetStdHandle(STD_INPUT_HANDLE);
 	si.hStdOutput = writePipe;
-	si.hStdError = writePipe;
+	HANDLE nullErr = INVALID_HANDLE_VALUE;
+	if (mergeStderr) {
+		si.hStdError = writePipe;
+	} else {
+		// Discard stderr so verbose log output from the child process
+		// does not pollute the captured stdout.
+		nullErr = CreateFileA("NUL", GENERIC_WRITE, 0, &sa,
+			OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+		si.hStdError = (nullErr != INVALID_HANDLE_VALUE)
+			? nullErr : GetStdHandle(STD_ERROR_HANDLE);
+	}
 
 	PROCESS_INFORMATION pi{};
 	std::string cmdLine;
@@ -203,6 +214,7 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 	);
 	CloseHandle(writePipe);
 	if (nullInput != INVALID_HANDLE_VALUE) CloseHandle(nullInput);
+	if (nullErr != INVALID_HANDLE_VALUE) CloseHandle(nullErr);
 	if (!ok) {
 		CloseHandle(readPipe);
 		return false;
@@ -253,7 +265,20 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 			if (devNull != STDIN_FILENO) close(devNull);
 		}
 		dup2(pipefd[1], STDOUT_FILENO);
-		dup2(pipefd[1], STDERR_FILENO);
+		if (mergeStderr) {
+			dup2(pipefd[1], STDERR_FILENO);
+		} else {
+			// Discard stderr so verbose log output from the child
+			// process does not pollute the captured stdout.
+			int devNullW = open("/dev/null", O_WRONLY);
+			if (devNullW >= 0) {
+				dup2(devNullW, STDERR_FILENO);
+				close(devNullW);
+			} else {
+				// Last resort: close stderr so nothing leaks into the pipe.
+				close(STDERR_FILENO);
+			}
+		}
 		close(pipefd[0]);
 		close(pipefd[1]);
 
@@ -2543,20 +2568,28 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 
 	std::string raw;
 	int ret = -1;
-	const bool started = runProcessCapture(args, raw, ret, true, onStreamData);
+	const bool started = runProcessCapture(args, raw, ret, true, onStreamData, false);
 	if (verbose) {
 		fprintf(stderr, "[ofxGgml] Process %s, exit code: %d\n",
 			started ? "started" : "failed to start", ret);
 	}
 	if (started && ret != 0) {
-		const std::string lowered = ofToLower(raw);
-		if (lowered.find("unknown argument") != std::string::npos ||
-			lowered.find("unrecognized option") != std::string::npos ||
-			lowered.find("invalid option") != std::string::npos ||
-			lowered.find("unknown option") != std::string::npos) {
+		// With stderr separated, error messages about unknown flags
+		// are no longer in `raw`.  If the process failed quickly and
+		// produced no usable stdout, retry with short-style flags as
+		// a fallback in case the installed CLI version uses a
+		// different option syntax.
+		if (trim(raw).empty()) {
 			args = makeArgs(true);
-			runProcessCapture(args, raw, ret, true, onStreamData);
+			runProcessCapture(args, raw, ret, true, onStreamData, false);
 		}
+	}
+
+	// Exit code 130 (128 + SIGINT) is expected when the interactive-
+	// mode CLI receives EOF on stdin and shuts down.  Treat it as
+	// success when we captured valid generated output.
+	if (started && ret == 130 && !trim(stripAnsi(raw)).empty()) {
+		ret = 0;
 	}
 
 	std::error_code ec;
