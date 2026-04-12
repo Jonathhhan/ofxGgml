@@ -430,6 +430,9 @@ static bool InputTextMultilineString(const char * label, std::string * str,
 	flags |= ImGuiInputTextFlags_CallbackResize;
 	// Ensure the string has at least 1 byte of capacity so &(*str)[0] is valid.
 	if (str->empty()) str->reserve(64);
+	// Pass capacity()+1 so ImGui knows the full writable buffer size
+	// (same pattern as imgui_stdlib.cpp).  The resize callback fires
+	// whenever more space is needed.
 	return ImGui::InputTextMultiline(label, &(*str)[0], str->capacity() + 1,
 		size, flags, StdStringResizeCallback,
 		static_cast<void *>(str));
@@ -1184,6 +1187,8 @@ ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "System:");
 }
 float availWidth = ImGui::GetContentRegionAvail().x;
 ImVec2 textSize = ImGui::CalcTextSize(msg.text.c_str(), nullptr, false, availWidth);
+// Height = rendered text + frame padding (top & bottom) + one extra line
+// for the cursor when editing at the end of the text.
 float fieldHeight = std::max(textSize.y + ImGui::GetStyle().FramePadding.y * 2
 	+ ImGui::GetTextLineHeight(), ImGui::GetTextLineHeight() * 2);
 char label[32];
