@@ -408,33 +408,6 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 
 }
 
-// ---------------------------------------------------------------------------
-// Helper: ImGui::InputTextMultiline wrapper for std::string.
-// Uses the CallbackResize mechanism so the string grows as the user types.
-// ---------------------------------------------------------------------------
-
-static int StdStringResizeCallback(ImGuiInputTextCallbackData * data) {
-	if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
-		std::string * str = static_cast<std::string *>(data->UserData);
-		str->resize(static_cast<size_t>(data->BufTextLen));
-		data->Buf = &(*str)[0];
-	}
-	return 0;
-}
-
-static bool InputTextMultilineString(const char * label, std::string * str,
-	const ImVec2 & size = ImVec2(0, 0),
-	ImGuiInputTextFlags flags = 0) {
-	flags |= ImGuiInputTextFlags_CallbackResize;
-	// Ensure the string has at least 1 byte of capacity so &(*str)[0] is valid.
-	if (str->empty()) str->reserve(64);
-	// Pass capacity()+1 so ImGui knows the full writable buffer size
-	// (same pattern as imgui_stdlib.cpp).  The resize callback fires
-	// whenever more space is needed.
-	return ImGui::InputTextMultiline(label, &(*str)[0], str->capacity() + 1,
-		size, flags, StdStringResizeCallback,
-		static_cast<void *>(str));
-}
 
 // ---------------------------------------------------------------------------
 // Probe for llama-completion / llama-cli / llama.
@@ -1203,15 +1176,7 @@ ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "AI:");
 } else {
 ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "System:");
 }
-float availWidth = ImGui::GetContentRegionAvail().x;
-ImVec2 textSize = ImGui::CalcTextSize(msg.text.c_str(), nullptr, false, availWidth);
-// Height = rendered text + frame padding (top & bottom) + one extra line
-// for the cursor when editing at the end of the text.
-float fieldHeight = std::max(textSize.y + ImGui::GetStyle().FramePadding.y * 2
-	+ ImGui::GetTextLineHeight(), ImGui::GetTextLineHeight() * 2);
-char label[32];
-snprintf(label, sizeof(label), "##ChatMsg%zu", i);
-InputTextMultilineString(label, &msg.text, ImVec2(-1, fieldHeight));
+ImGui::TextWrapped("%s", msg.text.c_str());
 ImGui::Spacing();
 }
 // Show streaming output while generating in Chat mode.
@@ -1464,8 +1429,9 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-InputTextMultilineString("##ScriptOut", &scriptOutput,
-	ImGui::GetContentRegionAvail());
+ImGui::BeginChild("##ScriptOut", ImVec2(0, 0), true);
+ImGui::TextWrapped("%s", scriptOutput.c_str());
+ImGui::EndChild();
 }
 }
 
@@ -1826,8 +1792,9 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-InputTextMultilineString("##SumOut", &summarizeOutput,
-	ImGui::GetContentRegionAvail());
+ImGui::BeginChild("##SumOut", ImVec2(0, 0), true);
+ImGui::TextWrapped("%s", summarizeOutput.c_str());
+ImGui::EndChild();
 }
 }
 
@@ -1897,8 +1864,9 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-InputTextMultilineString("##WriteOut", &writeOutput,
-	ImGui::GetContentRegionAvail());
+ImGui::BeginChild("##WriteOut", ImVec2(0, 0), true);
+ImGui::TextWrapped("%s", writeOutput.c_str());
+ImGui::EndChild();
 }
 }
 
@@ -1978,8 +1946,9 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-InputTextMultilineString("##TransOut", &translateOutput,
-	ImGui::GetContentRegionAvail());
+ImGui::BeginChild("##TransOut", ImVec2(0, 0), true);
+ImGui::TextWrapped("%s", translateOutput.c_str());
+ImGui::EndChild();
 }
 }
 
@@ -2056,8 +2025,9 @@ ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
 } else {
-InputTextMultilineString("##CustOut", &customOutput,
-	ImGui::GetContentRegionAvail());
+ImGui::BeginChild("##CustOut", ImVec2(0, 0), true);
+ImGui::TextWrapped("%s", customOutput.c_str());
+ImGui::EndChild();
 }
 }
 
@@ -2823,10 +2793,26 @@ workerThread.join();
  };
 
  if (!runRealInference(prompt, result, error, streamCb)) {
+ // If inference failed but streaming already delivered output
+ // (e.g. llama-completion crashed during cleanup after producing
+ // text), use the streamed data as the result instead of showing
+ // an error to the user.
+ std::string streamed;
+ {
+ std::lock_guard<std::mutex> lock(streamMutex);
+ streamed = streamingOutput;
+ }
+ if (!streamed.empty()) {
+ if (verbose) {
+ fprintf(stderr, "[ofxGgml] Process failed but streamed output available (%zu chars), using it.\n", streamed.size());
+ }
+ result = streamed;
+ } else {
  if (verbose) {
  fprintf(stderr, "[ofxGgml] Inference error: %s\n", error.c_str());
  }
  result = "[Error] " + error;
+ }
  } else {
  if (verbose) {
  fprintf(stderr, "[ofxGgml] Output (%zu chars):\n%s\n", result.size(), result.c_str());
