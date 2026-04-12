@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../tensor/ofxGgmlTensor.h"
-#include "../support/ofxGgmlTypes.h"
+#include "ofxGgmlTensor.h"
+#include "ofxGgmlTypes.h"
 
 #include <cstddef>
 #include <cstdint>

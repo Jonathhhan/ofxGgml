@@ -2,101 +2,155 @@
 
 An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https://github.com/ggml-org/ggml) tensor library for machine-learning computation.
 
+> **Version 0.2** — restructured addon layout with flat `src/`, standard oF example naming, and a one-command setup script.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone into your oF addons directory
+cd openFrameworks/addons
+git clone https://github.com/Jonathhhan/ofxGgml.git
+
+# 2. One-command setup: build ggml, llama.cpp CLI, and download models
+cd ofxGgml
+./scripts/setup.sh            # CPU-only
+./scripts/setup.sh --gpu      # with CUDA
+./scripts/setup.sh --auto     # auto-detect GPU backends
+
+# 3. Add ofxGgml to your project's addons.make and build
+```
+
 ## Features
 
-- **Backend management** — Automatic discovery and initialization of CPU, CUDA, Metal, Vulkan, and other ggml backends.
-- **GGUF model loading** (`ofxGgmlModel`) — Load GGUF model files, inspect metadata and tensor information, and upload weights to backend buffers for inference.
-- **Tensor wrapper** (`ofxGgmlTensor`) — Lightweight, non-owning wrapper with OF-friendly data access (read/write float vectors, fill, etc.).
-- **Computation graph builder** (`ofxGgmlGraph`) — Fluent API for building ggml computation graphs:
-  - Element-wise arithmetic: add, sub, mul, div, scale, clamp, sqr, sqrt
-  - Matrix operations: matMul (A × B^T), transpose, permute, reshape, view
-  - Reductions: sum, mean, argmax
-  - Normalization: norm, rmsNorm
-  - Activations: relu, gelu, silu, sigmoid, tanh, softmax
-  - Transformer helpers: flashAttn, rope
-  - Convolution / pooling: conv1d, convTranspose1d, pool1d, pool2d, upscale
-  - Loss functions: crossEntropyLoss
-- **Scheduled execution** — Multi-backend scheduler with automatic tensor placement and fallback.
-- **Device enumeration** — Query available devices, memory, and capabilities at runtime.
-- **Runtime backend selection** — Switch between CPU, GPU, or other backends at runtime via `ofxGgmlSettings::preferredBackend` or the GUI backend selector.
+| Category | Capabilities |
+|----------|-------------|
+| **Backend management** | Automatic discovery of CPU, CUDA, Metal, Vulkan backends; runtime selection |
+| **GGUF model loading** | Load GGUF files, inspect metadata and tensors, upload weights to GPU |
+| **Tensor wrapper** | Non-owning handle with OF-friendly data access (read/write floats, fill) |
+| **Graph builder** | Fluent API for computation graphs — see [Operations](#supported-operations) |
+| **Scheduled execution** | Multi-backend scheduler with automatic tensor placement and fallback |
+| **Device enumeration** | Query devices, memory, and capabilities at runtime |
+
+### Supported Operations
+
+<details>
+<summary>Click to expand full operation list</summary>
+
+- **Element-wise**: add, sub, mul, div, scale, clamp, sqr, sqrt
+- **Matrix**: matMul (A × Bᵀ), transpose, permute, reshape, view
+- **Reductions**: sum, mean, argmax
+- **Normalization**: norm, rmsNorm
+- **Activations**: relu, gelu, silu, sigmoid, tanh, softmax
+- **Transformer**: flashAttn, rope
+- **Convolution / pooling**: conv1d, convTranspose1d, pool1d, pool2d, upscale
+- **Loss**: crossEntropyLoss
+
+</details>
 
 ## Requirements
 
 - openFrameworks 0.12+
-- [ggml](https://github.com/ggml-org/ggml) built and installed (headers in `libs/ggml/include`, library linked via `addon_config.mk`).
+- [ggml](https://github.com/ggml-org/ggml) (built from source — see below)
+- C++17 compiler
 
-### Installing ggml
+## Installing ggml
 
-#### Linux (pkg-config)
+### Automated (recommended)
+
+```bash
+./scripts/setup.sh              # builds ggml + llama CLI + downloads models
+./scripts/setup.sh --auto       # auto-detect and enable GPU backends
+./scripts/setup.sh --skip-llama --skip-model  # ggml only
+```
+
+### Manual — Linux / macOS (pkg-config)
 
 ```bash
 git clone https://github.com/ggml-org/ggml
-cd ggml
-mkdir build && cd build
+cd ggml && mkdir build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
-cmake --build . --config Release -j 8
+cmake --build . --config Release -j$(nproc)
 sudo cmake --install .
 ```
 
-On Linux the addon uses `pkg-config` to locate the library automatically.
-
-#### Windows (Visual Studio)
-
-Build ggml with CMake and install it into the addon's `libs/ggml` directory:
+### Manual — Windows (Visual Studio)
 
 ```powershell
 git clone https://github.com/ggml-org/ggml
-cd ggml
-mkdir build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=C:/openFrameworks/addons/ofxGgml/libs/ggml -DBUILD_SHARED_LIBS=ON -DGGML_BUILD_EXAMPLES=OFF -DGGML_BUILD_TESTS=OFF
+cd ggml && mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=C:/openFrameworks/addons/ofxGgml/libs/ggml `
+  -DBUILD_SHARED_LIBS=ON -DGGML_BUILD_EXAMPLES=OFF -DGGML_BUILD_TESTS=OFF
 cmake --build . --config Release -j 8
 cmake --install . --config Release
 ```
 
-The addon expects the following files after installation:
+Expected files after install:
 
-- `libs/ggml/include/` — ggml headers
-- `libs/ggml/lib/ggml.lib` — import library (`ggml` transitively depends on `ggml-base` and `ggml-cpu`)
-- `libs/ggml/bin/ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll` — runtime DLLs
+| Path | Contents |
+|------|----------|
+| `libs/ggml/include/` | ggml headers |
+| `libs/ggml/lib/ggml.lib` | Import library |
+| `libs/ggml/bin/*.dll` | Runtime DLLs (`ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll`) |
 
-Copy the DLLs from `libs/ggml/bin/` into your project's `bin/` directory (next to the .exe) so they can be found at runtime.
+Copy the DLLs into your project's `bin/` directory (next to the `.exe`).
+
+## Addon Structure
+
+```
+ofxGgml/
+├── addon_config.mk          # oF project generator configuration
+├── src/
+│   ├── ofxGgml.h             # umbrella header — include this
+│   ├── ofxGgmlCore.h/.cpp    # backend init, compute, model weight loading
+│   ├── ofxGgmlGraph.h/.cpp   # computation graph builder
+│   ├── ofxGgmlModel.h/.cpp   # GGUF model loader
+│   ├── ofxGgmlTensor.h/.cpp  # non-owning tensor wrapper
+│   ├── ofxGgmlTypes.h        # enums, settings, result structs
+│   ├── ofxGgmlHelpers.h      # utility functions
+│   └── ofxGgmlVersion.h      # version macros
+├── libs/                     # third-party libs (ggml headers/binaries)
+├── scripts/
+│   ├── setup.sh              # one-command full setup
+│   ├── build-ggml.sh         # build & install ggml
+│   ├── build-llama-cli.sh    # build & install llama.cpp CLI tools
+│   └── download-model.sh     # download GGUF model presets
+├── example-basic/            # matrix multiplication demo
+├── example-neural/           # feedforward neural network demo
+└── example-gui/              # full ImGui AI Studio
+```
 
 ## Usage
+
+### Include the addon
+
+```cpp
+#include "ofxGgml.h"
+```
 
 ### Loading a GGUF model
 
 ```cpp
-#include "ofxGgml.h"
-
 ofxGgml ggml;
 ggml.setup();
 
-// Load a GGUF model file.
 ofxGgmlModel model;
 if (!model.load("path/to/model.gguf")) {
-    // handle error — file not found, corrupt, etc.
+    // handle error
 }
 
-// Inspect metadata.
+// Inspect metadata
 std::string arch = model.getMetadataString("general.architecture");
 int32_t ctxLen   = model.getMetadataInt32("llama.context_length");
 
-// List tensors in the model.
-for (int64_t i = 0; i < model.getNumTensors(); i++) {
-    std::string name = model.getTensorName(i);
-    auto tensor = model.getTensor(name);
-    // tensor.getType(), tensor.getDimSize(0), etc.
-}
-
-// Upload weights to the backend (CPU, CUDA, Metal, …).
+// Upload weights to backend (CPU, CUDA, Metal, …)
 ggml.loadModelWeights(model);
 ```
 
 ### Basic matrix multiplication
 
 ```cpp
-#include "ofxGgml.h"
-
 ofxGgml ggml;
 ggml.setup();
 
@@ -112,14 +166,14 @@ graph.build(result);
 // Load data
 float dataA[] = { 2,8, 5,1, 4,2, 8,6 };
 float dataB[] = { 10,5, 9,9, 5,4 };
+ggml.allocGraph(graph);
 ggml.setTensorData(a, dataA, sizeof(dataA));
 ggml.setTensorData(b, dataB, sizeof(dataB));
 
-auto r = ggml.compute(graph);
+auto r = ggml.computeGraph(graph);
 if (r.success) {
     std::vector<float> out(result.getNumElements());
     ggml.getTensorData(result, out.data(), out.size() * sizeof(float));
-    // out = { 60, 90, 42, 55, 54, 29, 50, 54, 28, 110, 126, 64 }
 }
 ```
 
@@ -135,171 +189,116 @@ graph.setInput(input);
 graph.setInput(weights);
 graph.setInput(bias);
 
-auto hidden = graph.matMul(weights, input);  // [3 x 1]
+auto hidden = graph.matMul(weights, input);
 auto biased = graph.add(hidden, bias);
 auto output = graph.relu(biased);
 
 graph.setOutput(output);
 graph.build(output);
 
-auto r = ggml.compute(graph);
+ggml.allocGraph(graph);
+// ... set tensor data ...
+auto r = ggml.computeGraph(graph);
 ```
 
-## API overview
+## API Reference
 
 | Class | Purpose |
-|---|---|
+|-------|---------|
 | `ofxGgml` | Backend init, device enumeration, compute scheduling, model weight loading |
-| `ofxGgmlModel` | Load GGUF model files, inspect metadata and tensor information |
 | `ofxGgmlGraph` | Build computation graphs (tensor creation + operations) |
-| `ofxGgmlTensor` | Non-owning tensor handle with metadata + data access |
-| `ofxGgmlTypes.h` | Enums and settings (`ofxGgmlType`, `ofxGgmlBackendType`, …) |
-| `ofxGgmlHelpers.h` | Utility functions (type names, byte formatting, …) |
+| `ofxGgmlModel` | Load GGUF model files, inspect metadata and tensor information |
+| `ofxGgmlTensor` | Non-owning tensor handle with metadata and data access |
+| `ofxGgmlTypes` | Enums and settings (`ofxGgmlType`, `ofxGgmlBackendType`, …) |
+| `ofxGgmlHelpers` | Utility functions (type names, byte formatting, …) |
+| `ofxGgmlVersion` | Version macros (`OFX_GGML_VERSION_STRING`, etc.) |
 
 ## Examples
 
-- **ofxGgmlExample** — Matrix multiplication with console output.
-- **ofxGgmlNeuralExample** — Simple feedforward neural network visualized in the OF window.
-- **ofxGgmlGuiExample** — Full ImGui-based AI Studio with six modes (Chat, Script, Summarize, Write, Translate, Custom).  Features include:
-  - **Model preselection** — choose from 2 recommended GGUF models (Qwen2.5-1.5B, Qwen2.5-Coder-1.5B) via a sidebar combo.
-  - **Script language selector** — 8 language presets (C++, Python, JavaScript, Rust, GLSL, Go, Bash, TypeScript) that set language-specific system prompts.
-  - **Script source browser** — connect to a **local folder** or **GitHub repository** to browse, load, and save script files directly from the scripting panel.
-  - **Session persistence** — auto-saves on exit, auto-loads on startup.  Full File → Save/Load Session support.  Saves all inputs, outputs, chat history, settings, model/language selections, and script source state.
+| Example | Description |
+|---------|-------------|
+| **example-basic/** | Matrix multiplication with console output |
+| **example-neural/** | Simple feedforward neural network visualized in the OF window |
+| **example-gui/** | Full ImGui-based AI Studio with six modes (Chat, Script, Summarize, Write, Translate, Custom) |
+
+### example-gui features
+
+- **Model preselection** — choose from recommended GGUF models via sidebar
+- **Script language selector** — 8 language presets (C++, Python, JS, Rust, GLSL, Go, Bash, TS)
+- **Script source browser** — connect to a local folder or GitHub repository
+- **Session persistence** — auto-save/load, File → Save/Load Session
+
+### Real inference in example-gui
+
+The GUI example uses [llama.cpp](https://github.com/ggml-org/llama.cpp) CLI tools for text generation:
+
+- Expected model location: `example-gui/bin/data/models/<preset>.gguf`
+- Runtime requirement: `llama-completion` or `llama-cli` in `PATH`, a common install directory, or `libs/llama/bin/`
+
+Build the tools with:
+
+```bash
+./scripts/build-llama-cli.sh                     # system install
+./scripts/build-llama-cli.sh --prefix ./libs/llama  # addon-local install
+```
 
 ## Build Scripts
 
-Three helper scripts are provided in the repository's `scripts/` directory:
+| Script | Purpose |
+|--------|---------|
+| `scripts/setup.sh` | **One-command setup**: builds ggml + llama CLI + downloads models |
+| `scripts/build-ggml.sh` | Clone, compile, and install the ggml library |
+| `scripts/build-llama-cli.sh` | Clone, compile, and install llama.cpp CLI tools |
+| `scripts/download-model.sh` | Download GGUF model presets |
 
-### `scripts/build-ggml.sh`
+All scripts support `--gpu`, `--vulkan`, `--metal`, `--auto`, `--prefix`, `--jobs`, `--clean`, and `--help`.
 
-Clone, compile, and install the ggml library from source:
+### Model presets
 
-```bash
-# Basic CPU-only system install
-./scripts/build-ggml.sh
-
-# System install with explicit CUDA support
-./scripts/build-ggml.sh --gpu
-
-# Custom install prefix
-./scripts/build-ggml.sh --prefix $HOME/.local --jobs 8
-```
-
-### `scripts/build-llama-cli.sh`
-
-Clone, compile, and install the [llama.cpp](https://github.com/ggml-org/llama.cpp) CLI tools (`llama-completion` and `llama-cli`).  `ofxGgmlGuiExample` uses these tools for real text generation:
-
-```bash
-# Basic CPU-only system install
-./scripts/build-llama-cli.sh
-
-# System install with CUDA support
-./scripts/build-llama-cli.sh --gpu
-
-# Install into the addon's libs directory (auto-detected by the GUI example)
-./scripts/build-llama-cli.sh --prefix ./libs/llama
-
-# Custom install prefix
-./scripts/build-llama-cli.sh --prefix $HOME/.local --jobs 8
-```
-
-### `scripts/download-model.sh`
-
-Download a GGUF model file for inference.  Supports model presets and task-based selection:
-
-```bash
-# Download both recommended presets (chat + coder, default behavior)
-./scripts/download-model.sh
-
-# Explicitly request both recommended presets
-./scripts/download-model.sh --both
-
-# Select by preset number
-./scripts/download-model.sh --preset 2    # Qwen2.5-Coder — best for scripting
-
-# Select the preferred model for a task (matches GUI example modes)
-./scripts/download-model.sh --task script     # Qwen2.5-Coder-1.5B
-./scripts/download-model.sh --task chat       # Qwen2.5-1.5B
-
-# List all presets with details
-./scripts/download-model.sh --list
-
-# Download a specific model by URL
-./scripts/download-model.sh --model https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
-```
-
-Available presets:
 | # | Model | Size | Best for |
 |---|-------|------|----------|
 | 1 | Qwen2.5-1.5B Instruct Q4_K_M | ~1.0 GB | chat, general |
 | 2 | Qwen2.5-Coder-1.5B Instruct Q4_K_M | ~1.0 GB | scripting, code generation |
 
-Preferred models per example task (`--task NAME`):
-| Task | Preset | Model |
-|------|--------|-------|
-| chat | 1 | Qwen2.5-1.5B Instruct Q4_K_M |
-| script | 2 | Qwen2.5-Coder-1.5B Instruct Q4_K_M |
-| summarize | 1 | Qwen2.5-1.5B Instruct Q4_K_M |
-| write | 1 | Qwen2.5-1.5B Instruct Q4_K_M |
-| translate | 1 | Qwen2.5-1.5B Instruct Q4_K_M |
-| custom | 1 | Qwen2.5-1.5B Instruct Q4_K_M |
-
-### Real inference in `ofxGgmlGuiExample`
-
-`ofxGgmlGuiExample` now attempts real text generation using [llama.cpp](https://github.com/ggml-org/llama.cpp) CLI tools with the selected preset model file:
-
-- Expected model location: `ofxGgmlGuiExample/bin/data/models/<preset>.gguf`
-- Runtime requirement: `llama-completion` (preferred) or `llama-cli` available in your `PATH`, a common install directory, or the addon-local `libs/llama/bin/` directory
-
-The app prefers `llama-completion` (one-shot text completion) over `llama-cli` (interactive chat mode since [llama.cpp PR #17824](https://github.com/ggml-org/llama.cpp/pull/17824)).  Both tools are built by the build script.
-
-You can build the llama.cpp CLI tools locally with:
-
 ```bash
-./scripts/build-llama-cli.sh
+./scripts/download-model.sh                    # download both presets
+./scripts/download-model.sh --preset 2         # coder model only
+./scripts/download-model.sh --task script      # same as --preset 2
+./scripts/download-model.sh --list             # show all presets
 ```
-
-Or install them into the addon tree for automatic detection:
-
-```bash
-./scripts/build-llama-cli.sh --prefix ./libs/llama
-```
-
-If either prerequisite is missing, the app shows an error with setup instructions.
 
 ## Troubleshooting
 
 ### GGML_ASSERT at ggml.cpp:22
 
-If you see an assertion like `GGML_ASSERT(prev != ggml_uncaught_exception)` at `ggml.cpp:22`, this means ggml's static initializer ran twice in the same process.  Common causes:
+This assertion means ggml's static initializer ran twice. Common causes:
 
-- **Duplicate linking**: linking `ggml`, `ggml-base`, and `ggml-cpu` simultaneously when `ggml` already depends on the other two. The addon's `addon_config.mk` now links only `ggml.lib` on Visual Studio to avoid this.
-- **Multiple ggml installations**: a system-wide ggml and a local copy in the addon's `libs/` directory both being loaded at runtime. Remove one or ensure library paths are consistent.
-- **Dynamic backend loading**: `ggml_backend_load_all()` uses `dlopen(RTLD_LOCAL)` which can load a second copy of `libggml-base`. The addon now automatically sets the `GGML_NO_BACKTRACE=1` environment variable before loading backends to prevent the duplicate terminate-handler assertion, and guards the call to run only once per process.
+- **Duplicate linking**: linking `ggml`, `ggml-base`, and `ggml-cpu` simultaneously.  The addon links only `ggml.lib` on VS to avoid this.
+- **Multiple installations**: system-wide + local copies both loaded at runtime.
+- **Dynamic backend loading**: the addon sets `GGML_NO_BACKTRACE=1` automatically.
 
-If the assertion still occurs (e.g. the static initializer runs before `setup()` is called), set the environment variable `GGML_NO_BACKTRACE=1` before launching the app.
+If the assertion still occurs, set `GGML_NO_BACKTRACE=1` before launching.
 
 ### llama-completion not found
 
-The GUI example searches for `llama-completion`, `llama-cli`, or `llama` in this order:
+The GUI example searches for `llama-completion`, `llama-cli`, or `llama` in:
 
-1. A custom path supplied in the GUI settings
-2. The system `PATH`
-3. The running executable's directory
-4. The addon-local `libs/llama/bin/` directory
-5. Common directories (`/usr/local/bin`, `~/.local/bin`, etc.)
+1. Custom path from GUI settings
+2. System `PATH`
+3. Running executable's directory
+4. `libs/llama/bin/` (addon-local)
+5. Common directories (`/usr/local/bin`, `~/.local/bin`)
 
-If the tool is not found, build it with:
+Build with: `./scripts/build-llama-cli.sh`
 
-```bash
-./scripts/build-llama-cli.sh
-```
+## Extending the Addon
 
-Or install into the addon tree:
+The addon is structured for easy extension:
 
-```bash
-./scripts/build-llama-cli.sh --prefix ./libs/llama
-```
+- **New operations**: Add methods to `ofxGgmlGraph` following the existing pattern.
+- **New model formats**: Extend or subclass `ofxGgmlModel`.
+- **Custom backends**: Use `ofxGgml::getBackend()` for low-level access.
+- **New tensor types**: Add values to `ofxGgmlType` enum in `ofxGgmlTypes.h`.
 
 ## License
 

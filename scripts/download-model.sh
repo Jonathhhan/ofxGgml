@@ -176,7 +176,7 @@ if [[ -z "$OUTPUT_DIR" ]]; then
 	# Try to find the example's bin/data directory.
 	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-	GUI_EXAMPLE="$ADDON_ROOT/ofxGgmlGuiExample/bin/data"
+	GUI_EXAMPLE="$ADDON_ROOT/example-gui/bin/data"
 	if [[ -d "$(dirname "$GUI_EXAMPLE")" ]]; then
 		OUTPUT_DIR="$GUI_EXAMPLE/models"
 	else

@@ -3,7 +3,7 @@
 # build-llama-cli.sh — Clone, compile, and install llama.cpp CLI tools.
 #
 # Builds both llama-cli (interactive chat) and llama-completion (one-shot
-# text completion) from the llama.cpp project.  The ofxGgmlGuiExample uses
+# text completion) from the llama.cpp project.  The example-gui uses
 # llama-completion for inference and falls back to llama-cli for older
 # installations.
 #
@@ -17,6 +17,7 @@
 #   --gpu, --cuda  Enable CUDA backend
 #   --vulkan       Enable Vulkan backend
 #   --metal        Enable Metal backend (macOS only)
+#   --auto         Auto-detect available GPU backends and enable them
 #   --clean        Remove build directory before building
 #   --help         Show this help message
 # ---------------------------------------------------------------------------
@@ -33,6 +34,7 @@ ENABLE_CUDA=0
 ENABLE_VULKAN=0
 ENABLE_METAL=0
 CLEAN=0
+AUTO_DETECT=0
 
 write_step() {
 	printf '==> %s\n' "$1"
@@ -65,6 +67,25 @@ if is_windows_like; then
 fi
 INSTALL_PREFIX="$DEFAULT_INSTALL_PREFIX"
 
+detect_cuda() {
+	if command -v nvcc >/dev/null 2>&1; then return 0; fi
+	if command -v nvidia-smi >/dev/null 2>&1; then return 0; fi
+	for cuda_dir in /usr/local/cuda /opt/cuda; do
+		if [[ -x "$cuda_dir/bin/nvcc" ]]; then return 0; fi
+	done
+	return 1
+}
+
+detect_vulkan() {
+	if command -v vulkaninfo >/dev/null 2>&1; then return 0; fi
+	if [[ -n "${VULKAN_SDK:-}" ]] && [[ -d "$VULKAN_SDK" ]]; then return 0; fi
+	return 1
+}
+
+detect_metal() {
+	[[ "$(uname -s 2>/dev/null)" == "Darwin" ]]
+}
+
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
@@ -93,6 +114,10 @@ while [[ $# -gt 0 ]]; do
 			ENABLE_METAL=1
 			shift
 			;;
+		--auto)
+			AUTO_DETECT=1
+			shift
+			;;
 		--clean)
 			CLEAN=1
 			shift
@@ -115,6 +140,29 @@ if [[ -z "$JOBS" ]]; then
 		JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 	else
 		JOBS=4
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Auto-detect GPU backends
+# ---------------------------------------------------------------------------
+
+if [[ "$AUTO_DETECT" -eq 1 ]]; then
+	write_step "Auto-detecting GPU backends..."
+	if detect_cuda; then
+		write_step "  CUDA detected — enabling CUDA backend."
+		ENABLE_CUDA=1
+	fi
+	if detect_vulkan; then
+		write_step "  Vulkan detected — enabling Vulkan backend."
+		ENABLE_VULKAN=1
+	fi
+	if detect_metal; then
+		write_step "  Metal detected — enabling Metal backend."
+		ENABLE_METAL=1
+	fi
+	if [[ "$ENABLE_CUDA" -eq 0 ]] && [[ "$ENABLE_VULKAN" -eq 0 ]] && [[ "$ENABLE_METAL" -eq 0 ]]; then
+		write_step "  No GPU backends detected — building CPU-only."
 	fi
 fi
 
@@ -191,7 +239,7 @@ cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}"
 # Build
 # ---------------------------------------------------------------------------
 
-# Build llama-completion (one-shot text completion — used by ofxGgmlGuiExample)
+# Build llama-completion (one-shot text completion — used by example-gui)
 # and llama-cli (interactive chat mode).
 write_step "Building llama-completion and llama-cli with $JOBS parallel jobs..."
 cmake --build . --config Release --target llama-completion llama-cli -j "$JOBS"
@@ -320,6 +368,6 @@ write_step "Done! llama.cpp tools have been built and installed to $EFFECTIVE_IN
 write_step ""
 write_step "Next steps:"
 write_step "  1. Ensure $EFFECTIVE_INSTALL_PREFIX/bin is in your PATH, or set the"
-write_step "     custom CLI path in the ofxGgmlGuiExample sidebar."
+write_step "     custom CLI path in the example-gui sidebar."
 write_step "  2. Run scripts/download-model.sh to fetch a GGUF model (if not done)."
 write_step "  3. Build and run your OF project with ofxGgml."

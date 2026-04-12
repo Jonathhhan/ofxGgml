@@ -1,4 +1,4 @@
-#include "ofxGgml.h"
+#include "ofxGgmlCore.h"
 
 #include "ggml.h"
 #include "ggml-alloc.h"

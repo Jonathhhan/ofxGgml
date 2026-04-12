@@ -11,6 +11,7 @@
 #   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 #   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
 #   --metal        Enable Metal backend (macOS only)
+#   --auto         Auto-detect available GPU backends and enable them
 #   --clean        Remove build directory before building
 #   --help         Show this help message
 # ---------------------------------------------------------------------------
@@ -76,6 +77,27 @@ done
 return 1
 }
 
+detect_vulkan() {
+# Check for Vulkan SDK tools.
+if command -v vulkaninfo >/dev/null 2>&1; then
+return 0
+fi
+if [[ -n "${VULKAN_SDK:-}" ]] && [[ -d "$VULKAN_SDK" ]]; then
+return 0
+fi
+return 1
+}
+
+detect_metal() {
+# Metal is available on macOS.
+if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+return 0
+fi
+return 1
+}
+
+AUTO_DETECT=0
+
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
@@ -104,6 +126,10 @@ shift
 		ENABLE_METAL=1
 		shift
 		;;
+	--auto)
+		AUTO_DETECT=1
+		shift
+		;;
 	--clean)
 		CLEAN=1
 		shift
@@ -126,6 +152,29 @@ elif command -v getconf >/dev/null 2>&1; then
 JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 else
 JOBS=4
+fi
+fi
+
+# ---------------------------------------------------------------------------
+# Auto-detect GPU backends
+# ---------------------------------------------------------------------------
+
+if [[ "$AUTO_DETECT" -eq 1 ]]; then
+write_step "Auto-detecting GPU backends..."
+if detect_cuda; then
+write_step "  CUDA detected — enabling CUDA backend."
+ENABLE_CUDA=1
+fi
+if detect_vulkan; then
+write_step "  Vulkan detected — enabling Vulkan backend."
+ENABLE_VULKAN=1
+fi
+if detect_metal; then
+write_step "  Metal detected — enabling Metal backend."
+ENABLE_METAL=1
+fi
+if [[ "$ENABLE_CUDA" -eq 0 ]] && [[ "$ENABLE_VULKAN" -eq 0 ]] && [[ "$ENABLE_METAL" -eq 0 ]]; then
+write_step "  No GPU backends detected — building CPU-only."
 fi
 fi
 
