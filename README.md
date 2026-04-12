@@ -25,6 +25,8 @@ An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https:/
 
 ### Installing ggml
 
+#### Linux (pkg-config)
+
 ```bash
 git clone https://github.com/ggml-org/ggml
 cd ggml
@@ -35,6 +37,27 @@ sudo cmake --install .
 ```
 
 On Linux the addon uses `pkg-config` to locate the library automatically.
+
+#### Windows (Visual Studio)
+
+Build ggml with CMake and install it into the addon's `libs/ggml` directory:
+
+```powershell
+git clone https://github.com/ggml-org/ggml
+cd ggml
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=C:/openFrameworks/addons/ofxGgml/libs/ggml -DBUILD_SHARED_LIBS=ON -DGGML_BUILD_EXAMPLES=OFF -DGGML_BUILD_TESTS=OFF
+cmake --build . --config Release -j 8
+cmake --install . --config Release
+```
+
+The addon expects the following files after installation:
+
+- `libs/ggml/include/` — ggml headers
+- `libs/ggml/lib/ggml.lib`, `ggml-base.lib`, `ggml-cpu.lib` — import libraries
+- `libs/ggml/bin/ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll` — runtime DLLs
+
+Copy the DLLs from `libs/ggml/bin/` into your project's `bin/` directory (next to the .exe) so they can be found at runtime.
 
 ## Usage
 

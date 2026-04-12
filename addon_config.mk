@@ -28,8 +28,12 @@ linuxarmv6l:
 linuxarmv7l:
 
 msys2:
+	ADDON_PKG_CONFIG_LIBRARIES = ggml
 
 vs:
+	ADDON_LIBS += libs/ggml/lib/ggml.lib
+	ADDON_LIBS += libs/ggml/lib/ggml-base.lib
+	ADDON_LIBS += libs/ggml/lib/ggml-cpu.lib
 
 android/armeabi:
 
