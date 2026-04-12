@@ -9,6 +9,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <numeric>
 #include <random>
 #include <sstream>
@@ -1702,7 +1703,11 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		return false;
 	}
 
-	if (std::system("llama-cli --version >/dev/null 2>&1") != 0) {
+	static int llamaCliAvailable = -1; // -1 unknown, 0 unavailable, 1 available
+	if (llamaCliAvailable < 0) {
+		llamaCliAvailable = (std::system("llama-cli --version >/dev/null 2>&1") == 0) ? 1 : 0;
+	}
+	if (llamaCliAvailable == 0) {
 		error = "llama-cli not found in PATH.";
 		return false;
 	}
@@ -1721,15 +1726,21 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		promptFile << prompt;
 	}
 
+	const int safeMaxTokens = std::clamp(maxTokens, 1, 8192);
+	const float safeTemp = (std::isfinite(temperature) ? std::clamp(temperature, 0.0f, 2.0f) : 0.7f);
+	const float safeTopP = (std::isfinite(topP) ? std::clamp(topP, 0.0f, 1.0f) : 0.9f);
+	const float safeRepeatPenalty = (std::isfinite(repeatPenalty) ? std::clamp(repeatPenalty, 1.0f, 2.0f) : 1.1f);
+	const int safeThreads = std::clamp(numThreads, 1, 128);
+
 	std::ostringstream cmd;
 	cmd << "llama-cli"
 		<< " -m " << shellQuote(modelPath)
 		<< " --file " << shellQuote(promptPath)
-		<< " -n " << maxTokens
-		<< " --temp " << temperature
-		<< " --top-p " << topP
-		<< " --repeat-penalty " << repeatPenalty
-		<< " --threads " << std::max(1, numThreads);
+		<< " -n " << safeMaxTokens
+		<< " --temp " << std::fixed << std::setprecision(3) << safeTemp
+		<< " --top-p " << std::fixed << std::setprecision(3) << safeTopP
+		<< " --repeat-penalty " << std::fixed << std::setprecision(3) << safeRepeatPenalty
+		<< " --threads " << safeThreads;
 	if (seed >= 0) {
 		cmd << " --seed " << seed;
 	}
