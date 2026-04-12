@@ -1896,6 +1896,11 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	const float safeTopP = (std::isfinite(topP) ? std::clamp(topP, 0.0f, 1.0f) : kDefaultTopP);
 	const float safeRepeatPenalty = (std::isfinite(repeatPenalty) ? std::clamp(repeatPenalty, 1.0f, 2.0f) : kDefaultRepeatPenalty);
 	const int safeThreads = std::clamp(numThreads, 1, 128);
+	const int safeContext = std::clamp(contextSize, 256, 16384);
+	const int safeBatch = std::clamp(batchSize, 32, 4096);
+	const int safeGpuLayers = std::clamp(gpuLayers, 0, 128);
+	const int effectiveGpuLayers =
+		(selectedBackendIndex == 1) ? 0 : ((selectedBackendIndex == 2) ? std::max(1, safeGpuLayers) : safeGpuLayers);
 
 	std::ostringstream tempStr, topPStr, repeatPenaltyStr;
 	tempStr << std::fixed << std::setprecision(3) << safeTemp;
@@ -1907,6 +1912,9 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		"-m", modelPath,
 		"--file", promptPath,
 		"-n", ofToString(safeMaxTokens),
+		"-c", ofToString(safeContext),
+		"-b", ofToString(safeBatch),
+		"-ngl", ofToString(effectiveGpuLayers),
 		"--temp", tempStr.str(),
 		"--top-p", topPStr.str(),
 		"--repeat-penalty", repeatPenaltyStr.str(),
