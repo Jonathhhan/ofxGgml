@@ -264,5 +264,6 @@ fi
 write_step "Done! ggml has been built and installed to $EFFECTIVE_INSTALL_PREFIX."
 write_step ""
 write_step "Next steps:"
-write_step "  1. Run scripts/download-model.sh to fetch a GGUF model."
-write_step "  2. Build your OF project with ofxGgml."
+write_step "  1. Run scripts/build-llama-cli.sh to build the llama-cli inference tool."
+write_step "  2. Run scripts/download-model.sh to fetch a GGUF model."
+write_step "  3. Build your OF project with ofxGgml."
