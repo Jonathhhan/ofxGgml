@@ -107,7 +107,7 @@ list_models() {
 	echo "Usage:"
 	echo "  ./scripts/download-model.sh --preset 1      # Qwen2.5-1.5B (default)"
 	echo "  ./scripts/download-model.sh --preset 2      # Qwen2.5-Coder for scripting"
-	echo "  ./scripts/download-model.sh --both          # download presets 1 and 2"
+	echo "  ./scripts/download-model.sh --both          # Download presets 1 and 2"
 	echo "  ./scripts/download-model.sh --task script   # same as --preset 2"
 	echo "  ./scripts/download-model.sh --task chat     # Qwen2.5-1.5B for chat"
 	echo "  ./scripts/download-model.sh --model <URL>   # custom URL"
@@ -226,8 +226,11 @@ download_model() {
 mkdir -p "$OUTPUT_DIR"
 
 if [[ "$DOWNLOAD_BOTH" == true ]]; then
+	if [[ ${#PRESET_URLS[@]} -lt 2 ]]; then
+		die "--both requires at least two configured presets"
+	fi
 	write_step "Downloading both recommended presets"
-	for i in "${!PRESET_URLS[@]}"; do
+	for i in 0 1; do
 		write_step "Preset $((i + 1)): ${PRESET_NAMES[$i]} (${PRESET_SIZES[$i]})"
 		download_model "${PRESET_URLS[$i]}" "$(basename "${PRESET_URLS[$i]}")"
 	done
