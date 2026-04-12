@@ -69,8 +69,15 @@ struct ofxGgmlSettings {
 	/// Number of CPU threads for computation (0 = auto-detect).
 	int threads = 0;
 
-	/// Preferred backend type.  The addon will fall back to CPU when the
-	/// requested backend is unavailable.
+	/// Preferred backend device name using the raw ggml name (e.g.
+	/// "CPU", "CUDA0", "Metal", "Vulkan0").  When non-empty this takes
+	/// priority over preferredBackend.  The addon will fall back to the
+	/// best available backend when the named device is not found.
+	std::string preferredBackendName;
+
+	/// Preferred backend type.  Only used when preferredBackendName is
+	/// empty.  The addon will fall back to CPU when the requested
+	/// backend is unavailable.
 	ofxGgmlBackendType preferredBackend = ofxGgmlBackendType::Gpu;
 
 	/// Size of the default computation-graph arena (number of nodes).
