@@ -2579,6 +2579,24 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	}
 
 	output = trim(stripAnsi(raw));
+
+	// Strip the prompt echo from the output — llama-cli may echo the
+	// prompt before the generated text.  Return only the generated part.
+	{
+		const std::string trimmedPrompt = trim(prompt);
+		if (!trimmedPrompt.empty() && output.size() > trimmedPrompt.size()) {
+			if (output.compare(0, trimmedPrompt.size(), trimmedPrompt) == 0) {
+				output = trim(output.substr(trimmedPrompt.size()));
+			} else {
+				const size_t pos = output.find(trimmedPrompt);
+				if (pos != std::string::npos &&
+					(pos + trimmedPrompt.size()) < output.size()) {
+					output = trim(output.substr(pos + trimmedPrompt.size()));
+				}
+			}
+		}
+	}
+
 	if (output.empty()) {
 		error = llamaCliCommand + " returned empty output.";
 		return false;
@@ -2654,8 +2672,19 @@ workerThread.join();
  fprintf(stderr, "[ofxGgml] Prompt (%zu chars):\n%s\n", prompt.size(), prompt.c_str());
  }
 
- auto streamCb = [this](const std::string & partial) {
+ const std::string trimmedPrompt = trim(prompt);
+ auto streamCb = [this, &trimmedPrompt](const std::string & partial) {
  std::string cleaned = stripAnsi(partial);
+ // Strip the prompt echo so only generated text is shown during streaming.
+ if (!trimmedPrompt.empty()) {
+ const size_t pos = cleaned.find(trimmedPrompt);
+ if (pos != std::string::npos) {
+ cleaned = cleaned.substr(pos + trimmedPrompt.size());
+ } else if (cleaned.size() < trimmedPrompt.size()) {
+ // Prompt likely still being echoed — suppress display.
+ cleaned.clear();
+ }
+ }
  std::lock_guard<std::mutex> lock(streamMutex);
  streamingOutput = cleaned;
  };
