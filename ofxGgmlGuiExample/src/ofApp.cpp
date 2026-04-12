@@ -13,6 +13,15 @@
 #include <numeric>
 #include <random>
 #include <sstream>
+#include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // Static data
@@ -23,19 +32,6 @@ const char * ofApp::modeLabels[kModeCount] = {
 };
 
 namespace {
-
-std::string shellQuote(const std::string & s) {
-	std::string out = "'";
-	for (char c : s) {
-		if (c == '\'') {
-			out += "'\"'\"'";
-		} else {
-			out += c;
-		}
-	}
-	out += "'";
-	return out;
-}
 
 std::string stripAnsi(const std::string & text) {
 	std::string out;
@@ -72,6 +68,156 @@ std::string trim(const std::string & s) {
 
 std::string formatFallbackOutput(const std::string & reason, const std::string & demoOutput) {
 	return "[Fallback: demo pipeline]\n" + reason + "\n\n" + demoOutput;
+}
+
+constexpr size_t kMaxLogMessages = 500;
+constexpr float kDefaultTemp = 0.7f;
+constexpr float kDefaultTopP = 0.9f;
+constexpr float kDefaultRepeatPenalty = 1.1f;
+
+#ifdef _WIN32
+std::string quoteWindowsArg(const std::string & arg) {
+	bool needsQuotes = arg.find_first_of(" \t\"") != std::string::npos;
+	if (!needsQuotes) return arg;
+	std::string out = "\"";
+	size_t backslashes = 0;
+	for (char c : arg) {
+		if (c == '\\') {
+			backslashes++;
+			continue;
+		}
+		if (c == '"') {
+			out.append(backslashes * 2 + 1, '\\');
+			out.push_back('"');
+			backslashes = 0;
+			continue;
+		}
+		if (backslashes > 0) {
+			out.append(backslashes, '\\');
+			backslashes = 0;
+		}
+		out.push_back(c);
+	}
+	if (backslashes > 0) {
+		out.append(backslashes * 2, '\\');
+	}
+	out.push_back('"');
+	return out;
+}
+#endif
+
+bool runProcessCapture(const std::vector<std::string> & args, std::string & output, int & exitCode) {
+	output.clear();
+	exitCode = -1;
+	if (args.empty() || args[0].empty()) return false;
+
+#ifdef _WIN32
+	SECURITY_ATTRIBUTES sa{};
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = TRUE;
+	sa.lpSecurityDescriptor = nullptr;
+
+	HANDLE readPipe = nullptr;
+	HANDLE writePipe = nullptr;
+	if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) return false;
+	if (!SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0)) {
+		CloseHandle(readPipe);
+		CloseHandle(writePipe);
+		return false;
+	}
+
+	STARTUPINFOA si{};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESTDHANDLES;
+	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+	si.hStdOutput = writePipe;
+	si.hStdError = writePipe;
+
+	PROCESS_INFORMATION pi{};
+	std::string cmdLine;
+	for (size_t i = 0; i < args.size(); i++) {
+		if (i > 0) cmdLine += " ";
+		cmdLine += quoteWindowsArg(args[i]);
+	}
+	std::vector<char> mutableCmd(cmdLine.begin(), cmdLine.end());
+	mutableCmd.push_back('\0');
+
+	BOOL ok = CreateProcessA(
+		args[0].c_str(),
+		mutableCmd.data(),
+		nullptr,
+		nullptr,
+		TRUE,
+		CREATE_NO_WINDOW,
+		nullptr,
+		nullptr,
+		&si,
+		&pi
+	);
+	CloseHandle(writePipe);
+	if (!ok) {
+		CloseHandle(readPipe);
+		return false;
+	}
+
+	char buffer[4096];
+	DWORD bytesRead = 0;
+	while (ReadFile(readPipe, buffer, static_cast<DWORD>(sizeof(buffer)), &bytesRead, nullptr) && bytesRead > 0) {
+		output.append(buffer, bytesRead);
+	}
+	CloseHandle(readPipe);
+
+	WaitForSingleObject(pi.hProcess, INFINITE);
+	DWORD code = 1;
+	GetExitCodeProcess(pi.hProcess, &code);
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+	exitCode = static_cast<int>(code);
+	return true;
+#else
+	int pipefd[2];
+	if (pipe(pipefd) != 0) return false;
+
+	pid_t pid = fork();
+	if (pid < 0) {
+		close(pipefd[0]);
+		close(pipefd[1]);
+		return false;
+	}
+
+	if (pid == 0) {
+		dup2(pipefd[1], STDOUT_FILENO);
+		dup2(pipefd[1], STDERR_FILENO);
+		close(pipefd[0]);
+		close(pipefd[1]);
+
+		std::vector<char *> argv;
+		argv.reserve(args.size() + 1);
+		for (const auto & a : args) {
+			argv.push_back(const_cast<char *>(a.c_str()));
+		}
+		argv.push_back(nullptr);
+		execvp(argv[0], argv.data());
+		_exit(127);
+	}
+
+	close(pipefd[1]);
+	char buffer[4096];
+	ssize_t n = 0;
+	while ((n = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
+		output.append(buffer, static_cast<size_t>(n));
+	}
+	close(pipefd[0]);
+
+	int status = 0;
+	if (waitpid(pid, &status, 0) < 0) return false;
+	if (WIFEXITED(status)) {
+		exitCode = WEXITSTATUS(status);
+	} else {
+		exitCode = -1;
+	}
+	return true;
+#endif
 }
 
 }
@@ -1707,18 +1853,31 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		return false;
 	}
 
-	static int llamaCliAvailable = -1; // -1 unknown, 0 unavailable, 1 available
-	if (llamaCliAvailable == 0) {
+	static std::atomic<int> llamaCliAvailable{-1}; // -1 unknown, 0 unavailable, 1 available
+	if (llamaCliAvailable.load(std::memory_order_relaxed) == 0) {
 		error = "llama-cli not found in PATH.";
 		return false;
 	}
+	if (llamaCliAvailable.load(std::memory_order_relaxed) < 0) {
+		std::string probeOut;
+		int probeExit = -1;
+		if (!runProcessCapture({"llama-cli", "--version"}, probeOut, probeExit) || probeExit != 0) {
+			llamaCliAvailable.store(0, std::memory_order_relaxed);
+			error = "llama-cli not found in PATH.";
+			return false;
+		}
+		llamaCliAvailable.store(1, std::memory_order_relaxed);
+	}
 
-	const std::string dataDir = ofToDataPath("", true);
+	std::error_code tempEc;
+	std::string dataDir = std::filesystem::temp_directory_path(tempEc).string();
+	if (tempEc || dataDir.empty()) {
+		dataDir = ofToDataPath("", true);
+	}
 	std::random_device rd;
 	const uint64_t nonce = (static_cast<uint64_t>(rd()) << 32) ^ static_cast<uint64_t>(rd());
 	const std::string id = ofToString(ofGetSystemTimeMillis()) + "_" + ofToString(nonce);
 	const std::string promptPath = ofFilePath::join(dataDir, "llama_prompt_" + id + ".txt");
-	const std::string outputPath = ofFilePath::join(dataDir, "llama_output_" + id + ".txt");
 
 	{
 		std::ofstream promptFile(promptPath);
@@ -1730,62 +1889,61 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	}
 
 	const int safeMaxTokens = std::clamp(maxTokens, 1, 8192);
-	const float safeTemp = (std::isfinite(temperature) ? std::clamp(temperature, 0.0f, 2.0f) : 0.7f);
-	const float safeTopP = (std::isfinite(topP) ? std::clamp(topP, 0.0f, 1.0f) : 0.9f);
-	const float safeRepeatPenalty = (std::isfinite(repeatPenalty) ? std::clamp(repeatPenalty, 1.0f, 2.0f) : 1.1f);
+	const float safeTemp = (std::isfinite(temperature) ? std::clamp(temperature, 0.0f, 2.0f) : kDefaultTemp);
+	const float safeTopP = (std::isfinite(topP) ? std::clamp(topP, 0.0f, 1.0f) : kDefaultTopP);
+	const float safeRepeatPenalty = (std::isfinite(repeatPenalty) ? std::clamp(repeatPenalty, 1.0f, 2.0f) : kDefaultRepeatPenalty);
 	const int safeThreads = std::clamp(numThreads, 1, 128);
 
-	std::ostringstream cmd;
-	cmd << "llama-cli"
-		<< " -m " << shellQuote(modelPath)
-		<< " --file " << shellQuote(promptPath)
-		<< " -n " << safeMaxTokens
-		<< " --temp " << std::fixed << std::setprecision(3) << safeTemp
-		<< " --top-p " << std::fixed << std::setprecision(3) << safeTopP
-		<< " --repeat-penalty " << std::fixed << std::setprecision(3) << safeRepeatPenalty
-		<< " --threads " << safeThreads;
-	if (seed >= 0) {
-		cmd << " --seed " << seed;
-	}
-	cmd << " > " << shellQuote(outputPath) << " 2>&1";
+	std::ostringstream tempStr, topPStr, repeatPenaltyStr;
+	tempStr << std::fixed << std::setprecision(3) << safeTemp;
+	topPStr << std::fixed << std::setprecision(3) << safeTopP;
+	repeatPenaltyStr << std::fixed << std::setprecision(3) << safeRepeatPenalty;
 
-	const int ret = std::system(cmd.str().c_str());
+	std::vector<std::string> args = {
+		"llama-cli",
+		"-m", modelPath,
+		"--file", promptPath,
+		"-n", ofToString(safeMaxTokens),
+		"--temp", tempStr.str(),
+		"--top-p", topPStr.str(),
+		"--repeat-penalty", repeatPenaltyStr.str(),
+		"--threads", ofToString(safeThreads)
+	};
+	if (seed >= 0) {
+		args.push_back("--seed");
+		args.push_back(ofToString(seed));
+	}
 
 	std::string raw;
-	{
-		std::ifstream in(outputPath);
-		if (in.is_open()) {
-			raw.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-		}
-	}
+	int ret = -1;
+	const bool started = runProcessCapture(args, raw, ret);
 
 	std::error_code ec;
 	std::filesystem::remove(promptPath, ec);
 	if (ec) {
 		std::lock_guard<std::mutex> lock(logMutex);
 		logMessages.push_back("[warn] failed to remove temp prompt file: " + promptPath);
-		if (logMessages.size() > 500) logMessages.pop_front();
+		if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
 	}
-	ec.clear();
-	std::filesystem::remove(outputPath, ec);
-	if (ec) {
-		std::lock_guard<std::mutex> lock(logMutex);
-		logMessages.push_back("[warn] failed to remove temp output file: " + outputPath);
-		if (logMessages.size() > 500) logMessages.pop_front();
+
+	if (!started) {
+		llamaCliAvailable.store(0, std::memory_order_relaxed);
+		error = "llama-cli not found in PATH.";
+		return false;
 	}
 
 	if (ret != 0) {
 		const std::string lowered = ofToLower(raw);
 		if (lowered.find("not found") != std::string::npos ||
 			lowered.find("no such file or directory") != std::string::npos) {
-			llamaCliAvailable = 0;
+			llamaCliAvailable.store(0, std::memory_order_relaxed);
 			error = "llama-cli not found in PATH.";
 			return false;
 		}
 		error = "llama-cli failed. Output:\n" + trim(stripAnsi(raw));
 		return false;
 	}
-	llamaCliAvailable = 1;
+	llamaCliAvailable.store(1, std::memory_order_relaxed);
 
 	output = trim(stripAnsi(raw));
 	if (output.empty()) {
