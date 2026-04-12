@@ -20,6 +20,7 @@
 #else
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <unistd.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -85,6 +86,30 @@ constexpr int kExecNotFound = 127; // POSIX convention when execvp fails
 std::atomic<int> llamaCliState{-1};
 std::string llamaCliCommand = "llama-completion";
 
+// Child process tracking — allows stopGeneration() to kill a running
+// llama-completion process instead of blocking until it finishes.
+#ifdef _WIN32
+std::atomic<HANDLE> inferenceProcessHandle{nullptr};
+#else
+std::atomic<pid_t> inferenceProcessPid{0};
+#endif
+
+// Kill the currently running inference child process, if any.
+void killInferenceProcess() {
+#ifdef _WIN32
+	HANDLE h = inferenceProcessHandle.exchange(nullptr);
+	if (h) {
+		TerminateProcess(h, 1);
+		// Do not close the handle here — runProcessCapture owns it.
+	}
+#else
+	pid_t pid = inferenceProcessPid.exchange(0);
+	if (pid > 0) {
+		kill(pid, SIGKILL);
+	}
+#endif
+}
+
 #ifdef _WIN32
 std::string quoteWindowsArg(const std::string & arg) {
 	bool needsQuotes = arg.find_first_of(" \t\"%^&|<>") != std::string::npos;
@@ -116,7 +141,8 @@ std::string quoteWindowsArg(const std::string & arg) {
 }
 #endif
 
-bool runProcessCapture(const std::vector<std::string> & args, std::string & output, int & exitCode) {
+bool runProcessCapture(const std::vector<std::string> & args, std::string & output, int & exitCode,
+                       bool trackProcess = false) {
 	output.clear();
 	exitCode = -1;
 	if (args.empty() || args[0].empty()) return false;
@@ -170,6 +196,10 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 		return false;
 	}
 
+	if (trackProcess) {
+		inferenceProcessHandle.store(pi.hProcess);
+	}
+
 	char buffer[4096];
 	DWORD bytesRead = 0;
 	while (ReadFile(readPipe, buffer, static_cast<DWORD>(sizeof(buffer)), &bytesRead, nullptr) && bytesRead > 0) {
@@ -178,6 +208,11 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 	CloseHandle(readPipe);
 
 	WaitForSingleObject(pi.hProcess, INFINITE);
+
+	if (trackProcess) {
+		inferenceProcessHandle.store(nullptr);
+	}
+
 	DWORD code = 1;
 	GetExitCodeProcess(pi.hProcess, &code);
 	CloseHandle(pi.hProcess);
@@ -212,6 +247,10 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 		_exit(127);
 	}
 
+	if (trackProcess) {
+		inferenceProcessPid.store(pid);
+	}
+
 	close(pipefd[1]);
 	char buffer[4096];
 	ssize_t n = 0;
@@ -221,9 +260,21 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 	close(pipefd[0]);
 
 	int status = 0;
-	if (waitpid(pid, &status, 0) < 0) return false;
+	pid_t wp = waitpid(pid, &status, 0);
+
+	if (trackProcess) {
+		inferenceProcessPid.store(0);
+	}
+
+	if (wp < 0) {
+		exitCode = -1;
+		return false;
+	}
+
 	if (WIFEXITED(status)) {
 		exitCode = WEXITSTATUS(status);
+	} else if (WIFSIGNALED(status)) {
+		exitCode = -1;
 	} else {
 		exitCode = -1;
 	}
@@ -2265,7 +2316,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 
 	std::string raw;
 	int ret = -1;
-	const bool started = runProcessCapture(args, raw, ret);
+	const bool started = runProcessCapture(args, raw, ret, true);
 	if (started && ret != 0) {
 		const std::string lowered = ofToLower(raw);
 		if (lowered.find("unknown argument") != std::string::npos ||
@@ -2273,7 +2324,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 			lowered.find("invalid option") != std::string::npos ||
 			lowered.find("unknown option") != std::string::npos) {
 			args = makeArgs(true);
-			runProcessCapture(args, raw, ret);
+			runProcessCapture(args, raw, ret, true);
 		}
 	}
 
@@ -2385,6 +2436,7 @@ generating.store(false);
 void ofApp::stopGeneration() {
 if (generating.load()) {
 cancelRequested.store(true);
+killInferenceProcess();
 }
 if (workerThread.joinable()) {
 workerThread.join();
