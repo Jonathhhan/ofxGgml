@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../support/ofxGgmlTypes.h"
+#include "ofxGgmlTypes.h"
 
 #include <cstddef>
 #include <cstdint>

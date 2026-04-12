@@ -1,5 +1,5 @@
 #include "ofApp.h"
-#include "support/ofxGgmlHelpers.h"
+#include "ofxGgmlHelpers.h"
 
 #include <sstream>
 
