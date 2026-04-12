@@ -77,7 +77,7 @@ constexpr float kDefaultRepeatPenalty = 1.1f;
 
 #ifdef _WIN32
 std::string quoteWindowsArg(const std::string & arg) {
-	bool needsQuotes = arg.find_first_of(" \t\"") != std::string::npos;
+	bool needsQuotes = arg.find_first_of(" \t\"%^&|<>") != std::string::npos;
 	if (!needsQuotes) return arg;
 	std::string out = "\"";
 	size_t backslashes = 0;
@@ -194,8 +194,9 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 		std::vector<std::string> mutableArgs = args;
 		std::vector<char *> argv;
 		argv.reserve(mutableArgs.size() + 1);
+		static char emptyArg[] = "";
 		for (auto & a : mutableArgs) {
-			argv.push_back(a.data());
+			argv.push_back(a.empty() ? emptyArg : &a[0]);
 		}
 		argv.push_back(nullptr);
 		execvp(argv[0], argv.data());
