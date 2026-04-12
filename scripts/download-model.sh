@@ -230,6 +230,7 @@ if [[ "$DOWNLOAD_BOTH" == true ]]; then
 		die "--both requires at least two configured presets"
 	fi
 	write_step "Downloading both recommended presets"
+	# Intentionally only download presets 1 and 2 (the two recommended models).
 	for i in 0 1; do
 		write_step "Preset $((i + 1)): ${PRESET_NAMES[$i]} (${PRESET_SIZES[$i]})"
 		download_model "${PRESET_URLS[$i]}" "$(basename "${PRESET_URLS[$i]}")"
