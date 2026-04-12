@@ -77,6 +77,7 @@ constexpr float kDefaultRepeatPenalty = 1.1f;
 constexpr int kBackendAuto = 0;
 constexpr int kBackendCpu = 1;
 constexpr int kBackendGpu = 2;
+constexpr int kMaxDeviceIndex = 64;  // reasonable upper bound for device indices
 constexpr int kExecNotFound = 127; // POSIX convention when execvp fails
 
 // Llama CLI detection state shared between probe and UI.
@@ -1997,7 +1998,7 @@ else if (key == "gpuLayers") gpuLayers = std::clamp(safeStoi(value), 0, 128);
 else if (key == "seed") seed = std::clamp(safeStoi(value, -1), -1, 99999);
 else if (key == "numThreads") numThreads = std::clamp(safeStoi(value, 4), 1, 32);
 else if (key == "selectedBackend") selectedBackendIndex = std::clamp(safeStoi(value), 0, 2);
-else if (key == "selectedDevice") selectedDeviceIndex = std::clamp(safeStoi(value, -1), -1, 64);
+else if (key == "selectedDevice") selectedDeviceIndex = std::clamp(safeStoi(value, -1), -1, kMaxDeviceIndex);
 else if (key == "theme") {
 	themeIndex = std::clamp(safeStoi(value), 0, 2);
 	applyTheme(themeIndex);
