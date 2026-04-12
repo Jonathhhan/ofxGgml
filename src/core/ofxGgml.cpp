@@ -28,12 +28,18 @@
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((constructor))
 static void ofxGgml_earlyEnvSetup() {
-	setenv("GGML_NO_BACKTRACE", "1", 0); // 0 = don't overwrite
+	setenv("GGML_NO_BACKTRACE", "1", 0); // don't overwrite if already set
 }
 #elif defined(_MSC_VER)
 #pragma init_seg(lib)
 static struct OfxGgmlEarlyEnv {
-	OfxGgmlEarlyEnv() { _putenv_s("GGML_NO_BACKTRACE", "1"); }
+	OfxGgmlEarlyEnv() {
+		size_t len = 0;
+		// Only set if not already present, matching the setenv() behavior.
+		if (getenv_s(&len, nullptr, 0, "GGML_NO_BACKTRACE") != 0 || len == 0) {
+			_putenv_s("GGML_NO_BACKTRACE", "1");
+		}
+	}
 } s_ofxGgmlEarlyEnv;
 #endif
 
@@ -97,9 +103,14 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		// libggml-base loaded via dlopen() skip the terminate-handler
 		// static initializer that triggers the assertion.
 #ifdef _WIN32
-		_putenv_s("GGML_NO_BACKTRACE", "1");
+		{
+			size_t len = 0;
+			if (getenv_s(&len, nullptr, 0, "GGML_NO_BACKTRACE") != 0 || len == 0) {
+				_putenv_s("GGML_NO_BACKTRACE", "1");
+			}
+		}
 #else
-		setenv("GGML_NO_BACKTRACE", "1", 0);
+		setenv("GGML_NO_BACKTRACE", "1", 0); // don't overwrite if already set
 #endif
 		ggml_backend_load_all();
 		backendsLoaded = true;
