@@ -18,7 +18,7 @@ An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https:/
   - Loss functions: crossEntropyLoss
 - **Scheduled execution** — Multi-backend scheduler with automatic tensor placement and fallback.
 - **Device enumeration** — Query available devices, memory, and capabilities at runtime.
-- **Runtime device selection** — Switch between CPU, GPU, or a specific device at runtime via `ofxGgmlSettings::deviceIndex` or the GUI device selector.
+- **Runtime backend selection** — Switch between CPU, GPU, or other backends at runtime via `ofxGgmlSettings::preferredBackend` or the GUI backend selector.
 
 ## Requirements
 

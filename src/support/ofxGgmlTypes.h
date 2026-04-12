@@ -70,14 +70,8 @@ struct ofxGgmlSettings {
 	int threads = 0;
 
 	/// Preferred backend type.  The addon will fall back to CPU when the
-	/// requested device is unavailable.
+	/// requested backend is unavailable.
 	ofxGgmlBackendType preferredBackend = ofxGgmlBackendType::Gpu;
-
-	/// Index of the specific backend device to use (-1 = auto-select the
-	/// first device matching `preferredBackend`).  When >= 0 the device at
-	/// this index (as returned by listDevices()) is initialised directly,
-	/// overriding `preferredBackend`.
-	int deviceIndex = -1;
 
 	/// Size of the default computation-graph arena (number of nodes).
 	size_t graphSize = 2048;
