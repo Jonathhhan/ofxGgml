@@ -155,7 +155,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 			ggml_backend_dev_t dev = ggml_backend_dev_get(i);
 			const char * devName = ggml_backend_dev_name(dev);
 			const char * devDesc = ggml_backend_dev_description(dev);
-			ggml_backend_dev_type devType = ggml_backend_dev_type(dev);
+			enum ggml_backend_dev_type devType = ggml_backend_dev_type(dev);
 			const char * typeLabel = "CPU";
 			if (devType == GGML_BACKEND_DEVICE_TYPE_GPU) {
 				typeLabel = "GPU";
