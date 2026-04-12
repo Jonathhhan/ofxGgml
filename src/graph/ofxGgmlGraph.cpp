@@ -285,12 +285,12 @@ ofxGgmlTensor ofxGgmlGraph::crossEntropyLoss(ofxGgmlTensor logits, ofxGgmlTensor
 // --------------------------------------------------------------------------
 
 void ofxGgmlGraph::build(ofxGgmlTensor output) {
-	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, false);
+	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
 	ggml_build_forward_expand(m_graph, output.raw());
 }
 
 void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
-	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, false);
+	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
 	for (auto t : outputs) {
 		ggml_build_forward_expand(m_graph, t.raw());
 	}

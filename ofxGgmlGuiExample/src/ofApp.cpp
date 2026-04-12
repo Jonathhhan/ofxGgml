@@ -70,6 +70,7 @@ std::string trim(const std::string & s) {
 }
 
 constexpr size_t kMaxLogMessages = 500;
+constexpr size_t kExePathBufSize = 4096; // buffer for resolving the executable path
 constexpr float kDefaultTemp = 0.7f;
 constexpr float kDefaultTopP = 0.9f;
 constexpr float kDefaultRepeatPenalty = 1.1f;
@@ -298,14 +299,14 @@ static void probeLlamaCli(std::mutex & logMutex,
 		// next to the application binary (common deployment layout).
 		{
 #ifdef _WIN32
-			std::vector<char> exeBuf(MAX_PATH);
+			std::vector<char> exeBuf(kExePathBufSize);
 			DWORD len = GetModuleFileNameA(nullptr, exeBuf.data(), static_cast<DWORD>(exeBuf.size()));
 			if (len > 0 && len < exeBuf.size()) {
 				auto exeDir = std::filesystem::path(std::string(exeBuf.data(), len)).parent_path();
 				searchDirs.push_back(exeDir.string());
 			}
 #elif defined(__linux__) || defined(__FreeBSD__)
-			std::vector<char> exeBuf(4096);
+			std::vector<char> exeBuf(kExePathBufSize);
 			ssize_t exeLen = readlink("/proc/self/exe", exeBuf.data(), exeBuf.size());
 			if (exeLen > 0 && static_cast<size_t>(exeLen) < exeBuf.size()) {
 				auto exeDir = std::filesystem::path(std::string(exeBuf.data(), static_cast<size_t>(exeLen))).parent_path();
@@ -314,7 +315,7 @@ static void probeLlamaCli(std::mutex & logMutex,
 #elif defined(__APPLE__)
 			// On macOS, use _NSGetExecutablePath or the current working
 			// directory; the latter is usually the bundle's Contents/MacOS.
-			char macBuf[4096];
+			char macBuf[kExePathBufSize];
 			uint32_t macBufSize = sizeof(macBuf);
 			if (_NSGetExecutablePath(macBuf, &macBufSize) == 0) {
 				auto exeDir = std::filesystem::path(macBuf).parent_path();
