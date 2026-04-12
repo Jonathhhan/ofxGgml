@@ -81,6 +81,9 @@ constexpr int kBackendCpu = 1;
 constexpr int kBackendGpu = 2;
 constexpr int kMaxDeviceIndex = 64;  // reasonable upper bound for device indices
 constexpr int kExecNotFound = 127; // POSIX convention when execvp fails
+constexpr float kSpinnerInterval = 0.15f;       // seconds per spinner frame
+constexpr float kDotsAnimationSpeed = 3.0f;     // dots cycle speed multiplier
+const char * const kWaitingLabels[] = {"generating", "generating.", "generating..", "generating..."};
 
 // Llama CLI detection state shared between probe and UI.
 // -1 = unknown / needs probe, 0 = probed but not found, 1 = available.
@@ -1012,7 +1015,7 @@ ImGui::SetTooltip("Full path to llama-completion or llama-cli binary (press Ente
 if (generating.load()) {
 ImGui::Spacing();
 const char * spinner = "|/-\\";
-int spinIdx = static_cast<int>(ImGui::GetTime() / 0.15) % 4;
+int spinIdx = static_cast<int>(ImGui::GetTime() / kSpinnerInterval) % 4;
 float elapsed = ofGetElapsedTimef() - generationStartTime;
 char genLabel[64];
 snprintf(genLabel, sizeof(genLabel), "%c Generating... (%.1fs)", spinner[spinIdx], elapsed);
@@ -1081,7 +1084,7 @@ std::lock_guard<std::mutex> lock(streamMutex);
 partial = streamingOutput;
 }
 if (partial.empty()) {
-int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
+int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
 const char * thinking[] = {"thinking", "thinking.", "thinking..", "thinking..."};
 ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", thinking[dots]);
 } else {
@@ -1313,9 +1316,8 @@ std::lock_guard<std::mutex> lock(streamMutex);
 partial = streamingOutput;
 }
 if (partial.empty()) {
-int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
-const char * waiting[] = {"generating", "generating.", "generating..", "generating..."};
-ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", waiting[dots]);
+int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 } else {
 ImGui::TextWrapped("%s", partial.c_str());
 }
@@ -1675,9 +1677,8 @@ std::lock_guard<std::mutex> lock(streamMutex);
 partial = streamingOutput;
 }
 if (partial.empty()) {
-int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
-const char * waiting[] = {"generating", "generating.", "generating..", "generating..."};
-ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", waiting[dots]);
+int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 } else {
 ImGui::TextWrapped("%s", partial.c_str());
 }
@@ -1746,9 +1747,8 @@ std::lock_guard<std::mutex> lock(streamMutex);
 partial = streamingOutput;
 }
 if (partial.empty()) {
-int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
-const char * waiting[] = {"generating", "generating.", "generating..", "generating..."};
-ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", waiting[dots]);
+int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 } else {
 ImGui::TextWrapped("%s", partial.c_str());
 }
@@ -1827,9 +1827,8 @@ std::lock_guard<std::mutex> lock(streamMutex);
 partial = streamingOutput;
 }
 if (partial.empty()) {
-int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
-const char * waiting[] = {"generating", "generating.", "generating..", "generating..."};
-ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", waiting[dots]);
+int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 } else {
 ImGui::TextWrapped("%s", partial.c_str());
 }
@@ -1905,9 +1904,8 @@ std::lock_guard<std::mutex> lock(streamMutex);
 partial = streamingOutput;
 }
 if (partial.empty()) {
-int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
-const char * waiting[] = {"generating", "generating.", "generating..", "generating..."};
-ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", waiting[dots]);
+int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 } else {
 ImGui::TextWrapped("%s", partial.c_str());
 }
@@ -1947,7 +1945,7 @@ ImGui::Text(" | GPU: %d layers", gpuLayers);
 if (generating.load()) {
 ImGui::SameLine();
 const char * spinner = "|/-\\";
-int spinIdx = static_cast<int>(ImGui::GetTime() / 0.15) % 4;
+int spinIdx = static_cast<int>(ImGui::GetTime() / kSpinnerInterval) % 4;
 float elapsed = ofGetElapsedTimef() - generationStartTime;
 char statusLabel[64];
 snprintf(statusLabel, sizeof(statusLabel), " | %c Generating... (%.1fs)", spinner[spinIdx], elapsed);
