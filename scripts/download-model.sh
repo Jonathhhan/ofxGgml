@@ -8,7 +8,7 @@
 #
 # Options:
 #   --model  URL   Direct URL to a GGUF model file.
-#                  Default: Qwen2.5-1.5B Instruct Q4_K_M
+#                  Default with no selectors: download both recommended presets
 #   --preset N     Select a model by preset number (see --list)
 #   --task   NAME  Select the preferred model for a task: chat, script,
 #                  summarize, write, translate, custom  (matches the GUI
@@ -105,7 +105,7 @@ list_models() {
 	done
 	echo ""
 	echo "Usage:"
-	echo "  ./scripts/download-model.sh --preset 1      # Qwen2.5-1.5B (default)"
+	echo "  ./scripts/download-model.sh                 # Download presets 1 and 2 (default)"
 	echo "  ./scripts/download-model.sh --preset 2      # Qwen2.5-Coder for scripting"
 	echo "  ./scripts/download-model.sh --both          # Download presets 1 and 2"
 	echo "  ./scripts/download-model.sh --task script   # same as --preset 2"
@@ -155,6 +155,11 @@ while [[ $# -gt 0 ]]; do
 			;;
 	esac
 done
+
+if [[ "$DOWNLOAD_BOTH" == false ]] && [[ -z "$MODEL_URL" ]] && [[ -z "$PRESET_INDEX" ]] && [[ -z "$TASK_NAME" ]]; then
+	DOWNLOAD_BOTH=true
+	write_step "No --model/--preset/--task specified, defaulting to both recommended presets"
+fi
 
 if [[ "$DOWNLOAD_BOTH" == true ]]; then
 	if [[ -n "$MODEL_URL" ]] || [[ -n "$PRESET_INDEX" ]] || [[ -n "$TASK_NAME" ]]; then

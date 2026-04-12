@@ -158,10 +158,10 @@ Clone, compile, and install the ggml library from source:
 Download a GGUF model file for inference.  Supports model presets and task-based selection:
 
 ```bash
-# Download default model (Qwen2.5-1.5B Instruct Q4_K_M, ~1.0 GB)
+# Download both recommended presets (chat + coder, default behavior)
 ./scripts/download-model.sh
 
-# Download both recommended presets (chat + coder)
+# Explicitly request both recommended presets
 ./scripts/download-model.sh --both
 
 # Select by preset number
