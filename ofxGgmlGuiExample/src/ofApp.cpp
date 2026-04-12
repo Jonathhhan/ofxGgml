@@ -1161,6 +1161,7 @@ bool sendClicked = ImGui::Button("Send", ImVec2(70, 0));
 if ((submitted || sendClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
 std::string userText(chatInput);
 chatMessages.push_back({"user", userText, ofGetElapsedTimef()});
+fprintf(stderr, "[ChatWindow] You: %s\n", userText.c_str());
 std::memset(chatInput, 0, sizeof(chatInput));
 runInference(AiMode::Chat, userText);
 }
@@ -2762,21 +2763,27 @@ if (pendingOutput.empty()) return;
 switch (pendingMode) {
 case AiMode::Chat:
 chatMessages.push_back({"assistant", pendingOutput, ofGetElapsedTimef()});
+fprintf(stderr, "[ChatWindow] AI: %s\n", pendingOutput.c_str());
 break;
 case AiMode::Script:
 scriptOutput = pendingOutput;
+fprintf(stderr, "[ChatWindow] Script: %s\n", pendingOutput.c_str());
 break;
 case AiMode::Summarize:
 summarizeOutput = pendingOutput;
+fprintf(stderr, "[ChatWindow] Summarize: %s\n", pendingOutput.c_str());
 break;
 case AiMode::Write:
 writeOutput = pendingOutput;
+fprintf(stderr, "[ChatWindow] Write: %s\n", pendingOutput.c_str());
 break;
 case AiMode::Translate:
 translateOutput = pendingOutput;
+fprintf(stderr, "[ChatWindow] Translate: %s\n", pendingOutput.c_str());
 break;
 case AiMode::Custom:
 customOutput = pendingOutput;
+fprintf(stderr, "[ChatWindow] Custom: %s\n", pendingOutput.c_str());
 break;
 }
 pendingOutput.clear();
