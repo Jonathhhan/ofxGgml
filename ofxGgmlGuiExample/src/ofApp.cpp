@@ -535,7 +535,7 @@ static void probeLlamaCli(std::mutex & logMutex,
 		// passing --prefix <addon>/libs/llama to the script.
 		{
 			std::error_code srcEc;
-			auto srcPath = std::filesystem::path(__FILE__).parent_path();  // .../example-gui/src
+			auto srcPath = std::filesystem::path(__FILE__).parent_path();  // .../ofxGgmlGuiExample/src
 			auto addonRoot = std::filesystem::weakly_canonical(srcPath / ".." / "..", srcEc);
 			if (!srcEc) {
 				searchDirs.push_back((addonRoot / "libs" / "llama" / "bin").string());
