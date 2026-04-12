@@ -2344,7 +2344,7 @@ else if (key == "numThreads") numThreads = std::clamp(safeStoi(value, 4), 1, 32)
 else if (key == "selectedBackend") {
 	// Legacy numeric index — kept for backward compatibility but
 	// overridden by selectedBackendName when present.
-	int maxIdx = std::max(0, static_cast<int>(backendNames.size()));
+	int maxIdx = static_cast<int>(backendNames.size());
 	selectedBackendIndex = std::clamp(safeStoi(value), 0, maxIdx);
 }
 else if (key == "selectedBackendName") {
@@ -2587,12 +2587,11 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	int effectiveGpuLayers = safeGpuLayers;
 	{
 		// Force zero GPU layers when the user explicitly selected a CPU
-		// backend (device name starts with "CPU").
+		// backend by checking the device type from the discovered list.
 		bool isCpuBackend = false;
 		if (selectedBackendIndex > 0 &&
-			selectedBackendIndex - 1 < static_cast<int>(backendNames.size())) {
-			const auto & name = backendNames[selectedBackendIndex - 1];
-			isCpuBackend = (name.find("CPU") == 0);
+			selectedBackendIndex - 1 < static_cast<int>(devices.size())) {
+			isCpuBackend = (devices[selectedBackendIndex - 1].type == ofxGgmlBackendType::Cpu);
 		}
 		if (isCpuBackend) effectiveGpuLayers = 0;
 	}
