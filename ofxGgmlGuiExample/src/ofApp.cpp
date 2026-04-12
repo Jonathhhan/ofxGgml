@@ -77,6 +77,12 @@ constexpr float kDefaultRepeatPenalty = 1.1f;
 constexpr int kBackendAuto = 0;
 constexpr int kBackendCpu = 1;
 constexpr int kBackendGpu = 2;
+constexpr int kExecNotFound = 127; // POSIX convention when execvp fails
+
+// Llama CLI detection state shared between probe and UI.
+// -1 = unknown / needs probe, 0 = (unused), 1 = available.
+std::atomic<int> llamaCliState{-1};
+std::string llamaCliCommand = "llama-cli";
 
 #ifdef _WIN32
 std::string quoteWindowsArg(const std::string & arg) {
@@ -660,6 +666,16 @@ ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "Engine: OK");
 ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.2f, 1.0f), "Engine: Error");
 }
 ImGui::Text("Backend: %s", ggml.getBackendName().c_str());
+
+// CLI detection status and retry button.
+if (llamaCliState.load(std::memory_order_relaxed) == 1) {
+ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "CLI: %s", llamaCliCommand.c_str());
+} else {
+ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.2f, 1.0f), "CLI: not detected");
+}
+if (ImGui::Button("Re-detect CLI", ImVec2(-1, 0))) {
+llamaCliState.store(-1, std::memory_order_relaxed);
+}
 
 if (generating.load()) {
 ImGui::Spacing();
@@ -1857,28 +1873,41 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		return false;
 	}
 
-	static std::atomic<int> llamaCliState{-1}; // -1 unknown, 0 unavailable, 1 available
-	static std::string llamaCliCommand = "llama-cli";
-	if (llamaCliState.load(std::memory_order_relaxed) == 0) {
-		error = "llama-cli/llama not found in PATH.";
-		return false;
-	}
-	if (llamaCliState.load(std::memory_order_relaxed) < 0) {
+	// Probe for llama-cli/llama if not already found.  Unlike earlier
+	// revisions this no longer permanently caches a "not-found" result
+	// so the user can install llama-cli without restarting the app.
+
+	if (llamaCliState.load(std::memory_order_relaxed) != 1) {
 		std::string probeOut;
 		int probeExit = -1;
 		const std::vector<std::string> candidates = {"llama-cli", "llama"};
+		const std::vector<std::string> probeFlags = {"--version", "--help"};
 		bool found = false;
 		for (const auto & candidate : candidates) {
-			if (runProcessCapture({candidate, "--version"}, probeOut, probeExit) && probeExit == 0) {
-				llamaCliCommand = candidate;
-				found = true;
-				break;
+			for (const auto & flag : probeFlags) {
+				if (runProcessCapture({candidate, flag}, probeOut, probeExit)
+					&& probeExit != kExecNotFound) {
+					llamaCliCommand = candidate;
+					found = true;
+					break;
+				}
 			}
+			if (found) break;
 		}
 		if (!found) {
-			llamaCliState.store(0, std::memory_order_relaxed);
+			// Don't cache unavailability — allow re-probe on next call.
+			{
+				std::lock_guard<std::mutex> lock(logMutex);
+				logMessages.push_back("[info] llama-cli/llama not found in PATH.");
+				if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+			}
 			error = "llama-cli/llama not found in PATH.";
 			return false;
+		}
+		{
+			std::lock_guard<std::mutex> lock(logMutex);
+			logMessages.push_back("[info] detected CLI: " + llamaCliCommand);
+			if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
 		}
 		llamaCliState.store(1, std::memory_order_relaxed);
 	}
@@ -1940,6 +1969,17 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 			out.push_back("--seed");
 			out.push_back(ofToString(seed));
 		}
+		if (mirostatMode == 1 || mirostatMode == 2) {
+			out.push_back("--mirostat");
+			out.push_back(ofToString(mirostatMode));
+			std::ostringstream tauStr, etaStr;
+			tauStr << std::fixed << std::setprecision(3) << std::clamp(mirostatTau, 0.0f, 20.0f);
+			etaStr << std::fixed << std::setprecision(3) << std::clamp(mirostatEta, 0.0f, 1.0f);
+			out.push_back("--mirostat-lr");
+			out.push_back(etaStr.str());
+			out.push_back("--mirostat-ent");
+			out.push_back(tauStr.str());
+		}
 		return out;
 	};
 	std::vector<std::string> args = makeArgs(false);
@@ -1950,7 +1990,9 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	if (started && ret != 0) {
 		const std::string lowered = ofToLower(raw);
 		if (lowered.find("unknown argument") != std::string::npos ||
-			lowered.find("unrecognized option") != std::string::npos) {
+			lowered.find("unrecognized option") != std::string::npos ||
+			lowered.find("invalid option") != std::string::npos ||
+			lowered.find("unknown option") != std::string::npos) {
 			args = makeArgs(true);
 			runProcessCapture(args, raw, ret);
 		}
@@ -1964,24 +2006,17 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
 	}
 
-	if (!started) {
-		llamaCliState.store(0, std::memory_order_relaxed);
+	if (!started || ret == kExecNotFound) {
+		// Binary truly missing — invalidate cache so next call re-probes.
+		llamaCliState.store(-1, std::memory_order_relaxed);
 		error = "llama-cli/llama not found in PATH.";
 		return false;
 	}
 
 	if (ret != 0) {
-		const std::string lowered = ofToLower(raw);
-		if (lowered.find("not found") != std::string::npos ||
-			lowered.find("no such file or directory") != std::string::npos) {
-			llamaCliState.store(0, std::memory_order_relaxed);
-			error = "llama-cli/llama not found in PATH.";
-			return false;
-		}
-		error = "llama-cli failed. Output:\n" + trim(stripAnsi(raw));
+		error = "llama-cli exited with code " + ofToString(ret) + ". Output:\n" + trim(stripAnsi(raw));
 		return false;
 	}
-	llamaCliState.store(1, std::memory_order_relaxed);
 
 	output = trim(stripAnsi(raw));
 	if (output.empty()) {
