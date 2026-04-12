@@ -66,10 +66,6 @@ std::string trim(const std::string & s) {
 	return s.substr(start, end - start);
 }
 
-std::string formatFallbackOutput(const std::string & reason, const std::string & demoOutput) {
-	return "[Fallback: demo pipeline]\n" + reason + "\n\n" + demoOutput;
-}
-
 constexpr size_t kMaxLogMessages = 500;
 constexpr float kDefaultTemp = 0.7f;
 constexpr float kDefaultTopP = 0.9f;
@@ -2313,8 +2309,14 @@ workerThread.join();
  std::string error;
 
  if (!runRealInference(prompt, result, error)) {
- std::string demo = runDemoComputation(userText, mode, systemPrompt);
- result = formatFallbackOutput(error, demo);
+ std::ostringstream oss;
+ oss << "[Error] " << error << "\n\n"
+     << "To run inference, complete these setup steps:\n"
+     << "  1. Build ggml:          ./scripts/build-ggml.sh\n"
+     << "  2. Download a model:    ./scripts/download-model.sh\n"
+     << "  3. Build llama.cpp CLI: ./scripts/build-llama-cli.sh\n\n"
+     << "See README.md for details.";
+ result = oss.str();
  }
 
 {
@@ -2364,206 +2366,6 @@ customOutput = pendingOutput;
 break;
 }
 pendingOutput.clear();
-}
-
-// ---------------------------------------------------------------------------
-// Demo computation — runs a ggml graph and produces illustrative output.
-//
-// NOTE: This demonstrates the ofxGgml compute pipeline.  Real inference
-// requires loading model weights from a GGUF file.  The build-ggml.sh and
-// download-model.sh scripts in scripts/ prepare the prerequisites.
-// ---------------------------------------------------------------------------
-
-std::string ofApp::runDemoComputation(const std::string & input, AiMode mode,
-const std::string & systemPrompt) {
-
-// Build a small ggml graph that processes the input length as a "feature"
-// through a random linear layer + softmax to produce demo probabilities.
-// This shows the full ofxGgml pipeline: tensor creation -> graph build ->
-// data upload -> compute -> result retrieval.
-
-const int inputLen = static_cast<int>(input.size());
-const int featureDim = 8;
-const int outputDim = 4;
-
-ofxGgmlGraph graph;
-
-// Input: encode the string length + character stats as features.
-auto inputTensor = graph.newTensor2d(ofxGgmlType::F32, featureDim, 1);
-auto weights     = graph.newTensor2d(ofxGgmlType::F32, featureDim, outputDim);
-auto bias        = graph.newTensor1d(ofxGgmlType::F32, outputDim);
-
-inputTensor.setName("input");
-weights.setName("weights");
-bias.setName("bias");
-
-graph.setInput(inputTensor);
-graph.setInput(weights);
-graph.setInput(bias);
-
-// Linear layer: softmax(W * x + b)
-auto h = graph.matMul(weights, inputTensor);
-auto hb = graph.add(h, bias);
-auto output = graph.softmax(hb);
-
-output.setName("output");
-graph.setOutput(output);
-graph.build(output);
-
-// Prepare input features from the text.
-std::vector<float> features(featureDim, 0.0f);
-const float normalizer = std::max(1.0f, static_cast<float>(inputLen));
-features[0] = static_cast<float>(inputLen) / 100.0f;
-int spaceCount = 0, upperCount = 0, digitCount = 0, punctCount = 0;
-for (char c : input) {
-if (c == ' ') spaceCount++;
-if (std::isupper(static_cast<unsigned char>(c))) upperCount++;
-if (std::isdigit(static_cast<unsigned char>(c))) digitCount++;
-if (std::ispunct(static_cast<unsigned char>(c))) punctCount++;
-}
-features[1] = static_cast<float>(spaceCount) / normalizer;
-features[2] = static_cast<float>(upperCount) / normalizer;
-features[3] = static_cast<float>(digitCount) / normalizer;
-features[4] = static_cast<float>(punctCount) / normalizer;
-features[5] = temperature;
-features[6] = static_cast<float>(maxTokens) / 2048.0f;
-
-float modeValue = 0.0f;
-switch (mode) {
-case AiMode::Chat:      modeValue = 1.0f; break;
-case AiMode::Script:    modeValue = 2.0f; break;
-case AiMode::Summarize: modeValue = 3.0f; break;
-case AiMode::Write:     modeValue = 4.0f; break;
-case AiMode::Translate: modeValue = 5.0f; break;
-case AiMode::Custom:    modeValue = 6.0f; break;
-}
-features[7] = modeValue / 6.0f;
-
-// Random weights seeded from input hash.
-std::hash<std::string> hasher;
-unsigned rngSeed = (seed >= 0)
-? static_cast<unsigned>(seed)
-: static_cast<unsigned>(hasher(input + systemPrompt));
-std::mt19937 rng(rngSeed);
-std::normal_distribution<float> dist(0.0f, 0.5f);
-
-std::vector<float> wData(featureDim * outputDim);
-std::vector<float> bData(outputDim);
-for (auto & v : wData) v = dist(rng);
-for (auto & v : bData) v = dist(rng) * 0.1f;
-
-// Allocate backend buffers before setting tensor data.
-ggml.allocGraph(graph);
-
-ggml.setTensorData(inputTensor, features.data(), features.size() * sizeof(float));
-ggml.setTensorData(weights, wData.data(), wData.size() * sizeof(float));
-ggml.setTensorData(bias, bData.data(), bData.size() * sizeof(float));
-
-// Compute.
-auto result = ggml.computeGraph(graph);
-
-if (!result.success) {
-return "[Error] Computation failed: " + result.error;
-}
-
-// Track performance metrics.
-lastComputeMs = result.elapsedMs;
-lastNodeCount = graph.getNumNodes();
-lastBackendUsed = ggml.getBackendName();
-
-// Read output probabilities.
-std::vector<float> probs(outputDim);
-ggml.getTensorData(output, probs.data(), probs.size() * sizeof(float));
-
-// Build response string based on mode.
-std::ostringstream oss;
-oss << "[ggml compute OK - " << ofToString(result.elapsedMs, 2) << " ms, "
-<< graph.getNumNodes() << " nodes, backend: " << ggml.getBackendName() << "]\n\n";
-
-// Include selected model info.
-if (!modelPresets.empty()) {
-oss << "[Model: " << modelPresets[static_cast<size_t>(selectedModelIndex)].name << "]\n\n";
-}
-
-switch (mode) {
-case AiMode::Chat:
-oss << "Input analyzed (" << inputLen << " chars). ";
-oss << "Confidence distribution: ";
-for (int i = 0; i < outputDim; i++) {
-oss << "class" << i << "=" << ofToString(probs[static_cast<size_t>(i)] * 100.0f, 1) << "% ";
-}
-oss << "\n\nThis is a demo - to run real language-model inference, "
-<< "use scripts/build-ggml.sh to compile ggml, then "
-<< "scripts/download-model.sh to fetch a GGUF model.";
-break;
-
-case AiMode::Script: {
-std::string langName = "Text";
-if (!scriptLanguages.empty()) {
-langName = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].name;
-}
-oss << "// Generated " << langName << " code skeleton (demo)\n";
-oss << "// Input: \"" << input.substr(0, 60) << (input.size() > 60 ? "..." : "") << "\"\n";
-oss << "// Features: len=" << inputLen << " words~=" << (spaceCount + 1) << "\n\n";
-oss << "void generatedFunction() {\n";
-oss << "    // Probability distribution from ggml softmax:\n";
-for (int i = 0; i < outputDim; i++) {
-oss << "    float p" << i << " = " << ofToString(probs[static_cast<size_t>(i)], 4) << "f;\n";
-}
-oss << "    // TODO: load a real model for code generation.\n";
-oss << "}\n";
-break;
-}
-
-case AiMode::Summarize:
-oss << "Summary of " << inputLen << "-character text:\n";
-oss << "  Word count (approx): " << (spaceCount + 1) << "\n";
-oss << "  Uppercase ratio: " << ofToString(features[2] * 100.0f, 1) << "%\n";
-oss << "  Digit content: " << ofToString(features[3] * 100.0f, 1) << "%\n";
-oss << "  Computed class probabilities: [";
-for (int i = 0; i < outputDim; i++) {
-if (i > 0) oss << ", ";
-oss << ofToString(probs[static_cast<size_t>(i)], 3);
-}
-oss << "]\n\nFor real summarization, load a language model via GGUF.";
-break;
-
-case AiMode::Write:
-oss << "Processed " << inputLen << " characters through ggml pipeline.\n";
-oss << "Softmax output: [";
-for (int i = 0; i < outputDim; i++) {
-if (i > 0) oss << ", ";
-oss << ofToString(probs[static_cast<size_t>(i)], 4);
-}
-oss << "]\n\nTo rewrite/expand text, a full language model is needed. "
-<< "Run scripts/download-model.sh to get one.";
-break;
-
-case AiMode::Translate:
-oss << "Translation request: " << inputLen << " characters, ~"
-<< (spaceCount + 1) << " words.\n";
-oss << "Softmax output: [";
-for (int i = 0; i < outputDim; i++) {
-if (i > 0) oss << ", ";
-oss << ofToString(probs[static_cast<size_t>(i)], 4);
-}
-oss << "]\n\nFor real translation, load a multilingual model. "
-<< "Run scripts/download-model.sh --task translate to get one.";
-break;
-
-case AiMode::Custom:
-oss << "System: " << (systemPrompt.empty() ? "(none)" : systemPrompt.substr(0, 80)) << "\n";
-oss << "Input: " << input.substr(0, 80) << (input.size() > 80 ? "..." : "") << "\n\n";
-oss << "ggml output (" << outputDim << "-dim softmax): [";
-for (int i = 0; i < outputDim; i++) {
-if (i > 0) oss << ", ";
-oss << ofToString(probs[static_cast<size_t>(i)], 4);
-}
-oss << "]\nElapsed: " << ofToString(result.elapsedMs, 2) << " ms";
-break;
-}
-
-return oss.str();
 }
 
 // ---------------------------------------------------------------------------

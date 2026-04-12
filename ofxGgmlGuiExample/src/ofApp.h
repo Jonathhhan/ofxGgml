@@ -256,8 +256,4 @@ private:
 	void applyTheme(int index);
 	void copyToClipboard(const std::string & text);
 	void exportChatHistory(const std::string & path);
-
-	// -- ggml demo computation --
-	std::string runDemoComputation(const std::string & input, AiMode mode,
-		const std::string & systemPrompt);
 };
