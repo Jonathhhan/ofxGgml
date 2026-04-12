@@ -176,6 +176,7 @@ private:
 	bool showDeviceInfo = false;
 	bool showLog = false;
 	bool showPerformance = false;
+	bool verbose = false;
 	std::deque<std::string> logMessages;
 	std::mutex logMutex;
 
