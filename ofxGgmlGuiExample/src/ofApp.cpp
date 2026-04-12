@@ -1898,7 +1898,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 			// Don't cache unavailability — allow re-probe on next call.
 			{
 				std::lock_guard<std::mutex> lock(logMutex);
-				logMessages.push_back("[info] llama-cli/llama not found in PATH; using demo pipeline.");
+				logMessages.push_back("[info] llama-cli/llama not found in PATH.");
 				if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
 			}
 			error = "llama-cli/llama not found in PATH.";
