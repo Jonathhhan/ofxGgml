@@ -9,6 +9,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <numeric>
 #include <random>
@@ -142,7 +143,8 @@ std::string quoteWindowsArg(const std::string & arg) {
 #endif
 
 bool runProcessCapture(const std::vector<std::string> & args, std::string & output, int & exitCode,
-                       bool trackProcess = false) {
+                       bool trackProcess = false,
+                       std::function<void(const std::string &)> onStreamData = nullptr) {
 	output.clear();
 	exitCode = -1;
 	if (args.empty() || args[0].empty()) return false;
@@ -204,6 +206,7 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 	DWORD bytesRead = 0;
 	while (ReadFile(readPipe, buffer, static_cast<DWORD>(sizeof(buffer)), &bytesRead, nullptr) && bytesRead > 0) {
 		output.append(buffer, bytesRead);
+		if (onStreamData) onStreamData(output);
 	}
 	CloseHandle(readPipe);
 
@@ -256,6 +259,7 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 	ssize_t n = 0;
 	while ((n = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
 		output.append(buffer, static_cast<size_t>(n));
+		if (onStreamData) onStreamData(output);
 	}
 	close(pipefd[0]);
 
@@ -1007,7 +1011,12 @@ ImGui::SetTooltip("Full path to llama-completion or llama-cli binary (press Ente
 
 if (generating.load()) {
 ImGui::Spacing();
-ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Generating...");
+const char * spinner = "|/-\\";
+int spinIdx = static_cast<int>(ImGui::GetTime() / 0.15) % 4;
+float elapsed = ofGetElapsedTimef() - generationStartTime;
+char genLabel[64];
+snprintf(genLabel, sizeof(genLabel), "%c Generating... (%.1fs)", spinner[spinIdx], elapsed);
+ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "%s", genLabel);
 if (ImGui::Button("Stop", ImVec2(-1, 0))) {
 stopGeneration();
 }
@@ -1060,6 +1069,24 @@ ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "System:");
 }
 ImGui::SameLine();
 ImGui::TextWrapped("%s", msg.text.c_str());
+ImGui::Spacing();
+}
+// Show streaming output while generating in Chat mode.
+if (generating.load() && activeGenerationMode == AiMode::Chat) {
+ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "AI:");
+ImGui::SameLine();
+std::string partial;
+{
+std::lock_guard<std::mutex> lock(streamMutex);
+partial = streamingOutput;
+}
+if (partial.empty()) {
+int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
+const char * thinking[] = {"thinking", "thinking.", "thinking..", "thinking..."};
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", thinking[dots]);
+} else {
+ImGui::TextWrapped("%s", partial.c_str());
+}
 ImGui::Spacing();
 }
 // Auto-scroll.
@@ -1279,7 +1306,22 @@ ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(scriptOutput.size()));
 }
 ImGui::BeginChild("##ScriptOut", ImVec2(0, 0), true);
+if (generating.load() && activeGenerationMode == AiMode::Script) {
+std::string partial;
+{
+std::lock_guard<std::mutex> lock(streamMutex);
+partial = streamingOutput;
+}
+if (partial.empty()) {
+int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
+const char * waiting[] = {"generating", "generating.", "generating..", "generating..."};
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", waiting[dots]);
+} else {
+ImGui::TextWrapped("%s", partial.c_str());
+}
+} else {
 ImGui::TextWrapped("%s", scriptOutput.empty() ? "(no output yet)" : scriptOutput.c_str());
+}
 ImGui::EndChild();
 }
 
@@ -1626,7 +1668,22 @@ ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(summarizeOutput.size()));
 }
 ImGui::BeginChild("##SumOut", ImVec2(0, 0), true);
+if (generating.load() && activeGenerationMode == AiMode::Summarize) {
+std::string partial;
+{
+std::lock_guard<std::mutex> lock(streamMutex);
+partial = streamingOutput;
+}
+if (partial.empty()) {
+int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
+const char * waiting[] = {"generating", "generating.", "generating..", "generating..."};
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", waiting[dots]);
+} else {
+ImGui::TextWrapped("%s", partial.c_str());
+}
+} else {
 ImGui::TextWrapped("%s", summarizeOutput.empty() ? "(no output yet)" : summarizeOutput.c_str());
+}
 ImGui::EndChild();
 }
 
@@ -1682,7 +1739,22 @@ ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(writeOutput.size()));
 }
 ImGui::BeginChild("##WriteOut", ImVec2(0, 0), true);
+if (generating.load() && activeGenerationMode == AiMode::Write) {
+std::string partial;
+{
+std::lock_guard<std::mutex> lock(streamMutex);
+partial = streamingOutput;
+}
+if (partial.empty()) {
+int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
+const char * waiting[] = {"generating", "generating.", "generating..", "generating..."};
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", waiting[dots]);
+} else {
+ImGui::TextWrapped("%s", partial.c_str());
+}
+} else {
 ImGui::TextWrapped("%s", writeOutput.empty() ? "(no output yet)" : writeOutput.c_str());
+}
 ImGui::EndChild();
 }
 
@@ -1748,7 +1820,22 @@ ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(translateOutput.size()));
 }
 ImGui::BeginChild("##TransOut", ImVec2(0, 0), true);
+if (generating.load() && activeGenerationMode == AiMode::Translate) {
+std::string partial;
+{
+std::lock_guard<std::mutex> lock(streamMutex);
+partial = streamingOutput;
+}
+if (partial.empty()) {
+int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
+const char * waiting[] = {"generating", "generating.", "generating..", "generating..."};
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", waiting[dots]);
+} else {
+ImGui::TextWrapped("%s", partial.c_str());
+}
+} else {
 ImGui::TextWrapped("%s", translateOutput.empty() ? "(no output yet)" : translateOutput.c_str());
+}
 ImGui::EndChild();
 }
 
@@ -1811,7 +1898,22 @@ ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(customOutput.size()));
 }
 ImGui::BeginChild("##CustOut", ImVec2(0, 0), true);
+if (generating.load() && activeGenerationMode == AiMode::Custom) {
+std::string partial;
+{
+std::lock_guard<std::mutex> lock(streamMutex);
+partial = streamingOutput;
+}
+if (partial.empty()) {
+int dots = static_cast<int>(ImGui::GetTime() * 3.0) % 4;
+const char * waiting[] = {"generating", "generating.", "generating..", "generating..."};
+ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", waiting[dots]);
+} else {
+ImGui::TextWrapped("%s", partial.c_str());
+}
+} else {
 ImGui::TextWrapped("%s", customOutput.empty() ? "(no output yet)" : customOutput.c_str());
+}
 ImGui::EndChild();
 }
 
@@ -1844,7 +1946,12 @@ ImGui::Text(" | GPU: %d layers", gpuLayers);
 }
 if (generating.load()) {
 ImGui::SameLine();
-ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), " | Generating...");
+const char * spinner = "|/-\\";
+int spinIdx = static_cast<int>(ImGui::GetTime() / 0.15) % 4;
+float elapsed = ofGetElapsedTimef() - generationStartTime;
+char statusLabel[64];
+snprintf(statusLabel, sizeof(statusLabel), " | %c Generating... (%.1fs)", spinner[spinIdx], elapsed);
+ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "%s", statusLabel);
 } else if (lastComputeMs > 0.0f) {
 ImGui::SameLine();
 ImGui::TextDisabled(" | Last: %.1f ms", lastComputeMs);
@@ -2209,7 +2316,8 @@ std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
 	return oss.str();
 }
 
-bool ofApp::runRealInference(const std::string & prompt, std::string & output, std::string & error) {
+bool ofApp::runRealInference(const std::string & prompt, std::string & output, std::string & error,
+	std::function<void(const std::string &)> onStreamData) {
 	output.clear();
 	error.clear();
 
@@ -2316,7 +2424,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 
 	std::string raw;
 	int ret = -1;
-	const bool started = runProcessCapture(args, raw, ret, true);
+	const bool started = runProcessCapture(args, raw, ret, true, onStreamData);
 	if (started && ret != 0) {
 		const std::string lowered = ofToLower(raw);
 		if (lowered.find("unknown argument") != std::string::npos ||
@@ -2324,7 +2432,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 			lowered.find("invalid option") != std::string::npos ||
 			lowered.find("unknown option") != std::string::npos) {
 			args = makeArgs(true);
-			runProcessCapture(args, raw, ret, true);
+			runProcessCapture(args, raw, ret, true, onStreamData);
 		}
 	}
 
@@ -2399,6 +2507,13 @@ if (generating.load() || !engineReady) return;
 
 generating.store(true);
 cancelRequested.store(false);
+activeGenerationMode = mode;
+generationStartTime = ofGetElapsedTimef();
+
+{
+std::lock_guard<std::mutex> lock(streamMutex);
+streamingOutput.clear();
+}
 
 // Detach previous thread if any.
 if (workerThread.joinable()) {
@@ -2410,7 +2525,13 @@ workerThread.join();
  std::string result;
  std::string error;
 
- if (!runRealInference(prompt, result, error)) {
+ auto streamCb = [this](const std::string & partial) {
+ std::string cleaned = stripAnsi(partial);
+ std::lock_guard<std::mutex> lock(streamMutex);
+ streamingOutput = cleaned;
+ };
+
+ if (!runRealInference(prompt, result, error, streamCb)) {
  std::ostringstream oss;
  oss << "[Error] " << error << "\n\n"
      << "To run inference, complete these setup steps:\n"
@@ -2429,6 +2550,12 @@ pendingRole = "assistant";
 pendingMode = mode;
 }
 }
+
+{
+std::lock_guard<std::mutex> lock(streamMutex);
+streamingOutput.clear();
+}
+
 generating.store(false);
 });
 }
@@ -2440,6 +2567,10 @@ killInferenceProcess();
 }
 if (workerThread.joinable()) {
 workerThread.join();
+}
+{
+std::lock_guard<std::mutex> lock(streamMutex);
+streamingOutput.clear();
 }
 generating.store(false);
 }
