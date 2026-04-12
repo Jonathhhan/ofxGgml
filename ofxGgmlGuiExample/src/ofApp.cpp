@@ -80,7 +80,7 @@ constexpr int kBackendGpu = 2;
 constexpr int kExecNotFound = 127; // POSIX convention when execvp fails
 
 // Llama CLI detection state shared between probe and UI.
-// -1 = unknown / needs probe, 0 = (unused), 1 = available.
+// -1 = unknown / needs probe, 0 = probed but not found, 1 = available.
 std::atomic<int> llamaCliState{-1};
 std::string llamaCliCommand = "llama-cli";
 
@@ -230,6 +230,45 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 #endif
 }
 
+}
+
+// ---------------------------------------------------------------------------
+// Probe for llama-cli / llama in PATH.
+// Updates llamaCliState and llamaCliCommand.  Safe to call from any thread.
+// ---------------------------------------------------------------------------
+
+static void probeLlamaCli(std::mutex & logMutex, std::deque<std::string> & logMessages) {
+	std::string probeOut;
+	int probeExit = -1;
+	const std::vector<std::string> candidates = {"llama-cli", "llama"};
+	const std::vector<std::string> probeFlags = {"--version", "--help"};
+	bool found = false;
+	for (const auto & candidate : candidates) {
+		for (const auto & flag : probeFlags) {
+			if (runProcessCapture({candidate, flag}, probeOut, probeExit)
+				&& probeExit != kExecNotFound) {
+				llamaCliCommand = candidate;
+				found = true;
+				break;
+			}
+		}
+		if (found) break;
+	}
+	if (!found) {
+		llamaCliState.store(0, std::memory_order_relaxed);
+		{
+			std::lock_guard<std::mutex> lock(logMutex);
+			logMessages.push_back("[info] llama-cli/llama not found in PATH.");
+			if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+		}
+		return;
+	}
+	{
+		std::lock_guard<std::mutex> lock(logMutex);
+		logMessages.push_back("[info] detected CLI: " + llamaCliCommand);
+		if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+	}
+	llamaCliState.store(1, std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------
@@ -424,6 +463,9 @@ if (logMessages.size() > 500) {
 logMessages.pop_front();
 }
 });
+
+// Detect llama-cli / llama at startup.
+probeLlamaCli(logMutex, logMessages);
 
 // Pre-fill example system prompt.
 std::strncpy(customSystemPrompt,
@@ -674,7 +716,7 @@ ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "CLI: %s", llamaCliCommand.c_
 ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.2f, 1.0f), "CLI: not detected");
 }
 if (ImGui::Button("Re-detect CLI", ImVec2(-1, 0))) {
-llamaCliState.store(-1, std::memory_order_relaxed);
+probeLlamaCli(logMutex, logMessages);
 }
 
 if (generating.load()) {
@@ -1878,38 +1920,11 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	// so the user can install llama-cli without restarting the app.
 
 	if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-		std::string probeOut;
-		int probeExit = -1;
-		const std::vector<std::string> candidates = {"llama-cli", "llama"};
-		const std::vector<std::string> probeFlags = {"--version", "--help"};
-		bool found = false;
-		for (const auto & candidate : candidates) {
-			for (const auto & flag : probeFlags) {
-				if (runProcessCapture({candidate, flag}, probeOut, probeExit)
-					&& probeExit != kExecNotFound) {
-					llamaCliCommand = candidate;
-					found = true;
-					break;
-				}
-			}
-			if (found) break;
-		}
-		if (!found) {
-			// Don't cache unavailability — allow re-probe on next call.
-			{
-				std::lock_guard<std::mutex> lock(logMutex);
-				logMessages.push_back("[info] llama-cli/llama not found in PATH.");
-				if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
-			}
+		probeLlamaCli(logMutex, logMessages);
+		if (llamaCliState.load(std::memory_order_relaxed) != 1) {
 			error = "llama-cli/llama not found in PATH.";
 			return false;
 		}
-		{
-			std::lock_guard<std::mutex> lock(logMutex);
-			logMessages.push_back("[info] detected CLI: " + llamaCliCommand);
-			if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
-		}
-		llamaCliState.store(1, std::memory_order_relaxed);
 	}
 
 	std::error_code tempEc;
