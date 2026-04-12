@@ -152,6 +152,39 @@ std::string cleanChatOutput(const std::string & text) {
 	return out;
 }
 
+// Translate well-known process crash/error exit codes into a short
+// human-readable description.  Returns an empty string for codes that
+// are not recognised so the caller can fall back to the numeric value.
+std::string describeExitCode(int code) {
+#ifdef _WIN32
+	switch (static_cast<unsigned int>(code)) {
+	case 0xC0000409: return "stack buffer overrun (0xC0000409)";
+	case 0xC0000005: return "access violation (0xC0000005)";
+	case 0xC00000FD: return "stack overflow (0xC00000FD)";
+	case 0xC0000135: return "DLL not found (0xC0000135)";
+	case 0xC000001D: return "illegal instruction (0xC000001D) — CPU may not support required features";
+	case 0xC0000374: return "heap corruption (0xC0000374)";
+	default: break;
+	}
+	// DWORD exit codes are stored as a signed int; match negative
+	// representations of the same NTSTATUS values.
+	switch (code) {
+	case -1073740791: return "stack buffer overrun (0xC0000409)";
+	case -1073741819: return "access violation (0xC0000005)";
+	case -1073741571: return "stack overflow (0xC00000FD)";
+	case -1073741515: return "DLL not found (0xC0000135)";
+	case -1073741795: return "illegal instruction (0xC000001D) — CPU may not support required features";
+	case -1073741676: return "heap corruption (0xC0000374)";
+	default: break;
+	}
+#endif
+	if (code >= 129 && code <= 159) {
+		int sig = code - 128;
+		return "killed by signal " + std::to_string(sig);
+	}
+	return "";
+}
+
 constexpr size_t kMaxLogMessages = 500;
 constexpr size_t kExePathBufSize = 4096; // buffer for resolving the executable path
 constexpr float kDefaultTemp = 0.7f;
@@ -2670,7 +2703,20 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	}
 
 	if (ret != 0) {
-		error = llamaCliCommand + " exited with code " + ofToString(ret) + ". Output:\n" + trim(stripAnsi(raw));
+		const std::string trimmedRaw = trim(stripAnsi(raw));
+		const std::string codeDesc = describeExitCode(ret);
+		if (!codeDesc.empty()) {
+			error = llamaCliCommand + " crashed: " + codeDesc + ".";
+			if (!trimmedRaw.empty()) {
+				error += "\nOutput:\n" + trimmedRaw;
+			}
+			error += "\nTry reducing context size, setting GPU layers to 0 (CPU-only), or updating your GPU drivers.";
+		} else {
+			error = llamaCliCommand + " exited with code " + ofToString(ret) + ".";
+			if (!trimmedRaw.empty()) {
+				error += " Output:\n" + trimmedRaw;
+			}
+		}
 		return false;
 	}
 
