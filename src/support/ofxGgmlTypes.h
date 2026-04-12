@@ -34,8 +34,8 @@ enum class ofxGgmlType {
 
 /// Pooling operation type — mirrors ggml_op_pool.
 enum class ofxGgmlPoolType {
-	Avg = 1,
-	Max = 0
+	Max = 0,
+	Avg = 1
 };
 
 /// Unary activation functions — mirrors ggml_unary_op.
