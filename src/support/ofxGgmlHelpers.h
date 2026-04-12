@@ -54,6 +54,15 @@ inline size_t elementSize(ofxGgmlType t) {
 	}
 }
 
+/// Human-readable label for a pooling operation type.
+inline std::string poolTypeName(ofxGgmlPoolType t) {
+	switch (t) {
+		case ofxGgmlPoolType::Avg: return "AVG";
+		case ofxGgmlPoolType::Max: return "MAX";
+		default:                   return "Unknown";
+	}
+}
+
 /// Human-readable label for the addon state.
 inline std::string stateName(ofxGgmlState s) {
 	switch (s) {

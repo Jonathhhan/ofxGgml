@@ -11,10 +11,10 @@ An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https:/
   - Element-wise arithmetic: add, sub, mul, div, scale, clamp, sqr, sqrt
   - Matrix operations: matMul (A × B^T), transpose, permute, reshape, view
   - Reductions: sum, mean, argmax
-  - Normalization: norm, rmsNorm, layerNorm
+  - Normalization: norm, rmsNorm
   - Activations: relu, gelu, silu, sigmoid, tanh, softmax
   - Transformer helpers: flashAttn, rope
-  - Convolution / pooling: conv1d, pool1d, pool2d, upscale
+  - Convolution / pooling: conv1d, convTranspose1d, pool1d, pool2d, upscale
   - Loss functions: crossEntropyLoss
 - **Scheduled execution** — Multi-backend scheduler with automatic tensor placement and fallback.
 - **Device enumeration** — Query available devices, memory, and capabilities at runtime.

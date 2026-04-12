@@ -80,34 +80,42 @@ void ofxGgmlGraph::setOutput(ofxGgmlTensor tensor) {
 // --------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::add(ofxGgmlTensor a, ofxGgmlTensor b) {
+	if (!a.raw() || !b.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_add(m_ctx, a.raw(), b.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::sub(ofxGgmlTensor a, ofxGgmlTensor b) {
+	if (!a.raw() || !b.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_sub(m_ctx, a.raw(), b.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::mul(ofxGgmlTensor a, ofxGgmlTensor b) {
+	if (!a.raw() || !b.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_mul(m_ctx, a.raw(), b.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::div(ofxGgmlTensor a, ofxGgmlTensor b) {
+	if (!a.raw() || !b.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_div(m_ctx, a.raw(), b.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::sqr(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_sqr(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::sqrt(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_sqrt(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::scale(ofxGgmlTensor a, float s) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_scale(m_ctx, a.raw(), s));
 }
 
 ofxGgmlTensor ofxGgmlGraph::clamp(ofxGgmlTensor a, float minVal, float maxVal) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_clamp(m_ctx, a.raw(), minVal, maxVal));
 }
 
@@ -116,18 +124,22 @@ ofxGgmlTensor ofxGgmlGraph::clamp(ofxGgmlTensor a, float minVal, float maxVal) {
 // --------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::sum(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_sum(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::sumRows(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_sum_rows(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::mean(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_mean(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::argmax(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_argmax(m_ctx, a.raw()));
 }
 
@@ -136,6 +148,7 @@ ofxGgmlTensor ofxGgmlGraph::argmax(ofxGgmlTensor a) {
 // --------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::matMul(ofxGgmlTensor a, ofxGgmlTensor b) {
+	if (!a.raw() || !b.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_mul_mat(m_ctx, a.raw(), b.raw()));
 }
 
@@ -144,34 +157,42 @@ ofxGgmlTensor ofxGgmlGraph::matMul(ofxGgmlTensor a, ofxGgmlTensor b) {
 // --------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::reshape2d(ofxGgmlTensor a, int64_t ne0, int64_t ne1) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_reshape_2d(m_ctx, a.raw(), ne0, ne1));
 }
 
 ofxGgmlTensor ofxGgmlGraph::reshape3d(ofxGgmlTensor a, int64_t ne0, int64_t ne1, int64_t ne2) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_reshape_3d(m_ctx, a.raw(), ne0, ne1, ne2));
 }
 
 ofxGgmlTensor ofxGgmlGraph::transpose(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_transpose(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::permute(ofxGgmlTensor a, int axis0, int axis1, int axis2, int axis3) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_permute(m_ctx, a.raw(), axis0, axis1, axis2, axis3));
 }
 
 ofxGgmlTensor ofxGgmlGraph::view1d(ofxGgmlTensor a, int64_t ne0, size_t offset) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_view_1d(m_ctx, a.raw(), ne0, offset));
 }
 
 ofxGgmlTensor ofxGgmlGraph::view2d(ofxGgmlTensor a, int64_t ne0, int64_t ne1, size_t nb1, size_t offset) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_view_2d(m_ctx, a.raw(), ne0, ne1, nb1, offset));
 }
 
 ofxGgmlTensor ofxGgmlGraph::repeat(ofxGgmlTensor a, ofxGgmlTensor b) {
+	if (!a.raw() || !b.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_repeat(m_ctx, a.raw(), b.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::concat(ofxGgmlTensor a, ofxGgmlTensor b, int dim) {
+	if (!a.raw() || !b.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_concat(m_ctx, a.raw(), b.raw(), dim));
 }
 
@@ -180,18 +201,13 @@ ofxGgmlTensor ofxGgmlGraph::concat(ofxGgmlTensor a, ofxGgmlTensor b, int dim) {
 // --------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::norm(ofxGgmlTensor a, float eps) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_norm(m_ctx, a.raw(), eps));
 }
 
 ofxGgmlTensor ofxGgmlGraph::rmsNorm(ofxGgmlTensor a, float eps) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_rms_norm(m_ctx, a.raw(), eps));
-}
-
-ofxGgmlTensor ofxGgmlGraph::layerNorm(ofxGgmlTensor a, float eps) {
-	// Layer normalization is equivalent to ggml_norm (mean-subtracted,
-	// variance-normalized).  Callers should apply learned scale/bias
-	// with add() and mul() on the result when needed.
-	return ofxGgmlTensor(ggml_norm(m_ctx, a.raw(), eps));
 }
 
 // --------------------------------------------------------------------------
@@ -199,26 +215,32 @@ ofxGgmlTensor ofxGgmlGraph::layerNorm(ofxGgmlTensor a, float eps) {
 // --------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::relu(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_relu(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::gelu(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_gelu(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::silu(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_silu(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::sigmoid(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_sigmoid(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::tanh(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_tanh(m_ctx, a.raw()));
 }
 
 ofxGgmlTensor ofxGgmlGraph::softmax(ofxGgmlTensor a) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_soft_max(m_ctx, a.raw()));
 }
 
@@ -226,23 +248,16 @@ ofxGgmlTensor ofxGgmlGraph::softmax(ofxGgmlTensor a) {
 //  Attention / Transformer helpers
 // --------------------------------------------------------------------------
 
-ofxGgmlTensor ofxGgmlGraph::flashAttn(ofxGgmlTensor q, ofxGgmlTensor k, ofxGgmlTensor v, bool masked) {
-	struct ggml_tensor * mask = nullptr;
-	if (masked) {
-		// Build a causal (lower-triangular) mask filled with -INFINITY for
-		// future positions.  Shape: [kv_len, q_len] with F32 type.
-		const int64_t qLen  = q.raw()->ne[1];
-		const int64_t kvLen = k.raw()->ne[1];
-		mask = ggml_new_tensor_2d(m_ctx, GGML_TYPE_F32, kvLen, qLen);
-		ggml_set_name(mask, "causal_mask");
-		ggml_set_input(mask);
-	}
+ofxGgmlTensor ofxGgmlGraph::flashAttn(ofxGgmlTensor q, ofxGgmlTensor k, ofxGgmlTensor v,
+	ofxGgmlTensor mask) {
+	if (!q.raw() || !k.raw() || !v.raw()) return ofxGgmlTensor();
 	float scale = 1.0f;
 	return ofxGgmlTensor(ggml_flash_attn_ext(m_ctx, q.raw(), k.raw(), v.raw(),
-		mask, scale, 0.0f, 0.0f));
+		mask.raw(), scale, 0.0f, 0.0f));
 }
 
 ofxGgmlTensor ofxGgmlGraph::rope(ofxGgmlTensor a, ofxGgmlTensor positions, int nDims, int mode) {
+	if (!a.raw() || !positions.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_rope(m_ctx, a.raw(), positions.raw(), nDims, mode));
 }
 
@@ -251,24 +266,32 @@ ofxGgmlTensor ofxGgmlGraph::rope(ofxGgmlTensor a, ofxGgmlTensor positions, int n
 // --------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::conv1d(ofxGgmlTensor a, ofxGgmlTensor kernel, int stride, int padding, int dilation) {
-	// Note: ggml provides ggml_conv_transpose_1d for transposed (deconv) 1-D
-	// convolution.  For a standard 1-D convolution the caller can use the
-	// im2col + matMul pattern.  This wrapper exposes the transposed variant
-	// directly since it is the primitive available in ggml.
-	(void)dilation; // dilation is not directly supported by ggml_conv_transpose_1d
+	if (!a.raw() || !kernel.raw()) return ofxGgmlTensor();
+	return ofxGgmlTensor(ggml_conv_1d(m_ctx, kernel.raw(), a.raw(), stride, padding, dilation));
+}
+
+ofxGgmlTensor ofxGgmlGraph::convTranspose1d(ofxGgmlTensor a, ofxGgmlTensor kernel, int stride, int padding, int dilation) {
+	if (!a.raw() || !kernel.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_conv_transpose_1d(m_ctx, kernel.raw(), a.raw(), stride, padding, dilation));
 }
 
-ofxGgmlTensor ofxGgmlGraph::pool1d(ofxGgmlTensor a, int kernelSize, int stride, int padding) {
-	return ofxGgmlTensor(ggml_pool_1d(m_ctx, a.raw(), GGML_OP_POOL_AVG, kernelSize, stride, padding));
+ofxGgmlTensor ofxGgmlGraph::pool1d(ofxGgmlTensor a, int kernelSize, int stride, int padding,
+	ofxGgmlPoolType type) {
+	if (!a.raw()) return ofxGgmlTensor();
+	return ofxGgmlTensor(ggml_pool_1d(m_ctx, a.raw(),
+		static_cast<enum ggml_op_pool>(type), kernelSize, stride, padding));
 }
 
-ofxGgmlTensor ofxGgmlGraph::pool2d(ofxGgmlTensor a, int kernelSize, int stride, int padding) {
-	return ofxGgmlTensor(ggml_pool_2d(m_ctx, a.raw(), GGML_OP_POOL_AVG,
+ofxGgmlTensor ofxGgmlGraph::pool2d(ofxGgmlTensor a, int kernelSize, int stride, int padding,
+	ofxGgmlPoolType type) {
+	if (!a.raw()) return ofxGgmlTensor();
+	return ofxGgmlTensor(ggml_pool_2d(m_ctx, a.raw(),
+		static_cast<enum ggml_op_pool>(type),
 		kernelSize, kernelSize, stride, stride, padding, padding));
 }
 
 ofxGgmlTensor ofxGgmlGraph::upscale(ofxGgmlTensor a, int scaleFactor) {
+	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_upscale(m_ctx, a.raw(), scaleFactor, GGML_SCALE_MODE_NEAREST));
 }
 
@@ -277,6 +300,7 @@ ofxGgmlTensor ofxGgmlGraph::upscale(ofxGgmlTensor a, int scaleFactor) {
 // --------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::crossEntropyLoss(ofxGgmlTensor logits, ofxGgmlTensor targets) {
+	if (!logits.raw() || !targets.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_cross_entropy_loss(m_ctx, logits.raw(), targets.raw()));
 }
 
