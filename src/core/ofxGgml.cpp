@@ -8,6 +8,40 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+
+// --------------------------------------------------------------------------
+//  Early environment setup
+// --------------------------------------------------------------------------
+//
+// ggml's static initializer (ggml.cpp:22) installs a custom
+// std::terminate handler.  When a second copy of libggml-base is loaded
+// at runtime (e.g. via dlopen when ggml_backend_load_all() loads GPU
+// backend plugins), its static initializer runs again and asserts that
+// the handler was not already replaced.  Setting GGML_NO_BACKTRACE
+// tells the initializer to skip the handler, avoiding the assertion.
+//
+// We set the variable as early as possible — via a high-priority
+// constructor on GCC/Clang, or via an init_seg(lib) on MSVC — so it is
+// in place before any ggml static initializer runs.
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((constructor))
+static void ofxGgml_earlyEnvSetup() {
+	setenv("GGML_NO_BACKTRACE", "1", 0); // don't overwrite if already set
+}
+#elif defined(_MSC_VER)
+#pragma init_seg(lib)
+static struct OfxGgmlEarlyEnv {
+	OfxGgmlEarlyEnv() {
+		size_t len = 0;
+		// Only set if not already present, matching the setenv() behavior.
+		if (getenv_s(&len, nullptr, 0, "GGML_NO_BACKTRACE") != 0 || len == 0) {
+			_putenv_s("GGML_NO_BACKTRACE", "1");
+		}
+	}
+} s_ofxGgmlEarlyEnv;
+#endif
 
 // --------------------------------------------------------------------------
 //  PIMPL
@@ -65,6 +99,19 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	// and pull in a second copy of libggml-base.
 	static bool backendsLoaded = false;
 	if (!backendsLoaded) {
+		// Set GGML_NO_BACKTRACE so that any additional copies of
+		// libggml-base loaded via dlopen() skip the terminate-handler
+		// static initializer that triggers the assertion.
+#ifdef _WIN32
+		{
+			size_t len = 0;
+			if (getenv_s(&len, nullptr, 0, "GGML_NO_BACKTRACE") != 0 || len == 0) {
+				_putenv_s("GGML_NO_BACKTRACE", "1");
+			}
+		}
+#else
+		setenv("GGML_NO_BACKTRACE", "1", 0); // don't overwrite if already set
+#endif
 		ggml_backend_load_all();
 		backendsLoaded = true;
 	}
