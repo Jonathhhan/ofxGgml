@@ -44,6 +44,33 @@ static struct OfxGgmlEarlyEnv {
 #endif
 
 // --------------------------------------------------------------------------
+//  Default console log callback
+// --------------------------------------------------------------------------
+
+/// Maps a ggml log level integer to a short label.
+static const char * logLevelLabel(int level) {
+	switch (level) {
+		case 1:  return "[DEBUG] ";
+		case 2:  return "[INFO]  ";
+		case 3:  return "[WARN]  ";
+		case 4:  return "[ERROR] ";
+		default: return "";        // NONE (0) and CONT (5)
+	}
+}
+
+/// Default callback that prints to stderr so that messages are always
+/// visible even when the caller does not install a custom callback.
+static void defaultLogCallback(int level, const std::string & message) {
+	if (message.empty()) return;
+	fprintf(stderr, "ofxGgml %s%s", logLevelLabel(level), message.c_str());
+	// GGML messages usually include a trailing newline; add one only
+	// when the message does not already end with one.
+	if (message.back() != '\n') {
+		fputc('\n', stderr);
+	}
+}
+
+// --------------------------------------------------------------------------
 //  PIMPL
 // --------------------------------------------------------------------------
 
@@ -55,7 +82,9 @@ struct ofxGgml::Impl {
 	ggml_backend_t cpuBackend = nullptr;
 	ggml_backend_sched_t sched = nullptr;
 
-	ofxGgmlLogCallback logCb;
+	/// Log callback — initialised to the built-in console logger so that
+	/// messages are visible by default.
+	ofxGgmlLogCallback logCb = defaultLogCallback;
 
 	void log(int level, const std::string & msg) {
 		if (logCb) logCb(level, msg);
@@ -116,6 +145,36 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		backendsLoaded = true;
 	}
 
+	// Log discovered devices so the user can see what is available.
+	{
+		const size_t devCount = ggml_backend_dev_count();
+		m_impl->log(GGML_LOG_LEVEL_INFO,
+			"ofxGgml: discovered " + std::to_string(devCount) + " backend device(s):\n");
+		bool hasGpu = false;
+		for (size_t i = 0; i < devCount; i++) {
+			ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+			const char * devName = ggml_backend_dev_name(dev);
+			const char * devDesc = ggml_backend_dev_description(dev);
+			ggml_backend_dev_type devType = ggml_backend_dev_type(dev);
+			const char * typeLabel = "CPU";
+			if (devType == GGML_BACKEND_DEVICE_TYPE_GPU) {
+				typeLabel = "GPU";
+				hasGpu = true;
+			} else if (devType != GGML_BACKEND_DEVICE_TYPE_CPU) {
+				typeLabel = "Accelerator";
+				hasGpu = true;
+			}
+			m_impl->log(GGML_LOG_LEVEL_INFO,
+				"ofxGgml:   [" + std::to_string(i) + "] " +
+				(devName ? devName : "?") + " — " +
+				(devDesc ? devDesc : "") + " (" + typeLabel + ")\n");
+		}
+		if (!hasGpu && settings.preferredBackend != ofxGgmlBackendType::Cpu) {
+			m_impl->log(GGML_LOG_LEVEL_WARN,
+				"ofxGgml: no usable GPU found — will fall back to CPU\n");
+		}
+	}
+
 	// Initialize the preferred backend.
 	if (settings.deviceIndex >= 0) {
 		// A specific device index was requested — try to initialise it.
@@ -124,6 +183,20 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 			ggml_backend_dev_t dev = ggml_backend_dev_get(
 				static_cast<size_t>(settings.deviceIndex));
 			m_impl->backend = ggml_backend_dev_init(dev, nullptr);
+			if (m_impl->backend) {
+				m_impl->log(GGML_LOG_LEVEL_INFO,
+					"ofxGgml: initialised requested device index " +
+					std::to_string(settings.deviceIndex) + "\n");
+			} else {
+				m_impl->log(GGML_LOG_LEVEL_WARN,
+					"ofxGgml: failed to initialise device index " +
+					std::to_string(settings.deviceIndex) + ", trying alternatives\n");
+			}
+		} else {
+			m_impl->log(GGML_LOG_LEVEL_WARN,
+				"ofxGgml: requested device index " +
+				std::to_string(settings.deviceIndex) + " out of range (" +
+				std::to_string(ggml_backend_dev_count()) + " available)\n");
 		}
 	}
 
@@ -139,7 +212,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 
 	if (!m_impl->backend) {
 		m_impl->state = ofxGgmlState::Error;
-		m_impl->log(2, "ofxGgml: failed to initialize any backend");
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to initialize any backend\n");
 		return false;
 	}
 
@@ -147,7 +220,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	m_impl->cpuBackend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
 	if (!m_impl->cpuBackend) {
 		m_impl->state = ofxGgmlState::Error;
-		m_impl->log(2, "ofxGgml: failed to initialize CPU backend");
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to initialize CPU backend\n");
 		ggml_backend_free(m_impl->backend);
 		m_impl->backend = nullptr;
 		return false;
@@ -167,7 +240,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 
 	if (!m_impl->sched) {
 		m_impl->state = ofxGgmlState::Error;
-		m_impl->log(2, "ofxGgml: failed to create backend scheduler");
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to create backend scheduler\n");
 		ggml_backend_free(m_impl->backend);
 		ggml_backend_free(m_impl->cpuBackend);
 		m_impl->backend = nullptr;
@@ -176,8 +249,8 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	}
 
 	m_impl->state = ofxGgmlState::Ready;
-	m_impl->log(0, std::string("ofxGgml: ready (backend: ") +
-		ggml_backend_name(m_impl->backend) + ")");
+	m_impl->log(GGML_LOG_LEVEL_INFO, std::string("ofxGgml: ready (backend: ") +
+		ggml_backend_name(m_impl->backend) + ")\n");
 	return true;
 }
 
@@ -258,18 +331,18 @@ void ofxGgml::getTensorData(ofxGgmlTensor tensor, void * data, size_t bytes) con
 
 bool ofxGgml::allocGraph(ofxGgmlGraph & graph) {
 	if (m_impl->state != ofxGgmlState::Ready) {
-		m_impl->log(2, "ofxGgml: not ready");
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: not ready\n");
 		return false;
 	}
 	if (!graph.raw()) {
-		m_impl->log(2, "ofxGgml: graph not built (call graph.build() first)");
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: graph not built (call graph.build() first)\n");
 		return false;
 	}
 
 	ggml_backend_sched_reset(m_impl->sched);
 
 	if (!ggml_backend_sched_alloc_graph(m_impl->sched, graph.raw())) {
-		m_impl->log(2, "ofxGgml: graph allocation failed");
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: graph allocation failed\n");
 		return false;
 	}
 	return true;
@@ -324,17 +397,17 @@ ofxGgmlComputeResult ofxGgml::compute(ofxGgmlGraph & graph) {
 
 bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	if (m_impl->state != ofxGgmlState::Ready) {
-		m_impl->log(2, "ofxGgml: not ready");
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: not ready\n");
 		return false;
 	}
 	if (!model.isLoaded()) {
-		m_impl->log(2, "ofxGgml: model not loaded");
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: model not loaded\n");
 		return false;
 	}
 
 	struct ggml_context * modelCtx = model.ggmlContext();
 	if (!modelCtx) {
-		m_impl->log(2, "ofxGgml: model has no ggml context");
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: model has no ggml context\n");
 		return false;
 	}
 
@@ -365,7 +438,7 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	// Step 2 — allocate a backend buffer for all context tensors.
 	ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(modelCtx, m_impl->backend);
 	if (!buf) {
-		m_impl->log(2, "ofxGgml: failed to allocate backend buffer for model weights");
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to allocate backend buffer for model weights\n");
 		return false;
 	}
 
@@ -374,9 +447,9 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 		ggml_backend_tensor_set(snap.tensor, snap.hostData, 0, snap.bytes);
 	}
 
-	m_impl->log(0, std::string("ofxGgml: model weights loaded (") +
+	m_impl->log(GGML_LOG_LEVEL_INFO, std::string("ofxGgml: model weights loaded (") +
 		std::to_string(snapshots.size()) + " tensors on backend: " +
-		ggml_backend_name(m_impl->backend) + ")");
+		ggml_backend_name(m_impl->backend) + ")\n");
 	return true;
 }
 
