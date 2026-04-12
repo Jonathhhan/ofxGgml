@@ -143,7 +143,7 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 	mutableCmd.push_back('\0');
 
 	BOOL ok = CreateProcessA(
-		args[0].c_str(),
+		nullptr,
 		mutableCmd.data(),
 		nullptr,
 		nullptr,
@@ -191,10 +191,11 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 		close(pipefd[0]);
 		close(pipefd[1]);
 
+		std::vector<std::string> mutableArgs = args;
 		std::vector<char *> argv;
-		argv.reserve(args.size() + 1);
-		for (const auto & a : args) {
-			argv.push_back(const_cast<char *>(a.c_str()));
+		argv.reserve(mutableArgs.size() + 1);
+		for (auto & a : mutableArgs) {
+			argv.push_back(a.data());
 		}
 		argv.push_back(nullptr);
 		execvp(argv[0], argv.data());
@@ -1853,20 +1854,20 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		return false;
 	}
 
-	static std::atomic<int> llamaCliAvailable{-1}; // -1 unknown, 0 unavailable, 1 available
-	if (llamaCliAvailable.load(std::memory_order_relaxed) == 0) {
+	static std::atomic<int> llamaCliState{-1}; // -1 unknown, 0 unavailable, 1 available
+	if (llamaCliState.load(std::memory_order_relaxed) == 0) {
 		error = "llama-cli not found in PATH.";
 		return false;
 	}
-	if (llamaCliAvailable.load(std::memory_order_relaxed) < 0) {
+	if (llamaCliState.load(std::memory_order_relaxed) < 0) {
 		std::string probeOut;
 		int probeExit = -1;
 		if (!runProcessCapture({"llama-cli", "--version"}, probeOut, probeExit) || probeExit != 0) {
-			llamaCliAvailable.store(0, std::memory_order_relaxed);
+			llamaCliState.store(0, std::memory_order_relaxed);
 			error = "llama-cli not found in PATH.";
 			return false;
 		}
-		llamaCliAvailable.store(1, std::memory_order_relaxed);
+		llamaCliState.store(1, std::memory_order_relaxed);
 	}
 
 	std::error_code tempEc;
@@ -1875,7 +1876,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		dataDir = ofToDataPath("", true);
 	}
 	std::random_device rd;
-	const uint64_t nonce = (static_cast<uint64_t>(rd()) << 32) ^ static_cast<uint64_t>(rd());
+	const uint64_t nonce = (static_cast<uint64_t>(rd()) << 32) | static_cast<uint64_t>(rd());
 	const std::string id = ofToString(ofGetSystemTimeMillis()) + "_" + ofToString(nonce);
 	const std::string promptPath = ofFilePath::join(dataDir, "llama_prompt_" + id + ".txt");
 
@@ -1927,7 +1928,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	}
 
 	if (!started) {
-		llamaCliAvailable.store(0, std::memory_order_relaxed);
+		llamaCliState.store(0, std::memory_order_relaxed);
 		error = "llama-cli not found in PATH.";
 		return false;
 	}
@@ -1936,14 +1937,14 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		const std::string lowered = ofToLower(raw);
 		if (lowered.find("not found") != std::string::npos ||
 			lowered.find("no such file or directory") != std::string::npos) {
-			llamaCliAvailable.store(0, std::memory_order_relaxed);
+			llamaCliState.store(0, std::memory_order_relaxed);
 			error = "llama-cli not found in PATH.";
 			return false;
 		}
 		error = "llama-cli failed. Output:\n" + trim(stripAnsi(raw));
 		return false;
 	}
-	llamaCliAvailable.store(1, std::memory_order_relaxed);
+	llamaCliState.store(1, std::memory_order_relaxed);
 
 	output = trim(stripAnsi(raw));
 	if (output.empty()) {
