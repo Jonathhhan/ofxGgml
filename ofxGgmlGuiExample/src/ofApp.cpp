@@ -194,9 +194,8 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 		std::vector<std::string> mutableArgs = args;
 		std::vector<char *> argv;
 		argv.reserve(mutableArgs.size() + 1);
-		static char emptyArg[] = "";
 		for (auto & a : mutableArgs) {
-			argv.push_back(a.empty() ? emptyArg : &a[0]);
+			argv.push_back(a.empty() ? const_cast<char *>("") : &a[0]);
 		}
 		argv.push_back(nullptr);
 		execvp(argv[0], argv.data());
@@ -1877,7 +1876,9 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		dataDir = ofToDataPath("", true);
 	}
 	std::random_device rd;
-	const uint64_t nonce = (static_cast<uint64_t>(rd()) << 32) | static_cast<uint64_t>(rd());
+	const uint64_t nonceHi = static_cast<uint64_t>(rd());
+	const uint64_t nonceLo = static_cast<uint64_t>(rd());
+	const uint64_t nonce = (nonceHi << 32) | nonceLo;
 	const std::string id = ofToString(ofGetSystemTimeMillis()) + "_" + ofToString(nonce);
 	const std::string promptPath = ofFilePath::join(dataDir, "llama_prompt_" + id + ".txt");
 
