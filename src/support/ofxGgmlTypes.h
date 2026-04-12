@@ -65,7 +65,7 @@ struct ofxGgmlSettings {
 
 	/// Preferred backend type.  The addon will fall back to CPU when the
 	/// requested device is unavailable.
-	ofxGgmlBackendType preferredBackend = ofxGgmlBackendType::Cpu;
+	ofxGgmlBackendType preferredBackend = ofxGgmlBackendType::Gpu;
 
 	/// Index of the specific backend device to use (-1 = auto-select the
 	/// first device matching `preferredBackend`).  When >= 0 the device at

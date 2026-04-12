@@ -7,7 +7,7 @@ void ofApp::setup() {
 	ofSetWindowTitle("ofxGgml — Matrix Multiplication");
 	ofBackground(30);
 
-	// Initialize ggml with default (CPU) settings.
+	// Initialize ggml with default settings (prefers GPU if available).
 	ofxGgmlSettings settings;
 	settings.threads = 4;
 	if (!ggml.setup(settings)) {
