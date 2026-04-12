@@ -265,7 +265,7 @@ Or install them into the addon tree for automatic detection:
 ./scripts/build-llama-cli.sh --prefix ./libs/llama
 ```
 
-If either prerequisite is missing, the app falls back to the built-in demo compute pipeline and shows the reason in the output.
+If either prerequisite is missing, the app shows an error with setup instructions.
 
 ## License
 
