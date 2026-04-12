@@ -275,9 +275,9 @@ If you see an assertion like `GGML_ASSERT(prev != ggml_uncaught_exception)` at `
 
 - **Duplicate linking**: linking `ggml`, `ggml-base`, and `ggml-cpu` simultaneously when `ggml` already depends on the other two. The addon's `addon_config.mk` now links only `ggml.lib` on Visual Studio to avoid this.
 - **Multiple ggml installations**: a system-wide ggml and a local copy in the addon's `libs/` directory both being loaded at runtime. Remove one or ensure library paths are consistent.
-- **Dynamic backend loading**: `ggml_backend_load_all()` uses `dlopen(RTLD_LOCAL)` which can load a second copy of `libggml-base`. The addon now guards this call to run only once per process.
+- **Dynamic backend loading**: `ggml_backend_load_all()` uses `dlopen(RTLD_LOCAL)` which can load a second copy of `libggml-base`. The addon now automatically sets the `GGML_NO_BACKTRACE=1` environment variable before loading backends to prevent the duplicate terminate-handler assertion, and guards the call to run only once per process.
 
-**Workaround**: set the environment variable `GGML_NO_BACKTRACE=1` before launching the app to skip the problematic terminate-handler initializer entirely.
+If the assertion still occurs (e.g. the static initializer runs before `setup()` is called), set the environment variable `GGML_NO_BACKTRACE=1` before launching the app.
 
 ### llama-completion not found
 
