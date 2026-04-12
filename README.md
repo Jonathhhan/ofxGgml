@@ -120,9 +120,6 @@ Two helper scripts are provided in the repository's `scripts/` directory:
 Clone, compile, and install the ggml library from source:
 
 ```bash
-# Install into this addon's libs/ggml (auto-detects CUDA)
-./scripts/build-ggml.sh --addon-lib-install
-
 # Basic CPU-only system install
 ./scripts/build-ggml.sh
 
