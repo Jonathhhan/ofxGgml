@@ -223,6 +223,9 @@ private:
 	std::string escapeSessionText(const std::string & text) const;
 	std::string unescapeSessionText(const std::string & text) const;
 
+	// -- custom CLI path --
+	char customCliPath[1024] = {};
+
 	// -- graph execution helper --
 	void runInference(AiMode mode, const std::string & userText,
 		const std::string & systemPrompt = "");
