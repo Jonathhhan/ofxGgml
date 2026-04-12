@@ -54,8 +54,7 @@ esac
 }
 
 if is_windows_like; then
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ADDON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_INSTALL_PREFIX="$ADDON_ROOT/libs/ggml"
 fi
 INSTALL_PREFIX="$DEFAULT_INSTALL_PREFIX"
