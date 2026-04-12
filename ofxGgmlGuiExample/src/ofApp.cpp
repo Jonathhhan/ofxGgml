@@ -70,6 +70,10 @@ std::string trim(const std::string & s) {
 	return s.substr(start, end - start);
 }
 
+std::string formatFallbackOutput(const std::string & reason, const std::string & demoOutput) {
+	return "[Fallback: demo pipeline]\n" + reason + "\n\n" + demoOutput;
+}
+
 }
 
 // ---------------------------------------------------------------------------
@@ -1704,16 +1708,15 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	}
 
 	static int llamaCliAvailable = -1; // -1 unknown, 0 unavailable, 1 available
-	if (llamaCliAvailable < 0) {
-		llamaCliAvailable = (std::system("llama-cli --version >/dev/null 2>&1") == 0) ? 1 : 0;
-	}
 	if (llamaCliAvailable == 0) {
 		error = "llama-cli not found in PATH.";
 		return false;
 	}
 
 	const std::string dataDir = ofToDataPath("", true);
-	const std::string id = ofToString(ofGetSystemTimeMillis());
+	std::random_device rd;
+	const uint64_t nonce = (static_cast<uint64_t>(rd()) << 32) ^ static_cast<uint64_t>(rd());
+	const std::string id = ofToString(ofGetSystemTimeMillis()) + "_" + ofToString(nonce);
 	const std::string promptPath = ofFilePath::join(dataDir, "llama_prompt_" + id + ".txt");
 	const std::string outputPath = ofFilePath::join(dataDir, "llama_output_" + id + ".txt");
 
@@ -1758,13 +1761,31 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 
 	std::error_code ec;
 	std::filesystem::remove(promptPath, ec);
+	if (ec) {
+		std::lock_guard<std::mutex> lock(logMutex);
+		logMessages.push_back("[warn] failed to remove temp prompt file: " + promptPath);
+		if (logMessages.size() > 500) logMessages.pop_front();
+	}
 	ec.clear();
 	std::filesystem::remove(outputPath, ec);
+	if (ec) {
+		std::lock_guard<std::mutex> lock(logMutex);
+		logMessages.push_back("[warn] failed to remove temp output file: " + outputPath);
+		if (logMessages.size() > 500) logMessages.pop_front();
+	}
 
 	if (ret != 0) {
+		const std::string lowered = ofToLower(raw);
+		if (lowered.find("not found") != std::string::npos ||
+			lowered.find("no such file or directory") != std::string::npos) {
+			llamaCliAvailable = 0;
+			error = "llama-cli not found in PATH.";
+			return false;
+		}
 		error = "llama-cli failed. Output:\n" + trim(stripAnsi(raw));
 		return false;
 	}
+	llamaCliAvailable = 1;
 
 	output = trim(stripAnsi(raw));
 	if (output.empty()) {
@@ -1794,7 +1815,7 @@ workerThread.join();
 
  if (!runRealInference(prompt, result, error)) {
  std::string demo = runDemoComputation(userText, mode, systemPrompt);
- result = "[Fallback: demo pipeline]\n" + error + "\n\n" + demo;
+ result = formatFallbackOutput(error, demo);
  }
 
 {
