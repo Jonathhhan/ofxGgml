@@ -274,6 +274,9 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 			if (devNullW >= 0) {
 				dup2(devNullW, STDERR_FILENO);
 				close(devNullW);
+			} else {
+				// Last resort: close stderr so nothing leaks into the pipe.
+				close(STDERR_FILENO);
 			}
 		}
 		close(pipefd[0]);
