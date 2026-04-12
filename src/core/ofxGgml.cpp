@@ -179,30 +179,6 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	}
 
 	// Initialize the preferred backend.
-	if (settings.deviceIndex >= 0) {
-		// A specific device index was requested — try to initialise it.
-		const size_t devCount = ggml_backend_dev_count();
-		if (static_cast<size_t>(settings.deviceIndex) < devCount) {
-			ggml_backend_dev_t dev = ggml_backend_dev_get(
-				static_cast<size_t>(settings.deviceIndex));
-			m_impl->backend = ggml_backend_dev_init(dev, nullptr);
-			if (m_impl->backend) {
-				m_impl->log(GGML_LOG_LEVEL_INFO,
-					"ofxGgml: initialised requested device index " +
-					std::to_string(settings.deviceIndex) + "\n");
-			} else {
-				m_impl->log(GGML_LOG_LEVEL_WARN,
-					"ofxGgml: failed to initialise device index " +
-					std::to_string(settings.deviceIndex) + ", trying alternatives\n");
-			}
-		} else {
-			m_impl->log(GGML_LOG_LEVEL_WARN,
-				"ofxGgml: requested device index " +
-				std::to_string(settings.deviceIndex) + " out of range (" +
-				std::to_string(ggml_backend_dev_count()) + " available)\n");
-		}
-	}
-
 	if (!m_impl->backend) {
 		m_impl->backend = ggml_backend_init_by_type(
 			static_cast<enum ggml_backend_dev_type>(settings.preferredBackend), nullptr);

@@ -161,7 +161,6 @@ constexpr float kDefaultRepeatPenalty = 1.1f;
 constexpr int kBackendAuto = 0;
 constexpr int kBackendCpu = 1;
 constexpr int kBackendGpu = 2;
-constexpr int kMaxDeviceIndex = 64;  // reasonable upper bound for device indices
 constexpr int kExecNotFound = 127; // POSIX convention when execvp fails
 constexpr float kSpinnerInterval = 0.15f;       // seconds per spinner frame
 constexpr float kDotsAnimationSpeed = 3.0f;     // dots cycle speed multiplier
@@ -770,7 +769,6 @@ settings.preferredBackend = ofxGgmlBackendType::Gpu;
 	} else if (selectedBackendIndex == kBackendCpu) {
 settings.preferredBackend = ofxGgmlBackendType::Cpu;
 }
-settings.deviceIndex = selectedDeviceIndex;
 settings.graphSize = static_cast<size_t>(contextSize);
 engineReady = ggml.setup(settings);
 if (engineReady) {
@@ -962,40 +960,6 @@ if (ImGui::Combo("Backend", &selectedBackendIndex, backendLabels, 3)) {
 reinitBackend();
 }
 
-// GPU device selector — list all discovered devices.
-{
-std::string devicePreview = (selectedDeviceIndex < 0) ? "Auto" : "";
-if (selectedDeviceIndex >= 0 && static_cast<size_t>(selectedDeviceIndex) < devices.size()) {
-	devicePreview = devices[static_cast<size_t>(selectedDeviceIndex)].name;
-}
-if (ImGui::BeginCombo("Device", devicePreview.c_str())) {
-	bool autoSelected = (selectedDeviceIndex < 0);
-	if (ImGui::Selectable("Auto", autoSelected)) {
-		selectedDeviceIndex = -1;
-		reinitBackend();
-	}
-	if (autoSelected) ImGui::SetItemDefaultFocus();
-	for (size_t i = 0; i < devices.size(); i++) {
-		const auto & d = devices[i];
-		bool isSelected = (selectedDeviceIndex == static_cast<int>(i));
-		std::string label = d.name + " (" +
-			ofxGgmlHelpers::backendTypeName(d.type) + ")";
-		if (ImGui::Selectable(label.c_str(), isSelected)) {
-			selectedDeviceIndex = static_cast<int>(i);
-			reinitBackend();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("%s\n%s\nMemory: %s / %s",
-				d.name.c_str(), d.description.c_str(),
-				ofxGgmlHelpers::formatBytes(d.memoryFree).c_str(),
-				ofxGgmlHelpers::formatBytes(d.memoryTotal).c_str());
-		}
-		if (isSelected) ImGui::SetItemDefaultFocus();
-	}
-	ImGui::EndCombo();
-}
-}
-
 ImGui::SeparatorText("Appearance");
 const char * themeLabels[] = { "Dark", "Light", "Classic" };
 if (ImGui::Combo("Theme", &themeIndex, themeLabels, 3)) {
@@ -1100,42 +1064,6 @@ const char * backendLabels[] = { "Auto", "CPU", "GPU" };
 ImGui::SetNextItemWidth(-1);
 if (ImGui::Combo("##Backend", &selectedBackendIndex, backendLabels, 3)) {
 reinitBackend();
-}
-
-// GPU device selector.
-ImGui::Text("Device:");
-ImGui::SetNextItemWidth(-1);
-{
-std::string devPreview = (selectedDeviceIndex < 0) ? "Auto" : "";
-if (selectedDeviceIndex >= 0 && static_cast<size_t>(selectedDeviceIndex) < devices.size()) {
-	devPreview = devices[static_cast<size_t>(selectedDeviceIndex)].name;
-}
-if (ImGui::BeginCombo("##Device", devPreview.c_str())) {
-	bool autoSel = (selectedDeviceIndex < 0);
-	if (ImGui::Selectable("Auto##dev", autoSel)) {
-		selectedDeviceIndex = -1;
-		reinitBackend();
-	}
-	if (autoSel) ImGui::SetItemDefaultFocus();
-	for (size_t i = 0; i < devices.size(); i++) {
-		const auto & d = devices[i];
-		bool isSel = (selectedDeviceIndex == static_cast<int>(i));
-		std::string lbl = d.name + " (" +
-			ofxGgmlHelpers::backendTypeName(d.type) + ")";
-		if (ImGui::Selectable((lbl + "##dev" + ofToString(i)).c_str(), isSel)) {
-			selectedDeviceIndex = static_cast<int>(i);
-			reinitBackend();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("%s\nMemory: %s / %s",
-				d.description.c_str(),
-				ofxGgmlHelpers::formatBytes(d.memoryFree).c_str(),
-				ofxGgmlHelpers::formatBytes(d.memoryTotal).c_str());
-		}
-		if (isSel) ImGui::SetItemDefaultFocus();
-	}
-	ImGui::EndCombo();
-}
 }
 
 ImGui::Spacing();
@@ -2133,11 +2061,6 @@ ImGui::SetNextWindowSize(ImVec2(420, 300), ImGuiCond_FirstUseEver);
 if (ImGui::Begin("Device Info", &showDeviceInfo)) {
 ImGui::Text("Backend: %s", ggml.getBackendName().c_str());
 ImGui::Text("State: %s", ofxGgmlHelpers::stateName(ggml.getState()).c_str());
-ImGui::Text("Selected device: %s",
-	selectedDeviceIndex < 0 ? "Auto" :
-	(static_cast<size_t>(selectedDeviceIndex) < devices.size()
-		? devices[static_cast<size_t>(selectedDeviceIndex)].name.c_str()
-		: "Invalid"));
 ImGui::Separator();
 
 if (devices.empty()) {
@@ -2146,25 +2069,13 @@ ImGui::TextDisabled("No devices discovered.");
 for (size_t i = 0; i < devices.size(); i++) {
 const auto & d = devices[i];
 ImGui::PushID(static_cast<int>(i));
-bool isActive = (selectedDeviceIndex == static_cast<int>(i));
-if (isActive) {
-	ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "%s", d.name.c_str());
-} else {
-	ImGui::Text("%s", d.name.c_str());
-}
+ImGui::Text("%s", d.name.c_str());
 ImGui::SameLine();
 ImGui::TextDisabled("(%s)", d.description.c_str());
 ImGui::Text("  Type: %s  Memory: %s / %s",
 ofxGgmlHelpers::backendTypeName(d.type).c_str(),
 ofxGgmlHelpers::formatBytes(d.memoryFree).c_str(),
 ofxGgmlHelpers::formatBytes(d.memoryTotal).c_str());
-if (!isActive) {
-	ImGui::SameLine();
-	if (ImGui::SmallButton("Use")) {
-		selectedDeviceIndex = static_cast<int>(i);
-		reinitBackend();
-	}
-}
 ImGui::Separator();
 ImGui::PopID();
 }
@@ -2260,7 +2171,6 @@ out << "gpuLayers=" << gpuLayers << "\n";
 out << "seed=" << seed << "\n";
 out << "numThreads=" << numThreads << "\n";
 out << "selectedBackend=" << selectedBackendIndex << "\n";
-out << "selectedDevice=" << selectedDeviceIndex << "\n";
 out << "theme=" << themeIndex << "\n";
 out << "mirostatMode=" << mirostatMode << "\n";
 out << "mirostatTau=" << ofToString(mirostatTau, 4) << "\n";
@@ -2366,7 +2276,6 @@ else if (key == "gpuLayers") gpuLayers = std::clamp(safeStoi(value), 0, 128);
 else if (key == "seed") seed = std::clamp(safeStoi(value, -1), -1, 99999);
 else if (key == "numThreads") numThreads = std::clamp(safeStoi(value, 4), 1, 32);
 else if (key == "selectedBackend") selectedBackendIndex = std::clamp(safeStoi(value), 0, 2);
-else if (key == "selectedDevice") selectedDeviceIndex = std::clamp(safeStoi(value, -1), -1, kMaxDeviceIndex);
 else if (key == "theme") {
 	themeIndex = std::clamp(safeStoi(value), 0, 2);
 	applyTheme(themeIndex);
@@ -2630,11 +2539,6 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 			out.push_back("--mirostat-ent");
 			out.push_back(tauStr.str());
 		}
-		// Pass specific GPU device index if selected.
-		if (selectedDeviceIndex >= 0) {
-			out.push_back("--device");
-			out.push_back(ofToString(selectedDeviceIndex));
-		}
 		return out;
 	};
 	std::vector<std::string> args = makeArgs(false);
@@ -2753,7 +2657,6 @@ if (selectedBackendIndex == kBackendGpu) {
 } else if (selectedBackendIndex == kBackendCpu) {
 	settings.preferredBackend = ofxGgmlBackendType::Cpu;
 }
-settings.deviceIndex = selectedDeviceIndex;
 settings.graphSize = static_cast<size_t>(contextSize);
 
 engineReady = ggml.setup(settings);
@@ -2939,10 +2842,6 @@ ImGui::Text("Configuration:");
 ImGui::Separator();
 const char * backendLabels[] = { "Auto", "CPU", "GPU" };
 ImGui::Text("  Preference: %s", backendLabels[selectedBackendIndex]);
-ImGui::Text("  Device:     %s", selectedDeviceIndex < 0 ? "Auto" :
-	(static_cast<size_t>(selectedDeviceIndex) < devices.size()
-		? devices[static_cast<size_t>(selectedDeviceIndex)].name.c_str()
-		: "Invalid"));
 ImGui::Text("  Threads:    %d", numThreads);
 ImGui::Text("  Context:    %d", contextSize);
 ImGui::Text("  Batch:      %d", batchSize);

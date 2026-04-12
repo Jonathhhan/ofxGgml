@@ -168,7 +168,6 @@ private:
 	int seed = -1;                                   // -1 = random
 	int numThreads = 4;
 	int selectedBackendIndex = 0;                    // 0=Auto, 1=CPU, 2=GPU
-	int selectedDeviceIndex = -1;                    // -1=auto, >=0=specific device
 	int themeIndex = 0;                              // 0=Dark, 1=Light, 2=Classic
 	int mirostatMode = 0;                            // 0=off, 1=Mirostat, 2=Mirostat 2.0
 	float mirostatTau = 5.0f;
