@@ -119,6 +119,18 @@ public:
 	//  Logging
 	// ------------------------------------------------------------------
 
+	/// Install a custom log callback.  By default, all log messages
+	/// (from ggml internals and from the addon itself) are printed to
+	/// stderr with a level prefix.  Call this method with a custom
+	/// callback to redirect them (e.g. to a GUI log panel).
+	///
+	/// The callback signature is:
+	///   void(int level, const std::string & message)
+	/// where level follows the ggml_log_level enum:
+	///   0 = NONE, 1 = DEBUG, 2 = INFO, 3 = WARN, 4 = ERROR, 5 = CONT.
+	///
+	/// Pass a no-op lambda to silence all output:
+	///   ggml.setLogCallback([](int, const std::string &) {});
 	void setLogCallback(ofxGgmlLogCallback cb);
 
 	// ------------------------------------------------------------------
