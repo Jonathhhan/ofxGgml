@@ -205,8 +205,8 @@ if [[ -e "$INSTALL_PREFIX" ]] && [[ ! -d "$INSTALL_PREFIX" ]]; then
 fi
 
 if [[ ! -d "$INSTALL_PREFIX" ]]; then
-	install_parent="$(dirname "$INSTALL_PREFIX")"
-	if [[ -w "$install_parent" ]]; then
+	INSTALL_PREFIX_PARENT="$(dirname "$INSTALL_PREFIX")"
+	if [[ -w "$INSTALL_PREFIX_PARENT" ]]; then
 		mkdir -p "$INSTALL_PREFIX"
 	fi
 fi
