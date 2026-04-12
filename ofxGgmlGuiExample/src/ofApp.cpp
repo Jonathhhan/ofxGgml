@@ -828,7 +828,7 @@ ImGui::SetTooltip("Number of model layers to offload to GPU\n0 = all on CPU");
 ImGui::SameLine();
 if (ImGui::SmallButton("None##settgpu")) gpuLayers = 0;
 ImGui::SameLine();
-if (ImGui::SmallButton("All##settgpu")) gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 999;
+if (ImGui::SmallButton("All##settgpu")) gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
 }
 
 const char * backendLabels[] = { "Auto", "CPU", "GPU" };
@@ -957,7 +957,7 @@ gpuLayers = 0;
 }
 ImGui::SameLine();
 if (ImGui::Button("All##gpu", ImVec2(-1, 0))) {
-gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 999;
+gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
 }
 }
 
@@ -2339,6 +2339,8 @@ void ofApp::detectModelLayers() {
 	}
 
 	// Fallback: try common architecture names.
+	// These are well-known GGUF architecture identifiers from llama.cpp.
+	// Update this list when new architectures are added to llama.cpp.
 	if (detectedModelLayers == 0) {
 		const char * archNames[] = {
 			"llama", "qwen2", "gemma", "phi", "starcoder",
