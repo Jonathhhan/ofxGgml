@@ -2,20 +2,19 @@
 # ---------------------------------------------------------------------------
 # setup.sh — One-command setup for the ofxGgml addon.
 #
-# Builds ggml (CPU-only by default), installs the llama.cpp CLI
+# Builds ggml (auto-detect GPU backends by default), installs the llama.cpp CLI
 # tools, and downloads a recommended model so you can run the examples
 # right away.
 #
-# GPU backends (CUDA, Vulkan, Metal) must be explicitly enabled via
-# flags.  Use --auto to auto-detect available GPU backends, or
-# --cuda / --vulkan / --metal to enable a specific one.
+# Use --cpu-only to force CPU-only builds, or --cuda / --vulkan / --metal
+# to force a specific backend.
 #
 # Usage:
 #   ./scripts/setup.sh [OPTIONS]
 #
 # Options:
-#   --cpu-only         Build CPU backend only (default)
-#   --auto             Auto-detect and enable available GPU backends
+#   --cpu-only         Build CPU backend only (disable GPU auto-detect)
+#   --auto             Auto-detect and enable available GPU backends (default)
 #   --gpu, --cuda      Enable CUDA backend
 #   --prefix DIR       Install prefix for llama tools
 #                      (default: /usr/local on Linux, addon-local libs/ on Windows)
@@ -35,8 +34,8 @@ ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKIP_GGML=0
 SKIP_LLAMA=0
 SKIP_MODEL=0
-GPU_FLAG=""
-LLAMA_GPU_FLAG=""
+GPU_FLAG="--auto"
+LLAMA_GPU_FLAG="--auto"
 PREFIX_FLAG=""
 JOBS_FLAG=""
 CLEAN_FLAG=""
@@ -77,6 +76,7 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--auto)
 			GPU_FLAG="--auto"
+			LLAMA_GPU_FLAG="--auto"
 			shift
 			;;
 		--vulkan)
@@ -91,6 +91,7 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--cpu-only)
 			GPU_FLAG="--cpu-only"
+			LLAMA_GPU_FLAG=""
 			shift
 			;;
 		--prefix)
@@ -144,7 +145,7 @@ echo "  └───────────────────────
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 1 — Build ggml (CPU-only by default)
+# Step 1 — Build ggml (GPU auto-detect by default)
 # ---------------------------------------------------------------------------
 
 if [[ "$SKIP_GGML" -eq 0 ]]; then

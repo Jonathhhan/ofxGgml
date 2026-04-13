@@ -13,10 +13,11 @@ An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https:/
 cd openFrameworks/addons
 git clone https://github.com/Jonathhhan/ofxGgml.git
 
-# 2. Build ggml (CPU-only by default) + llama.cpp CLI + download models
+# 2. Build ggml (GPU auto-detect by default) + llama.cpp CLI + download models
 cd ofxGgml
-./scripts/setup.sh              # CPU only (default)
-./scripts/setup.sh --auto       # auto-detects CUDA / Vulkan / Metal
+./scripts/setup.sh              # auto-detects CUDA / Vulkan / Metal (default)
+./scripts/setup.sh --auto       # explicit auto-detect
+./scripts/setup.sh --cpu-only   # force CPU-only
 ./scripts/setup.sh --cuda       # explicitly enable CUDA
 
 # 3. Add ofxGgml to your project's addons.make and build
@@ -67,12 +68,11 @@ ggml source is bundled in `libs/ggml/`.  It is compiled as a static library.  By
 ### Automated (recommended)
 
 ```bash
-./scripts/setup.sh              # builds ggml + llama CLI + downloads models
-./scripts/setup.sh --auto       # auto-detect GPU backends
+./scripts/setup.sh              # builds ggml + llama CLI + downloads models (auto-detect default)
 ./scripts/setup.sh --cuda       # explicitly enable CUDA
 ./scripts/setup.sh --skip-llama --skip-model  # ggml only
-./scripts/setup-libs.sh --auto  # build ggml + llama only (no model download)
-./scripts/setup-model.sh --model-preset 2  # download model only
+./scripts/setup.sh --skip-model  # build ggml + llama only (no model download)
+./scripts/setup.sh --skip-ggml --skip-llama --model-preset 2  # download model only
 ```
 
 ### ggml only
@@ -156,8 +156,6 @@ ofxGgml/
 │   └── build/                # build output (created by build-ggml.sh)
 ├── scripts/
 │   ├── setup.sh              # one-command full setup
-│   ├── setup-libs.sh         # setup libs/tools only (no model download)
-│   ├── setup-model.sh        # setup models only (skip lib/tool builds)
 │   ├── build-ggml.sh         # build bundled ggml — Linux/macOS
 │   ├── build-ggml.bat        # build bundled ggml — Windows/VS
 │   ├── update-ggml-source.sh # update bundled ggml to latest upstream
@@ -294,8 +292,6 @@ Build the tools with:
 | Script | Purpose |
 |--------|---------|
 | `scripts/setup.sh` | **One-command setup**: builds ggml + llama CLI + downloads models |
-| `scripts/setup-libs.sh` | Build ggml + llama CLI tools only (skip model download) |
-| `scripts/setup-model.sh` | Download model presets only (skip ggml/llama builds) |
 | `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, CPU-only by default) |
 | `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, `--auto` default) |
 | `scripts/update-ggml-source.sh` | Update bundled ggml source to latest upstream |
