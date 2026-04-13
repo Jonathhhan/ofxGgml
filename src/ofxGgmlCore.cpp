@@ -158,12 +158,19 @@ static void gpuInitAbortHandler(const char * message) {
 
 /// SIGABRT handler — catches abort() regardless of which shared library
 /// raised it.  Only active while the init guard is armed.
+///
+/// Uses only async-signal-safe operations (longjmp is listed as
+/// async-signal-safe in POSIX.1-2024).  String operations are limited
+/// to direct character assignment — no library string functions.
 static void gpuInitSigabrtHandler(int /*sig*/) {
 	if (s_gpuInitGuardActive) {
 		if (s_gpuInitAbortMsg[0] == '\0') {
-			std::strncpy(s_gpuInitAbortMsg, "SIGABRT caught",
-				sizeof(s_gpuInitAbortMsg) - 1);
-			s_gpuInitAbortMsg[sizeof(s_gpuInitAbortMsg) - 1] = '\0';
+			// Inline copy of a short literal — avoids strncpy which
+			// is not guaranteed async-signal-safe by POSIX.
+			const char lit[] = "SIGABRT caught";
+			for (size_t i = 0; i < sizeof(lit) && i < sizeof(s_gpuInitAbortMsg); i++) {
+				s_gpuInitAbortMsg[i] = lit[i]; // includes '\0'
+			}
 		}
 		s_gpuInitGuardActive = false;
 		std::longjmp(s_gpuInitJmpBuf, 1);
