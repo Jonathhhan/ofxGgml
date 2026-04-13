@@ -24,6 +24,7 @@ common:
 	# Exclude bundled ggml source from the oF build — it is compiled
 	# separately via CMake (scripts/build-ggml.sh).
 	ADDON_SOURCES_EXCLUDE += libs/ggml/src/%
+	ADDON_SOURCES_EXCLUDE += libs/ggml/build/%
 
 linux64:
 	ADDON_LIBS += libs/ggml/build/src/libggml.a
