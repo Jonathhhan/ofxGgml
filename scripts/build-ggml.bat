@@ -126,6 +126,7 @@ echo ==^> Configuring ggml build...
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 
 set "CMAKE_ARGS=-DCMAKE_BUILD_TYPE=Release"
+set "PLATFORM_ARG="
 
 if "%AUTO_DETECT%"=="1" (
     set "CMAKE_ARGS=%CMAKE_ARGS% -DOFXGGML_GPU_AUTODETECT=ON"
@@ -140,7 +141,23 @@ if defined ENABLE_VULKAN (
     set "CMAKE_ARGS=%CMAKE_ARGS% -DOFXGGML_VULKAN=%ENABLE_VULKAN%"
 )
 
-cmake -B "%BUILD_DIR%" "%GGML_DIR%" %CMAKE_ARGS%
+if defined CMAKE_GENERATOR (
+    echo(%CMAKE_GENERATOR% | findstr /i /c:"Visual Studio" >nul
+    if not errorlevel 1 set "PLATFORM_ARG=-A x64"
+) else (
+    set "PLATFORM_ARG=-A x64"
+)
+
+if defined PLATFORM_ARG (
+    cmake -B "%BUILD_DIR%" "%GGML_DIR%" %PLATFORM_ARG% %CMAKE_ARGS%
+    if errorlevel 1 (
+        echo ==^> Configure with x64 platform failed, retrying without %PLATFORM_ARG%...
+        cmake -B "%BUILD_DIR%" "%GGML_DIR%" %CMAKE_ARGS%
+    )
+) else (
+    cmake -B "%BUILD_DIR%" "%GGML_DIR%" %CMAKE_ARGS%
+)
+
 if errorlevel 1 (
     echo Error: CMake configuration failed.
     exit /b 1
