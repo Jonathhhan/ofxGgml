@@ -236,6 +236,7 @@ private:
 
 	// -- graph execution helper --
 	void reinitBackend();
+	void syncSelectedBackendIndex();
 	bool isSelectedBackendCpu() const;
 	void runInference(AiMode mode, const std::string & userText,
 		const std::string & systemPrompt = "");

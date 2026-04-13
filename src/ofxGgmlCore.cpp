@@ -95,6 +95,23 @@ struct ofxGgml::Impl {
 };
 
 // --------------------------------------------------------------------------
+//  Device validation helper
+// --------------------------------------------------------------------------
+
+/// Returns true when the device reports usable memory (total > 0 and
+/// free > 0).  CPU devices always pass — this check is only meaningful
+/// for GPU / accelerator devices where the driver may enumerate the
+/// device even though it cannot allocate memory.
+static bool isDeviceMemoryAvailable(ggml_backend_dev_t dev) {
+	if (!dev) return false;
+	enum ggml_backend_dev_type dt = ggml_backend_dev_type(dev);
+	if (dt == GGML_BACKEND_DEVICE_TYPE_CPU) return true;
+	size_t free = 0, total = 0;
+	ggml_backend_dev_memory(dev, &free, &total);
+	return total > 0 && free > 0;
+}
+
+// --------------------------------------------------------------------------
 //  Static log callback for ggml
 // --------------------------------------------------------------------------
 
@@ -197,21 +214,12 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		ggml_backend_dev_t namedDev = ggml_backend_dev_by_name(
 			settings.preferredBackendName.c_str());
 		if (namedDev) {
-			enum ggml_backend_dev_type dt = ggml_backend_dev_type(namedDev);
-			bool needsGpuCheck = (dt != GGML_BACKEND_DEVICE_TYPE_CPU);
-			bool gpuOk = true;
-			if (needsGpuCheck) {
-				size_t free = 0, total = 0;
-				ggml_backend_dev_memory(namedDev, &free, &total);
-				if (total == 0 || free == 0) {
-					gpuOk = false;
-					m_impl->log(GGML_LOG_LEVEL_WARN,
-						"ofxGgml: device \"" + settings.preferredBackendName +
-						"\" reports no usable memory — skipping\n");
-				}
-			}
-			if (gpuOk) {
+			if (isDeviceMemoryAvailable(namedDev)) {
 				m_impl->backend = ggml_backend_dev_init(namedDev, nullptr);
+			} else {
+				m_impl->log(GGML_LOG_LEVEL_WARN,
+					"ofxGgml: device \"" + settings.preferredBackendName +
+					"\" reports no usable memory — skipping\n");
 			}
 		}
 		if (!m_impl->backend) {
@@ -225,16 +233,12 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		// Try the preferred type, but validate the device first.
 		ggml_backend_dev_t typeDev = ggml_backend_dev_by_type(
 			static_cast<enum ggml_backend_dev_type>(settings.preferredBackend));
-		if (typeDev) {
-			size_t free = 0, total = 0;
-			ggml_backend_dev_memory(typeDev, &free, &total);
-			if (total > 0 && free > 0) {
-				m_impl->backend = ggml_backend_dev_init(typeDev, nullptr);
-			} else {
-				m_impl->log(GGML_LOG_LEVEL_WARN,
-					"ofxGgml: preferred device type reports no usable memory"
-					" — falling back\n");
-			}
+		if (typeDev && isDeviceMemoryAvailable(typeDev)) {
+			m_impl->backend = ggml_backend_dev_init(typeDev, nullptr);
+		} else if (typeDev) {
+			m_impl->log(GGML_LOG_LEVEL_WARN,
+				"ofxGgml: preferred device type reports no usable memory"
+				" — falling back\n");
 		}
 	}
 	if (!m_impl->backend) {
