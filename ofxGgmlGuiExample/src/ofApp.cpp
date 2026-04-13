@@ -799,10 +799,8 @@ initScriptLanguages();
 initCodeTemplates();
 initPromptTemplates();
 if (!scriptLanguages.empty()) {
-	if (!scriptLanguages.empty()) {
-		scriptSource.setPreferredExtension(
-			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
-	}
+	scriptSource.setPreferredExtension(
+		scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
 }
 
 // Default branch for GitHub.
