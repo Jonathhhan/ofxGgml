@@ -237,6 +237,7 @@ update_addon_config() {
 	local base_name
 	local rel_path
 	local -A selected=()
+	local -A consumed=()
 	local all_libs=()
 	local remaining_libs=()
 	local ordered_names=(
@@ -271,18 +272,18 @@ update_addon_config() {
 		if [[ -n "${selected[$base_name]:-}" ]]; then
 			rel_path="${selected[$base_name]#"$ADDON_ROOT"/}"
 			libs+=("$rel_path")
-			unset selected[$base_name]
+			consumed["$base_name"]=1
 		fi
 	done
 
 	for base_name in "${!selected[@]}"; do
-		remaining_libs+=("${selected[$base_name]#"$ADDON_ROOT"/}")
+		if [[ -z "${consumed[$base_name]:-}" ]]; then
+			remaining_libs+=("${selected[$base_name]#"$ADDON_ROOT"/}")
+		fi
 	done
 
 	if [[ ${#remaining_libs[@]} -gt 0 ]]; then
-		local old_ifs="${IFS- }"
-		IFS=$'\n' remaining_libs=($(printf '%s\n' "${remaining_libs[@]}" | sort))
-		IFS="$old_ifs"
+		mapfile -t remaining_libs < <(printf '%s\n' "${remaining_libs[@]}" | sort)
 		libs+=("${remaining_libs[@]}")
 	fi
 
