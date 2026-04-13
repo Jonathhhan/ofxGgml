@@ -145,6 +145,13 @@ if "%SKIP_MODEL%"=="0" (
     echo [2/2] Skipping model download ^(--skip-model^).
 )
 
+if "%GGML_BUILD_FAILED%"=="1" (
+    echo.
+    echo Setup partially completed: model download finished, but ggml build failed.
+    echo.
+    exit /b 1
+)
+
 echo.
 echo Setup complete.
 echo.
@@ -152,11 +159,6 @@ echo Next steps:
 echo   1. Add ofxGgml to your project addons.make
 echo   2. Build and run your project
 echo.
-
-if "%GGML_BUILD_FAILED%"=="1" (
-    echo Setup finished with errors: ggml build failed.
-    exit /b 1
-)
 
 exit /b 0
 
