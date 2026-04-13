@@ -16,8 +16,8 @@
 #   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 #   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
 #   --metal        Enable Metal backend (macOS only)
-#   --auto         Auto-detect available GPU backends
-#   --cpu-only     Disable GPU autodetection, build CPU backend only (default)
+#   --auto         Auto-detect available GPU backends (default)
+#   --cpu-only     Disable GPU autodetection, build CPU backend only
 #   --clean        Remove build directory before building
 #   --help         Show this help message
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ JOBS=""
 ENABLE_CUDA=""
 ENABLE_VULKAN=""
 ENABLE_METAL=""
-AUTO_DETECT=0
+AUTO_DETECT=1
 CLEAN=0
 
 write_step() {

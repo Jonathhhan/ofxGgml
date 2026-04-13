@@ -967,12 +967,11 @@ if (ImGui::BeginMenu("View")) {
 ImGui::MenuItem("Device Info    (F1)", nullptr, &showDeviceInfo);
 ImGui::MenuItem("Engine Log     (F2)", nullptr, &showLog);
 ImGui::MenuItem("Performance    (F3)", nullptr, &showPerformance);
-ImGui::MenuItem("Script Source Panel", nullptr, &showScriptSourcePanel);
 ImGui::Separator();
 ImGui::MenuItem("Verbose Console Output", nullptr, &verbose);
 ImGui::EndMenu();
 }
-if (ImGui::BeginMenu("Settings")) {
+if (ImGui::BeginMenu("Options")) {
 ImGui::SeparatorText("Generation");
 ImGui::SliderInt("Max Tokens", &maxTokens, 32, 4096);
 ImGui::SliderFloat("Temperature", &temperature, 0.0f, 2.0f, "%.2f");
@@ -1336,7 +1335,6 @@ ImGui::SameLine();
 if (isGitHub) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.6f, 1.0f));
 if (ImGui::SmallButton("GitHub")) {
 scriptSourceType = ScriptSourceType::GitHubRepo;
-showScriptSourcePanel = true;
 }
 if (isGitHub) ImGui::PopStyleColor();
 
@@ -1362,7 +1360,7 @@ ImGui::PopID();
 ImGui::EndChild();
 }
 
-if (scriptSourceType == ScriptSourceType::GitHubRepo && showScriptSourcePanel) {
+if (scriptSourceType == ScriptSourceType::GitHubRepo) {
 drawScriptSourcePanel();
 }
 
