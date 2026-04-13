@@ -2838,6 +2838,10 @@ bool ofApp::isSelectedBackendCpu() const {
 }
 
 void ofApp::syncSelectedBackendIndex() {
+	if (backendNames.empty()) {
+		selectedBackendIndex = 0;
+		return;
+	}
 	std::string actualName = ggml.getBackendName();
 	int matchIdx = -1;
 	for (int i = 0; i < static_cast<int>(backendNames.size()); i++) {
