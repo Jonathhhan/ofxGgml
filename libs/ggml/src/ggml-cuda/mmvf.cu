@@ -273,7 +273,7 @@ static __global__ void mul_mat_vec_f(
         }
         for (int col2 = tid; col2 < ncols2; col2 += block_size) {
             const nv_bfloat162 tmpx = x2[col2];
-            nv_bfloat162 tmpx_gate;
+            nv_bfloat162 tmpx_gate = {0.0f, 0.0f};
             if constexpr (has_fusion) {
                 if (use_gate) {
                     tmpx_gate = gate_x2[col2];

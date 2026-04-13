@@ -150,5 +150,11 @@ if [[ -n "$UPSTREAM_MAJOR" ]]; then
 	sed -i "s/set(GGML_VERSION_PATCH .*/set(GGML_VERSION_PATCH $UPSTREAM_PATCH)/" "$GGML_DIR/CMakeLists.txt"
 fi
 
+# ---------------------------------------------------------------------------
+# Apply local patches
+# ---------------------------------------------------------------------------
+
+"$SCRIPT_DIR/apply-patches.sh"
+
 write_step "Done! ggml source updated to commit $BUNDLED_COMMIT"
 write_step "Run ./scripts/build-ggml.sh --clean to rebuild."
