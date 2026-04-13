@@ -71,6 +71,8 @@ ggml source is bundled in `libs/ggml/`.  It is compiled as a static library.  By
 ./scripts/setup.sh --auto       # auto-detect GPU backends
 ./scripts/setup.sh --cuda       # explicitly enable CUDA
 ./scripts/setup.sh --skip-llama --skip-model  # ggml only
+./scripts/setup-libs.sh --auto  # build ggml + llama only (no model download)
+./scripts/setup-model.sh --model-preset 2  # download model only
 ```
 
 ### ggml only
@@ -88,8 +90,7 @@ ggml source is bundled in `libs/ggml/`.  It is compiled as a static library.  By
 Open a **Developer Command Prompt for VS** (or any terminal with CMake in your PATH) and run:
 
 ```bat
-scripts\build-ggml.bat              &:: CPU only (default)
-scripts\build-ggml.bat --auto      &:: auto-detect GPU backends
+scripts\build-ggml.bat              &:: auto-detect GPU backends (default)
 scripts\build-ggml.bat --cuda       &:: force CUDA on
 scripts\build-ggml.bat --vulkan     &:: force Vulkan on
 scripts\build-ggml.bat --cpu-only   &:: CPU only
@@ -155,6 +156,8 @@ ofxGgml/
 │   └── build/                # build output (created by build-ggml.sh)
 ├── scripts/
 │   ├── setup.sh              # one-command full setup
+│   ├── setup-libs.sh         # setup libs/tools only (no model download)
+│   ├── setup-model.sh        # setup models only (skip lib/tool builds)
 │   ├── build-ggml.sh         # build bundled ggml — Linux/macOS
 │   ├── build-ggml.bat        # build bundled ggml — Windows/VS
 │   ├── update-ggml-source.sh # update bundled ggml to latest upstream
@@ -291,8 +294,10 @@ Build the tools with:
 | Script | Purpose |
 |--------|---------|
 | `scripts/setup.sh` | **One-command setup**: builds ggml + llama CLI + downloads models |
+| `scripts/setup-libs.sh` | Build ggml + llama CLI tools only (skip model download) |
+| `scripts/setup-model.sh` | Download model presets only (skip ggml/llama builds) |
 | `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, CPU-only by default) |
-| `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, CPU-only by default) |
+| `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, `--auto` default) |
 | `scripts/update-ggml-source.sh` | Update bundled ggml source to latest upstream |
 | `scripts/build-llama-cli.sh` | Clone, compile, and install llama.cpp CLI tools |
 | `scripts/download-model.sh` | Download GGUF model presets |

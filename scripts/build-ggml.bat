@@ -5,8 +5,8 @@ REM build-ggml.bat — Build the bundled ggml tensor library on Windows.
 REM
 REM The ggml source is bundled inside libs\ggml\.  This script runs CMake
 REM to configure and build it, producing static libraries that the addon
-REM links against.  GPU backends (CUDA, Vulkan) must be explicitly enabled
-REM via command-line flags.  By default only the CPU backend is built.
+REM links against.  GPU backends (CUDA, Vulkan) can be auto-detected or
+REM explicitly enabled via command-line flags.  By default auto-detection is on.
 REM
 REM Usage:
 REM   scripts\build-ggml.bat [OPTIONS]
@@ -14,8 +14,8 @@ REM
 REM Options:
 REM   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 REM   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
-REM   --auto         Auto-detect available GPU backends
-REM   --cpu-only     Disable GPU autodetection, build CPU backend only (default)
+REM   --auto         Auto-detect available GPU backends (default)
+REM   --cpu-only     Disable GPU autodetection, build CPU backend only
 REM   --clean        Remove build directory before building
 REM   --jobs N       Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
 REM   --help         Show this help message
@@ -28,28 +28,33 @@ set "BUILD_DIR=%GGML_DIR%\build"
 set "JOBS=%NUMBER_OF_PROCESSORS%"
 set "ENABLE_CUDA="
 set "ENABLE_VULKAN="
-set "AUTO_DETECT=0"
+set "AUTO_DETECT=1"
 set "CLEAN=0"
 
 :parse_args
 if "%~1"=="" goto done_args
 if /i "%~1"=="--cuda" (
     set "ENABLE_CUDA=ON"
+    set "AUTO_DETECT=0"
     shift
     goto parse_args
 )
 if /i "%~1"=="--gpu" (
     set "ENABLE_CUDA=ON"
+    set "AUTO_DETECT=0"
     shift
     goto parse_args
 )
 if /i "%~1"=="--vulkan" (
     set "ENABLE_VULKAN=ON"
+    set "AUTO_DETECT=0"
     shift
     goto parse_args
 )
 if /i "%~1"=="--cpu-only" (
     set "AUTO_DETECT=0"
+    set "ENABLE_CUDA="
+    set "ENABLE_VULKAN="
     shift
     goto parse_args
 )
@@ -83,8 +88,8 @@ echo.
 echo Options:
 echo   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 echo   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
-echo   --auto         Auto-detect available GPU backends
-echo   --cpu-only     Disable GPU autodetection, build CPU backend only (default)
+echo   --auto         Auto-detect available GPU backends (default)
+echo   --cpu-only     Disable GPU autodetection, build CPU backend only
 echo   --clean        Remove build directory before building
 echo   --jobs N       Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
 echo   --help         Show this help message
@@ -145,21 +150,10 @@ REM ---------------------------------------------------------------------------
 REM Build
 REM ---------------------------------------------------------------------------
 
-echo ==^> Building ggml (Release) with %JOBS% parallel jobs...
-
-cmake --build "%BUILD_DIR%" --config Release -j %JOBS%
-if errorlevel 1 (
-    echo Error: CMake Release build failed.
-    exit /b 1
-)
-
-echo ==^> Building ggml (Debug) with %JOBS% parallel jobs...
-
-cmake --build "%BUILD_DIR%" --config Debug -j %JOBS%
-if errorlevel 1 (
-    echo Error: CMake Debug build failed.
-    exit /b 1
-)
+call :build_config Release
+if errorlevel 1 exit /b 1
+call :build_config Debug
+if errorlevel 1 exit /b 1
 
 REM ---------------------------------------------------------------------------
 REM Verify
@@ -169,42 +163,11 @@ echo ==^> Verifying build output...
 
 set "LIB_DIR_REL=%BUILD_DIR%\src\Release"
 set "LIB_DIR_DBG=%BUILD_DIR%\src\Debug"
-set "FOUND=0"
 
-if exist "%LIB_DIR_REL%\ggml.lib" (
-    echo ==^>   Found (Release): %LIB_DIR_REL%\ggml.lib
-    set "FOUND=1"
-)
-if exist "%LIB_DIR_REL%\ggml-base.lib" (
-    echo ==^>   Found (Release): %LIB_DIR_REL%\ggml-base.lib
-    set "FOUND=1"
-)
-if exist "%LIB_DIR_REL%\ggml-cpu.lib" (
-    echo ==^>   Found (Release): %LIB_DIR_REL%\ggml-cpu.lib
-    set "FOUND=1"
-)
-
-if "%FOUND%"=="0" (
-    echo Error: No ggml Release libraries found in %LIB_DIR_REL%
-    echo Make sure CMake built successfully with the Visual Studio generator.
-    exit /b 1
-)
-
-set "DBG_FOUND=0"
-if exist "%LIB_DIR_DBG%\ggml.lib" (
-    echo ==^>   Found (Debug): %LIB_DIR_DBG%\ggml.lib
-    set "DBG_FOUND=1"
-)
-if exist "%LIB_DIR_DBG%\ggml-base.lib" (
-    echo ==^>   Found (Debug): %LIB_DIR_DBG%\ggml-base.lib
-    set "DBG_FOUND=1"
-)
-if exist "%LIB_DIR_DBG%\ggml-cpu.lib" (
-    echo ==^>   Found (Debug): %LIB_DIR_DBG%\ggml-cpu.lib
-    set "DBG_FOUND=1"
-)
-
-if "%DBG_FOUND%"=="0" (
+call :verify_config Release
+if errorlevel 1 exit /b 1
+call :verify_config Debug
+if errorlevel 2 (
     echo ==^> Warning: No ggml Debug libraries found in %LIB_DIR_DBG%
     echo ==^> Debug mode may not work. Only Release configuration will be available.
 )
@@ -223,3 +186,36 @@ echo ==^> Import ofxGgml.props into your VS project to link the libraries:
 echo ==^>   View ^> Property Manager ^> Add Existing Property Sheet
 
 endlocal
+exit /b 0
+
+:build_config
+set "CFG=%~1"
+echo ==^> Building ggml (%CFG%) with %JOBS% parallel jobs...
+cmake --build "%BUILD_DIR%" --config %CFG% -j %JOBS%
+if errorlevel 1 (
+    echo Error: CMake %CFG% build failed.
+    exit /b 1
+)
+exit /b 0
+
+:verify_config
+set "CFG=%~1"
+set "CFG_LIB_DIR=%BUILD_DIR%\src\%CFG%"
+set "FOUND=0"
+for %%L in (ggml.lib ggml-base.lib ggml-cpu.lib) do (
+    if exist "!CFG_LIB_DIR!\%%L" (
+        echo ==^>   Found (%CFG%): !CFG_LIB_DIR!\%%L
+        set "FOUND=1"
+    )
+)
+
+if "!FOUND!"=="0" (
+    if /i "%CFG%"=="Release" (
+        echo Error: No ggml Release libraries found in !CFG_LIB_DIR!
+        echo Make sure CMake built successfully with the Visual Studio generator.
+        exit /b 1
+    ) else (
+        exit /b 2
+    )
+)
+exit /b 0
