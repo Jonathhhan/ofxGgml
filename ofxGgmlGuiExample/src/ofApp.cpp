@@ -1368,6 +1368,23 @@ ImGui::Text("Describe what you want:");
 ImGui::InputTextMultiline("##ScriptIn", scriptInput, sizeof(scriptInput),
 ImVec2(-1, 100));
 
+bool useProjectMemory = scriptProjectMemory.isEnabled();
+if (ImGui::Checkbox("Use project memory", &useProjectMemory)) {
+scriptProjectMemory.setEnabled(useProjectMemory);
+}
+ImGui::SameLine();
+ImGui::TextDisabled("(learn from prior script requests in this session)");
+if (ImGui::CollapsingHeader("Project Memory", ImGuiTreeNodeFlags_DefaultOpen)) {
+if (ImGui::SmallButton("Clear Memory")) {
+scriptProjectMemory.clear();
+}
+ImGui::SameLine();
+ImGui::TextDisabled("(%d chars)", static_cast<int>(scriptProjectMemory.getMemoryText().size()));
+ImGui::BeginChild("##ProjectMemory", ImVec2(-1, 100), true);
+ImGui::TextWrapped("%s", scriptProjectMemory.getMemoryText().c_str());
+ImGui::EndChild();
+}
+
 // Code template selector.
 if (selectedLanguageIndex >= 0 &&
 selectedLanguageIndex < static_cast<int>(codeTemplates.size()) &&
@@ -2254,6 +2271,8 @@ out << "scriptSourceType=" << static_cast<int>(scriptSourceType) << "\n";
 out << "scriptSourcePath=" << escapeSessionText(scriptSourcePath) << "\n";
 out << "scriptSourceGitHub=" << escapeSessionText(scriptSourceGitHub) << "\n";
 out << "scriptSourceBranch=" << escapeSessionText(scriptSourceBranch) << "\n";
+out << "useProjectMemory=" << (scriptProjectMemory.isEnabled() ? 1 : 0) << "\n";
+out << "projectMemory=" << escapeSessionText(scriptProjectMemory.getMemoryText()) << "\n";
 
 // Input buffers.
 out << "chatInput=" << escapeSessionText(chatInput) << "\n";
@@ -2381,6 +2400,10 @@ else if (key == "scriptSourceType") {
 else if (key == "scriptSourcePath") scriptSourcePath = unescapeSessionText(value);
 else if (key == "scriptSourceGitHub") copyToBuf(scriptSourceGitHub, sizeof(scriptSourceGitHub), value);
 else if (key == "scriptSourceBranch") copyToBuf(scriptSourceBranch, sizeof(scriptSourceBranch), value);
+else if (key == "useProjectMemory") scriptProjectMemory.setEnabled(safeStoi(value, 1) != 0);
+else if (key == "projectMemory") {
+scriptProjectMemory.setMemoryText(unescapeSessionText(value));
+}
 else if (key == "chatInput") copyToBuf(chatInput, sizeof(chatInput), value);
 else if (key == "scriptInput") copyToBuf(scriptInput, sizeof(scriptInput), value);
 else if (key == "summarizeInput") copyToBuf(summarizeInput, sizeof(summarizeInput), value);
@@ -2500,6 +2523,9 @@ std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
 
 	if (!systemPrompt.empty()) {
 		oss << "System:\n" << systemPrompt << "\n\n";
+	}
+	if (mode == AiMode::Script) {
+		oss << scriptProjectMemory.buildPromptContext();
 	}
 
 	switch (mode) {
@@ -2816,6 +2842,9 @@ void ofApp::syncSelectedBackendIndex() {
 void ofApp::runInference(AiMode mode, const std::string & userText,
 const std::string & systemPrompt) {
 if (generating.load() || !engineReady) return;
+if (mode == AiMode::Script) {
+lastScriptRequest = userText;
+}
 
 generating.store(true);
 cancelRequested.store(false);
@@ -2955,6 +2984,9 @@ fprintf(stderr, "[ChatWindow] AI: %s\n", pendingOutput.c_str());
 break;
 case AiMode::Script:
 scriptOutput = pendingOutput;
+if (pendingOutput.rfind("[Error]", 0) != 0) {
+scriptProjectMemory.addInteraction(lastScriptRequest, pendingOutput);
+}
 fprintf(stderr, "[ChatWindow] Script: %s\n", pendingOutput.c_str());
 break;
 case AiMode::Summarize:
