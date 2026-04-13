@@ -49,21 +49,24 @@ done
 [[ -f "$MODEL" ]] || { echo "Error: model not found: $MODEL" >&2; exit 1; }
 [[ "$RUNS" =~ ^[0-9]+$ ]] || { echo "Error: --runs must be an integer" >&2; exit 1; }
 [[ "$TOKENS" =~ ^[0-9]+$ ]] || { echo "Error: --tokens must be an integer" >&2; exit 1; }
+[[ "$CONTEXT" =~ ^[0-9]+$ ]] || { echo "Error: --context must be an integer" >&2; exit 1; }
+[[ "$THREADS" =~ ^[0-9]+$ ]] || { echo "Error: --threads must be an integer" >&2; exit 1; }
 
 prompt_file="$(mktemp "${TMPDIR:-/tmp}/ofxggml-bench-prompt.XXXXXX.txt")"
-trap 'rm -f "$prompt_file"' EXIT
-printf '%s' "$PROMPT" > "$prompt_file"
-
 results_file="$(mktemp "${TMPDIR:-/tmp}/ofxggml-bench-result.XXXXXX.txt")"
-trap 'rm -f "$prompt_file" "$results_file"' EXIT
+cleanup() {
+rm -f "$prompt_file" "$results_file"
+}
+trap cleanup EXIT
+printf '%s' "$PROMPT" > "$prompt_file"
 
 for ((i = 1; i <= RUNS; i++)); do
 start_ns="$(date +%s%N)"
+cmd=("$CLI_BIN" -m "$MODEL" --file "$prompt_file" -n "$TOKENS" -c "$CONTEXT" --simple-io --no-display-prompt)
 if [[ "$THREADS" -gt 0 ]]; then
-raw="$($CLI_BIN -m "$MODEL" --file "$prompt_file" -n "$TOKENS" -c "$CONTEXT" --threads "$THREADS" --simple-io --no-display-prompt 2>&1)"
-else
-raw="$($CLI_BIN -m "$MODEL" --file "$prompt_file" -n "$TOKENS" -c "$CONTEXT" --simple-io --no-display-prompt 2>&1)"
+cmd+=(--threads "$THREADS")
 fi
+raw="$("${cmd[@]}" 2>&1)"
 status=$?
 end_ns="$(date +%s%N)"
 dur_ms=$(( (end_ns - start_ns) / 1000000 ))
