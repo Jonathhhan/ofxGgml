@@ -27,7 +27,7 @@ cd ofxGgml
 
 | Category | Capabilities |
 |----------|-------------|
-| **Backend management** | Automatic discovery of CPU, CUDA, Metal, Vulkan backends; runtime selection |
+| **Backend management** | Automatic discovery of CPU, CUDA, Metal, Vulkan backends; runtime selection (CUDA → Vulkan → other accelerator → CPU fallback) |
 | **GPU support** | GPU backends (CUDA, Vulkan, Metal) can be enabled via build script flags (e.g. `--cuda`, `--auto`) |
 | **GGUF model loading** | Load GGUF files, inspect metadata and tensors, upload weights to GPU |
 | **Tensor wrapper** | Non-owning handle with OF-friendly data access (read/write floats, fill) |
