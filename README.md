@@ -115,6 +115,7 @@ scripts\build-ggml.bat --cpu-only   &:: CPU only
 ```
 
 This builds both **Debug** and **Release** configurations, producing libraries in `libs\ggml\build\src\Release\` and `libs\ggml\build\src\Debug\`.
+If a parallel Windows build hits a transient CUDA/MSBuild object-link race (for example missing `*.obj` in `ggml-cuda`), the script automatically retries that configuration with a single job.
 
 After building ggml, regenerate your project with the openFrameworks Project Generator so the generated VS project picks up the latest addon library list.
 
