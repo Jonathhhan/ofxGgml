@@ -210,6 +210,11 @@ set "CFG=%~1"
 echo ==^> Building ggml (%CFG%) with %JOBS% parallel jobs...
 cmake --build "%BUILD_DIR%" --config %CFG% -j %JOBS%
 if errorlevel 1 (
+    if not "%JOBS%"=="1" (
+        echo ==^> Build failed with parallel jobs, retrying ggml (%CFG%) with 1 job to avoid transient CUDA/MSBuild object races...
+        cmake --build "%BUILD_DIR%" --config %CFG% -j 1
+        if not errorlevel 1 exit /b 0
+    )
     echo Error: CMake %CFG% build failed.
     exit /b 1
 )
