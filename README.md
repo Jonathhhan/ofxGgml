@@ -60,6 +60,8 @@ cd ofxGgml
 
 ggml source is bundled in `libs/ggml/`.  It is compiled as a static library with GPU backends auto-detected at build time.
 
+> **Windows / Visual Studio users:** You must build ggml before opening your OF project, otherwise the linker will report `LNK1181: cannot open input file "ggml.lib"`.  See the [Windows](#windows-visual-studio) section below.
+
 ### Automated (recommended)
 
 ```bash
@@ -76,6 +78,21 @@ ggml source is bundled in `libs/ggml/`.  It is compiled as a static library with
 ./scripts/build-ggml.sh --vulkan  # force Vulkan on
 ./scripts/build-ggml.sh --cpu-only  # CPU only
 ```
+
+### Windows (Visual Studio)
+
+Open a **Developer Command Prompt for VS** (or any terminal with CMake in your PATH) and run:
+
+```bat
+scripts\build-ggml.bat              &:: GPU auto-detected
+scripts\build-ggml.bat --cuda       &:: force CUDA on
+scripts\build-ggml.bat --vulkan     &:: force Vulkan on
+scripts\build-ggml.bat --cpu-only   &:: CPU only
+```
+
+This produces `ggml.lib`, `ggml-base.lib`, and `ggml-cpu.lib` in `libs\ggml\build\src\Release\`, which the addon links automatically via `addon_config.mk`.
+
+After building, regenerate your project with the openFrameworks Project Generator and build normally.
 
 ### Manual — CMake
 
@@ -124,7 +141,8 @@ ofxGgml/
 │   └── build/                # build output (created by build-ggml.sh)
 ├── scripts/
 │   ├── setup.sh              # one-command full setup
-│   ├── build-ggml.sh         # build bundled ggml (GPU auto-detect)
+│   ├── build-ggml.sh         # build bundled ggml — Linux/macOS
+│   ├── build-ggml.bat        # build bundled ggml — Windows/VS
 │   ├── update-ggml-source.sh # update bundled ggml to latest upstream
 │   ├── build-llama-cli.sh    # build & install llama.cpp CLI tools
 │   └── download-model.sh     # download GGUF model presets
@@ -259,7 +277,8 @@ Build the tools with:
 | Script | Purpose |
 |--------|---------|
 | `scripts/setup.sh` | **One-command setup**: builds ggml + llama CLI + downloads models |
-| `scripts/build-ggml.sh` | Build the bundled ggml library (GPU auto-detect by default) |
+| `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, GPU auto-detect by default) |
+| `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, GPU auto-detect by default) |
 | `scripts/update-ggml-source.sh` | Update bundled ggml source to latest upstream |
 | `scripts/build-llama-cli.sh` | Clone, compile, and install llama.cpp CLI tools |
 | `scripts/download-model.sh` | Download GGUF model presets |
@@ -287,10 +306,16 @@ Build the tools with:
 Make sure you've built ggml first:
 
 ```bash
+# Linux / macOS
 ./scripts/build-ggml.sh
 ```
 
-The build output should be in `libs/ggml/build/src/` (e.g. `libggml.a`, `libggml-base.a`, `libggml-cpu.a` on Linux/macOS, or `ggml.lib` etc. on Windows).
+```bat
+:: Windows (Developer Command Prompt)
+scripts\build-ggml.bat
+```
+
+The build output should be in `libs/ggml/build/src/` (e.g. `libggml.a`, `libggml-base.a`, `libggml-cpu.a` on Linux/macOS, or `ggml.lib` etc. in `libs\ggml\build\src\Release\` on Windows).
 
 ### llama-completion not found
 
