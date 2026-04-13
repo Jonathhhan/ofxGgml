@@ -36,6 +36,7 @@ ENABLE_METAL=0
 VULKAN_EXPLICIT=0
 CLEAN=0
 AUTO_DETECT=0
+CONFIGURE_LOG=""
 
 write_step() {
 	printf '==> %s\n' "$1"
@@ -50,6 +51,13 @@ usage() {
 	sed -n '2,/^# ---/{ /^# ---/d; s/^# //; s/^#//; p }' "$0"
 	exit 0
 }
+
+cleanup_temp_files() {
+	if [[ -n "${CONFIGURE_LOG:-}" ]] && [[ -f "$CONFIGURE_LOG" ]]; then
+		rm -f "$CONFIGURE_LOG"
+	fi
+}
+trap cleanup_temp_files EXIT
 
 is_windows_like() {
 	case "$(uname -s 2>/dev/null || echo unknown)" in
@@ -270,7 +278,7 @@ if ! cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}" 2>&1 | tee "$CONFIGURE_LOG"; then
 			FALLBACK_ARGS+=("$arg")
 		done
 		FALLBACK_ARGS+=(-DGGML_VULKAN=OFF)
-		if ! cmake "$SOURCE_DIR" "${FALLBACK_ARGS[@]}"; then
+		if ! cmake "$SOURCE_DIR" "${FALLBACK_ARGS[@]}" 2>&1 | tee -a "$CONFIGURE_LOG"; then
 			die "CMake configure failed after retrying with Vulkan disabled."
 		fi
 		CMAKE_ARGS=("${FALLBACK_ARGS[@]}")
@@ -278,7 +286,6 @@ if ! cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}" 2>&1 | tee "$CONFIGURE_LOG"; then
 		die "CMake configure failed."
 	fi
 fi
-rm -f "$CONFIGURE_LOG"
 
 # ---------------------------------------------------------------------------
 # Build
