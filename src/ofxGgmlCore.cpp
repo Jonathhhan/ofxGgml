@@ -180,23 +180,68 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	}
 
 	// Initialize the preferred backend.
+	//
+	// When a GPU backend is requested we first validate that the device
+	// actually reports usable memory.  Some systems enumerate a GPU
+	// device (e.g. via ggml_backend_load_all()) even though the
+	// underlying driver cannot create a working context – attempting to
+	// initialise such a device can trigger a fatal GGML_ABORT inside
+	// ggml_malloc/ggml_calloc when an internal allocation fails.
+	//
+	// The validation mirrors the approach used by stable-diffusion.cpp:
+	// only attempt GPU init when the device is genuinely available, and
+	// fall back to CPU immediately otherwise.
+
 	if (!m_impl->backend && !settings.preferredBackendName.empty()) {
-		m_impl->backend = ggml_backend_init_by_name(
-			settings.preferredBackendName.c_str(), nullptr);
+		// Validate the named device before attempting init.
+		ggml_backend_dev_t namedDev = ggml_backend_dev_by_name(
+			settings.preferredBackendName.c_str());
+		if (namedDev) {
+			enum ggml_backend_dev_type dt = ggml_backend_dev_type(namedDev);
+			bool needsGpuCheck = (dt != GGML_BACKEND_DEVICE_TYPE_CPU);
+			bool gpuOk = true;
+			if (needsGpuCheck) {
+				size_t free = 0, total = 0;
+				ggml_backend_dev_memory(namedDev, &free, &total);
+				if (total == 0 || free == 0) {
+					gpuOk = false;
+					m_impl->log(GGML_LOG_LEVEL_WARN,
+						"ofxGgml: device \"" + settings.preferredBackendName +
+						"\" reports no usable memory — skipping\n");
+				}
+			}
+			if (gpuOk) {
+				m_impl->backend = ggml_backend_dev_init(namedDev, nullptr);
+			}
+		}
 		if (!m_impl->backend) {
 			m_impl->log(GGML_LOG_LEVEL_WARN,
 				"ofxGgml: backend \"" + settings.preferredBackendName +
-				"\" not found — trying fallback\n");
+				"\" not found or failed to init — trying fallback\n");
+		}
+	}
+	if (!m_impl->backend &&
+		settings.preferredBackend != ofxGgmlBackendType::Cpu) {
+		// Try the preferred type, but validate the device first.
+		ggml_backend_dev_t typeDev = ggml_backend_dev_by_type(
+			static_cast<enum ggml_backend_dev_type>(settings.preferredBackend));
+		if (typeDev) {
+			size_t free = 0, total = 0;
+			ggml_backend_dev_memory(typeDev, &free, &total);
+			if (total > 0 && free > 0) {
+				m_impl->backend = ggml_backend_dev_init(typeDev, nullptr);
+			} else {
+				m_impl->log(GGML_LOG_LEVEL_WARN,
+					"ofxGgml: preferred device type reports no usable memory"
+					" — falling back\n");
+			}
 		}
 	}
 	if (!m_impl->backend) {
+		// Explicit CPU init as a fallback — avoids ggml_backend_init_best()
+		// which would attempt GPU init again and could crash.
 		m_impl->backend = ggml_backend_init_by_type(
-			static_cast<enum ggml_backend_dev_type>(settings.preferredBackend), nullptr);
-	}
-
-	if (!m_impl->backend) {
-		// Fall back to the best available.
-		m_impl->backend = ggml_backend_init_best();
+			GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
 	}
 
 	if (!m_impl->backend) {
