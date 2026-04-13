@@ -309,14 +309,24 @@ ofxGgmlTensor ofxGgmlGraph::crossEntropyLoss(ofxGgmlTensor logits, ofxGgmlTensor
 // --------------------------------------------------------------------------
 
 void ofxGgmlGraph::build(ofxGgmlTensor output) {
+	if (!output.raw()) {
+		m_graph = nullptr;
+		return;
+	}
 	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
 	ggml_build_forward_expand(m_graph, output.raw());
 }
 
 void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
+	if (outputs.empty()) {
+		m_graph = nullptr;
+		return;
+	}
 	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
 	for (auto t : outputs) {
-		ggml_build_forward_expand(m_graph, t.raw());
+		if (t.raw()) {
+			ggml_build_forward_expand(m_graph, t.raw());
+		}
 	}
 }
 
@@ -327,5 +337,14 @@ int ofxGgmlGraph::getNumNodes() const {
 
 ofxGgmlTensor ofxGgmlGraph::getNode(int index) const {
 	if (!m_graph) return ofxGgmlTensor();
-	return ofxGgmlTensor(ggml_graph_node(m_graph, index));
+	const int n = ggml_graph_n_nodes(m_graph);
+	if (n <= 0) return ofxGgmlTensor();
+	int resolved = index;
+	if (resolved < 0) {
+		resolved = n + resolved;
+	}
+	if (resolved < 0 || resolved >= n) {
+		return ofxGgmlTensor();
+	}
+	return ofxGgmlTensor(ggml_graph_node(m_graph, resolved));
 }
