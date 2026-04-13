@@ -147,7 +147,7 @@ if "%SKIP_MODEL%"=="0" (
 
 if "%GGML_BUILD_FAILED%"=="1" (
     echo.
-    echo Setup partially completed: model download finished, but ggml build failed.
+    echo Setup partially completed: ggml build failed.
     echo.
     exit /b 1
 )
