@@ -185,13 +185,10 @@ if not exist "%CONFIG_FILE%" (
     goto skip_config_update
 )
 
-REM Collect all built ggml .lib files
-set "LIB_LIST="
+REM Collect count of built ggml .lib files
 set "LIB_COUNT=0"
 for %%F in ("%LIB_DIR%\ggml*.lib") do (
     set /a LIB_COUNT+=1
-    set "LIB_LIST=!LIB_LIST!	ADDON_LIBS += libs/ggml/build/src/Release/%%~nxF
-"
 )
 
 if %LIB_COUNT%==0 (
