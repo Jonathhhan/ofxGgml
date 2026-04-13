@@ -300,6 +300,8 @@ download_model() {
 	write_step "  Dest: $output_path"
 	if [[ -n "$expected_sha256" ]]; then
 		write_step "  SHA256: $expected_sha256"
+	else
+		write_step "  SHA256: not configured (download will not be integrity-verified)"
 	fi
 	write_step ""
 
@@ -321,6 +323,9 @@ download_model() {
 			die "Failed to compute SHA256 checksum. Install sha256sum or shasum."
 		fi
 		if [[ "$got_sha256" != "$expected_sha256" ]]; then
+			write_step "Checksum mismatch:"
+			write_step "  expected: $expected_sha256"
+			write_step "  actual:   $got_sha256"
 			rm -f "$output_path"
 			die "Checksum verification failed for $output_path"
 		fi

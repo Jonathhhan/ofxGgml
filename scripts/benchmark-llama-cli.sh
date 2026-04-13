@@ -54,7 +54,7 @@ prompt_file="$(mktemp "${TMPDIR:-/tmp}/ofxggml-bench-prompt.XXXXXX.txt")"
 trap 'rm -f "$prompt_file"' EXIT
 printf '%s' "$PROMPT" > "$prompt_file"
 
-results_file="$(mktemp "${TMPDIR:-/tmp}/ofxggml-bench-results.XXXXXX.txt")"
+results_file="$(mktemp "${TMPDIR:-/tmp}/ofxggml-bench-result.XXXXXX.txt")"
 trap 'rm -f "$prompt_file" "$results_file"' EXIT
 
 for ((i = 1; i <= RUNS; i++)); do

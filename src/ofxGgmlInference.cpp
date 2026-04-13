@@ -97,7 +97,17 @@ if (ec) base = std::filesystem::current_path();
 const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
 std::mt19937_64 rng(static_cast<uint64_t>(now));
 const uint64_t nonce = rng();
-return (base / (std::string(prefix) + std::to_string(now) + "_" + std::to_string(nonce) + ext)).string();
+	return (base / (std::string(prefix) + std::to_string(now) + "_" + std::to_string(nonce) + ext)).string();
+}
+
+static uint32_t makeRandomSeed() {
+	try {
+		std::random_device rd;
+		return rd();
+	} catch (...) {
+		const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+		return static_cast<uint32_t>(now ^ (now >> 32));
+	}
 }
 
 static bool writeTextFile(const std::string & path, const std::string & text) {
@@ -355,7 +365,7 @@ cum += probs[i];
 if (cum >= topP) break;
 }
 
-std::mt19937 rng(seed == 0 ? std::random_device{}() : seed);
+	std::mt19937 rng(seed == 0 ? makeRandomSeed() : seed);
 std::discrete_distribution<size_t> dist(filtered.begin(), filtered.end());
 return static_cast<int>(filteredIdx[dist(rng)]);
 }

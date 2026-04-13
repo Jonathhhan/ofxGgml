@@ -387,7 +387,7 @@ Build the tools with:
 ./scripts/download-model.sh --model <URL> --checksum <SHA256>  # custom with checksum verification
 ```
 
-Model preset metadata is stored in `scripts/model-catalog.json`. `download-model.sh` supports resumable downloads and validates SHA256 checksums when provided.
+Model preset metadata is stored in `scripts/model-catalog.json`. `download-model.sh` supports resumable downloads and validates SHA256 checksums when provided. If a preset checksum is blank in the catalog, the script prints an explicit warning and skips integrity verification for that download.
 
 ## Troubleshooting
 
