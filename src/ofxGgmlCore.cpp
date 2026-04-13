@@ -392,6 +392,8 @@ void ofxGgml::close() {
 		ggml_backend_sched_free(m_impl->sched);
 		m_impl->sched = nullptr;
 	}
+	// Graph tracking is tied to scheduler lifetime; after close(), any
+	// previously tracked graph allocations/reservations are invalid.
 	m_impl->reservedGraph = nullptr;
 	m_impl->allocatedGraph = nullptr;
 	m_impl->hasPendingAsync = false;
@@ -543,7 +545,7 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 
 	if (m_impl->state != ofxGgmlState::Ready) {
 		if (m_impl->state == ofxGgmlState::Computing && m_impl->hasPendingAsync) {
-			result.error = "ofxGgml: compute already in flight (call synchronize first)";
+			result.error = "ofxGgml: async compute already in flight (call synchronize() first)";
 			return result;
 		}
 		result.error = "ofxGgml: not ready";
@@ -674,6 +676,8 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors_from_buft(
 		modelCtx, ggml_backend_get_default_buffer_type(m_impl->backend));
 	if (!buf) {
+		m_impl->log(GGML_LOG_LEVEL_WARN,
+			"ofxGgml: alloc_ctx_tensors_from_buft failed, falling back to alloc_ctx_tensors\n");
 		buf = ggml_backend_alloc_ctx_tensors(modelCtx, m_impl->backend);
 	}
 	if (!buf) {

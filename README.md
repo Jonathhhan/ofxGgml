@@ -255,7 +255,7 @@ if (submit.success) {
 
 ### Allocation reuse for stable graphs
 
-- Repeated `allocGraph(graph)` calls on the same built graph avoid re-allocation.
+- Repeated `allocGraph(graph)` calls on the same built graph instance (same graph pointer/object) avoid re-allocation.
 - New/different graph instances still use the normal allocation path automatically.
 
 ## API Reference
