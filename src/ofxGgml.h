@@ -22,4 +22,5 @@
 #include "ofxGgmlInference.h"
 #include "ofxGgmlModel.h"
 #include "ofxGgmlProjectMemory.h"
+#include "ofxGgmlScriptSource.h"
 #include "ofxGgmlCore.h"
