@@ -30,6 +30,7 @@ set "GPU_FLAG=--auto"
 set "JOBS_FLAG="
 set "CLEAN_FLAG="
 set "MODEL_PRESET="
+set "GGML_BUILD_FAILED=0"
 
 :parse_args
 if "%~1"=="" goto done_args
@@ -129,8 +130,8 @@ if "%SKIP_GGML%"=="0" (
     echo [1/2] Building ggml...
     call "%SCRIPT_DIR%build-ggml.bat" %GPU_FLAG% %JOBS_FLAG% %CLEAN_FLAG%
     if errorlevel 1 (
-        echo Error: ggml build failed.
-        exit /b 1
+        echo Warning: ggml build failed. Continuing to model download...
+        set "GGML_BUILD_FAILED=1"
     )
 ) else (
     echo [1/2] Skipping ggml build ^(--skip-ggml^).
@@ -151,6 +152,12 @@ echo Next steps:
 echo   1. Add ofxGgml to your project addons.make
 echo   2. Build and run your project
 echo.
+
+if "%GGML_BUILD_FAILED%"=="1" (
+    echo Setup finished with errors: ggml build failed.
+    exit /b 1
+)
+
 exit /b 0
 
 :download_models
