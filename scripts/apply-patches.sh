@@ -16,6 +16,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 GGML_DIR="$ADDON_ROOT/libs/ggml"
 
+# Portable sed -i: macOS requires a backup extension argument.
+sedi() {
+	if [[ "$(uname)" == "Darwin" ]]; then
+		sed -i '' "$@"
+	else
+		sed -i "$@"
+	fi
+}
+
 write_step() {
 	printf '==> %s\n' "$1"
 }
@@ -46,7 +55,7 @@ apply_mmvf_tmpx_gate_init() {
 	fi
 
 	if grep -q 'nv_bfloat162 tmpx_gate;' "$file"; then
-		sed -i 's/            nv_bfloat162 tmpx_gate;/            nv_bfloat162 tmpx_gate = {0.0f, 0.0f};/' "$file"
+		sedi 's/\([[:space:]]*\)nv_bfloat162 tmpx_gate;/\1nv_bfloat162 tmpx_gate = {0.0f, 0.0f};/' "$file"
 		write_ok "$desc"
 	else
 		write_skip "$desc"
