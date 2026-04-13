@@ -51,9 +51,10 @@ msys2:
 
 vs:
 	# @DIFFUSION_LIBS_START vs
-	ADDON_LIBS += libs/ggml/build/src/Release/ggml.lib
-	ADDON_LIBS += libs/ggml/build/src/Release/ggml-base.lib
-	ADDON_LIBS += libs/ggml/build/src/Release/ggml-cpu.lib
+	# Libraries are linked via ofxGgml.props (Visual Studio property sheet)
+	# which selects the correct Debug or Release libraries automatically.
+	# Import ofxGgml.props into your VS project via:
+	#   View > Property Manager > Add Existing Property Sheet
 	# @DIFFUSION_LIBS_END vs
 
 android/armeabi:

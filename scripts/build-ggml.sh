@@ -213,9 +213,10 @@ update_addon_config() {
 			;;
 		MINGW*|MSYS*|CYGWIN*)
 			if [[ -d "$LIB_DIR/Release" ]]; then
-				section="vs"
-				search_dir="$LIB_DIR/Release"
-				ext=".lib"
+				# VS libraries are linked via ofxGgml.props — skip
+				# addon_config.mk update for the vs section.
+				write_step "VS libraries are linked via ofxGgml.props (skipping addon_config.mk [vs] update)."
+				return 0
 			else
 				section="msys2"
 				search_dir="$LIB_DIR"

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ofxGgml Visual Studio property sheet.
+
+  Provides per-configuration (Debug / Release) library linking so that
+  Debug builds link against Debug-compiled ggml libraries and Release
+  builds link against Release-compiled ggml libraries.  This avoids
+  LNK2038 RuntimeLibrary / _ITERATOR_DEBUG_LEVEL mismatch errors.
+
+  How to use:
+    1. Build ggml with:  scripts\build-ggml.bat
+       (this builds both Debug and Release configurations)
+    2. In your Visual Studio project, go to
+         View > Property Manager
+       Right-click your project and choose "Add Existing Property Sheet".
+       Browse to this file (ofxGgml.props) in the addon root directory.
+       Repeat for each configuration (Debug|x64, Release|x64).
+
+  The property sheet uses $(MSBuildThisFileDirectory) so all paths are
+  resolved relative to the addon root regardless of project layout.
+  $(Configuration) resolves to "Debug" or "Release" automatically.
+-->
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup Label="UserMacros">
+    <ofxGgmlRoot>$(MSBuildThisFileDirectory)</ofxGgmlRoot>
+    <ofxGgmlLibDir>$(ofxGgmlRoot)libs\ggml\build\src\$(Configuration)\</ofxGgmlLibDir>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <Link>
+      <AdditionalLibraryDirectories>$(ofxGgmlLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ggml.lib;ggml-base.lib;ggml-cpu.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+</Project>
