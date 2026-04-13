@@ -1001,6 +1001,31 @@ ImGui::SeparatorText("Engine");
 ImGui::SliderInt("Threads", &numThreads, 1, 32);
 ImGui::SliderInt("Context Size", &contextSize, 256, 16384);
 ImGui::SliderInt("Batch Size", &batchSize, 32, 4096);
+if (!backendNames.empty()) {
+	int clampedBackendIndex = std::clamp(selectedBackendIndex, 0, static_cast<int>(backendNames.size()) - 1);
+	selectedBackendIndex = clampedBackendIndex;
+	const std::string currentBackendLabel = backendNames[static_cast<size_t>(clampedBackendIndex)];
+	if (ImGui::BeginCombo("Preferred Backend", currentBackendLabel.c_str())) {
+		for (int i = 0; i < static_cast<int>(backendNames.size()); i++) {
+			const bool isSelected = (selectedBackendIndex == i);
+			if (ImGui::Selectable(backendNames[static_cast<size_t>(i)].c_str(), isSelected)) {
+				if (selectedBackendIndex != i) {
+					selectedBackendIndex = i;
+					reinitBackend();
+				}
+			}
+			if (isSelected) {
+				ImGui::SetItemDefaultFocus();
+			}
+		}
+		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Choose a discovered backend/device (Vulkan appears when available).");
+	}
+} else {
+	ImGui::TextDisabled("Preferred Backend: (no devices)");
+}
 {
 // GPU layers control the llama-completion CLI process, which has
 // its own GPU support — always allow the user to adjust them.
