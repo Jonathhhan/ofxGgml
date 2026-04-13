@@ -229,16 +229,66 @@ update_addon_config() {
 			;;
 	esac
 
-	# Collect all built ggml libraries
+	# Collect built ggml libraries with link-safe ordering:
+	# core first, known backends next, then any extras in sorted order.
 	local libs=()
+	local lib
 	local lib_name
-	for lib in "$search_dir"/libggml*"$ext" "$search_dir"/ggml*"$ext"; do
-		if [[ -f "$lib" ]]; then
-			# Make path relative to ADDON_ROOT
-			lib_name="${lib#"$ADDON_ROOT"/}"
-			libs+=("$lib_name")
+	local base_name
+	local rel_path
+	local -A selected=()
+	local -A consumed=()
+	local all_libs=()
+	local remaining_libs=()
+	local sorted_keys=()
+	local sorted_remaining=()
+	local ordered_names=(
+		"libggml$ext"
+		"ggml$ext"
+		"libggml-base$ext"
+		"ggml-base$ext"
+		"libggml-cpu$ext"
+		"ggml-cpu$ext"
+		"libggml-cuda$ext"
+		"ggml-cuda$ext"
+		"libggml-vulkan$ext"
+		"ggml-vulkan$ext"
+		"libggml-metal$ext"
+		"ggml-metal$ext"
+		"libggml-opencl$ext"
+		"ggml-opencl$ext"
+		"libggml-sycl$ext"
+		"ggml-sycl$ext"
+	)
+
+	shopt -s nullglob
+	all_libs=("$search_dir"/libggml*"$ext" "$search_dir"/ggml*"$ext")
+	shopt -u nullglob
+
+	for lib in "${all_libs[@]}"; do
+		base_name="$(basename "$lib")"
+		selected["$base_name"]="$lib"
+	done
+
+	for base_name in "${ordered_names[@]}"; do
+		if [[ -n "${selected[$base_name]:-}" ]]; then
+			rel_path="${selected[$base_name]#"$ADDON_ROOT"/}"
+			libs+=("$rel_path")
+			consumed["$base_name"]=1
 		fi
 	done
+
+	mapfile -t sorted_keys < <(printf '%s\n' "${!selected[@]}" | sort)
+	for base_name in "${sorted_keys[@]}"; do
+		if [[ -z "${consumed[$base_name]:-}" ]]; then
+			remaining_libs+=("${selected[$base_name]#"$ADDON_ROOT"/}")
+		fi
+	done
+
+	if [[ ${#remaining_libs[@]} -gt 0 ]]; then
+		mapfile -t sorted_remaining < <(printf '%s\n' "${remaining_libs[@]}" | sort)
+		libs+=("${sorted_remaining[@]}")
+	fi
 
 	if [[ ${#libs[@]} -eq 0 ]]; then
 		write_step "Warning: No libraries found to update in addon_config.mk."
@@ -266,8 +316,13 @@ update_addon_config() {
 			$0 ~ end   { printing=1; next }
 			printing { print }
 		' "$config_file" > "$tmpfile"
-		mv "$tmpfile" "$config_file"
-		write_step "Updated addon_config.mk [$section] with ${#libs[@]} libraries."
+		if cmp -s "$tmpfile" "$config_file"; then
+			rm -f "$tmpfile"
+			write_step "addon_config.mk [$section] already up to date (${#libs[@]} libraries)."
+		else
+			mv "$tmpfile" "$config_file"
+			write_step "Updated addon_config.mk [$section] with ${#libs[@]} libraries."
+		fi
 	else
 		write_step "Warning: Could not find markers in addon_config.mk for section '$section'."
 	fi
