@@ -15,10 +15,14 @@ git clone https://github.com/Jonathhhan/ofxGgml.git
 
 # 2. Build ggml (GPU auto-detect by default) + llama.cpp CLI + download models
 cd ofxGgml
-./scripts/setup.sh              # auto-detects CUDA / Vulkan / Metal (default)
-./scripts/setup.sh --auto       # explicit auto-detect
-./scripts/setup.sh --cpu-only   # force CPU-only
-./scripts/setup.sh --cuda       # explicitly enable CUDA
+./scripts/setup_linux.sh              # Linux/macOS full setup (default auto-detect)
+./scripts/setup_linux.sh --auto       # explicit auto-detect
+./scripts/setup_linux.sh --cpu-only   # force CPU-only
+./scripts/setup_linux.sh --cuda       # explicitly enable CUDA
+
+# Windows (Developer Command Prompt)
+scripts\setup_windows.bat             # build ggml + download models
+scripts\setup_windows.bat --cpu-only  # force CPU-only
 
 # 3. Add ofxGgml to your project's addons.make and build
 ```
@@ -70,11 +74,22 @@ ggml source is bundled in `libs/ggml/`.  It is compiled as a static library.  By
 ### Automated (recommended)
 
 ```bash
-./scripts/setup.sh              # builds ggml + llama CLI + downloads models (auto-detect default)
-./scripts/setup.sh --cuda       # explicitly enable CUDA
-./scripts/setup.sh --skip-llama --skip-model  # ggml only
-./scripts/setup.sh --skip-model  # build ggml + llama only (no model download)
-./scripts/setup.sh --skip-ggml --skip-llama --model-preset 2  # download model only
+./scripts/setup_linux.sh              # Linux/macOS: ggml + llama CLI + models (auto-detect)
+./scripts/setup_linux.sh --cuda       # Linux/macOS: explicitly enable CUDA
+./scripts/setup_linux.sh --skip-llama --skip-model  # Linux/macOS: ggml only
+./scripts/setup_linux.sh --skip-model  # Linux/macOS: ggml + llama only (no model download)
+./scripts/setup_linux.sh --skip-ggml --skip-llama --model-preset 2  # Linux/macOS: model only
+```
+
+```bat
+:: Windows: ggml + models
+scripts\setup_windows.bat
+:: Windows: force CUDA
+scripts\setup_windows.bat --cuda
+:: Windows: ggml only
+scripts\setup_windows.bat --skip-model
+:: Windows: model preset 2 only
+scripts\setup_windows.bat --skip-ggml --model-preset 2
 ```
 
 ### ggml only
@@ -151,7 +166,9 @@ ofxGgml/
 │   ├── cmake/                # ggml cmake helpers
 │   └── build/                # build output (created by build-ggml.sh)
 ├── scripts/
-│   ├── setup.sh              # one-command full setup
+│   ├── setup.sh              # full setup (legacy/general entry point)
+│   ├── setup_linux.sh        # Linux/macOS setup entry point
+│   ├── setup_windows.bat     # Windows setup entry point
 │   ├── build-ggml.sh         # build bundled ggml — Linux/macOS
 │   ├── build-ggml.bat        # build bundled ggml — Windows/VS
 │   ├── update-ggml-source.sh # update bundled ggml to latest upstream
@@ -303,7 +320,9 @@ Build the tools with:
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/setup.sh` | **One-command setup**: builds ggml + llama CLI + downloads models |
+| `scripts/setup_linux.sh` | **Linux/macOS setup**: builds ggml + llama CLI + downloads models |
+| `scripts/setup_windows.bat` | **Windows setup**: builds ggml + downloads models |
+| `scripts/setup.sh` | Legacy/general setup entry point (Linux/macOS) |
 | `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, `--auto` by default) |
 | `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, `--auto` default) |
 | `scripts/update-ggml-source.sh` | Update bundled ggml source to latest upstream |
