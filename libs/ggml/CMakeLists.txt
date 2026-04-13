@@ -2,9 +2,9 @@
 # ofxGgml bundled ggml build
 # ---------------------------------------------------------------------------
 #
-# Builds ggml as a static library with GPU backend autodetection.
-# GPU backends (CUDA, Vulkan, Metal) are compiled directly into the
-# library — no dynamic plugin loading, no duplicate static initializers.
+# Builds ggml as a static library.  GPU backends (CUDA, Vulkan, Metal)
+# must be explicitly enabled — they are not auto-detected by default to
+# avoid linker errors when the required GPU SDK libraries are missing.
 #
 # Usage:
 #   cmake -B build libs/ggml
@@ -15,7 +15,7 @@
 #   ./scripts/build-ggml.sh
 #
 # Options (passed via -D):
-#   OFXGGML_GPU_AUTODETECT  ON/OFF  (default ON)  — auto-enable GPU backends
+#   OFXGGML_GPU_AUTODETECT  ON/OFF  (default OFF) — auto-enable GPU backends
 #   OFXGGML_CUDA            ON/OFF  (default OFF)  — force CUDA on/off
 #   OFXGGML_VULKAN          ON/OFF  (default OFF)  — force Vulkan on/off
 #   OFXGGML_METAL           ON/OFF  (default OFF)  — force Metal on/off
@@ -34,7 +34,7 @@ set(GGML_VERSION "${GGML_VERSION_MAJOR}.${GGML_VERSION_MINOR}.${GGML_VERSION_PAT
 # Options
 # ---------------------------------------------------------------------------
 
-option(OFXGGML_GPU_AUTODETECT "Auto-detect and enable available GPU backends" ON)
+option(OFXGGML_GPU_AUTODETECT "Auto-detect and enable available GPU backends" OFF)
 option(OFXGGML_CUDA   "Enable CUDA backend"   OFF)
 option(OFXGGML_VULKAN "Enable Vulkan backend" OFF)
 option(OFXGGML_METAL  "Enable Metal backend"  OFF)

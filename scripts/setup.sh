@@ -2,19 +2,21 @@
 # ---------------------------------------------------------------------------
 # setup.sh — One-command setup for the ofxGgml addon.
 #
-# Builds ggml (with GPU autodetection), installs the llama.cpp CLI
+# Builds ggml (CPU-only by default), installs the llama.cpp CLI
 # tools, and downloads a recommended model so you can run the examples
 # right away.
 #
-# GPU backends (CUDA, Vulkan, Metal) are auto-detected and enabled
-# automatically — no flags needed.  Use --cpu-only to disable.
+# GPU backends (CUDA, Vulkan, Metal) must be explicitly enabled via
+# flags.  Use --auto to auto-detect available GPU backends, or
+# --cuda / --vulkan / --metal to enable a specific one.
 #
 # Usage:
 #   ./scripts/setup.sh [OPTIONS]
 #
 # Options:
-#   --cpu-only         Disable GPU autodetection, build CPU backend only
-#   --gpu              Alias for default behaviour (GPU auto-detect)
+#   --cpu-only         Build CPU backend only (default)
+#   --auto             Auto-detect and enable available GPU backends
+#   --gpu, --cuda      Enable CUDA backend
 #   --prefix DIR       Install prefix for llama tools
 #                      (default: /usr/local on Linux, addon-local libs/ on Windows)
 #   --skip-ggml        Skip building ggml (if already built)
@@ -69,16 +71,21 @@ usage() {
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--gpu|--cuda)
-			# GPU auto-detect is on by default; explicit --gpu is a no-op
-			# for ggml but still passed to llama.cpp build.
+			GPU_FLAG="--cuda"
 			LLAMA_GPU_FLAG="--gpu"
 			shift
 			;;
+		--auto)
+			GPU_FLAG="--auto"
+			shift
+			;;
 		--vulkan)
+			GPU_FLAG="--vulkan"
 			LLAMA_GPU_FLAG="--vulkan"
 			shift
 			;;
 		--metal)
+			GPU_FLAG="--metal"
 			LLAMA_GPU_FLAG="--metal"
 			shift
 			;;
@@ -137,11 +144,11 @@ echo "  └───────────────────────
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 1 — Build ggml (GPU auto-detected by default)
+# Step 1 — Build ggml (CPU-only by default)
 # ---------------------------------------------------------------------------
 
 if [[ "$SKIP_GGML" -eq 0 ]]; then
-	write_step "Step 1/3: Building ggml tensor library (GPU auto-detect)..."
+	write_step "Step 1/3: Building ggml tensor library..."
 	# shellcheck disable=SC2086
 	"$SCRIPT_DIR/build-ggml.sh" $GPU_FLAG $JOBS_FLAG $CLEAN_FLAG
 	write_ok "ggml built successfully."

@@ -4,8 +4,8 @@
 #
 # The ggml source is bundled inside libs/ggml/.  This script runs CMake
 # to configure and build it, producing static libraries that the addon
-# links against.  GPU backends (CUDA, Vulkan, Metal) are auto-detected
-# by default.
+# links against.  GPU backends (CUDA, Vulkan, Metal) must be explicitly
+# enabled via command-line flags.  By default only the CPU backend is built.
 #
 # Usage:
 #   ./scripts/build-ggml.sh [OPTIONS]
@@ -16,8 +16,8 @@
 #   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 #   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
 #   --metal        Enable Metal backend (macOS only)
-#   --auto         Auto-detect available GPU backends (this is the default)
-#   --cpu-only     Disable GPU autodetection, build CPU backend only
+#   --auto         Auto-detect available GPU backends
+#   --cpu-only     Disable GPU autodetection, build CPU backend only (default)
 #   --clean        Remove build directory before building
 #   --help         Show this help message
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ JOBS=""
 ENABLE_CUDA=""
 ENABLE_VULKAN=""
 ENABLE_METAL=""
-AUTO_DETECT=1
+AUTO_DETECT=0
 CLEAN=0
 
 write_step() {
