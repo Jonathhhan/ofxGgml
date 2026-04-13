@@ -848,12 +848,7 @@ probeLlamaCli(logMutex, logMessages, customCliPath);
 // only when a GPU backend is selected.
 detectModelLayers();
 {
-	bool isCpu = true;
-	if (selectedBackendIndex >= 0 &&
-		selectedBackendIndex < static_cast<int>(devices.size())) {
-		isCpu = (devices[selectedBackendIndex].type == ofxGgmlBackendType::Cpu);
-	}
-	if (isCpu) {
+	if (isSelectedBackendCpu()) {
 		gpuLayers = 0;
 	} else if (detectedModelLayers > 0) {
 		gpuLayers = detectedModelLayers;
@@ -998,11 +993,7 @@ ImGui::SliderInt("Threads", &numThreads, 1, 32);
 ImGui::SliderInt("Context Size", &contextSize, 256, 16384);
 ImGui::SliderInt("Batch Size", &batchSize, 32, 4096);
 {
-bool isCpuBackend = true;
-if (selectedBackendIndex >= 0 &&
-	selectedBackendIndex < static_cast<int>(devices.size())) {
-	isCpuBackend = (devices[selectedBackendIndex].type == ofxGgmlBackendType::Cpu);
-}
+bool isCpuBackend = isSelectedBackendCpu();
 int settingsSliderMax = detectedModelLayers > 0 ? detectedModelLayers : 128;
 if (isCpuBackend) {
 gpuLayers = 0;
@@ -1091,12 +1082,7 @@ if (ImGui::Selectable(label.c_str(), isSelected)) {
 selectedModelIndex = i;
 detectModelLayers();
 // Only set GPU layers when a GPU backend is active.
-bool isCpu = true;
-if (selectedBackendIndex >= 0 &&
-	selectedBackendIndex < static_cast<int>(devices.size())) {
-	isCpu = (devices[selectedBackendIndex].type == ofxGgmlBackendType::Cpu);
-}
-if (isCpu) {
+if (isSelectedBackendCpu()) {
 gpuLayers = 0;
 } else if (detectedModelLayers > 0) {
 gpuLayers = detectedModelLayers;
@@ -1127,11 +1113,7 @@ ImGui::SetNextItemWidth(-1);
 ImGui::SliderFloat("##TopP", &topP, 0.0f, 1.0f, "Top-P: %.2f");
 ImGui::SetNextItemWidth(-1);
 {
-bool isCpuBackend = true;
-if (selectedBackendIndex >= 0 &&
-	selectedBackendIndex < static_cast<int>(devices.size())) {
-	isCpuBackend = (devices[selectedBackendIndex].type == ofxGgmlBackendType::Cpu);
-}
+bool isCpuBackend = isSelectedBackendCpu();
 int sliderMax = detectedModelLayers > 0 ? detectedModelLayers : 128;
 if (isCpuBackend) {
 gpuLayers = 0;
@@ -2650,12 +2632,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	int effectiveGpuLayers = safeGpuLayers;
 	{
 		// Force zero GPU layers when the selected backend is CPU.
-		bool isCpuBackend = true;
-		if (selectedBackendIndex >= 0 &&
-			selectedBackendIndex < static_cast<int>(devices.size())) {
-			isCpuBackend = (devices[selectedBackendIndex].type == ofxGgmlBackendType::Cpu);
-		}
-		if (isCpuBackend) effectiveGpuLayers = 0;
+		if (isSelectedBackendCpu()) effectiveGpuLayers = 0;
 	}
 
 	std::ostringstream tempStr, topPStr, repeatPenaltyStr;
@@ -2841,12 +2818,7 @@ if (engineReady) {
 		selectedBackendIndex = 0;
 	}
 	// Force GPU layers to 0 when switching to CPU backend.
-	bool isCpu = true;
-	if (selectedBackendIndex >= 0 &&
-		selectedBackendIndex < static_cast<int>(devices.size())) {
-		isCpu = (devices[selectedBackendIndex].type == ofxGgmlBackendType::Cpu);
-	}
-	if (isCpu) {
+	if (isSelectedBackendCpu()) {
 		gpuLayers = 0;
 	} else if (gpuLayers == 0 && detectedModelLayers > 0) {
 		// Auto-enable GPU layers when switching to a GPU backend.
@@ -2862,6 +2834,14 @@ if (engineReady) {
 	logMessages.push_back("[info] Backend reinitialized: " + engineStatus);
 	if (logMessages.size() > 500) logMessages.pop_front();
 }
+}
+
+bool ofApp::isSelectedBackendCpu() const {
+	if (selectedBackendIndex >= 0 &&
+		selectedBackendIndex < static_cast<int>(devices.size())) {
+		return devices[selectedBackendIndex].type == ofxGgmlBackendType::Cpu;
+	}
+	return true; // assume CPU when no devices are known
 }
 
 void ofApp::runInference(AiMode mode, const std::string & userText,
