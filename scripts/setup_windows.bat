@@ -110,7 +110,7 @@ echo   --auto             Auto-detect GPU backends ^(default^)
 echo   --gpu, --cuda      Enable CUDA backend
 echo   --vulkan           Enable Vulkan backend
 echo   --skip-ggml        Skip building ggml
-echo   --skip-model       Skip downloading model file^(s^)
+echo   --skip-model       Skip downloading model files
 echo   --model-preset N   Download preset 1 or 2 ^(default: both^)
 echo   --jobs N           Parallel build jobs ^(default: %NUMBER_OF_PROCESSORS%^)
 echo   --clean            Remove previous build directories before building
@@ -137,7 +137,7 @@ if "%SKIP_GGML%"=="0" (
 )
 
 if "%SKIP_MODEL%"=="0" (
-    echo [2/2] Downloading model file^(s^)...
+    echo [2/2] Downloading model files...
     call :download_models
     if errorlevel 1 exit /b 1
 ) else (

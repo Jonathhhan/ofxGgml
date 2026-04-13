@@ -82,10 +82,14 @@ ggml source is bundled in `libs/ggml/`.  It is compiled as a static library.  By
 ```
 
 ```bat
-scripts\setup_windows.bat             &:: Windows: ggml + models
-scripts\setup_windows.bat --cuda      &:: Windows: force CUDA
-scripts\setup_windows.bat --skip-model &:: Windows: ggml only
-scripts\setup_windows.bat --skip-ggml --model-preset 2 &:: Windows: model preset 2 only
+:: Windows: ggml + models
+scripts\setup_windows.bat
+:: Windows: force CUDA
+scripts\setup_windows.bat --cuda
+:: Windows: ggml only
+scripts\setup_windows.bat --skip-model
+:: Windows: model preset 2 only
+scripts\setup_windows.bat --skip-ggml --model-preset 2
 ```
 
 ### ggml only
