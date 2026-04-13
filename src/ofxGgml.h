@@ -6,6 +6,7 @@
 /// Include this single file to access all addon classes:
 ///   - ofxGgml         — backend management, compute scheduling
 ///   - ofxGgmlGraph    — computation graph builder
+///   - ofxGgmlInference — text generation / embeddings helper (llama CLI)
 ///   - ofxGgmlModel    — GGUF model loading
 ///   - ofxGgmlProjectMemory — persistent prompt memory helper
 ///   - ofxGgmlTensor   — non-owning tensor handle
@@ -18,6 +19,7 @@
 #include "ofxGgmlHelpers.h"
 #include "ofxGgmlTensor.h"
 #include "ofxGgmlGraph.h"
+#include "ofxGgmlInference.h"
 #include "ofxGgmlModel.h"
 #include "ofxGgmlProjectMemory.h"
 #include "ofxGgmlCore.h"

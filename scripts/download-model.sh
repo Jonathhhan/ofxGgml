@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./scripts/download-model.sh [--model URL] [--preset N] [--task NAME] [--both]
-#                               [--output DIR] [--name FILE]
+#                               [--output DIR] [--name FILE] [--checksum SHA256]
 #
 # Options:
 #   --model  URL   Direct URL to a GGUF model file.
@@ -16,6 +16,7 @@
 #   --output DIR   Directory to save the model (default: bin/data/models/)
 #   --name   FILE  Output file name (default: derived from URL)
 #   --both         Download both recommended presets (1 and 2)
+#   --checksum HEX SHA256 checksum for --model URL downloads
 #   --list         List recommended models with preset numbers and exit
 #   --help         Show this help message
 #
@@ -33,26 +34,74 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+MODEL_CATALOG_PATH="$ADDON_ROOT/scripts/model-catalog.json"
+
 # ---------------------------------------------------------------------------
-# Model presets — same list as the GUI example
+# Model presets (loaded from model-catalog.json, with fallback defaults)
 # ---------------------------------------------------------------------------
 
-PRESET_NAMES=(
-	"Qwen2.5-1.5B Instruct Q4_K_M"
-	"Qwen2.5-Coder-1.5B Instruct Q4_K_M"
-)
-PRESET_URLS=(
-	"https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
-	"https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
-)
-PRESET_SIZES=(
-	"~1.0 GB"
-	"~1.0 GB"
-)
-PRESET_BESTFOR=(
-	"chat, general"
-	"scripting, code generation"
-)
+PRESET_NAMES=()
+PRESET_URLS=()
+PRESET_SIZES=()
+PRESET_BESTFOR=()
+PRESET_FILENAMES=()
+PRESET_SHA256=()
+
+if command -v python3 >/dev/null 2>&1 && [[ -f "$MODEL_CATALOG_PATH" ]]; then
+	MODEL_CATALOG_ROWS="$(python3 - "$MODEL_CATALOG_PATH" <<'PY'
+import json, sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+for model in data.get("models", []):
+    print("\t".join([
+        str(model.get("name", "")),
+        str(model.get("url", "")),
+        str(model.get("size", "")),
+        str(model.get("best_for", "")),
+        str(model.get("filename", "")),
+        str(model.get("sha256", "")),
+    ]))
+PY
+)"
+	while IFS=$'\t' read -r name url size bestfor filename sha256; do
+		[[ -z "$name" ]] && continue
+		PRESET_NAMES+=("$name")
+		PRESET_URLS+=("$url")
+		PRESET_SIZES+=("$size")
+		PRESET_BESTFOR+=("$bestfor")
+		PRESET_FILENAMES+=("$filename")
+		PRESET_SHA256+=("$sha256")
+	done <<< "$MODEL_CATALOG_ROWS"
+fi
+
+if [[ ${#PRESET_NAMES[@]} -eq 0 ]]; then
+	PRESET_NAMES=(
+		"Qwen2.5-1.5B Instruct Q4_K_M"
+		"Qwen2.5-Coder-1.5B Instruct Q4_K_M"
+	)
+	PRESET_URLS=(
+		"https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+		"https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+	)
+	PRESET_SIZES=(
+		"~1.0 GB"
+		"~1.0 GB"
+	)
+	PRESET_BESTFOR=(
+		"chat, general"
+		"scripting, code generation"
+	)
+	PRESET_FILENAMES=(
+		"qwen2.5-1.5b-instruct-q4_k_m.gguf"
+		"qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+	)
+	PRESET_SHA256=("" "")
+fi
+
 # Zero-based indices of presets downloaded by default / --both.
 RECOMMENDED_PRESET_INDICES=(0 1)
 
@@ -71,6 +120,7 @@ TASK_PRESET[custom]=1
 MODEL_URL=""
 OUTPUT_DIR=""
 OUTPUT_NAME=""
+MODEL_CHECKSUM=""
 PRESET_INDEX=""
 TASK_NAME=""
 DOWNLOAD_BOTH=false
@@ -96,6 +146,9 @@ list_models() {
 		local n=$((i + 1))
 		printf "  %d. %-40s %s\n" "$n" "${PRESET_NAMES[$i]}" "${PRESET_SIZES[$i]}"
 		printf "     Best for: %s\n" "${PRESET_BESTFOR[$i]}"
+		if [[ -n "${PRESET_SHA256[$i]:-}" ]]; then
+			printf "     SHA256: %s\n" "${PRESET_SHA256[$i]}"
+		fi
 		printf "     %s\n\n" "${PRESET_URLS[$i]}"
 	done
 	echo "Preferred models per example task (--task NAME):"
@@ -112,7 +165,10 @@ list_models() {
 	echo "  ./scripts/download-model.sh --both          # Download presets 1 and 2"
 	echo "  ./scripts/download-model.sh --task script   # same as --preset 2"
 	echo "  ./scripts/download-model.sh --task chat     # Qwen2.5-1.5B for chat"
+	echo "  ./scripts/download-model.sh --model <URL> --checksum <SHA256>"
 	echo "  ./scripts/download-model.sh --model <URL>   # custom URL"
+	echo ""
+	echo "Catalog: $MODEL_CATALOG_PATH"
 	exit 0
 }
 
@@ -140,6 +196,10 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--name)
 			OUTPUT_NAME="$2"
+			shift 2
+			;;
+		--checksum)
+			MODEL_CHECKSUM="$2"
 			shift 2
 			;;
 		--both)
@@ -170,12 +230,13 @@ if [[ "$DOWNLOAD_BOTH" == true ]]; then
 	if [[ -n "$OUTPUT_NAME" ]]; then
 		die "Cannot use --name with --both"
 	fi
+	if [[ -n "$MODEL_CHECKSUM" ]]; then
+		die "Cannot use --checksum with --both"
+	fi
 fi
 
 if [[ -z "$OUTPUT_DIR" ]]; then
 	# Try to find the example's bin/data directory.
-	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-	ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 	GUI_EXAMPLE="$ADDON_ROOT/ofxGgmlGuiExample/bin/data"
 	if [[ -d "$(dirname "$GUI_EXAMPLE")" ]]; then
 		OUTPUT_DIR="$GUI_EXAMPLE/models"
@@ -200,27 +261,70 @@ fi
 download_model() {
 	local model_url="$1"
 	local output_name="$2"
+	local expected_sha256="${3:-}"
 	local output_path="$OUTPUT_DIR/$output_name"
 
+	compute_sha256() {
+		local path="$1"
+		if command -v sha256sum >/dev/null 2>&1; then
+			sha256sum "$path" | awk '{print $1}'
+			return 0
+		elif command -v shasum >/dev/null 2>&1; then
+			shasum -a 256 "$path" | awk '{print $1}'
+			return 0
+		fi
+		return 1
+	}
+
 	if [[ -f "$output_path" ]]; then
-		write_step "Model already exists at $output_path (skipping)"
-		return 0
+		if [[ -n "$expected_sha256" ]]; then
+			if actual_sha256="$(compute_sha256 "$output_path" 2>/dev/null)"; then
+				if [[ "$actual_sha256" == "$expected_sha256" ]]; then
+					write_step "Model already exists and checksum matches: $output_path"
+					return 0
+				fi
+				write_step "Checksum mismatch for existing file, re-downloading: $output_path"
+				rm -f "$output_path"
+			else
+				write_step "Checksum tool unavailable, keeping existing file: $output_path"
+				return 0
+			fi
+		else
+			write_step "Model already exists at $output_path (skipping)"
+			return 0
+		fi
 	fi
 
 	write_step "Downloading model..."
 	write_step "  URL:  $model_url"
 	write_step "  Dest: $output_path"
+	if [[ -n "$expected_sha256" ]]; then
+		write_step "  SHA256: $expected_sha256"
+	fi
 	write_step ""
 
 	if [[ "$DOWNLOAD_CMD" == "curl" ]]; then
-		curl -L --progress-bar -o "$output_path" "$model_url"
+		curl -L --progress-bar -C - --retry 3 --retry-delay 2 -o "$output_path" "$model_url"
 	elif [[ "$DOWNLOAD_CMD" == "wget" ]]; then
-		wget --show-progress -O "$output_path" "$model_url"
+		wget -c --show-progress -O "$output_path" "$model_url"
 	fi
 
 	if [[ ! -s "$output_path" ]]; then
 		rm -f "$output_path"
 		die "Downloaded file is empty. Check the URL and try again."
+	fi
+
+	if [[ -n "$expected_sha256" ]]; then
+		local got_sha256=""
+		if ! got_sha256="$(compute_sha256 "$output_path" 2>/dev/null)"; then
+			rm -f "$output_path"
+			die "Failed to compute SHA256 checksum. Install sha256sum or shasum."
+		fi
+		if [[ "$got_sha256" != "$expected_sha256" ]]; then
+			rm -f "$output_path"
+			die "Checksum verification failed for $output_path"
+		fi
+		write_step "Checksum verification passed."
 	fi
 
 	local FILE_SIZE
@@ -239,7 +343,11 @@ if [[ "$DOWNLOAD_BOTH" == true ]]; then
 			die "Recommended preset index $i is out of range, but only ${#PRESET_URLS[@]} preset entries are configured"
 		fi
 		write_step "Preset $((i + 1)): ${PRESET_NAMES[$i]} (${PRESET_SIZES[$i]})"
-		download_model "${PRESET_URLS[$i]}" "$(basename "${PRESET_URLS[$i]}")"
+		local_name="${PRESET_FILENAMES[$i]:-}"
+		if [[ -z "$local_name" ]]; then
+			local_name="$(basename "${PRESET_URLS[$i]}")"
+		fi
+		download_model "${PRESET_URLS[$i]}" "$local_name" "${PRESET_SHA256[$i]:-}"
 	done
 	write_step "Next steps:"
 	write_step "  1. Build ggml with scripts/build-ggml.sh (if not done)."
@@ -268,6 +376,9 @@ if [[ -n "$PRESET_INDEX" ]]; then
 		die "Invalid preset number: $PRESET_INDEX (valid: 1-${#PRESET_URLS[@]})"
 	fi
 	MODEL_URL="${PRESET_URLS[$idx]}"
+	if [[ -z "$MODEL_CHECKSUM" ]]; then
+		MODEL_CHECKSUM="${PRESET_SHA256[$idx]:-}"
+	fi
 	write_step "Preset $PRESET_INDEX selected: ${PRESET_NAMES[$idx]} (${PRESET_SIZES[$idx]})"
 fi
 
@@ -278,10 +389,16 @@ if [[ -z "$MODEL_URL" ]]; then
 fi
 
 if [[ -z "$OUTPUT_NAME" ]]; then
-	OUTPUT_NAME="$(basename "$MODEL_URL")"
+	if [[ -n "$PRESET_INDEX" ]]; then
+		idx=$((PRESET_INDEX - 1))
+		OUTPUT_NAME="${PRESET_FILENAMES[$idx]:-}"
+	fi
+	if [[ -z "$OUTPUT_NAME" ]]; then
+		OUTPUT_NAME="$(basename "$MODEL_URL")"
+	fi
 fi
 
-download_model "$MODEL_URL" "$OUTPUT_NAME"
+download_model "$MODEL_URL" "$OUTPUT_NAME" "$MODEL_CHECKSUM"
 write_step "Next steps:"
 write_step "  1. Build ggml with scripts/build-ggml.sh (if not done)."
 write_step "  2. Build and run your OF project with ofxGgml."

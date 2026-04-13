@@ -1,0 +1,404 @@
+#include "ofxGgmlInference.h"
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <numeric>
+#include <random>
+#include <sstream>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/wait.h>
+#endif
+
+namespace {
+
+static std::string trim(const std::string & s) {
+size_t b = 0;
+while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
+size_t e = s.size();
+while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
+return s.substr(b, e - b);
+}
+
+static std::string quoteArg(const std::string & arg) {
+#ifdef _WIN32
+std::string out = "\"";
+for (char c : arg) {
+if (c == '"') out += '\\';
+out += c;
+}
+out += '"';
+return out;
+#else
+std::string out = "'";
+for (char c : arg) {
+if (c == '\'') {
+out += "'\\''";
+} else {
+out += c;
+}
+}
+out += "'";
+return out;
+#endif
+}
+
+static std::string joinCommand(const std::vector<std::string> & args) {
+std::string cmd;
+for (size_t i = 0; i < args.size(); ++i) {
+if (i > 0) cmd += " ";
+cmd += quoteArg(args[i]);
+}
+cmd += " 2>&1";
+return cmd;
+}
+
+static bool runCommandCapture(const std::vector<std::string> & args, std::string & output, int & exitCode) {
+output.clear();
+exitCode = -1;
+const std::string cmd = joinCommand(args);
+
+#ifdef _WIN32
+FILE * pipe = _popen(cmd.c_str(), "r");
+#else
+FILE * pipe = popen(cmd.c_str(), "r");
+#endif
+if (!pipe) return false;
+
+std::array<char, 4096> buf{};
+while (fgets(buf.data(), static_cast<int>(buf.size()), pipe) != nullptr) {
+output += buf.data();
+}
+
+#ifdef _WIN32
+exitCode = _pclose(pipe);
+#else
+exitCode = pclose(pipe);
+if (WIFEXITED(exitCode)) {
+exitCode = WEXITSTATUS(exitCode);
+}
+#endif
+return true;
+}
+
+static std::string makeTempPath(const char * prefix, const char * ext) {
+std::error_code ec;
+std::filesystem::path base = std::filesystem::temp_directory_path(ec);
+if (ec) base = std::filesystem::current_path();
+const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+std::mt19937_64 rng(static_cast<uint64_t>(now));
+const uint64_t nonce = rng();
+return (base / (std::string(prefix) + std::to_string(now) + "_" + std::to_string(nonce) + ext)).string();
+}
+
+static bool writeTextFile(const std::string & path, const std::string & text) {
+std::ofstream out(path, std::ios::binary);
+if (!out.is_open()) return false;
+out << text;
+return out.good();
+}
+
+static bool parseEmbeddingVector(const std::string & raw, std::vector<float> & out) {
+out.clear();
+const size_t begin = raw.find('[');
+const size_t end = raw.find(']', begin == std::string::npos ? 0 : begin + 1);
+if (begin == std::string::npos || end == std::string::npos || end <= begin + 1) return false;
+std::string body = raw.substr(begin + 1, end - begin - 1);
+for (char & c : body) {
+if (c == ',') c = ' ';
+}
+std::istringstream iss(body);
+float v = 0.0f;
+while (iss >> v) {
+if (std::isfinite(v)) out.push_back(v);
+}
+return !out.empty();
+}
+
+} // namespace
+
+ofxGgmlInference::ofxGgmlInference()
+: m_completionExe("llama-cli")
+, m_embeddingExe("llama-embedding") {}
+
+void ofxGgmlInference::setCompletionExecutable(const std::string & path) {
+m_completionExe = path;
+}
+
+void ofxGgmlInference::setEmbeddingExecutable(const std::string & path) {
+m_embeddingExe = path;
+}
+
+const std::string & ofxGgmlInference::getCompletionExecutable() const {
+return m_completionExe;
+}
+
+const std::string & ofxGgmlInference::getEmbeddingExecutable() const {
+return m_embeddingExe;
+}
+
+ofxGgmlInferenceResult ofxGgmlInference::generate(
+const std::string & modelPath,
+const std::string & prompt,
+const ofxGgmlInferenceSettings & settings) const {
+ofxGgmlInferenceResult result;
+if (modelPath.empty()) {
+result.error = "model path is empty";
+return result;
+}
+if (m_completionExe.empty()) {
+result.error = "completion executable path is empty";
+return result;
+}
+
+const auto t0 = std::chrono::steady_clock::now();
+const std::string promptPath = makeTempPath("ofxggml_prompt_", ".txt");
+if (!writeTextFile(promptPath, prompt)) {
+result.error = "failed to write temp prompt file";
+return result;
+}
+
+std::vector<std::string> args = {
+m_completionExe,
+"-m", modelPath,
+"--file", promptPath,
+"-n", std::to_string(std::clamp(settings.maxTokens, 1, 8192)),
+"-c", std::to_string(std::clamp(settings.contextSize, 128, 131072)),
+"-b", std::to_string(std::clamp(settings.batchSize, 1, 8192)),
+"-ngl", std::to_string(std::max(0, settings.gpuLayers)),
+"--temp", std::to_string(std::clamp(settings.temperature, 0.0f, 3.0f)),
+"--top-p", std::to_string(std::clamp(settings.topP, 0.0f, 1.0f)),
+"--repeat-penalty", std::to_string(std::clamp(settings.repeatPenalty, 1.0f, 3.0f)),
+"--no-display-prompt"
+};
+
+if (settings.simpleIo) {
+args.push_back("--simple-io");
+}
+if (settings.threads > 0) {
+args.push_back("--threads");
+args.push_back(std::to_string(std::clamp(settings.threads, 1, 256)));
+}
+if (settings.seed >= 0) {
+args.push_back("--seed");
+args.push_back(std::to_string(settings.seed));
+}
+if (!settings.promptCachePath.empty()) {
+args.push_back("--prompt-cache");
+args.push_back(settings.promptCachePath);
+if (settings.promptCacheAll) {
+args.push_back("--prompt-cache-all");
+}
+}
+if (!settings.jsonSchema.empty()) {
+args.push_back("--json-schema");
+args.push_back(settings.jsonSchema);
+}
+if (!settings.grammarPath.empty()) {
+args.push_back("--grammar-file");
+args.push_back(settings.grammarPath);
+}
+
+std::string raw;
+int exitCode = -1;
+const bool started = runCommandCapture(args, raw, exitCode);
+std::error_code rmEc;
+std::filesystem::remove(promptPath, rmEc);
+
+if (!started) {
+result.error = "failed to start llama completion process";
+return result;
+}
+if (exitCode != 0) {
+result.error = trim(raw);
+if (result.error.empty()) {
+result.error = "llama completion failed with exit code " + std::to_string(exitCode);
+}
+return result;
+}
+
+result.success = true;
+result.text = trim(raw);
+const auto t1 = std::chrono::steady_clock::now();
+result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
+return result;
+}
+
+ofxGgmlEmbeddingResult ofxGgmlInference::embed(
+const std::string & modelPath,
+const std::string & text,
+const ofxGgmlEmbeddingSettings & settings) const {
+ofxGgmlEmbeddingResult result;
+if (modelPath.empty()) {
+result.error = "model path is empty";
+return result;
+}
+if (m_embeddingExe.empty()) {
+result.error = "embedding executable path is empty";
+return result;
+}
+
+const std::string promptPath = makeTempPath("ofxggml_embed_", ".txt");
+if (!writeTextFile(promptPath, text)) {
+result.error = "failed to write temp embedding prompt file";
+return result;
+}
+
+std::vector<std::string> args = {
+m_embeddingExe,
+"-m", modelPath,
+"--file", promptPath,
+"--embd-output-format", "json",
+"--pooling", settings.pooling
+};
+if (settings.normalize) {
+args.push_back("--embd-normalize");
+}
+
+std::string raw;
+int exitCode = -1;
+const bool started = runCommandCapture(args, raw, exitCode);
+std::error_code rmEc;
+std::filesystem::remove(promptPath, rmEc);
+
+if (!started) {
+result.error = "failed to start llama embedding process";
+return result;
+}
+if (exitCode != 0) {
+result.error = trim(raw);
+if (result.error.empty()) {
+result.error = "llama embedding failed with exit code " + std::to_string(exitCode);
+}
+return result;
+}
+
+if (!parseEmbeddingVector(raw, result.embedding)) {
+result.error = "failed to parse embedding output";
+return result;
+}
+
+result.success = true;
+return result;
+}
+
+std::vector<std::string> ofxGgmlInference::tokenize(const std::string & text) {
+std::vector<std::string> tokens;
+std::istringstream iss(text);
+std::string tok;
+while (iss >> tok) {
+tokens.push_back(tok);
+}
+return tokens;
+}
+
+std::string ofxGgmlInference::detokenize(const std::vector<std::string> & tokens) {
+std::ostringstream oss;
+for (size_t i = 0; i < tokens.size(); ++i) {
+if (i > 0) oss << ' ';
+oss << tokens[i];
+}
+return oss.str();
+}
+
+int ofxGgmlInference::sampleFromLogits(
+const std::vector<float> & logits,
+float temperature,
+float topP,
+uint32_t seed) {
+if (logits.empty()) return -1;
+if (!std::isfinite(temperature) || temperature <= 0.0f) {
+return static_cast<int>(std::distance(logits.begin(), std::max_element(logits.begin(), logits.end())));
+}
+
+const float maxLogit = *std::max_element(logits.begin(), logits.end());
+std::vector<float> probs(logits.size(), 0.0f);
+float sum = 0.0f;
+for (size_t i = 0; i < logits.size(); ++i) {
+const float z = (logits[i] - maxLogit) / temperature;
+const float p = std::exp(z);
+probs[i] = std::isfinite(p) ? p : 0.0f;
+sum += probs[i];
+}
+if (sum <= 0.0f) {
+return static_cast<int>(std::distance(logits.begin(), std::max_element(logits.begin(), logits.end())));
+}
+for (float & p : probs) p /= sum;
+
+std::vector<size_t> idx(probs.size());
+std::iota(idx.begin(), idx.end(), static_cast<size_t>(0));
+std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return probs[a] > probs[b]; });
+
+topP = std::clamp(topP, 0.0f, 1.0f);
+if (topP <= 0.0f) {
+return static_cast<int>(idx.front());
+}
+
+std::vector<double> filtered;
+std::vector<size_t> filteredIdx;
+filtered.reserve(probs.size());
+filteredIdx.reserve(probs.size());
+float cum = 0.0f;
+for (size_t i : idx) {
+filtered.push_back(probs[i]);
+filteredIdx.push_back(i);
+cum += probs[i];
+if (cum >= topP) break;
+}
+
+std::mt19937 rng(seed == 0 ? std::random_device{}() : seed);
+std::discrete_distribution<size_t> dist(filtered.begin(), filtered.end());
+return static_cast<int>(filteredIdx[dist(rng)]);
+}
+
+void ofxGgmlEmbeddingIndex::clear() {
+m_entries.clear();
+}
+
+void ofxGgmlEmbeddingIndex::add(const std::string & id, const std::string & text, const std::vector<float> & embedding) {
+if (embedding.empty()) return;
+m_entries.push_back({ id, text, embedding });
+}
+
+std::vector<ofxGgmlSimilarityHit> ofxGgmlEmbeddingIndex::search(const std::vector<float> & queryEmbedding, size_t topK) const {
+std::vector<ofxGgmlSimilarityHit> hits;
+if (queryEmbedding.empty() || m_entries.empty() || topK == 0) return hits;
+
+hits.reserve(m_entries.size());
+for (size_t i = 0; i < m_entries.size(); ++i) {
+const auto & e = m_entries[i];
+hits.push_back({ e.id, e.text, cosineSimilarity(queryEmbedding, e.embedding), i });
+}
+
+std::sort(hits.begin(), hits.end(), [](const ofxGgmlSimilarityHit & a, const ofxGgmlSimilarityHit & b) {
+return a.score > b.score;
+});
+
+if (hits.size() > topK) hits.resize(topK);
+return hits;
+}
+
+float ofxGgmlEmbeddingIndex::cosineSimilarity(const std::vector<float> & a, const std::vector<float> & b) {
+if (a.empty() || b.empty() || a.size() != b.size()) return 0.0f;
+double dot = 0.0;
+double na = 0.0;
+double nb = 0.0;
+for (size_t i = 0; i < a.size(); ++i) {
+const double da = a[i];
+const double db = b[i];
+dot += da * db;
+na += da * da;
+nb += db * db;
+}
+if (na <= 0.0 || nb <= 0.0) return 0.0f;
+return static_cast<float>(dot / (std::sqrt(na) * std::sqrt(nb)));
+}
