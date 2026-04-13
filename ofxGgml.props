@@ -2,7 +2,8 @@
 <!--
   ofxGgml Visual Studio property sheet.
 
-  Provides per-configuration (Debug / Release) library linking so that
+  Provides include paths for the addon's headers and ggml library headers,
+  and per-configuration (Debug / Release) library linking so that
   Debug builds link against Debug-compiled ggml libraries and Release
   builds link against Release-compiled ggml libraries.  This avoids
   LNK2038 RuntimeLibrary / _ITERATOR_DEBUG_LEVEL mismatch errors.
@@ -28,6 +29,9 @@
   </PropertyGroup>
 
   <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ofxGgmlRoot)src;$(ofxGgmlRoot)libs\ggml\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(ofxGgmlLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>ggml.lib;ggml-base.lib;ggml-cpu.lib;%(AdditionalDependencies)</AdditionalDependencies>
