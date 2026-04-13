@@ -1293,17 +1293,23 @@ ImGui::Separator();
 ImGui::Text("Language:");
 ImGui::SameLine();
 ImGui::SetNextItemWidth(140);
-if (!scriptLanguages.empty()) {
-if (ImGui::BeginCombo("##LangSel", scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].name.c_str())) {
-for (int i = 0; i < static_cast<int>(scriptLanguages.size()); i++) {
-bool isSelected = (selectedLanguageIndex == i);
-if (ImGui::Selectable(scriptLanguages[static_cast<size_t>(i)].name.c_str(), isSelected)) {
-selectedLanguageIndex = i;
-}
-if (isSelected) ImGui::SetItemDefaultFocus();
-}
-ImGui::EndCombo();
-}
+	if (!scriptLanguages.empty()) {
+	if (ImGui::BeginCombo("##LangSel", scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].name.c_str())) {
+	for (int i = 0; i < static_cast<int>(scriptLanguages.size()); i++) {
+	bool isSelected = (selectedLanguageIndex == i);
+	if (ImGui::Selectable(scriptLanguages[static_cast<size_t>(i)].name.c_str(), isSelected)) {
+	if (selectedLanguageIndex != i) {
+	selectedLanguageIndex = i;
+	selectedTemplateIndex = -1;
+	if (scriptSourceType == ScriptSourceType::LocalFolder && !scriptSourcePath.empty()) {
+	scanLocalFolder(scriptSourcePath);
+	}
+	}
+	}
+	if (isSelected) ImGui::SetItemDefaultFocus();
+	}
+	ImGui::EndCombo();
+	}
 }
 
 ImGui::SameLine();
@@ -1413,38 +1419,43 @@ ImGui::EndCombo();
 }
 }
 
+auto buildScriptPrompt = [this](const std::string & body) {
+std::string prompt;
+if (!scriptLanguages.empty()) {
+prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
+}
+prompt += body;
+return prompt;
+};
+
 ImGui::BeginDisabled(generating.load() || std::strlen(scriptInput) == 0);
 if (ImGui::Button("Generate Code", ImVec2(120, 0))) {
-std::string langPrompt;
-if (!scriptLanguages.empty()) {
-langPrompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
-}
-runInference(AiMode::Script, langPrompt + scriptInput);
+runInference(AiMode::Script, buildScriptPrompt(scriptInput));
 }
 ImGui::SameLine();
 if (ImGui::Button("Explain Code", ImVec2(110, 0))) {
-std::string prompt = std::string("Explain the following code:\n") + scriptInput;
-runInference(AiMode::Script, prompt);
+runInference(AiMode::Script, buildScriptPrompt(
+	std::string("Explain the following code:\n") + scriptInput));
 }
 ImGui::SameLine();
 if (ImGui::Button("Debug Code", ImVec2(100, 0))) {
-std::string prompt = std::string("Find bugs in the following code:\n") + scriptInput;
-runInference(AiMode::Script, prompt);
+runInference(AiMode::Script, buildScriptPrompt(
+	std::string("Find bugs in the following code:\n") + scriptInput));
 }
 ImGui::SameLine();
 if (ImGui::Button("Optimize", ImVec2(80, 0))) {
-std::string prompt = std::string("Optimize the following code for performance. Show the improved version and explain what changed:\n") + scriptInput;
-runInference(AiMode::Script, prompt);
+runInference(AiMode::Script, buildScriptPrompt(
+	std::string("Optimize the following code for performance. Show the improved version and explain what changed:\n") + scriptInput));
 }
 ImGui::SameLine();
 if (ImGui::Button("Refactor", ImVec2(80, 0))) {
-std::string prompt = std::string("Refactor the following code to improve readability, maintainability, and structure. Show the refactored version:\n") + scriptInput;
-runInference(AiMode::Script, prompt);
+runInference(AiMode::Script, buildScriptPrompt(
+	std::string("Refactor the following code to improve readability, maintainability, and structure. Show the refactored version:\n") + scriptInput));
 }
 ImGui::SameLine();
 if (ImGui::Button("Review", ImVec2(70, 0))) {
-std::string prompt = std::string("Review the following code for bugs, security issues, and style. Provide specific feedback:\n") + scriptInput;
-runInference(AiMode::Script, prompt);
+runInference(AiMode::Script, buildScriptPrompt(
+	std::string("Review the following code for bugs, security issues, and style. Provide specific feedback:\n") + scriptInput));
 }
 ImGui::EndDisabled();
 
