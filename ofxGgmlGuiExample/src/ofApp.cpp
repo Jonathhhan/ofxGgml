@@ -809,21 +809,14 @@ backendNames.clear();
 for (const auto & d : devices) {
 	backendNames.push_back(d.name);
 }
-// Auto-select the first GPU/accelerator backend if available.
-{
-	int gpuIdx = -1;
-	for (int i = 0; i < static_cast<int>(devices.size()); i++) {
-		if (devices[i].type != ofxGgmlBackendType::Cpu) {
-			gpuIdx = i;
-			break;
-		}
-	}
-	if (gpuIdx >= 0) {
-		selectedBackendIndex = gpuIdx;
-	} else {
-		selectedBackendIndex = 0; // CPU fallback
-	}
-}
+// Auto-select the device that matches the *actual* running backend.
+// Previous code blindly picked the first GPU device, but the engine
+// may have fallen back to CPU (e.g. when the GPU driver is present
+// but cannot create a working context).  Matching by name avoids
+// the mismatch where the dropdown says "GPU" but the engine is on
+// CPU, and prevents a user from accidentally triggering a reinit
+// that crashes.
+syncSelectedBackendIndex();
 } else {
 engineStatus = "Failed to initialize ggml engine";
 }
@@ -2813,10 +2806,10 @@ if (engineReady) {
 	for (const auto & d : devices) {
 		backendNames.push_back(d.name);
 	}
-	// Clamp index to valid range.
-	if (selectedBackendIndex >= static_cast<int>(backendNames.size())) {
-		selectedBackendIndex = 0;
-	}
+	// Update the dropdown to match the *actual* running backend.
+	// The engine may have fallen back to CPU if the requested GPU
+	// backend could not be initialised.
+	syncSelectedBackendIndex();
 	// Force GPU layers to 0 when switching to CPU backend.
 	if (isSelectedBackendCpu()) {
 		gpuLayers = 0;
@@ -2842,6 +2835,22 @@ bool ofApp::isSelectedBackendCpu() const {
 		return devices[selectedBackendIndex].type == ofxGgmlBackendType::Cpu;
 	}
 	return true; // assume CPU when no devices are known
+}
+
+void ofApp::syncSelectedBackendIndex() {
+	if (backendNames.empty()) {
+		selectedBackendIndex = 0;
+		return;
+	}
+	std::string actualName = ggml.getBackendName();
+	int matchIdx = -1;
+	for (int i = 0; i < static_cast<int>(backendNames.size()); i++) {
+		if (backendNames[i] == actualName) {
+			matchIdx = i;
+			break;
+		}
+	}
+	selectedBackendIndex = (matchIdx >= 0) ? matchIdx : 0;
 }
 
 void ofApp::runInference(AiMode mode, const std::string & userText,
