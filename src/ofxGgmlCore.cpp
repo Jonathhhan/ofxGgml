@@ -6,9 +6,11 @@
 #include "ggml-cpu.h"
 
 #include <chrono>
+#include <csetjmp>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <mutex>
 
 // --------------------------------------------------------------------------
 //  Early environment setup
@@ -109,6 +111,58 @@ static bool isDeviceMemoryAvailable(ggml_backend_dev_t dev) {
 	size_t free = 0, total = 0;
 	ggml_backend_dev_memory(dev, &free, &total);
 	return total > 0 && free > 0;
+}
+
+// --------------------------------------------------------------------------
+//  Abort recovery for GPU backend init
+// --------------------------------------------------------------------------
+//
+// ggml calls GGML_ABORT("fatal error") → ggml_abort() → abort() when an
+// internal allocation fails (e.g. inside ggml_malloc / ggml_calloc).
+// When a GPU backend cannot be initialised properly this kills the entire
+// process.
+//
+// We install a custom abort callback via ggml_set_abort_callback() that
+// uses longjmp to return control to the call-site so the addon can fall
+// back to the CPU backend instead of crashing.
+
+static thread_local std::jmp_buf s_gpuInitJmpBuf;
+static thread_local bool s_gpuInitGuardActive = false;
+static thread_local const char * s_gpuInitAbortMsg = nullptr;
+
+static void gpuInitAbortHandler(const char * message) {
+	if (s_gpuInitGuardActive) {
+		s_gpuInitAbortMsg = message;
+		s_gpuInitGuardActive = false;
+		std::longjmp(s_gpuInitJmpBuf, 1);
+	}
+}
+
+/// Try to initialise a backend device, catching any fatal ggml abort
+/// so the process can continue with a CPU fallback.
+/// A mutex serialises access because ggml_set_abort_callback() sets a
+/// process-wide (not thread-local) callback.
+static ggml_backend_t tryInitBackendDev(ggml_backend_dev_t dev) {
+	static std::mutex mtx;
+	std::lock_guard<std::mutex> lock(mtx);
+
+	ggml_abort_callback_t prev = ggml_set_abort_callback(gpuInitAbortHandler);
+	s_gpuInitGuardActive = true;
+	s_gpuInitAbortMsg = nullptr;
+
+	ggml_backend_t result = nullptr;
+	if (setjmp(s_gpuInitJmpBuf) == 0) {
+		result = ggml_backend_dev_init(dev, nullptr);
+	} else {
+		// longjmp fired — log the abort message to stderr so the
+		// developer can diagnose why GPU init failed.
+		fprintf(stderr, "ofxGgml: GPU backend init aborted: %s\n",
+			s_gpuInitAbortMsg ? s_gpuInitAbortMsg : "unknown error");
+	}
+
+	s_gpuInitGuardActive = false;
+	ggml_set_abort_callback(prev);
+	return result;
 }
 
 // --------------------------------------------------------------------------
@@ -215,7 +269,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 			settings.preferredBackendName.c_str());
 		if (namedDev) {
 			if (isDeviceMemoryAvailable(namedDev)) {
-				m_impl->backend = ggml_backend_dev_init(namedDev, nullptr);
+				m_impl->backend = tryInitBackendDev(namedDev);
 			} else {
 				m_impl->log(GGML_LOG_LEVEL_WARN,
 					"ofxGgml: device \"" + settings.preferredBackendName +
@@ -234,7 +288,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		ggml_backend_dev_t typeDev = ggml_backend_dev_by_type(
 			static_cast<enum ggml_backend_dev_type>(settings.preferredBackend));
 		if (typeDev && isDeviceMemoryAvailable(typeDev)) {
-			m_impl->backend = ggml_backend_dev_init(typeDev, nullptr);
+			m_impl->backend = tryInitBackendDev(typeDev);
 		} else if (typeDev) {
 			m_impl->log(GGML_LOG_LEVEL_WARN,
 				"ofxGgml: preferred device type reports no usable memory"
