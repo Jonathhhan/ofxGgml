@@ -38,10 +38,10 @@ SKIP_LLAMA=0
 SKIP_MODEL=0
 GPU_FLAG="--auto"
 LLAMA_GPU_FLAG="--auto"
-PREFIX_FLAG=""
-JOBS_FLAG=""
-CLEAN_FLAG=""
-MODEL_PRESET_FLAG=""
+PREFIX_VALUE=""
+JOBS_VALUE=""
+CLEAN=0
+MODEL_PRESET_VALUE=""
 
 write_step() {
 	printf '\n\033[1;34m==> %s\033[0m\n' "$1"
@@ -98,7 +98,7 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--prefix)
 			[[ $# -ge 2 ]] || die "--prefix requires a value"
-			PREFIX_FLAG="--prefix $2"
+			PREFIX_VALUE="$2"
 			shift 2
 			;;
 		--skip-ggml)
@@ -115,16 +115,16 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--model-preset)
 			[[ $# -ge 2 ]] || die "--model-preset requires a value"
-			MODEL_PRESET_FLAG="--preset $2"
+			MODEL_PRESET_VALUE="$2"
 			shift 2
 			;;
 		--jobs)
 			[[ $# -ge 2 ]] || die "--jobs requires a value"
-			JOBS_FLAG="--jobs $2"
+			JOBS_VALUE="$2"
 			shift 2
 			;;
 		--clean)
-			CLEAN_FLAG="--clean"
+			CLEAN=1
 			shift
 			;;
 		--help|-h)
@@ -152,8 +152,14 @@ echo ""
 
 if [[ "$SKIP_GGML" -eq 0 ]]; then
 	write_step "Step 1/3: Building ggml tensor library..."
-	# shellcheck disable=SC2086
-	"$SCRIPT_DIR/build-ggml.sh" $GPU_FLAG $JOBS_FLAG $CLEAN_FLAG
+	GGML_ARGS=("$GPU_FLAG")
+	if [[ -n "$JOBS_VALUE" ]]; then
+		GGML_ARGS+=(--jobs "$JOBS_VALUE")
+	fi
+	if [[ "$CLEAN" -eq 1 ]]; then
+		GGML_ARGS+=(--clean)
+	fi
+	"$SCRIPT_DIR/build-ggml.sh" "${GGML_ARGS[@]}"
 	write_ok "ggml built successfully."
 else
 	write_warn "Skipping ggml build (--skip-ggml)."
@@ -165,8 +171,20 @@ fi
 
 if [[ "$SKIP_LLAMA" -eq 0 ]]; then
 	write_step "Step 2/3: Building llama.cpp CLI tools..."
-	# shellcheck disable=SC2086
-	"$SCRIPT_DIR/build-llama-cli.sh" $LLAMA_GPU_FLAG $PREFIX_FLAG $JOBS_FLAG $CLEAN_FLAG
+	LLAMA_ARGS=()
+	if [[ -n "$LLAMA_GPU_FLAG" ]]; then
+		LLAMA_ARGS+=("$LLAMA_GPU_FLAG")
+	fi
+	if [[ -n "$PREFIX_VALUE" ]]; then
+		LLAMA_ARGS+=(--prefix "$PREFIX_VALUE")
+	fi
+	if [[ -n "$JOBS_VALUE" ]]; then
+		LLAMA_ARGS+=(--jobs "$JOBS_VALUE")
+	fi
+	if [[ "$CLEAN" -eq 1 ]]; then
+		LLAMA_ARGS+=(--clean)
+	fi
+	"$SCRIPT_DIR/build-llama-cli.sh" "${LLAMA_ARGS[@]}"
 	write_ok "llama.cpp tools built successfully."
 else
 	write_warn "Skipping llama.cpp build (--skip-llama)."
@@ -178,9 +196,8 @@ fi
 
 if [[ "$SKIP_MODEL" -eq 0 ]]; then
 	write_step "Step 3/3: Downloading model file(s)..."
-	if [[ -n "$MODEL_PRESET_FLAG" ]]; then
-		# shellcheck disable=SC2086
-		"$SCRIPT_DIR/download-model.sh" $MODEL_PRESET_FLAG
+	if [[ -n "$MODEL_PRESET_VALUE" ]]; then
+		"$SCRIPT_DIR/download-model.sh" --preset "$MODEL_PRESET_VALUE"
 	else
 		"$SCRIPT_DIR/download-model.sh" --both
 	fi
