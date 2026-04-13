@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -18,10 +19,12 @@ std::string normalizeLower(const std::string & s) {
 
 }
 
+ofxGgmlScriptSource::~ofxGgmlScriptSource() {
+	cancelFetchWorker("Fetch canceled: source destroyed");
+}
+
 void ofxGgmlScriptSource::clear() {
-	const uint64_t generation = m_fetchGeneration.fetch_add(1) + 1;
-	(void)generation;
-	m_fetching.store(false);
+	cancelFetchWorker("Fetch canceled: source cleared");
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_sourceType = ofxGgmlScriptSourceType::None;
 	m_localFolderPath.clear();
@@ -29,12 +32,11 @@ void ofxGgmlScriptSource::clear() {
 	m_gitHubBranch.clear();
 	m_files.clear();
 	m_status.clear();
+	m_fetchDiagnostics.clear();
 }
 
 void ofxGgmlScriptSource::setGitHubMode() {
-	const uint64_t generation = m_fetchGeneration.fetch_add(1) + 1;
-	(void)generation;
-	m_fetching.store(false);
+	cancelFetchWorker("Fetch canceled: switched to GitHub mode");
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_sourceType = ofxGgmlScriptSourceType::GitHubRepo;
 	m_localFolderPath.clear();
@@ -61,9 +63,7 @@ std::string ofxGgmlScriptSource::getPreferredExtension() const {
 }
 
 bool ofxGgmlScriptSource::setLocalFolder(const std::string & path) {
-	const uint64_t generation = m_fetchGeneration.fetch_add(1) + 1;
-	(void)generation;
-	m_fetching.store(false);
+	cancelFetchWorker("Fetch canceled: switched to local folder");
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_sourceType = ofxGgmlScriptSourceType::LocalFolder;
 	m_localFolderPath = path;
@@ -110,6 +110,8 @@ bool ofxGgmlScriptSource::setGitHubRepo(const std::string & ownerRepo, const std
 }
 
 bool ofxGgmlScriptSource::fetchGitHubRepo() {
+	cancelFetchWorker("Fetch canceled: superseded by new fetch");
+
 	std::string ownerRepo;
 	std::string branch;
 	uint64_t generation = 0;
@@ -131,7 +133,9 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 		}
 		m_files.clear();
 		m_status = "Fetching...";
+		m_cancelFetch.store(false);
 		generation = m_fetchGeneration.fetch_add(1) + 1;
+		pushFetchDiagnosticLocked("start", "GitHub fetch started", generation);
 	}
 	m_fetching.store(true);
 
@@ -141,24 +145,35 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 		ownerRepo + "/" + branch + "/";
 	const std::string preferredExt = getPreferredExtension();
 
-	std::thread([this, generation, apiUrl, rawPrefix, preferredExt]() {
+	std::thread worker([this, generation, apiUrl, rawPrefix, preferredExt]() {
 		std::vector<ofxGgmlScriptSourceFileEntry> entries;
 		std::string status;
+		bool hadError = false;
 
 		ofHttpResponse response = ofLoadURL(apiUrl);
+		if (m_cancelFetch.load() || m_fetchGeneration.load() != generation) {
+			m_fetching.store(false);
+			return;
+		}
 		if (response.status < 200 || response.status >= 300) {
 			if (response.status == 404) {
 				status = "Repo not found";
 			} else {
 				status = "GitHub API error: " + ofToString(response.status);
 			}
+			hadError = true;
 		} else {
 			const std::string body = response.data.getText();
 			ofJson json = ofJson::parse(body, nullptr, false);
 			if (json.is_discarded() || !json.contains("tree") || !json["tree"].is_array()) {
 				status = "Failed to parse GitHub response";
+				hadError = true;
 			} else {
 				for (const auto & item : json["tree"]) {
+					if (m_cancelFetch.load() || m_fetchGeneration.load() != generation) {
+						m_fetching.store(false);
+						return;
+					}
 					if (!item.is_object()) continue;
 					const std::string type = item.value("type", "");
 					if (type != "blob") continue;
@@ -190,7 +205,8 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 			}
 		}
 
-		if (m_fetchGeneration.load() != generation) {
+		if (m_cancelFetch.load() || m_fetchGeneration.load() != generation) {
+			m_fetching.store(false);
 			return;
 		}
 
@@ -200,10 +216,18 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 				m_fetchGeneration.load() == generation) {
 				m_files = std::move(entries);
 				m_status = status;
+				pushFetchDiagnosticLocked(
+					hadError ? "error" : "complete",
+					status,
+					generation);
 			}
 		}
 		m_fetching.store(false);
-	}).detach();
+	});
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_fetchThread = std::move(worker);
+	}
 
 	return true;
 }
@@ -337,6 +361,59 @@ std::string ofxGgmlScriptSource::getStatus() const {
 
 bool ofxGgmlScriptSource::isFetching() const {
 	return m_fetching.load();
+}
+
+std::vector<ofxGgmlScriptSourceFetchDiagnostic> ofxGgmlScriptSource::getFetchDiagnostics() const {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	return m_fetchDiagnostics;
+}
+
+void ofxGgmlScriptSource::cancelFetchWorker(const std::string & reason) {
+	std::thread worker;
+	bool wasFetching = false;
+	bool hadWorker = false;
+	uint64_t generation = 0;
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		wasFetching = m_fetching.load();
+		hadWorker = m_fetchThread.joinable();
+		if (!wasFetching && !hadWorker) {
+			return;
+		}
+		generation = m_fetchGeneration.fetch_add(1) + 1;
+		m_cancelFetch.store(true);
+		m_fetching.store(false);
+		if (wasFetching) {
+			pushFetchDiagnosticLocked("cancel", reason, generation);
+			if (m_sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
+				m_status = "Fetch canceled";
+			}
+		}
+		worker = std::move(m_fetchThread);
+	}
+	if (worker.joinable()) {
+		worker.join();
+	}
+}
+
+void ofxGgmlScriptSource::pushFetchDiagnosticLocked(
+	const std::string & state,
+	const std::string & message,
+	uint64_t generation) {
+	ofxGgmlScriptSourceFetchDiagnostic diagnostic;
+	diagnostic.state = state;
+	diagnostic.message = message;
+	diagnostic.generation = generation;
+	diagnostic.timestampMs = static_cast<uint64_t>(
+		std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch())
+			.count());
+	m_fetchDiagnostics.push_back(std::move(diagnostic));
+	static constexpr size_t kMaxDiagnostics = 64;
+	if (m_fetchDiagnostics.size() > kMaxDiagnostics) {
+		m_fetchDiagnostics.erase(m_fetchDiagnostics.begin(),
+			m_fetchDiagnostics.begin() + (m_fetchDiagnostics.size() - kMaxDiagnostics));
+	}
 }
 
 bool ofxGgmlScriptSource::scanLocalFolderLocked() {

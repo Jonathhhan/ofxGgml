@@ -3,8 +3,10 @@
 #include "ofMain.h"
 
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 enum class ofxGgmlScriptSourceType {
@@ -19,8 +21,17 @@ struct ofxGgmlScriptSourceFileEntry {
 	bool isDirectory = false;
 };
 
+struct ofxGgmlScriptSourceFetchDiagnostic {
+	std::string state;
+	std::string message;
+	uint64_t generation = 0;
+	uint64_t timestampMs = 0;
+};
+
 class ofxGgmlScriptSource {
 public:
+	~ofxGgmlScriptSource();
+
 	void clear();
 	void setGitHubMode();
 
@@ -42,11 +53,16 @@ public:
 	std::vector<ofxGgmlScriptSourceFileEntry> getFiles() const;
 	std::string getStatus() const;
 	bool isFetching() const;
+	std::vector<ofxGgmlScriptSourceFetchDiagnostic> getFetchDiagnostics() const;
 
 private:
 	bool scanLocalFolderLocked();
 	std::vector<ofxGgmlScriptSourceFileEntry> scanLocalFolderEntries(
 		const std::string & path) const;
+	void cancelFetchWorker(const std::string & reason);
+	void pushFetchDiagnosticLocked(const std::string & state,
+		const std::string & message,
+		uint64_t generation);
 
 	static bool isValidOwnerRepo(const std::string & ownerRepo);
 	static bool isValidBranch(const std::string & branch);
@@ -63,7 +79,10 @@ private:
 	std::string m_preferredExtension;
 	std::vector<ofxGgmlScriptSourceFileEntry> m_files;
 	std::string m_status;
+	std::vector<ofxGgmlScriptSourceFetchDiagnostic> m_fetchDiagnostics;
+	std::thread m_fetchThread;
 
 	std::atomic<bool> m_fetching{false};
+	std::atomic<bool> m_cancelFetch{false};
 	std::atomic<uint64_t> m_fetchGeneration{0};
 };

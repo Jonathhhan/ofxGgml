@@ -16,6 +16,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <unistd.h>
 #include <sys/wait.h>
 #endif
 
@@ -29,8 +30,8 @@ while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
 return s.substr(b, e - b);
 }
 
-static std::string quoteArg(const std::string & arg) {
 #ifdef _WIN32
+static std::string quoteArg(const std::string & arg) {
 std::string out = "\"";
 for (char c : arg) {
 if (c == '"') out += '\\';
@@ -38,18 +39,6 @@ out += c;
 }
 out += '"';
 return out;
-#else
-std::string out = "'";
-for (char c : arg) {
-if (c == '\'') {
-out += "'\\''";
-} else {
-out += c;
-}
-}
-out += "'";
-return out;
-#endif
 }
 
 static std::string joinCommand(const std::vector<std::string> & args) {
@@ -61,17 +50,15 @@ cmd += quoteArg(args[i]);
 cmd += " 2>&1";
 return cmd;
 }
+#endif
 
 static bool runCommandCapture(const std::vector<std::string> & args, std::string & output, int & exitCode) {
 output.clear();
 exitCode = -1;
+#ifdef _WIN32
 const std::string cmd = joinCommand(args);
 
-#ifdef _WIN32
 FILE * pipe = _popen(cmd.c_str(), "r");
-#else
-FILE * pipe = popen(cmd.c_str(), "r");
-#endif
 if (!pipe) return false;
 
 std::array<char, 4096> buf{};
@@ -79,13 +66,56 @@ while (fgets(buf.data(), static_cast<int>(buf.size()), pipe) != nullptr) {
 output += buf.data();
 }
 
-#ifdef _WIN32
 exitCode = _pclose(pipe);
 #else
-exitCode = pclose(pipe);
-if (WIFEXITED(exitCode)) {
-exitCode = WEXITSTATUS(exitCode);
-}
+if (args.empty() || args.front().empty()) return false;
+
+	int pipeFds[2] = {-1, -1};
+	if (pipe(pipeFds) != 0) {
+		return false;
+	}
+
+	pid_t pid = fork();
+	if (pid < 0) {
+		close(pipeFds[0]);
+		close(pipeFds[1]);
+		return false;
+	}
+
+	if (pid == 0) {
+		dup2(pipeFds[1], STDOUT_FILENO);
+		dup2(pipeFds[1], STDERR_FILENO);
+		close(pipeFds[0]);
+		close(pipeFds[1]);
+
+		std::vector<char *> argv;
+		argv.reserve(args.size() + 1);
+		for (const auto & arg : args) {
+			argv.push_back(const_cast<char *>(arg.c_str()));
+		}
+		argv.push_back(nullptr);
+
+		execvp(argv[0], argv.data());
+		_exit(127);
+	}
+
+	close(pipeFds[1]);
+	std::array<char, 4096> buf{};
+	ssize_t bytesRead = 0;
+	while ((bytesRead = read(pipeFds[0], buf.data(), buf.size())) > 0) {
+		output.append(buf.data(), static_cast<size_t>(bytesRead));
+	}
+	close(pipeFds[0]);
+
+	int status = 0;
+	if (waitpid(pid, &status, 0) < 0) {
+		return false;
+	}
+	if (WIFEXITED(status)) {
+		exitCode = WEXITSTATUS(status);
+	} else if (WIFSIGNALED(status)) {
+		exitCode = 128 + WTERMSIG(status);
+	}
 #endif
 return true;
 }
@@ -144,21 +174,78 @@ outPath = slot.path;
 return true;
 }
 
+static bool extractEmbeddingArray(const ofJson & value, std::vector<float> & out) {
+	out.clear();
+	if (!value.is_array()) return false;
+	for (const auto & item : value) {
+		if (!item.is_number()) continue;
+		const float v = item.get<float>();
+		if (std::isfinite(v)) out.push_back(v);
+	}
+	return !out.empty();
+}
+
+static bool parseEmbeddingJson(const ofJson & json, std::vector<float> & out) {
+	if (json.is_array()) {
+		return extractEmbeddingArray(json, out);
+	}
+	if (!json.is_object()) return false;
+
+	if (json.contains("embedding")) {
+		if (parseEmbeddingJson(json["embedding"], out)) return true;
+	}
+	if (json.contains("embeddings")) {
+		if (parseEmbeddingJson(json["embeddings"], out)) return true;
+	}
+	if (json.contains("result")) {
+		if (parseEmbeddingJson(json["result"], out)) return true;
+	}
+	if (json.contains("data") && json["data"].is_array()) {
+		for (const auto & item : json["data"]) {
+			if (parseEmbeddingJson(item, out)) return true;
+		}
+	}
+	return false;
+}
+
 static bool parseEmbeddingVector(const std::string & raw, std::vector<float> & out) {
-out.clear();
-const size_t begin = raw.find('[');
-const size_t end = raw.find(']', begin == std::string::npos ? 0 : begin + 1);
-if (begin == std::string::npos || end == std::string::npos || end <= begin + 1) return false;
-std::string body = raw.substr(begin + 1, end - begin - 1);
-for (char & c : body) {
-if (c == ',') c = ' ';
-}
-std::istringstream iss(body);
-float v = 0.0f;
-while (iss >> v) {
-if (std::isfinite(v)) out.push_back(v);
-}
-return !out.empty();
+	out.clear();
+
+	const std::string normalized = trim(raw);
+	if (!normalized.empty()) {
+		ofJson parsed = ofJson::parse(normalized, nullptr, false);
+		if (!parsed.is_discarded() && parseEmbeddingJson(parsed, out)) {
+			return true;
+		}
+	}
+
+	std::istringstream lines(raw);
+	std::vector<std::string> candidates;
+	std::string line;
+	while (std::getline(lines, line)) {
+		line = trim(line);
+		if (!line.empty()) candidates.push_back(std::move(line));
+	}
+	for (auto it = candidates.rbegin(); it != candidates.rend(); ++it) {
+		ofJson parsed = ofJson::parse(*it, nullptr, false);
+		if (!parsed.is_discarded() && parseEmbeddingJson(parsed, out)) {
+			return true;
+		}
+	}
+
+	const size_t begin = raw.find('[');
+	const size_t end = raw.find(']', begin == std::string::npos ? 0 : begin + 1);
+	if (begin == std::string::npos || end == std::string::npos || end <= begin + 1) return false;
+	std::string body = raw.substr(begin + 1, end - begin - 1);
+	for (char & c : body) {
+		if (c == ',') c = ' ';
+	}
+	std::istringstream iss(body);
+	float v = 0.0f;
+	while (iss >> v) {
+		if (std::isfinite(v)) out.push_back(v);
+	}
+	return !out.empty();
 }
 
 } // namespace
