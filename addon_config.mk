@@ -27,9 +27,11 @@ common:
 	ADDON_SOURCES_EXCLUDE += libs/ggml/build/%
 
 linux64:
+	# @DIFFUSION_LIBS_START linux64
 	ADDON_LIBS += libs/ggml/build/src/libggml.a
 	ADDON_LIBS += libs/ggml/build/src/libggml-base.a
 	ADDON_LIBS += libs/ggml/build/src/libggml-cpu.a
+	# @DIFFUSION_LIBS_END linux64
 	ADDON_LDFLAGS += -lpthread -ldl
 
 linux:
@@ -39,24 +41,30 @@ linuxarmv6l:
 linuxarmv7l:
 
 msys2:
+	# @DIFFUSION_LIBS_START msys2
 	ADDON_LIBS += libs/ggml/build/src/libggml.a
 	ADDON_LIBS += libs/ggml/build/src/libggml-base.a
 	ADDON_LIBS += libs/ggml/build/src/libggml-cpu.a
+	# @DIFFUSION_LIBS_END msys2
 	ADDON_LDFLAGS += -lpthread
 
 vs:
+	# @DIFFUSION_LIBS_START vs
 	ADDON_LIBS += libs/ggml/build/src/Release/ggml.lib
 	ADDON_LIBS += libs/ggml/build/src/Release/ggml-base.lib
 	ADDON_LIBS += libs/ggml/build/src/Release/ggml-cpu.lib
+	# @DIFFUSION_LIBS_END vs
 
 android/armeabi:
 
 android/armeabi-v7a:
 
 osx:
+	# @DIFFUSION_LIBS_START osx
 	ADDON_LIBS += libs/ggml/build/src/libggml.a
 	ADDON_LIBS += libs/ggml/build/src/libggml-base.a
 	ADDON_LIBS += libs/ggml/build/src/libggml-cpu.a
+	# @DIFFUSION_LIBS_END osx
 	ADDON_FRAMEWORKS += Accelerate
 
 ios:

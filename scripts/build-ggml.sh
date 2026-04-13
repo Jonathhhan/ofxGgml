@@ -182,6 +182,98 @@ if [[ "$FOUND" -eq 0 ]]; then
 	die "No ggml libraries found in $LIB_DIR"
 fi
 
+# ---------------------------------------------------------------------------
+# Update addon_config.mk with detected libraries
+# ---------------------------------------------------------------------------
+
+update_addon_config() {
+	local config_file="$ADDON_ROOT/addon_config.mk"
+	if [[ ! -f "$config_file" ]]; then
+		write_step "Warning: addon_config.mk not found, skipping config update."
+		return 0
+	fi
+
+	local OS_NAME
+	OS_NAME="$(uname -s 2>/dev/null || echo unknown)"
+
+	local section=""
+	local search_dir=""
+	local ext=""
+
+	case "$OS_NAME" in
+		Linux*)
+			section="linux64"
+			search_dir="$LIB_DIR"
+			ext=".a"
+			;;
+		Darwin*)
+			section="osx"
+			search_dir="$LIB_DIR"
+			ext=".a"
+			;;
+		MINGW*|MSYS*|CYGWIN*)
+			if [[ -d "$LIB_DIR/Release" ]]; then
+				section="vs"
+				search_dir="$LIB_DIR/Release"
+				ext=".lib"
+			else
+				section="msys2"
+				search_dir="$LIB_DIR"
+				ext=".a"
+			fi
+			;;
+		*)
+			write_step "Warning: Unknown OS '$OS_NAME', skipping addon_config.mk update."
+			return 0
+			;;
+	esac
+
+	# Collect all built ggml libraries
+	local libs=()
+	local lib_name
+	for lib in "$search_dir"/libggml*"$ext" "$search_dir"/ggml*"$ext"; do
+		if [[ -f "$lib" ]]; then
+			# Make path relative to ADDON_ROOT
+			lib_name="${lib#"$ADDON_ROOT"/}"
+			libs+=("$lib_name")
+		fi
+	done
+
+	if [[ ${#libs[@]} -eq 0 ]]; then
+		write_step "Warning: No libraries found to update in addon_config.mk."
+		return 0
+	fi
+
+	# Build the replacement block
+	local replacement=""
+	replacement=$'\t'"# @DIFFUSION_LIBS_START $section"$'\n'
+	for lib_path in "${libs[@]}"; do
+		replacement+=$'\t'"ADDON_LIBS += $lib_path"$'\n'
+	done
+	replacement+=$'\t'"# @DIFFUSION_LIBS_END $section"
+
+	# Use awk to replace the section between markers
+	local start_marker="# @DIFFUSION_LIBS_START $section"
+	local end_marker="# @DIFFUSION_LIBS_END $section"
+
+	if grep -q "$start_marker" "$config_file" && grep -q "$end_marker" "$config_file"; then
+		local tmpfile
+		tmpfile="$(mktemp)"
+		awk -v start="$start_marker" -v end="$end_marker" -v repl="$replacement" '
+			BEGIN { printing=1 }
+			$0 ~ start { printing=0; print repl; next }
+			$0 ~ end   { printing=1; next }
+			printing { print }
+		' "$config_file" > "$tmpfile"
+		mv "$tmpfile" "$config_file"
+		write_step "Updated addon_config.mk [$section] with ${#libs[@]} libraries."
+	else
+		write_step "Warning: Could not find markers in addon_config.mk for section '$section'."
+	fi
+}
+
+update_addon_config
+
 write_step "Done! ggml has been built in $BUILD_DIR"
 write_step ""
 write_step "The addon will automatically find the libraries in this location."

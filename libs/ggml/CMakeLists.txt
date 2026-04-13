@@ -78,6 +78,7 @@ endif()
 
 # Static library — no dynamic backend loading
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(GGML_STATIC ON CACHE BOOL "" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 
 # Core settings
