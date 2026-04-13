@@ -52,16 +52,11 @@ msys2:
 vs:
 	ADDON_INCLUDES += src
 	ADDON_INCLUDES += libs/ggml/include
-	# Link directly from addon_config.mk so the Project Generator emits
-	# Visual Studio library paths without relying on an external .props file.
+	# @DIFFUSION_LIBS_START vs
 	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml.lib
 	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml-base.lib
 	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml-cpu.lib
-	ADDON_LIBS += libs/ggml/build/src/ggml-cuda/$(Configuration)/ggml-cuda.lib
-	ADDON_LIBS += $(CUDA_PATH)\lib\x64\cudart.lib
-	ADDON_LIBS += $(CUDA_PATH)\lib\x64\cublas.lib
-	ADDON_LIBS += $(CUDA_PATH)\lib\x64\cublasLt.lib
-	ADDON_LIBS += $(CUDA_PATH)\lib\x64\cuda.lib
+	# @DIFFUSION_LIBS_END vs
 
 android/armeabi:
 

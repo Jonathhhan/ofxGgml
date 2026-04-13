@@ -97,11 +97,22 @@ public:
 	/// then this method.
 	ofxGgmlComputeResult computeGraph(ofxGgmlGraph & graph);
 
+	/// Submit graph execution asynchronously.
+	/// If the graph is not yet allocated this call allocates it first.
+	ofxGgmlComputeResult computeGraphAsync(ofxGgmlGraph & graph);
+
+	/// Wait for an in-flight async compute to finish.
+	/// Returns success when no async compute is pending.
+	ofxGgmlComputeResult synchronize();
+
 	/// Convenience: allocate buffers and compute in one call.
 	/// Only suitable for graphs whose input tensors do not need
 	/// external data set via setTensorData() between allocation
 	/// and computation.
 	ofxGgmlComputeResult compute(ofxGgmlGraph & graph);
+
+	/// Last recorded setup / alloc / upload / compute timings.
+	ofxGgmlTimings getLastTimings() const;
 
 	// ------------------------------------------------------------------
 	//  Model weight loading
