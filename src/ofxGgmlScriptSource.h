@@ -22,6 +22,7 @@ struct ofxGgmlScriptSourceFileEntry {
 class ofxGgmlScriptSource {
 public:
 	void clear();
+	void setGitHubMode();
 
 	void setPreferredExtension(const std::string & ext);
 	std::string getPreferredExtension() const;
@@ -66,4 +67,3 @@ private:
 	std::atomic<bool> m_fetching{false};
 	std::atomic<uint64_t> m_fetchGeneration{0};
 };
-

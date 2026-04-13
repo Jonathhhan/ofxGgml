@@ -31,6 +31,17 @@ void ofxGgmlScriptSource::clear() {
 	m_status.clear();
 }
 
+void ofxGgmlScriptSource::setGitHubMode() {
+	const uint64_t generation = m_fetchGeneration.fetch_add(1) + 1;
+	(void)generation;
+	m_fetching.store(false);
+	std::lock_guard<std::mutex> lock(m_mutex);
+	m_sourceType = ofxGgmlScriptSourceType::GitHubRepo;
+	m_localFolderPath.clear();
+	m_files.clear();
+	m_status.clear();
+}
+
 void ofxGgmlScriptSource::setPreferredExtension(const std::string & ext) {
 	std::string normalized = trim(ext);
 	if (!normalized.empty() && normalized.front() != '.') {
@@ -442,4 +453,3 @@ bool ofxGgmlScriptSource::hasSourceExtension(
 	}
 	return false;
 }
-
