@@ -2996,7 +2996,7 @@ std::string response = pendingOutput;
 if (response.size() > kProjectMemoryEntryMaxChars) {
 response = response.substr(0, kProjectMemoryEntryMaxChars);
 }
-if (!request.empty() || !response.empty()) {
+if (!request.empty() && !response.empty()) {
 if (!projectMemory.empty()) {
 projectMemory += "\n\n---\n\n";
 }
