@@ -214,11 +214,12 @@ if errorlevel 1 (
         echo ==^> Build failed with parallel jobs for ggml (%CFG%).
         echo ==^> Retry triggered: running ggml (%CFG%) again with 1 job to avoid transient CUDA/MSBuild object races...
         cmake --build "%BUILD_DIR%" --config %CFG% -j 1
-        if not errorlevel 1 (
+        if errorlevel 1 (
+            echo ==^> Retry result: FAILED for ggml (%CFG%) with 1 job.
+        ) else (
             echo ==^> Retry result: SUCCESS for ggml (%CFG%) with 1 job.
             exit /b 0
         )
-        echo ==^> Retry result: FAILED for ggml (%CFG%) with 1 job.
     )
     echo Error: CMake %CFG% build failed.
     exit /b 1
