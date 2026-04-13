@@ -24,6 +24,7 @@ src/
 ├── ofxGgml.h            # umbrella header (include this)
 ├── ofxGgmlCore.h/.cpp   # backend management, compute
 ├── ofxGgmlGraph.h/.cpp  # computation graph builder
+├── ofxGgmlInference.h/.cpp # llama.cpp CLI generation/embedding helper
 ├── ofxGgmlModel.h/.cpp  # GGUF model loading
 ├── ofxGgmlTensor.h/.cpp # tensor wrapper
 ├── ofxGgmlTypes.h       # enums, settings, result structs

@@ -2,7 +2,7 @@
 
 An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https://github.com/ggml-org/ggml) tensor library for machine-learning computation.
 
-> **Version 0.2** — ggml is now bundled and compiled as a static library.  GPU backends can be enabled via build script flags.
+> **Version 0.3** — ggml is bundled as a static library, plus native llama.cpp CLI inference helpers for generation, embeddings, and cache-aware workflows.
 
 ---
 
@@ -34,6 +34,7 @@ scripts\setup_windows.bat --cpu-only  # force CPU-only
 | **Backend management** | Automatic discovery of CPU, CUDA, Metal, Vulkan backends; runtime selection (CUDA → Vulkan → other accelerator → CPU fallback) |
 | **GPU support** | GPU backends (CUDA, Vulkan, Metal) can be enabled via build script flags (e.g. `--cuda`, `--auto`) |
 | **GGUF model loading** | Load GGUF files, inspect metadata and tensors, upload weights to GPU |
+| **Native inference helper** | `ofxGgmlInference` API for llama.cpp CLI generation, embedding, session-cache reuse, and structured outputs |
 | **Tensor wrapper** | Non-owning handle with OF-friendly data access (read/write floats, fill) |
 | **Graph builder** | Fluent API for computation graphs — see [Operations](#supported-operations) |
 | **Scheduled execution** | Multi-backend scheduler with automatic tensor placement and fallback |
@@ -154,6 +155,7 @@ ofxGgml/
 │   ├── ofxGgml.h             # umbrella header — include this
 │   ├── ofxGgmlCore.h/.cpp    # backend init, compute, model weight loading
 │   ├── ofxGgmlGraph.h/.cpp   # computation graph builder
+│   ├── ofxGgmlInference.h/.cpp # llama.cpp CLI generation / embeddings helper
 │   ├── ofxGgmlModel.h/.cpp   # GGUF model loader
 │   ├── ofxGgmlProjectMemory.h/.cpp # prompt memory helper for persistent coding context
 │   ├── ofxGgmlTensor.h/.cpp  # non-owning tensor wrapper
@@ -271,6 +273,39 @@ if (submit.success) {
 }
 ```
 
+### Native text generation + KV cache reuse
+
+```cpp
+ofxGgmlInference inf;
+ofxGgmlInferenceSettings s;
+s.maxTokens = 256;
+s.promptCachePath = "chat-cache.bin"; // KV/session reuse
+s.promptCacheAll = true;
+s.jsonSchema = "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}}}";
+
+auto r = inf.generate("path/to/model.gguf", "Return JSON with an answer.", s);
+if (r.success) {
+    std::cout << r.text << std::endl;
+}
+```
+
+### Embeddings + similarity search helper (mini RAG flow)
+
+```cpp
+ofxGgmlInference inf;
+ofxGgmlEmbeddingIndex index;
+
+auto e1 = inf.embed("path/to/model.gguf", "openFrameworks is a C++ toolkit");
+auto e2 = inf.embed("path/to/model.gguf", "ggml is a tensor compute library");
+if (e1.success) index.add("doc1", "openFrameworks is a C++ toolkit", e1.embedding);
+if (e2.success) index.add("doc2", "ggml is a tensor compute library", e2.embedding);
+
+auto q = inf.embed("path/to/model.gguf", "What library handles tensors?");
+if (q.success) {
+    auto hits = index.search(q.embedding, 1);
+}
+```
+
 ### Allocation reuse for stable graphs
 
 - Repeated `allocGraph(graph)` calls on the same built graph instance (same graph pointer/object) avoid re-allocation.
@@ -282,6 +317,8 @@ if (submit.success) {
 |-------|---------|
 | `ofxGgml` | Backend init, device enumeration, compute scheduling, model weight loading |
 | `ofxGgmlGraph` | Build computation graphs (tensor creation + operations) |
+| `ofxGgmlInference` | CLI-backed text generation + embeddings with KV cache and structured-output flags |
+| `ofxGgmlEmbeddingIndex` | In-memory cosine-similarity retrieval helper for RAG-style lookups |
 | `ofxGgmlModel` | Load GGUF model files, inspect metadata and tensor information |
 | `ofxGgmlProjectMemory` | Persist request/response memory and prepend it to future prompts |
 | `ofxGgmlTensor` | Non-owning tensor handle with metadata and data access |
@@ -310,7 +347,7 @@ if (submit.success) {
 The GUI example uses [llama.cpp](https://github.com/ggml-org/llama.cpp) CLI tools for text generation:
 
 - Expected model location: `ofxGgmlGuiExample/bin/data/models/<preset>.gguf`
-- Runtime requirement: `llama-completion` or `llama-cli` in `PATH`, a common install directory, or `libs/llama/bin/`
+- Runtime requirement: `llama-completion`, `llama-cli`, or `llama-embedding` in `PATH`, a common install directory, or `libs/llama/bin/`
 
 Build the tools with:
 
@@ -331,6 +368,7 @@ Build the tools with:
 | `scripts/update-ggml-source.sh` | Update bundled ggml source to latest upstream |
 | `scripts/build-llama-cli.sh` | Clone, compile, and install llama.cpp CLI tools |
 | `scripts/download-model.sh` | Download GGUF model presets |
+| `scripts/benchmark-llama-cli.sh` | Benchmark llama-cli latency and approximate tokens/sec |
 
 `build-ggml.sh` supports `--cuda`, `--vulkan`, `--metal`, `--auto`, `--cpu-only`, `--jobs`, `--clean`, and `--help`.  By default GPU backend auto-detection is enabled; use `--cpu-only` to force CPU-only builds.
 
@@ -346,7 +384,10 @@ Build the tools with:
 ./scripts/download-model.sh --preset 2         # coder model only
 ./scripts/download-model.sh --task script      # same as --preset 2
 ./scripts/download-model.sh --list             # show all presets
+./scripts/download-model.sh --model <URL> --checksum <SHA256>  # custom with checksum verification
 ```
+
+Model preset metadata is stored in `scripts/model-catalog.json`. `download-model.sh` supports resumable downloads and validates SHA256 checksums when provided. If a preset checksum is blank in the catalog, the script prints an explicit warning and skips integrity verification for that download.
 
 ## Troubleshooting
 

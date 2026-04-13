@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build bundled ggml (CPU-only)
+        run: ./scripts/build-ggml.sh --cpu-only
+
+      - name: Script syntax checks
+        run: |
+          bash -n scripts/*.sh
+
+      - name: Validate model catalog JSON
+        run: python3 -m json.tool scripts/model-catalog.json > /dev/null
+
+      - name: Smoke test model tooling
+        run: |
+          ./scripts/download-model.sh --list
+          ./scripts/benchmark-llama-cli.sh --help

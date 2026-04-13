@@ -292,10 +292,13 @@ fi
 # Build
 # ---------------------------------------------------------------------------
 
-# Build llama-completion (one-shot text completion — used by ofxGgmlGuiExample)
-# and llama-cli (interactive chat mode).
-write_step "Building llama-completion and llama-cli with $JOBS parallel jobs..."
-cmake --build . --config Release --target llama-completion llama-cli -j "$JOBS"
+# Build llama-completion (one-shot text completion — used by ofxGgmlGuiExample),
+# llama-cli (interactive chat mode), and llama-embedding when available.
+write_step "Building llama-completion, llama-cli, and llama-embedding with $JOBS parallel jobs..."
+if ! cmake --build . --config Release --target llama-completion llama-cli llama-embedding -j "$JOBS"; then
+	write_step "llama-embedding target unavailable, retrying without it..."
+	cmake --build . --config Release --target llama-completion llama-cli -j "$JOBS"
+fi
 
 # ---------------------------------------------------------------------------
 # Install
@@ -327,10 +330,12 @@ find_binary() {
 
 BUILT_COMPLETION=""
 BUILT_CLI=""
+BUILT_EMBEDDING=""
 BUILT_COMPLETION=$(find_binary "llama-completion") || true
 BUILT_CLI=$(find_binary "llama-cli") || true
+BUILT_EMBEDDING=$(find_binary "llama-embedding") || true
 
-if [[ -z "$BUILT_COMPLETION" ]] && [[ -z "$BUILT_CLI" ]]; then
+if [[ -z "$BUILT_COMPLETION" ]] && [[ -z "$BUILT_CLI" ]] && [[ -z "$BUILT_EMBEDDING" ]]; then
 	die "Could not find any built llama binaries under $BUILD_DIR"
 fi
 
@@ -360,7 +365,7 @@ install_binary_sudo() {
 do_install() {
 	local prefix="$1"
 	local use_sudo="${2:-false}"
-	for binary in "$BUILT_COMPLETION" "$BUILT_CLI"; do
+	for binary in "$BUILT_COMPLETION" "$BUILT_CLI" "$BUILT_EMBEDDING"; do
 		if [[ -n "$binary" ]]; then
 			if [[ "$use_sudo" == "true" ]]; then
 				install_binary_sudo "$binary" "$prefix"
@@ -397,7 +402,7 @@ fi
 
 write_step "Verifying installation..."
 INSTALLED_TOOLS=0
-for tool_name in llama-completion llama-cli; do
+for tool_name in llama-completion llama-cli llama-embedding; do
 	tool_path="$EFFECTIVE_INSTALL_PREFIX/bin/$tool_name"
 	if is_windows_like; then
 		tool_path="${tool_path}.exe"
