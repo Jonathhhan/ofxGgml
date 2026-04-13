@@ -33,6 +33,7 @@ JOBS=""
 ENABLE_CUDA=0
 ENABLE_VULKAN=0
 ENABLE_METAL=0
+VULKAN_EXPLICIT=0
 CLEAN=0
 AUTO_DETECT=0
 
@@ -77,6 +78,25 @@ detect_cuda() {
 }
 
 detect_vulkan() {
+	local has_glslc=0
+	if command -v glslc >/dev/null 2>&1; then
+		has_glslc=1
+	elif [[ -n "${VULKAN_SDK:-}" ]]; then
+		for glslc_path in \
+			"$VULKAN_SDK/Bin/glslc" \
+			"$VULKAN_SDK/Bin/glslc.exe" \
+			"$VULKAN_SDK/bin/glslc" \
+			"$VULKAN_SDK/bin/glslc.exe"; do
+			if [[ -x "$glslc_path" ]]; then
+				has_glslc=1
+				break
+			fi
+		done
+	fi
+
+	# Runtime-only Vulkan installs are insufficient; require shader compiler tooling.
+	[[ "$has_glslc" -eq 1 ]] || return 1
+
 	if command -v vulkaninfo >/dev/null 2>&1; then return 0; fi
 	if [[ -n "${VULKAN_SDK:-}" ]] && [[ -d "$VULKAN_SDK" ]]; then return 0; fi
 	return 1
@@ -108,6 +128,7 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--vulkan)
 			ENABLE_VULKAN=1
+			VULKAN_EXPLICIT=1
 			shift
 			;;
 		--metal)
@@ -233,7 +254,24 @@ if [[ "$ENABLE_METAL" -eq 1 ]]; then
 	CMAKE_ARGS+=(-DGGML_METAL=ON)
 fi
 
-cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}"
+if ! cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}"; then
+	# Auto-detect should be resilient: if Vulkan looked available but CMake
+	# cannot resolve full Vulkan SDK requirements, retry CPU/CUDA/Metal only.
+	if [[ "$ENABLE_VULKAN" -eq 1 ]] && [[ "$AUTO_DETECT" -eq 1 ]] && [[ "$VULKAN_EXPLICIT" -eq 0 ]]; then
+		write_step "Warning: Vulkan auto-detected but CMake configure failed; retrying with Vulkan disabled."
+		ENABLE_VULKAN=0
+		FALLBACK_ARGS=()
+		for arg in "${CMAKE_ARGS[@]}"; do
+			[[ "$arg" == "-DGGML_VULKAN=ON" ]] && continue
+			FALLBACK_ARGS+=("$arg")
+		done
+		FALLBACK_ARGS+=(-DGGML_VULKAN=OFF)
+		cmake "$SOURCE_DIR" "${FALLBACK_ARGS[@]}"
+		CMAKE_ARGS=("${FALLBACK_ARGS[@]}")
+	else
+		die "CMake configure failed."
+	fi
+fi
 
 # ---------------------------------------------------------------------------
 # Build
