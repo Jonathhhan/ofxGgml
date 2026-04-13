@@ -6,7 +6,6 @@
 #include "ggml-cpu.h"
 
 #include <chrono>
-#include <cctype>
 #include <csetjmp>
 #include <cstdio>
 #include <cstring>
@@ -176,7 +175,9 @@ static bool hasPrefixIgnoreCase(const char * value, const char * prefix) {
 		if (*value == '\0') return false;
 		const unsigned char a = static_cast<unsigned char>(*value);
 		const unsigned char b = static_cast<unsigned char>(*prefix);
-		if (std::tolower(a) != std::tolower(b)) return false;
+		const unsigned char la = (a >= 'A' && a <= 'Z') ? static_cast<unsigned char>(a + ('a' - 'A')) : a;
+		const unsigned char lb = (b >= 'A' && b <= 'Z') ? static_cast<unsigned char>(b + ('a' - 'A')) : b;
+		if (la != lb) return false;
 		++value;
 		++prefix;
 	}
