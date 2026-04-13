@@ -78,6 +78,7 @@ endif()
 
 # Static library — no dynamic backend loading
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(GGML_STATIC ON CACHE BOOL "" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 
 # Core settings
@@ -90,6 +91,10 @@ set(GGML_SCHED_MAX_COPIES "4" CACHE STRING "" FORCE)
 set(GGML_CUDA   ${OFXGGML_CUDA}   CACHE BOOL "" FORCE)
 set(GGML_VULKAN ${OFXGGML_VULKAN} CACHE BOOL "" FORCE)
 set(GGML_METAL  ${OFXGGML_METAL}  CACHE BOOL "" FORCE)
+
+# CUDA options (must have defaults so the CUDA CMakeLists.txt works correctly)
+set(GGML_CUDA_PEER_MAX_BATCH_SIZE "128" CACHE STRING "ggml: max batch size for using peer access" FORCE)
+set(GGML_CUDA_FA ON CACHE BOOL "ggml: enable CUDA flash attention" FORCE)
 
 # Disable backends we don't need
 set(GGML_BLAS    OFF CACHE BOOL "" FORCE)

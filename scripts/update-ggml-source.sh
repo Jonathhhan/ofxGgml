@@ -33,6 +33,15 @@ die() {
 	exit 1
 }
 
+# Portable sed -i: macOS requires a backup extension argument.
+sedi() {
+	if [[ "$(uname)" == "Darwin" ]]; then
+		sed -i '' "$@"
+	else
+		sed -i "$@"
+	fi
+}
+
 usage() {
 	sed -n '2,/^# ---/{ /^# ---/d; s/^# //; s/^#//; p }' "$0"
 	exit 0
@@ -137,7 +146,7 @@ if [[ -n "$SAVE_BUILD" ]] && [[ -d "$SAVE_BUILD" ]]; then
 fi
 
 # Update commit reference in CMakeLists.txt
-sed -i "s/set(GGML_BUILD_COMMIT .*/set(GGML_BUILD_COMMIT \"$BUNDLED_COMMIT\")/" "$GGML_DIR/CMakeLists.txt"
+sedi "s/set(GGML_BUILD_COMMIT .*/set(GGML_BUILD_COMMIT \"$BUNDLED_COMMIT\")/" "$GGML_DIR/CMakeLists.txt"
 
 # Update version from upstream
 UPSTREAM_MAJOR=$(grep 'set(GGML_VERSION_MAJOR' "$TMP_CLONE/CMakeLists.txt" | grep -o '[0-9]\+')
@@ -145,9 +154,9 @@ UPSTREAM_MINOR=$(grep 'set(GGML_VERSION_MINOR' "$TMP_CLONE/CMakeLists.txt" | gre
 UPSTREAM_PATCH=$(grep 'set(GGML_VERSION_PATCH' "$TMP_CLONE/CMakeLists.txt" | grep -o '[0-9]\+')
 
 if [[ -n "$UPSTREAM_MAJOR" ]]; then
-	sed -i "s/set(GGML_VERSION_MAJOR .*/set(GGML_VERSION_MAJOR $UPSTREAM_MAJOR)/" "$GGML_DIR/CMakeLists.txt"
-	sed -i "s/set(GGML_VERSION_MINOR .*/set(GGML_VERSION_MINOR $UPSTREAM_MINOR)/" "$GGML_DIR/CMakeLists.txt"
-	sed -i "s/set(GGML_VERSION_PATCH .*/set(GGML_VERSION_PATCH $UPSTREAM_PATCH)/" "$GGML_DIR/CMakeLists.txt"
+	sedi "s/set(GGML_VERSION_MAJOR .*/set(GGML_VERSION_MAJOR $UPSTREAM_MAJOR)/" "$GGML_DIR/CMakeLists.txt"
+	sedi "s/set(GGML_VERSION_MINOR .*/set(GGML_VERSION_MINOR $UPSTREAM_MINOR)/" "$GGML_DIR/CMakeLists.txt"
+	sedi "s/set(GGML_VERSION_PATCH .*/set(GGML_VERSION_PATCH $UPSTREAM_PATCH)/" "$GGML_DIR/CMakeLists.txt"
 fi
 
 # ---------------------------------------------------------------------------

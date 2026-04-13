@@ -173,6 +173,61 @@ if "%FOUND%"=="0" (
     exit /b 1
 )
 
+REM ---------------------------------------------------------------------------
+REM Update addon_config.mk with detected libraries
+REM ---------------------------------------------------------------------------
+
+echo ==^> Updating addon_config.mk with built libraries...
+
+set "CONFIG_FILE=%ADDON_ROOT%\addon_config.mk"
+if not exist "%CONFIG_FILE%" (
+    echo ==^> Warning: addon_config.mk not found, skipping config update.
+    goto skip_config_update
+)
+
+REM Collect count of built ggml .lib files
+set "LIB_COUNT=0"
+for %%F in ("%LIB_DIR%\ggml*.lib") do (
+    set /a LIB_COUNT+=1
+)
+
+if %LIB_COUNT%==0 (
+    echo ==^> Warning: No libraries found to update in addon_config.mk.
+    goto skip_config_update
+)
+
+REM Write a temporary awk-like replacement using PowerShell
+set "START_MARKER=# @DIFFUSION_LIBS_START vs"
+set "END_MARKER=# @DIFFUSION_LIBS_END vs"
+
+REM Build replacement content to a temp file
+set "TMPFILE=%TEMP%\ofxggml_config_update.tmp"
+(
+    echo 	%START_MARKER%
+    for %%F in ("%LIB_DIR%\ggml*.lib") do (
+        echo 	ADDON_LIBS += libs/ggml/build/src/Release/%%~nxF
+    )
+    echo 	%END_MARKER%
+) > "%TMPFILE%"
+
+REM Use PowerShell to do the replacement between markers
+powershell -NoProfile -Command ^
+    "$content = Get-Content '%CONFIG_FILE%' -Raw;" ^
+    "$replacement = Get-Content '%TMPFILE%' -Raw;" ^
+    "$pattern = '(?ms)\t# @DIFFUSION_LIBS_START vs\r?\n.*?\t# @DIFFUSION_LIBS_END vs';" ^
+    "$newContent = $content -replace $pattern, $replacement.TrimEnd();" ^
+    "Set-Content '%CONFIG_FILE%' -Value $newContent -NoNewline"
+
+if errorlevel 1 (
+    echo ==^> Warning: Could not update addon_config.mk automatically.
+) else (
+    echo ==^> Updated addon_config.mk [vs] with %LIB_COUNT% libraries.
+)
+
+del /q "%TMPFILE%" 2>nul
+
+:skip_config_update
+
 echo ==^> Done! ggml has been built in %BUILD_DIR%
 echo ==^>
 echo ==^> The addon will automatically find the libraries in this location.
