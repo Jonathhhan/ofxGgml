@@ -151,7 +151,7 @@ if defined CMAKE_GENERATOR (
 if defined PLATFORM_ARG (
     cmake -B "%BUILD_DIR%" "%GGML_DIR%" %PLATFORM_ARG% %CMAKE_ARGS%
     if errorlevel 1 (
-        echo ==^> Configure with x64 platform failed, retrying without %PLATFORM_ARG%...
+        echo ==^> Configure with x64 platform failed, retrying with default platform settings...
         cmake -B "%BUILD_DIR%" "%GGML_DIR%" %CMAKE_ARGS%
     )
 ) else (
