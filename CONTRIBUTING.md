@@ -10,7 +10,7 @@ Thank you for your interest in contributing!
    cd openFrameworks/addons
    git clone https://github.com/<you>/ofxGgml.git
    cd ofxGgml
-   ./scripts/setup_linux.sh
+   ./scripts/setup_linux_macos.sh
    ```
 3. Create a feature branch:
    ```bash

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# setup_linux.sh — One-command setup for the ofxGgml addon (Linux/macOS).
+# setup_linux_macos.sh — One-command setup for the ofxGgml addon (Linux/macOS).
 #
 # Builds ggml (auto-detect GPU backends by default), installs the llama.cpp CLI
 # tools, and downloads a recommended model so you can run the examples
@@ -10,7 +10,7 @@
 # to force a specific backend.
 #
 # Usage:
-#   ./scripts/setup_linux.sh [OPTIONS]
+#   ./scripts/setup_linux_macos.sh [OPTIONS]
 #
 # Options:
 #   --cpu-only         Build CPU backend only (disable GPU auto-detect)

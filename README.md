@@ -15,10 +15,10 @@ git clone https://github.com/Jonathhhan/ofxGgml.git
 
 # 2. Build ggml (GPU auto-detect by default) + llama.cpp CLI + download models
 cd ofxGgml
-./scripts/setup_linux.sh              # Linux/macOS full setup (default auto-detect)
-./scripts/setup_linux.sh --auto       # explicit auto-detect
-./scripts/setup_linux.sh --cpu-only   # force CPU-only
-./scripts/setup_linux.sh --cuda       # explicitly enable CUDA
+./scripts/setup_linux_macos.sh              # Linux/macOS full setup (default auto-detect)
+./scripts/setup_linux_macos.sh --auto       # explicit auto-detect
+./scripts/setup_linux_macos.sh --cpu-only   # force CPU-only
+./scripts/setup_linux_macos.sh --cuda       # explicitly enable CUDA
 
 # Windows (Developer Command Prompt)
 scripts\setup_windows.bat             # build ggml + download models
@@ -75,11 +75,11 @@ ggml source is bundled in `libs/ggml/`.  It is compiled as a static library.  By
 ### Automated (recommended)
 
 ```bash
-./scripts/setup_linux.sh              # Linux/macOS: ggml + llama CLI + models (auto-detect)
-./scripts/setup_linux.sh --cuda       # Linux/macOS: explicitly enable CUDA
-./scripts/setup_linux.sh --skip-llama --skip-model  # Linux/macOS: ggml only
-./scripts/setup_linux.sh --skip-model  # Linux/macOS: ggml + llama only (no model download)
-./scripts/setup_linux.sh --skip-ggml --skip-llama --model-preset 2  # Linux/macOS: model only
+./scripts/setup_linux_macos.sh              # Linux/macOS: ggml + llama CLI + models (auto-detect)
+./scripts/setup_linux_macos.sh --cuda       # Linux/macOS: explicitly enable CUDA
+./scripts/setup_linux_macos.sh --skip-llama --skip-model  # Linux/macOS: ggml only
+./scripts/setup_linux_macos.sh --skip-model  # Linux/macOS: ggml + llama only (no model download)
+./scripts/setup_linux_macos.sh --skip-ggml --skip-llama --model-preset 2  # Linux/macOS: model only
 ```
 
 ```bat
@@ -170,7 +170,7 @@ ofxGgml/
 │   ├── cmake/                # ggml cmake helpers
 │   └── build/                # build output (created by build-ggml.sh)
 ├── scripts/
-│   ├── setup_linux.sh        # Linux/macOS full setup entry point
+│   ├── setup_linux_macos.sh  # Linux/macOS full setup entry point
 │   ├── setup_windows.bat     # Windows setup entry point
 │   ├── build-ggml.sh         # build bundled ggml — Linux/macOS
 │   ├── build-ggml.bat        # build bundled ggml — Windows/VS
@@ -361,7 +361,7 @@ Build the tools with:
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/setup_linux.sh` | **Linux/macOS setup**: builds ggml + llama CLI + downloads models |
+| `scripts/setup_linux_macos.sh` | **Linux/macOS setup**: builds ggml + llama CLI + downloads models |
 | `scripts/setup_windows.bat` | **Windows setup**: builds ggml + downloads models |
 | `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, `--auto` by default) |
 | `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, `--auto` default) |
