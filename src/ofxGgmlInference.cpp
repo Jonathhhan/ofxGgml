@@ -117,6 +117,33 @@ out << text;
 return out.good();
 }
 
+struct ThreadLocalTempFile {
+std::string path;
+~ThreadLocalTempFile() {
+if (path.empty()) return;
+std::error_code ec;
+std::filesystem::remove(path, ec);
+}
+};
+
+static bool writeReusableTempTextFile(
+ThreadLocalTempFile & slot,
+const char * prefix,
+const std::string & text,
+std::string & outPath) {
+if (slot.path.empty()) {
+slot.path = makeTempPath(prefix, ".txt");
+}
+if (!writeTextFile(slot.path, text)) {
+slot.path = makeTempPath(prefix, ".txt");
+if (!writeTextFile(slot.path, text)) {
+return false;
+}
+}
+outPath = slot.path;
+return true;
+}
+
 static bool parseEmbeddingVector(const std::string & raw, std::vector<float> & out) {
 out.clear();
 const size_t begin = raw.find('[');
@@ -171,8 +198,9 @@ return result;
 }
 
 const auto t0 = std::chrono::steady_clock::now();
-const std::string promptPath = makeTempPath("ofxggml_prompt_", ".txt");
-if (!writeTextFile(promptPath, prompt)) {
+static thread_local ThreadLocalTempFile promptTempFile;
+std::string promptPath;
+if (!writeReusableTempTextFile(promptTempFile, "ofxggml_prompt_", prompt, promptPath)) {
 result.error = "failed to write temp prompt file";
 return result;
 }
@@ -221,8 +249,6 @@ args.push_back(settings.grammarPath);
 std::string raw;
 int exitCode = -1;
 const bool started = runCommandCapture(args, raw, exitCode);
-std::error_code rmEc;
-std::filesystem::remove(promptPath, rmEc);
 
 if (!started) {
 result.error = "failed to start llama completion process";
@@ -257,8 +283,9 @@ result.error = "embedding executable path is empty";
 return result;
 }
 
-const std::string promptPath = makeTempPath("ofxggml_embed_", ".txt");
-if (!writeTextFile(promptPath, text)) {
+static thread_local ThreadLocalTempFile promptTempFile;
+std::string promptPath;
+if (!writeReusableTempTextFile(promptTempFile, "ofxggml_embed_", text, promptPath)) {
 result.error = "failed to write temp embedding prompt file";
 return result;
 }
@@ -277,8 +304,6 @@ args.push_back("--embd-normalize");
 std::string raw;
 int exitCode = -1;
 const bool started = runCommandCapture(args, raw, exitCode);
-std::error_code rmEc;
-std::filesystem::remove(promptPath, rmEc);
 
 if (!started) {
 result.error = "failed to start llama embedding process";
