@@ -492,21 +492,25 @@ m_entries.push_back({ id, text, embedding });
 }
 
 std::vector<ofxGgmlSimilarityHit> ofxGgmlEmbeddingIndex::search(const std::vector<float> & queryEmbedding, size_t topK) const {
-std::vector<ofxGgmlSimilarityHit> hits;
-if (queryEmbedding.empty() || m_entries.empty() || topK == 0) return hits;
+	std::vector<ofxGgmlSimilarityHit> hits;
+	if (queryEmbedding.empty() || m_entries.empty() || topK == 0) return hits;
 
-hits.reserve(m_entries.size());
-for (size_t i = 0; i < m_entries.size(); ++i) {
-const auto & e = m_entries[i];
-hits.push_back({ e.id, e.text, cosineSimilarity(queryEmbedding, e.embedding), i });
-}
+	hits.reserve(m_entries.size());
+	for (size_t i = 0; i < m_entries.size(); ++i) {
+		const auto & e = m_entries[i];
+		hits.push_back({ e.id, e.text, cosineSimilarity(queryEmbedding, e.embedding), i });
+	}
 
-std::sort(hits.begin(), hits.end(), [](const ofxGgmlSimilarityHit & a, const ofxGgmlSimilarityHit & b) {
-return a.score > b.score;
-});
-
-if (hits.size() > topK) hits.resize(topK);
-return hits;
+	const size_t limit = std::min(topK, hits.size());
+	auto byScoreDesc = [](const ofxGgmlSimilarityHit & a, const ofxGgmlSimilarityHit & b) {
+		return a.score > b.score;
+	};
+	if (limit < hits.size()) {
+		std::nth_element(hits.begin(), hits.begin() + limit, hits.end(), byScoreDesc);
+		hits.resize(limit);
+	}
+	std::sort(hits.begin(), hits.end(), byScoreDesc);
+	return hits;
 }
 
 float ofxGgmlEmbeddingIndex::cosineSimilarity(const std::vector<float> & a, const std::vector<float> & b) {
