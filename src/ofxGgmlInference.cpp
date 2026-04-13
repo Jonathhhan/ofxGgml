@@ -117,6 +117,33 @@ out << text;
 return out.good();
 }
 
+struct ThreadLocalTempFile {
+std::string path;
+~ThreadLocalTempFile() {
+if (path.empty()) return;
+std::error_code ec;
+std::filesystem::remove(path, ec);
+}
+};
+
+static bool writeReusableTempTextFile(
+ThreadLocalTempFile & slot,
+const char * prefix,
+const std::string & text,
+std::string & outPath) {
+if (slot.path.empty()) {
+slot.path = makeTempPath(prefix, ".txt");
+}
+if (!writeTextFile(slot.path, text)) {
+slot.path = makeTempPath(prefix, ".txt");
+if (!writeTextFile(slot.path, text)) {
+return false;
+}
+}
+outPath = slot.path;
+return true;
+}
+
 static bool parseEmbeddingVector(const std::string & raw, std::vector<float> & out) {
 out.clear();
 const size_t begin = raw.find('[');
@@ -171,13 +198,11 @@ return result;
 }
 
 const auto t0 = std::chrono::steady_clock::now();
-static thread_local std::string promptPath = makeTempPath("ofxggml_prompt_", ".txt");
-if (!writeTextFile(promptPath, prompt)) {
-promptPath = makeTempPath("ofxggml_prompt_", ".txt");
-if (!writeTextFile(promptPath, prompt)) {
+static thread_local ThreadLocalTempFile promptTempFile;
+std::string promptPath;
+if (!writeReusableTempTextFile(promptTempFile, "ofxggml_prompt_", prompt, promptPath)) {
 result.error = "failed to write temp prompt file";
 return result;
-}
 }
 
 std::vector<std::string> args = {
@@ -258,13 +283,11 @@ result.error = "embedding executable path is empty";
 return result;
 }
 
-static thread_local std::string promptPath = makeTempPath("ofxggml_embed_", ".txt");
-if (!writeTextFile(promptPath, text)) {
-promptPath = makeTempPath("ofxggml_embed_", ".txt");
-if (!writeTextFile(promptPath, text)) {
+static thread_local ThreadLocalTempFile promptTempFile;
+std::string promptPath;
+if (!writeReusableTempTextFile(promptTempFile, "ofxggml_embed_", text, promptPath)) {
 result.error = "failed to write temp embedding prompt file";
 return result;
-}
 }
 
 std::vector<std::string> args = {
