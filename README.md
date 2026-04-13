@@ -120,7 +120,7 @@ CMake options:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `OFXGGML_GPU_AUTODETECT` | `OFF` | Auto-detect and enable available GPU backends |
+| `OFXGGML_GPU_AUTODETECT` | `ON` | Auto-detect and enable available GPU backends |
 | `OFXGGML_CUDA` | `OFF` | Force CUDA backend on/off |
 | `OFXGGML_VULKAN` | `OFF` | Force Vulkan backend on/off |
 | `OFXGGML_METAL` | `OFF` | Force Metal backend on/off |
