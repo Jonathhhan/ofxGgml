@@ -211,13 +211,13 @@ echo ==^> Building ggml (%CFG%) with %JOBS% parallel jobs...
 cmake --build "%BUILD_DIR%" --config %CFG% -j %JOBS%
 if errorlevel 1 (
     if not "%JOBS%"=="1" (
-        echo ==^> Build failed with parallel jobs for ggml (%CFG%).
-        echo ==^> Retry triggered: running ggml (%CFG%) again with 1 job to avoid transient CUDA/MSBuild object races...
+        echo ==^> Build failed with parallel jobs for ggml ^(%CFG%^).
+        echo ==^> Retry triggered: running ggml ^(%CFG%^) again with 1 job to avoid transient CUDA/MSBuild object races...
         cmake --build "%BUILD_DIR%" --config %CFG% -j 1
         if errorlevel 1 (
-            echo ==^> Retry result: FAILED for ggml (%CFG%) with 1 job.
+            echo ==^> Retry result: FAILED for ggml ^(%CFG%^) with 1 job.
         ) else (
-            echo ==^> Retry result: SUCCESS for ggml (%CFG%) with 1 job.
+            echo ==^> Retry result: SUCCESS for ggml ^(%CFG%^) with 1 job.
             exit /b 0
         )
     )
@@ -231,15 +231,15 @@ set "CFG=%~1"
 set "CFG_LIB_DIR=%BUILD_DIR%\src\%CFG%"
 set "FOUND=0"
 if exist "%CFG_LIB_DIR%\ggml.lib" (
-    echo ==^>   Found (%CFG%): %CFG_LIB_DIR%\ggml.lib
+    echo ==^>   Found ^(%CFG%^): %CFG_LIB_DIR%\ggml.lib
     set "FOUND=1"
 )
 if exist "%CFG_LIB_DIR%\ggml-base.lib" (
-    echo ==^>   Found (%CFG%): %CFG_LIB_DIR%\ggml-base.lib
+    echo ==^>   Found ^(%CFG%^): %CFG_LIB_DIR%\ggml-base.lib
     set "FOUND=1"
 )
 if exist "%CFG_LIB_DIR%\ggml-cpu.lib" (
-    echo ==^>   Found (%CFG%): %CFG_LIB_DIR%\ggml-cpu.lib
+    echo ==^>   Found ^(%CFG%^): %CFG_LIB_DIR%\ggml-cpu.lib
     set "FOUND=1"
 )
 
