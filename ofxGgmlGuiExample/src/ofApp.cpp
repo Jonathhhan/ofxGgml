@@ -149,6 +149,24 @@ std::string cleanChatOutput(const std::string & text) {
 	}
 	out = trim(out);
 
+	// Strip trailing CLI artifacts: "> EOF", "EOF", "interrupted by user".
+	{
+		const std::vector<std::string> trailingArtifacts = {
+			"> EOF", "EOF", "interrupted by user"
+		};
+		bool stripped = true;
+		while (stripped) {
+			stripped = false;
+			for (const auto & art : trailingArtifacts) {
+				if (out.size() >= art.size() &&
+					out.compare(out.size() - art.size(), art.size(), art) == 0) {
+					out = trim(out.substr(0, out.size() - art.size()));
+					stripped = true;
+				}
+			}
+		}
+	}
+
 	return out;
 }
 
@@ -830,12 +848,11 @@ logMessages.pop_front();
 }
 });
 
-// Auto-load last session if available (before CLI probe so that a
-// persisted custom CLI path is available).
+// Auto-load last session if available.
 autoLoadSession();
 
 // Detect llama-completion / llama-cli / llama at startup.
-probeLlamaCli(logMutex, logMessages, customCliPath);
+probeLlamaCli(logMutex, logMessages);
 
 // Detect model layer count for GPU layers slider and default to all layers
 // only when a GPU backend is selected.
@@ -1012,18 +1029,6 @@ ImGui::EndDisabled();
 }
 }
 
-{
-if (!backendNames.empty()) {
-auto getter = [](void * data, int idx) -> const char * {
-	return (*static_cast<std::vector<std::string>*>(data))[idx].c_str();
-};
-if (ImGui::Combo("Backend", &selectedBackendIndex, getter, &backendNames,
-	static_cast<int>(backendNames.size()))) {
-reinitBackend();
-}
-}
-}
-
 ImGui::SeparatorText("Appearance");
 const char * themeLabels[] = { "Dark", "Light", "Classic" };
 if (ImGui::Combo("Theme", &themeIndex, themeLabels, 3)) {
@@ -1137,25 +1142,6 @@ ImGui::Spacing();
 ImGui::Separator();
 ImGui::Spacing();
 
-// Backend preference.
-ImGui::Text("Backend:");
-{
-if (!backendNames.empty()) {
-auto getter = [](void * data, int idx) -> const char * {
-	return (*static_cast<std::vector<std::string>*>(data))[idx].c_str();
-};
-ImGui::SetNextItemWidth(-1);
-if (ImGui::Combo("##Backend", &selectedBackendIndex, getter, &backendNames,
-	static_cast<int>(backendNames.size()))) {
-reinitBackend();
-}
-}
-}
-
-ImGui::Spacing();
-ImGui::Separator();
-ImGui::Spacing();
-
 // Engine status indicator.
 if (engineReady) {
 ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "Engine: OK");
@@ -1163,27 +1149,6 @@ ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "Engine: OK");
 ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.2f, 1.0f), "Engine: Error");
 }
 ImGui::Text("Backend: %s", ggml.getBackendName().c_str());
-
-// CLI detection status and retry button.
-if (llamaCliState.load(std::memory_order_relaxed) == 1) {
-ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "CLI: %s", llamaCliCommand.c_str());
-} else {
-ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.2f, 1.0f), "CLI: not detected");
-}
-if (ImGui::Button("Re-detect CLI", ImVec2(-1, 0))) {
-probeLlamaCli(logMutex, logMessages, customCliPath);
-}
-
-// Custom CLI path override.
-ImGui::Text("Custom CLI path:");
-ImGui::SetNextItemWidth(-1);
-if (ImGui::InputText("##CliPath", customCliPath, sizeof(customCliPath),
-	ImGuiInputTextFlags_EnterReturnsTrue)) {
-probeLlamaCli(logMutex, logMessages, customCliPath);
-}
-if (ImGui::IsItemHovered()) {
-ImGui::SetTooltip("Full path to llama-completion or llama-cli binary (press Enter to apply)");
-}
 
 if (generating.load()) {
 ImGui::Spacing();
@@ -2281,9 +2246,6 @@ out << "mirostatTau=" << ofToString(mirostatTau, 4) << "\n";
 out << "mirostatEta=" << ofToString(mirostatEta, 4) << "\n";
 out << "verbose=" << (verbose ? 1 : 0) << "\n";
 
-// Custom CLI path.
-out << "customCliPath=" << escapeSessionText(customCliPath) << "\n";
-
 // Script source.
 out << "scriptSourceType=" << static_cast<int>(scriptSourceType) << "\n";
 out << "scriptSourcePath=" << escapeSessionText(scriptSourcePath) << "\n";
@@ -2408,7 +2370,7 @@ else if (key == "mirostatMode") mirostatMode = std::clamp(safeStoi(value), 0, 2)
 else if (key == "mirostatTau") mirostatTau = std::clamp(safeStof(value, 5.0f), 0.0f, 10.0f);
 else if (key == "mirostatEta") mirostatEta = std::clamp(safeStof(value, 0.1f), 0.0f, 1.0f);
 else if (key == "verbose") verbose = (safeStoi(value) != 0);
-else if (key == "customCliPath") copyToBuf(customCliPath, sizeof(customCliPath), value);
+else if (key == "customCliPath") { /* ignored — CLI path option removed */ }
 else if (key == "scriptSourceType") {
 	int t = std::clamp(safeStoi(value), 0, 2);
 	scriptSourceType = static_cast<ScriptSourceType>(t);
@@ -2586,9 +2548,9 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	// restarting the app.
 
 	if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-		probeLlamaCli(logMutex, logMessages, customCliPath);
+		probeLlamaCli(logMutex, logMessages);
 		if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-			error = "llama-completion/llama-cli/llama not found. Build with scripts/build-llama-cli.sh or set a custom CLI path in the sidebar.";
+			error = "llama-completion/llama-cli/llama not found. Build with scripts/build-llama-cli.sh.";
 			return false;
 		}
 	}
