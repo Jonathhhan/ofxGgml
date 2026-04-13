@@ -240,6 +240,8 @@ update_addon_config() {
 	local -A consumed=()
 	local all_libs=()
 	local remaining_libs=()
+	local sorted_keys=()
+	local sorted_remaining=()
 	local ordered_names=(
 		"libggml$ext"
 		"ggml$ext"
@@ -276,15 +278,16 @@ update_addon_config() {
 		fi
 	done
 
-	for base_name in "${!selected[@]}"; do
+	mapfile -t sorted_keys < <(printf '%s\n' "${!selected[@]}" | sort)
+	for base_name in "${sorted_keys[@]}"; do
 		if [[ -z "${consumed[$base_name]:-}" ]]; then
 			remaining_libs+=("${selected[$base_name]#"$ADDON_ROOT"/}")
 		fi
 	done
 
 	if [[ ${#remaining_libs[@]} -gt 0 ]]; then
-		mapfile -t remaining_libs < <(printf '%s\n' "${remaining_libs[@]}" | sort)
-		libs+=("${remaining_libs[@]}")
+		mapfile -t sorted_remaining < <(printf '%s\n' "${remaining_libs[@]}" | sort)
+		libs+=("${sorted_remaining[@]}")
 	fi
 
 	if [[ ${#libs[@]} -eq 0 ]]; then
