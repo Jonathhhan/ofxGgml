@@ -254,10 +254,14 @@ if [[ "$ENABLE_METAL" -eq 1 ]]; then
 	CMAKE_ARGS+=(-DGGML_METAL=ON)
 fi
 
-if ! cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}"; then
+CONFIGURE_LOG="$(mktemp)"
+if ! cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}" 2>&1 | tee "$CONFIGURE_LOG"; then
 	# Auto-detect should be resilient: if Vulkan looked available but CMake
 	# cannot resolve full Vulkan SDK requirements, retry CPU/CUDA/Metal only.
-	if [[ "$ENABLE_VULKAN" -eq 1 ]] && [[ "$AUTO_DETECT" -eq 1 ]] && [[ "$VULKAN_EXPLICIT" -eq 0 ]]; then
+	if [[ "$ENABLE_VULKAN" -eq 1 ]] &&
+		[[ "$AUTO_DETECT" -eq 1 ]] &&
+		[[ "$VULKAN_EXPLICIT" -eq 0 ]] &&
+		grep -q "Could NOT find Vulkan" "$CONFIGURE_LOG"; then
 		write_step "Warning: Vulkan auto-detected but CMake configure failed; retrying with Vulkan disabled."
 		ENABLE_VULKAN=0
 		FALLBACK_ARGS=()
@@ -266,12 +270,15 @@ if ! cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}"; then
 			FALLBACK_ARGS+=("$arg")
 		done
 		FALLBACK_ARGS+=(-DGGML_VULKAN=OFF)
-		cmake "$SOURCE_DIR" "${FALLBACK_ARGS[@]}"
+		if ! cmake "$SOURCE_DIR" "${FALLBACK_ARGS[@]}"; then
+			die "CMake configure failed after retrying with Vulkan disabled."
+		fi
 		CMAKE_ARGS=("${FALLBACK_ARGS[@]}")
 	else
 		die "CMake configure failed."
 	fi
 fi
+rm -f "$CONFIGURE_LOG"
 
 # ---------------------------------------------------------------------------
 # Build
