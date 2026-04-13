@@ -145,11 +145,19 @@ REM ---------------------------------------------------------------------------
 REM Build
 REM ---------------------------------------------------------------------------
 
-echo ==^> Building ggml with %JOBS% parallel jobs...
+echo ==^> Building ggml (Release) with %JOBS% parallel jobs...
 
 cmake --build "%BUILD_DIR%" --config Release -j %JOBS%
 if errorlevel 1 (
-    echo Error: CMake build failed.
+    echo Error: CMake Release build failed.
+    exit /b 1
+)
+
+echo ==^> Building ggml (Debug) with %JOBS% parallel jobs...
+
+cmake --build "%BUILD_DIR%" --config Debug -j %JOBS%
+if errorlevel 1 (
+    echo Error: CMake Debug build failed.
     exit /b 1
 )
 
@@ -159,86 +167,59 @@ REM ---------------------------------------------------------------------------
 
 echo ==^> Verifying build output...
 
-set "LIB_DIR=%BUILD_DIR%\src\Release"
+set "LIB_DIR_REL=%BUILD_DIR%\src\Release"
+set "LIB_DIR_DBG=%BUILD_DIR%\src\Debug"
 set "FOUND=0"
 
-if exist "%LIB_DIR%\ggml.lib" (
-    echo ==^>   Found: %LIB_DIR%\ggml.lib
+if exist "%LIB_DIR_REL%\ggml.lib" (
+    echo ==^>   Found (Release): %LIB_DIR_REL%\ggml.lib
     set "FOUND=1"
 )
-if exist "%LIB_DIR%\ggml-base.lib" (
-    echo ==^>   Found: %LIB_DIR%\ggml-base.lib
+if exist "%LIB_DIR_REL%\ggml-base.lib" (
+    echo ==^>   Found (Release): %LIB_DIR_REL%\ggml-base.lib
     set "FOUND=1"
 )
-if exist "%LIB_DIR%\ggml-cpu.lib" (
-    echo ==^>   Found: %LIB_DIR%\ggml-cpu.lib
+if exist "%LIB_DIR_REL%\ggml-cpu.lib" (
+    echo ==^>   Found (Release): %LIB_DIR_REL%\ggml-cpu.lib
     set "FOUND=1"
 )
 
 if "%FOUND%"=="0" (
-    echo Error: No ggml libraries found in %LIB_DIR%
+    echo Error: No ggml Release libraries found in %LIB_DIR_REL%
     echo Make sure CMake built successfully with the Visual Studio generator.
     exit /b 1
 )
 
+set "DBG_FOUND=0"
+if exist "%LIB_DIR_DBG%\ggml.lib" (
+    echo ==^>   Found (Debug): %LIB_DIR_DBG%\ggml.lib
+    set "DBG_FOUND=1"
+)
+if exist "%LIB_DIR_DBG%\ggml-base.lib" (
+    echo ==^>   Found (Debug): %LIB_DIR_DBG%\ggml-base.lib
+    set "DBG_FOUND=1"
+)
+if exist "%LIB_DIR_DBG%\ggml-cpu.lib" (
+    echo ==^>   Found (Debug): %LIB_DIR_DBG%\ggml-cpu.lib
+    set "DBG_FOUND=1"
+)
+
+if "%DBG_FOUND%"=="0" (
+    echo ==^> Warning: No ggml Debug libraries found in %LIB_DIR_DBG%
+    echo ==^> Debug mode may not work. Only Release configuration will be available.
+)
+
 REM ---------------------------------------------------------------------------
-REM Update addon_config.mk with detected libraries
+REM addon_config.mk — VS libraries are handled by ofxGgml.props
 REM ---------------------------------------------------------------------------
 
-echo ==^> Updating addon_config.mk with built libraries...
-
-set "CONFIG_FILE=%ADDON_ROOT%\addon_config.mk"
-if not exist "%CONFIG_FILE%" (
-    echo ==^> Warning: addon_config.mk not found, skipping config update.
-    goto skip_config_update
-)
-
-REM Collect count of built ggml .lib files
-set "LIB_COUNT=0"
-for %%F in ("%LIB_DIR%\ggml*.lib") do (
-    set /a LIB_COUNT+=1
-)
-
-if %LIB_COUNT%==0 (
-    echo ==^> Warning: No libraries found to update in addon_config.mk.
-    goto skip_config_update
-)
-
-REM Write a temporary awk-like replacement using PowerShell
-set "START_MARKER=# @DIFFUSION_LIBS_START vs"
-set "END_MARKER=# @DIFFUSION_LIBS_END vs"
-
-REM Build replacement content to a temp file
-set "TMPFILE=%TEMP%\ofxggml_config_update.tmp"
-(
-    echo 	%START_MARKER%
-    for %%F in ("%LIB_DIR%\ggml*.lib") do (
-        echo 	ADDON_LIBS += libs/ggml/build/src/Release/%%~nxF
-    )
-    echo 	%END_MARKER%
-) > "%TMPFILE%"
-
-REM Use PowerShell to do the replacement between markers
-powershell -NoProfile -Command ^
-    "$content = Get-Content '%CONFIG_FILE%' -Raw;" ^
-    "$replacement = Get-Content '%TMPFILE%' -Raw;" ^
-    "$pattern = '(?ms)\t# @DIFFUSION_LIBS_START vs\r?\n.*?\t# @DIFFUSION_LIBS_END vs';" ^
-    "$newContent = $content -replace $pattern, $replacement.TrimEnd();" ^
-    "Set-Content '%CONFIG_FILE%' -Value $newContent -NoNewline"
-
-if errorlevel 1 (
-    echo ==^> Warning: Could not update addon_config.mk automatically.
-) else (
-    echo ==^> Updated addon_config.mk [vs] with %LIB_COUNT% libraries.
-)
-
-del /q "%TMPFILE%" 2>nul
-
-:skip_config_update
+echo ==^> VS libraries are linked via ofxGgml.props (no addon_config.mk update needed).
 
 echo ==^> Done! ggml has been built in %BUILD_DIR%
+echo ==^>   Release libs: %LIB_DIR_REL%
+echo ==^>   Debug libs:   %LIB_DIR_DBG%
 echo ==^>
-echo ==^> The addon will automatically find the libraries in this location.
-echo ==^> Build your OF project with ofxGgml.
+echo ==^> Import ofxGgml.props into your VS project to link the libraries:
+echo ==^>   View ^> Property Manager ^> Add Existing Property Sheet
 
 endlocal

@@ -94,9 +94,15 @@ scripts\build-ggml.bat --vulkan     &:: force Vulkan on
 scripts\build-ggml.bat --cpu-only   &:: CPU only
 ```
 
-This produces `ggml.lib`, `ggml-base.lib`, and `ggml-cpu.lib` in `libs\ggml\build\src\Release\`, which the addon links automatically via `addon_config.mk`.
+This builds both **Debug** and **Release** configurations, producing libraries in `libs\ggml\build\src\Release\` and `libs\ggml\build\src\Debug\`.
 
-After building, regenerate your project with the openFrameworks Project Generator and build normally.
+After building ggml, regenerate your project with the openFrameworks Project Generator, then **import the property sheet**:
+
+1. In Visual Studio, open **View → Property Manager**.
+2. Right-click your project and choose **Add Existing Property Sheet**.
+3. Browse to `ofxGgml.props` in the addon root directory.
+
+The property sheet automatically selects the correct Debug or Release libraries based on your build configuration, avoiding `LNK2038` CRT mismatch errors.
 
 ### Manual — CMake
 
@@ -128,6 +134,7 @@ CMake options:
 ```
 ofxGgml/
 ├── addon_config.mk          # oF project generator configuration
+├── ofxGgml.props            # VS property sheet for Debug/Release linking
 ├── src/
 │   ├── ofxGgml.h             # umbrella header — include this
 │   ├── ofxGgmlCore.h/.cpp    # backend init, compute, model weight loading

@@ -854,13 +854,12 @@ autoLoadSession();
 // Detect llama-completion / llama-cli / llama at startup.
 probeLlamaCli(logMutex, logMessages);
 
-// Detect model layer count for GPU layers slider and default to all layers
-// only when a GPU backend is selected.
+// Detect model layer count for GPU layers slider.
 detectModelLayers();
 {
-	if (isSelectedBackendCpu()) {
-		gpuLayers = 0;
-	} else if (detectedModelLayers > 0) {
+	if (gpuLayers == 0 && detectedModelLayers > 0) {
+		// Default GPU layers to all if a model is loaded and the user
+		// hasn't explicitly set them to 0 from a previous session.
 		gpuLayers = detectedModelLayers;
 	}
 }
@@ -1003,30 +1002,22 @@ ImGui::SliderInt("Threads", &numThreads, 1, 32);
 ImGui::SliderInt("Context Size", &contextSize, 256, 16384);
 ImGui::SliderInt("Batch Size", &batchSize, 32, 4096);
 {
-bool isCpuBackend = isSelectedBackendCpu();
+// GPU layers control the llama-completion CLI process, which has
+// its own GPU support — always allow the user to adjust them.
 int settingsSliderMax = detectedModelLayers > 0 ? detectedModelLayers : 128;
-if (isCpuBackend) {
-gpuLayers = 0;
-ImGui::BeginDisabled();
-}
 ImGui::SliderInt("GPU Layers", &gpuLayers, 0, settingsSliderMax);
 if (ImGui::IsItemHovered()) {
-if (isCpuBackend) {
-ImGui::SetTooltip("GPU layers not available with CPU backend");
-} else if (detectedModelLayers > 0) {
-ImGui::SetTooltip("Number of model layers to offload to GPU\n"
+if (detectedModelLayers > 0) {
+ImGui::SetTooltip("Number of model layers to offload to GPU (llama-completion)\n"
 	"0 = all on CPU\nModel has %d layers", detectedModelLayers);
 } else {
-ImGui::SetTooltip("Number of model layers to offload to GPU\n0 = all on CPU");
+ImGui::SetTooltip("Number of model layers to offload to GPU (llama-completion)\n0 = all on CPU");
 }
 }
 ImGui::SameLine();
 if (ImGui::SmallButton("None##settgpu")) gpuLayers = 0;
 ImGui::SameLine();
 if (ImGui::SmallButton("All##settgpu")) gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
-if (isCpuBackend) {
-ImGui::EndDisabled();
-}
 }
 
 ImGui::SeparatorText("Appearance");
@@ -1079,10 +1070,8 @@ std::string label = preset.name + "  " + preset.sizeMB;
 if (ImGui::Selectable(label.c_str(), isSelected)) {
 selectedModelIndex = i;
 detectModelLayers();
-// Only set GPU layers when a GPU backend is active.
-if (isSelectedBackendCpu()) {
-gpuLayers = 0;
-} else if (detectedModelLayers > 0) {
+// Default to all GPU layers when switching models.
+if (detectedModelLayers > 0) {
 gpuLayers = detectedModelLayers;
 }
 }
@@ -1111,18 +1100,13 @@ ImGui::SetNextItemWidth(-1);
 ImGui::SliderFloat("##TopP", &topP, 0.0f, 1.0f, "Top-P: %.2f");
 ImGui::SetNextItemWidth(-1);
 {
-bool isCpuBackend = isSelectedBackendCpu();
+// GPU layers control the llama-completion CLI process, which has
+// its own GPU support — always allow the user to adjust them.
 int sliderMax = detectedModelLayers > 0 ? detectedModelLayers : 128;
-if (isCpuBackend) {
-gpuLayers = 0;
-ImGui::BeginDisabled();
-}
 ImGui::SliderInt("##GPULayers", &gpuLayers, 0, sliderMax, "GPU Layers: %d");
 if (ImGui::IsItemHovered()) {
-if (isCpuBackend) {
-ImGui::SetTooltip("GPU layers not available with CPU backend");
-} else if (detectedModelLayers > 0) {
-ImGui::SetTooltip("Model has %d layers", detectedModelLayers);
+if (detectedModelLayers > 0) {
+ImGui::SetTooltip("Model has %d layers\nGPU offloading via llama-completion", detectedModelLayers);
 }
 }
 // None / All quick buttons.
@@ -1132,9 +1116,6 @@ gpuLayers = 0;
 ImGui::SameLine();
 if (ImGui::Button("All##gpu", ImVec2(-1, 0))) {
 gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
-}
-if (isCpuBackend) {
-ImGui::EndDisabled();
 }
 }
 
@@ -2584,11 +2565,10 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	const int safeContext = std::clamp(contextSize, 256, 16384);
 	const int safeBatch = std::clamp(batchSize, 32, 4096);
 	const int safeGpuLayers = std::clamp(gpuLayers, 0, 128);
+	// GPU layers control the llama-completion CLI process, which has
+	// its own GPU support independent of the addon's ggml engine.
+	// Do not force layers to zero based on the engine backend.
 	int effectiveGpuLayers = safeGpuLayers;
-	{
-		// Force zero GPU layers when the selected backend is CPU.
-		if (isSelectedBackendCpu()) effectiveGpuLayers = 0;
-	}
 
 	std::ostringstream tempStr, topPStr, repeatPenaltyStr;
 	tempStr << std::fixed << std::setprecision(3) << safeTemp;
@@ -2656,6 +2636,17 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		if (trim(raw).empty()) {
 			args = makeArgs(true);
 			runProcessCapture(args, raw, ret, true, onStreamData, false);
+		}
+		// If still no stdout output after the short-flag retry, do a
+		// diagnostic run with stderr captured so the user sees the
+		// actual error message from the CLI tool.
+		if (ret != 0 && trim(raw).empty()) {
+			std::string diagOut;
+			int diagRet = -1;
+			runProcessCapture(makeArgs(false), diagOut, diagRet, false, nullptr, true);
+			if (!trim(diagOut).empty()) {
+				raw = diagOut;
+			}
 		}
 	}
 
@@ -2772,13 +2763,6 @@ if (engineReady) {
 	// The engine may have fallen back to CPU if the requested GPU
 	// backend could not be initialised.
 	syncSelectedBackendIndex();
-	// Force GPU layers to 0 when switching to CPU backend.
-	if (isSelectedBackendCpu()) {
-		gpuLayers = 0;
-	} else if (gpuLayers == 0 && detectedModelLayers > 0) {
-		// Auto-enable GPU layers when switching to a GPU backend.
-		gpuLayers = detectedModelLayers;
-	}
 } else {
 	engineStatus = "Failed to initialize ggml engine";
 	devices.clear();
@@ -2789,14 +2773,6 @@ if (engineReady) {
 	logMessages.push_back("[info] Backend reinitialized: " + engineStatus);
 	if (logMessages.size() > 500) logMessages.pop_front();
 }
-}
-
-bool ofApp::isSelectedBackendCpu() const {
-	if (selectedBackendIndex >= 0 &&
-		selectedBackendIndex < static_cast<int>(devices.size())) {
-		return devices[selectedBackendIndex].type == ofxGgmlBackendType::Cpu;
-	}
-	return true; // assume CPU when no devices are known
 }
 
 void ofApp::syncSelectedBackendIndex() {
