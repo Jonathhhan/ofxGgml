@@ -39,7 +39,10 @@ bool ofxGgmlModel::load(const std::string & path) {
 	params.ctx      = &dataCtx;
 
 	struct gguf_context * guf = gguf_init_from_file(path.c_str(), params);
-	if (!guf) {
+	if (!guf || !dataCtx) {
+		if (guf) {
+			gguf_free(guf);
+		}
 		return false;
 	}
 
