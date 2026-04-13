@@ -7,44 +7,10 @@
 
 #include <chrono>
 #include <csetjmp>
-#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <mutex>
-
-// --------------------------------------------------------------------------
-//  Early environment setup
-// --------------------------------------------------------------------------
-//
-// ggml's static initializer (ggml.cpp:22) installs a custom
-// std::terminate handler.  When a second copy of libggml-base is loaded
-// at runtime (e.g. via dlopen when ggml_backend_load_all() loads GPU
-// backend plugins), its static initializer runs again and asserts that
-// the handler was not already replaced.  Setting GGML_NO_BACKTRACE
-// tells the initializer to skip the handler, avoiding the assertion.
-//
-// We set the variable as early as possible — via a high-priority
-// constructor on GCC/Clang, or via an init_seg(lib) on MSVC — so it is
-// in place before any ggml static initializer runs.
-
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((constructor))
-static void ofxGgml_earlyEnvSetup() {
-	setenv("GGML_NO_BACKTRACE", "1", 0); // don't overwrite if already set
-}
-#elif defined(_MSC_VER)
-#pragma init_seg(lib)
-static struct OfxGgmlEarlyEnv {
-	OfxGgmlEarlyEnv() {
-		size_t len = 0;
-		// Only set if not already present, matching the setenv() behavior.
-		if (getenv_s(&len, nullptr, 0, "GGML_NO_BACKTRACE") != 0 || len == 0) {
-			_putenv_s("GGML_NO_BACKTRACE", "1");
-		}
-	}
-} s_ofxGgmlEarlyEnv;
-#endif
 
 // --------------------------------------------------------------------------
 //  Default console log callback
@@ -115,117 +81,80 @@ static bool isDeviceMemoryAvailable(ggml_backend_dev_t dev) {
 }
 
 // --------------------------------------------------------------------------
-//  Abort recovery for GPU backend init
+//  Abort recovery for ggml calls
 // --------------------------------------------------------------------------
 //
 // ggml calls GGML_ABORT("fatal error") → ggml_abort() → abort() when an
 // internal allocation fails (e.g. inside ggml_malloc / ggml_calloc).
-// When a GPU backend cannot be initialised properly this kills the entire
-// process.
 //
-// Defence is layered:
-//
-//   1. ggml_set_abort_callback()  — intercepts ggml_abort() in the *main*
-//      copy of libggml-base and longjmp's back before abort() is reached.
-//
-//   2. SIGABRT signal handler — catches abort() even when the call
-//      originates inside a GPU-backend *plugin* that was loaded via
-//      dlopen and links to its own copy of libggml-base (whose
-//      g_abort_callback is NULL).
-//
-// Both paths longjmp to the same recovery point so that the caller can
-// fall back to the CPU backend instead of crashing.
+// Since ggml is compiled directly into the addon as a static library,
+// there is only a single copy of libggml-base.  The abort callback set
+// via ggml_set_abort_callback() is always effective — no SIGABRT handler
+// or environment-variable workarounds are needed.
 
-static thread_local std::jmp_buf s_gpuInitJmpBuf;
-static thread_local bool s_gpuInitGuardActive = false;
-static thread_local char s_gpuInitAbortMsg[256] = {};
+static thread_local std::jmp_buf s_ggmlAbortJmpBuf;
+static thread_local bool s_ggmlAbortGuardActive = false;
+static thread_local char s_ggmlAbortMsg[256] = {};
 
-/// ggml abort callback — fires when ggml_abort() is called in the same
-/// libggml copy as the one we linked against.
-static void gpuInitAbortHandler(const char * message) {
-	if (s_gpuInitGuardActive) {
+/// ggml abort callback — intercepts ggml_abort() and longjmp's back to
+/// the recovery point set by guardedGgmlCall().
+static void ggmlAbortHandler(const char * message) {
+	if (s_ggmlAbortGuardActive) {
 		if (message) {
-			std::strncpy(s_gpuInitAbortMsg, message,
-				sizeof(s_gpuInitAbortMsg) - 1);
-			s_gpuInitAbortMsg[sizeof(s_gpuInitAbortMsg) - 1] = '\0';
+			std::strncpy(s_ggmlAbortMsg, message,
+				sizeof(s_ggmlAbortMsg) - 1);
+			s_ggmlAbortMsg[sizeof(s_ggmlAbortMsg) - 1] = '\0';
 		} else {
-			s_gpuInitAbortMsg[0] = '\0';
+			s_ggmlAbortMsg[0] = '\0';
 		}
-		s_gpuInitGuardActive = false;
-		std::longjmp(s_gpuInitJmpBuf, 1);
+		s_ggmlAbortGuardActive = false;
+		std::longjmp(s_ggmlAbortJmpBuf, 1);
 	}
 }
 
-/// SIGABRT handler — catches abort() regardless of which shared library
-/// raised it.  Only active while the init guard is armed.
+/// Execute a callable with abort recovery.  If the callable triggers a
+/// fatal ggml abort (GGML_ABORT / ggml_abort()), the longjmp fires and
+/// this function returns false.  On success it returns true.
 ///
-/// Uses only async-signal-safe operations (longjmp is listed as
-/// async-signal-safe in POSIX.1-2024).  String operations are limited
-/// to direct character assignment — no library string functions.
-static void gpuInitSigabrtHandler(int /*sig*/) {
-	if (s_gpuInitGuardActive) {
-		if (s_gpuInitAbortMsg[0] == '\0') {
-			// Inline copy of a short literal — avoids strncpy which
-			// is not guaranteed async-signal-safe by POSIX.
-			const char lit[] = "SIGABRT caught";
-			for (size_t i = 0; i < sizeof(lit) && i < sizeof(s_gpuInitAbortMsg); i++) {
-				s_gpuInitAbortMsg[i] = lit[i]; // includes '\0'
-			}
-		}
-		s_gpuInitGuardActive = false;
-		std::longjmp(s_gpuInitJmpBuf, 1);
+/// @param fn       Callable to execute.
+/// @param context  Short label for log messages (e.g. "backend init").
+///
+/// A mutex serialises access because ggml_set_abort_callback() operates
+/// at process-wide scope.
+template<typename F>
+static bool guardedGgmlCall(F && fn, const char * context = nullptr) {
+	static std::mutex mtx;
+	std::lock_guard<std::mutex> lock(mtx);
+
+	ggml_abort_callback_t prevAbortCb = ggml_set_abort_callback(ggmlAbortHandler);
+
+	s_ggmlAbortGuardActive = true;
+	s_ggmlAbortMsg[0] = '\0';
+
+	bool ok = false;
+	if (setjmp(s_ggmlAbortJmpBuf) == 0) {
+		fn();
+		ok = true;
+	} else {
+		fprintf(stderr, "ofxGgml: ggml abort caught%s%s: %s\n",
+			context ? " during " : "",
+			context ? context : "",
+			s_ggmlAbortMsg[0] ? s_ggmlAbortMsg : "unknown error");
 	}
+
+	s_ggmlAbortGuardActive = false;
+	ggml_set_abort_callback(prevAbortCb);
+
+	return ok;
 }
 
 /// Try to initialise a backend device, catching any fatal ggml abort
 /// so the process can continue with a CPU fallback.
-/// A mutex serialises access because both ggml_set_abort_callback() and
-/// the SIGABRT handler operate at process-wide scope.
 static ggml_backend_t tryInitBackendDev(ggml_backend_dev_t dev) {
-	static std::mutex mtx;
-	std::lock_guard<std::mutex> lock(mtx);
-
-	// Layer 1: ggml abort callback (covers the local libggml copy).
-	ggml_abort_callback_t prevAbortCb = ggml_set_abort_callback(gpuInitAbortHandler);
-
-	// Layer 2: SIGABRT handler (covers plugin / foreign libggml copies).
-#ifdef _WIN32
-	// On Windows, signal() returns SIG_ERR or a handler pointer.
-	auto prevSig = std::signal(SIGABRT, gpuInitSigabrtHandler);
-#else
-	struct sigaction sa = {};
-	sa.sa_handler = gpuInitSigabrtHandler;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = 0; // no SA_RESTART — we want longjmp
-	struct sigaction prevSa = {};
-	sigaction(SIGABRT, &sa, &prevSa);
-#endif
-
-	s_gpuInitGuardActive = true;
-	s_gpuInitAbortMsg[0] = '\0';
-
 	ggml_backend_t result = nullptr;
-	if (setjmp(s_gpuInitJmpBuf) == 0) {
+	guardedGgmlCall([&]() {
 		result = ggml_backend_dev_init(dev, nullptr);
-	} else {
-		// longjmp fired — log the abort message to stderr so the
-		// developer can diagnose why GPU init failed.
-		fprintf(stderr, "ofxGgml: GPU backend init aborted: %s\n",
-			s_gpuInitAbortMsg[0] ? s_gpuInitAbortMsg : "unknown error");
-	}
-
-	s_gpuInitGuardActive = false;
-
-	// Restore previous handlers.
-	ggml_set_abort_callback(prevAbortCb);
-#ifdef _WIN32
-	if (prevSig != SIG_ERR) {
-		std::signal(SIGABRT, prevSig);
-	}
-#else
-	sigaction(SIGABRT, &prevSa, nullptr);
-#endif
-
+	}, "GPU backend init");
 	return result;
 }
 
@@ -259,27 +188,18 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	m_impl->settings = settings;
 	ggml_log_set(ggmlLogCallback, m_impl.get());
 
-	// Load all available backend libraries (CUDA, Metal, Vulkan, …).
-	// Guard: only load once per process to avoid triggering the
-	// GGML_ASSERT(prev != ggml_uncaught_exception) in ggml.cpp:22
-	// when backend shared libraries are loaded via dlopen(RTLD_LOCAL)
-	// and pull in a second copy of libggml-base.
+	// With static linking, GPU backends compiled into the library are
+	// registered automatically via the ggml_backend_registry constructor
+	// (triggered by #ifdef GGML_USE_CUDA / GGML_USE_VULKAN / etc. in
+	// ggml-backend-reg.cpp).  We still call ggml_backend_load_all()
+	// to pick up any additional runtime-loadable backends, but this is
+	// safe — there is only one copy of libggml-base so no duplicate
+	// static initializer assertions.
 	static bool backendsLoaded = false;
 	if (!backendsLoaded) {
-		// Set GGML_NO_BACKTRACE so that any additional copies of
-		// libggml-base loaded via dlopen() skip the terminate-handler
-		// static initializer that triggers the assertion.
-#ifdef _WIN32
-		{
-			size_t len = 0;
-			if (getenv_s(&len, nullptr, 0, "GGML_NO_BACKTRACE") != 0 || len == 0) {
-				_putenv_s("GGML_NO_BACKTRACE", "1");
-			}
-		}
-#else
-		setenv("GGML_NO_BACKTRACE", "1", 0); // don't overwrite if already set
-#endif
-		ggml_backend_load_all();
+		guardedGgmlCall([&]() {
+			ggml_backend_load_all();
+		}, "backend loading");
 		backendsLoaded = true;
 	}
 
@@ -362,8 +282,10 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	if (!m_impl->backend) {
 		// Explicit CPU init as a fallback — avoids ggml_backend_init_best()
 		// which would attempt GPU init again and could crash.
-		m_impl->backend = ggml_backend_init_by_type(
-			GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+		guardedGgmlCall([&]() {
+			m_impl->backend = ggml_backend_init_by_type(
+				GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+		}, "CPU backend init");
 	}
 
 	if (!m_impl->backend) {
@@ -373,7 +295,10 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	}
 
 	// Ensure we always have a CPU backend for scheduling.
-	m_impl->cpuBackend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+	guardedGgmlCall([&]() {
+		m_impl->cpuBackend = ggml_backend_init_by_type(
+			GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+	}, "CPU scheduling backend init");
 	if (!m_impl->cpuBackend) {
 		m_impl->state = ofxGgmlState::Error;
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to initialize CPU backend\n");
@@ -390,9 +315,11 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	// Build scheduler with up to 2 backends.
 	ggml_backend_t backends[2] = { m_impl->backend, m_impl->cpuBackend };
 	int nBackends = (m_impl->backend == m_impl->cpuBackend) ? 1 : 2;
-	m_impl->sched = ggml_backend_sched_new(
-		backends, nullptr, nBackends,
-		static_cast<size_t>(settings.graphSize), false, true);
+	guardedGgmlCall([&]() {
+		m_impl->sched = ggml_backend_sched_new(
+			backends, nullptr, nBackends,
+			static_cast<size_t>(settings.graphSize), false, true);
+	}, "scheduler creation");
 
 	if (!m_impl->sched) {
 		m_impl->state = ofxGgmlState::Error;

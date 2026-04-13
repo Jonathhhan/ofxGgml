@@ -6,6 +6,10 @@
 # from the file system.
 # += will add the values to the previous ones in the file or the ones parsed from the file
 # system.
+#
+# ggml is bundled in libs/ggml/ and compiled via CMake as a static
+# library.  Run ./scripts/build-ggml.sh before building your OF project.
+# GPU backends (CUDA, Vulkan, Metal) are auto-detected during the build.
 
 meta:
 	ADDON_NAME = ofxGgml
@@ -17,9 +21,15 @@ meta:
 
 common:
 	ADDON_INCLUDES += libs/ggml/include
+	# Exclude bundled ggml source from the oF build — it is compiled
+	# separately via CMake (scripts/build-ggml.sh).
+	ADDON_SOURCES_EXCLUDE += libs/ggml/src/%
 
 linux64:
-	ADDON_PKG_CONFIG_LIBRARIES = ggml
+	ADDON_LIBS += libs/ggml/build/src/libggml.a
+	ADDON_LIBS += libs/ggml/build/src/libggml-base.a
+	ADDON_LIBS += libs/ggml/build/src/libggml-cpu.a
+	ADDON_LDFLAGS += -lpthread -ldl
 
 linux:
 
@@ -28,20 +38,25 @@ linuxarmv6l:
 linuxarmv7l:
 
 msys2:
-	ADDON_PKG_CONFIG_LIBRARIES = ggml
+	ADDON_LIBS += libs/ggml/build/src/libggml.a
+	ADDON_LIBS += libs/ggml/build/src/libggml-base.a
+	ADDON_LIBS += libs/ggml/build/src/libggml-cpu.a
+	ADDON_LDFLAGS += -lpthread
 
 vs:
-	# Link only ggml.lib — it transitively depends on ggml-base and
-	# ggml-cpu.  Listing all three can cause duplicate static
-	# initialisers (the GGML_ASSERT at ggml.cpp:22) when building
-	# with static libraries.
-	ADDON_LIBS += libs/ggml/lib/ggml.lib
+	ADDON_LIBS += libs/ggml/build/src/Release/ggml.lib
+	ADDON_LIBS += libs/ggml/build/src/Release/ggml-base.lib
+	ADDON_LIBS += libs/ggml/build/src/Release/ggml-cpu.lib
 
 android/armeabi:
 
 android/armeabi-v7a:
 
 osx:
+	ADDON_LIBS += libs/ggml/build/src/libggml.a
+	ADDON_LIBS += libs/ggml/build/src/libggml-base.a
+	ADDON_LIBS += libs/ggml/build/src/libggml-cpu.a
+	ADDON_FRAMEWORKS += Accelerate
 
 ios:
 

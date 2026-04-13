@@ -2,7 +2,7 @@
 
 An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https://github.com/ggml-org/ggml) tensor library for machine-learning computation.
 
-> **Version 0.2** — restructured addon layout with flat `src/`, standard oF example naming, and a one-command setup script.
+> **Version 0.2** — ggml is now bundled and compiled as a static library with automatic GPU backend detection.
 
 ---
 
@@ -13,11 +13,10 @@ An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https:/
 cd openFrameworks/addons
 git clone https://github.com/Jonathhhan/ofxGgml.git
 
-# 2. One-command setup: build ggml, llama.cpp CLI, and download models
+# 2. Build ggml (GPU auto-detected) + llama.cpp CLI + download models
 cd ofxGgml
-./scripts/setup.sh            # CPU-only
-./scripts/setup.sh --gpu      # with CUDA
-./scripts/setup.sh --auto     # auto-detect GPU backends
+./scripts/setup.sh            # auto-detects CUDA / Vulkan / Metal
+./scripts/setup.sh --cpu-only # CPU only, no GPU
 
 # 3. Add ofxGgml to your project's addons.make and build
 ```
@@ -27,6 +26,7 @@ cd ofxGgml
 | Category | Capabilities |
 |----------|-------------|
 | **Backend management** | Automatic discovery of CPU, CUDA, Metal, Vulkan backends; runtime selection |
+| **GPU auto-detect** | GPU backends are auto-detected and compiled in at build time — no manual flags needed |
 | **GGUF model loading** | Load GGUF files, inspect metadata and tensors, upload weights to GPU |
 | **Tensor wrapper** | Non-owning handle with OF-friendly data access (read/write floats, fill) |
 | **Graph builder** | Fluent API for computation graphs — see [Operations](#supported-operations) |
@@ -52,49 +52,55 @@ cd ofxGgml
 ## Requirements
 
 - openFrameworks 0.12+
-- [ggml](https://github.com/ggml-org/ggml) (built from source — see below)
+- CMake 3.18+ (for building ggml)
 - C++17 compiler
+- **Optional**: CUDA toolkit, Vulkan SDK, or Metal framework for GPU acceleration
 
-## Installing ggml
+## Building ggml
+
+ggml source is bundled in `libs/ggml/`.  It is compiled as a static library with GPU backends auto-detected at build time.
 
 ### Automated (recommended)
 
 ```bash
 ./scripts/setup.sh              # builds ggml + llama CLI + downloads models
-./scripts/setup.sh --auto       # auto-detect and enable GPU backends
+./scripts/setup.sh --cpu-only   # disable GPU autodetection
 ./scripts/setup.sh --skip-llama --skip-model  # ggml only
 ```
 
-### Manual — Linux / macOS (pkg-config)
+### ggml only
 
 ```bash
-git clone https://github.com/ggml-org/ggml
-cd ggml && mkdir build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
-cmake --build . --config Release -j$(nproc)
-sudo cmake --install .
+./scripts/build-ggml.sh         # GPU auto-detected
+./scripts/build-ggml.sh --cuda  # force CUDA on
+./scripts/build-ggml.sh --vulkan  # force Vulkan on
+./scripts/build-ggml.sh --cpu-only  # CPU only
 ```
 
-### Manual — Windows (Visual Studio)
+### Manual — CMake
 
-```powershell
-git clone https://github.com/ggml-org/ggml
-cd ggml && mkdir build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=C:/openFrameworks/addons/ofxGgml/libs/ggml `
-  -DBUILD_SHARED_LIBS=ON -DGGML_BUILD_EXAMPLES=OFF -DGGML_BUILD_TESTS=OFF
-cmake --build . --config Release -j 8
-cmake --install . --config Release
+```bash
+cd ofxGgml
+cmake -B libs/ggml/build libs/ggml -DCMAKE_BUILD_TYPE=Release
+cmake --build libs/ggml/build --config Release -j$(nproc)
 ```
 
-Expected files after install:
+CMake options:
 
-| Path | Contents |
-|------|----------|
-| `libs/ggml/include/` | ggml headers |
-| `libs/ggml/lib/ggml.lib` | Import library |
-| `libs/ggml/bin/*.dll` | Runtime DLLs (`ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll`) |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `OFXGGML_GPU_AUTODETECT` | `ON` | Auto-detect and enable available GPU backends |
+| `OFXGGML_CUDA` | `OFF` | Force CUDA backend on/off |
+| `OFXGGML_VULKAN` | `OFF` | Force Vulkan backend on/off |
+| `OFXGGML_METAL` | `OFF` | Force Metal backend on/off |
 
-Copy the DLLs into your project's `bin/` directory (next to the `.exe`).
+### Updating bundled ggml
+
+```bash
+./scripts/update-ggml-source.sh          # update to latest master
+./scripts/update-ggml-source.sh --commit abc123  # pin to a specific commit
+./scripts/build-ggml.sh --clean          # rebuild after updating
+```
 
 ## Addon Structure
 
@@ -110,10 +116,16 @@ ofxGgml/
 │   ├── ofxGgmlTypes.h        # enums, settings, result structs
 │   ├── ofxGgmlHelpers.h      # utility functions
 │   └── ofxGgmlVersion.h      # version macros
-├── libs/                     # third-party libs (ggml headers/binaries)
+├── libs/ggml/                # bundled ggml source + CMake build
+│   ├── CMakeLists.txt        # addon's CMake wrapper (GPU autodetect)
+│   ├── include/              # ggml headers
+│   ├── src/                  # ggml source (core, CPU, CUDA, Vulkan, Metal)
+│   ├── cmake/                # ggml cmake helpers
+│   └── build/                # build output (created by build-ggml.sh)
 ├── scripts/
 │   ├── setup.sh              # one-command full setup
-│   ├── build-ggml.sh         # build & install ggml
+│   ├── build-ggml.sh         # build bundled ggml (GPU auto-detect)
+│   ├── update-ggml-source.sh # update bundled ggml to latest upstream
 │   ├── build-llama-cli.sh    # build & install llama.cpp CLI tools
 │   └── download-model.sh     # download GGUF model presets
 ├── ofxGgmlBasicExample/      # matrix multiplication demo
@@ -247,11 +259,12 @@ Build the tools with:
 | Script | Purpose |
 |--------|---------|
 | `scripts/setup.sh` | **One-command setup**: builds ggml + llama CLI + downloads models |
-| `scripts/build-ggml.sh` | Clone, compile, and install the ggml library |
+| `scripts/build-ggml.sh` | Build the bundled ggml library (GPU auto-detect by default) |
+| `scripts/update-ggml-source.sh` | Update bundled ggml source to latest upstream |
 | `scripts/build-llama-cli.sh` | Clone, compile, and install llama.cpp CLI tools |
 | `scripts/download-model.sh` | Download GGUF model presets |
 
-All scripts support `--gpu`, `--vulkan`, `--metal`, `--auto`, `--prefix`, `--jobs`, `--clean`, and `--help`.
+`build-ggml.sh` supports `--cuda`, `--vulkan`, `--metal`, `--cpu-only`, `--jobs`, `--clean`, and `--help`.  GPU backends are auto-detected by default (no flags needed).
 
 ### Model presets
 
@@ -269,15 +282,15 @@ All scripts support `--gpu`, `--vulkan`, `--metal`, `--auto`, `--prefix`, `--job
 
 ## Troubleshooting
 
-### GGML_ASSERT at ggml.cpp:22
+### ggml libraries not found
 
-This assertion means ggml's static initializer ran twice. Common causes:
+Make sure you've built ggml first:
 
-- **Duplicate linking**: linking `ggml`, `ggml-base`, and `ggml-cpu` simultaneously.  The addon links only `ggml.lib` on VS to avoid this.
-- **Multiple installations**: system-wide + local copies both loaded at runtime.
-- **Dynamic backend loading**: the addon sets `GGML_NO_BACKTRACE=1` automatically.
+```bash
+./scripts/build-ggml.sh
+```
 
-If the assertion still occurs, set `GGML_NO_BACKTRACE=1` before launching.
+The build output should be in `libs/ggml/build/src/` (e.g. `libggml.a`, `libggml-base.a`, `libggml-cpu.a` on Linux/macOS, or `ggml.lib` etc. on Windows).
 
 ### llama-completion not found
 

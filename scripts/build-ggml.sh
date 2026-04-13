@@ -1,210 +1,127 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# build-ggml.sh — Clone, compile, and install the ggml tensor library.
+# build-ggml.sh — Build the bundled ggml tensor library.
+#
+# The ggml source is bundled inside libs/ggml/.  This script runs CMake
+# to configure and build it, producing static libraries that the addon
+# links against.  GPU backends (CUDA, Vulkan, Metal) are auto-detected
+# by default.
 #
 # Usage:
-#   ./scripts/build-ggml.sh [--prefix DIR] [--jobs 8] [--gpu]
+#   ./scripts/build-ggml.sh [OPTIONS]
 #
 # Options:
-#   --prefix DIR   Install prefix (default: /usr/local on Unix, addon-local libs/ggml on Windows-like shells)
+#   --prefix DIR   Install prefix (default: addon-local libs/ggml/build)
 #   --jobs N       Parallel build jobs (default: number of CPU cores)
 #   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 #   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
 #   --metal        Enable Metal backend (macOS only)
-#   --auto         Auto-detect available GPU backends and enable them
+#   --auto         Auto-detect available GPU backends (this is the default)
+#   --cpu-only     Disable GPU autodetection, build CPU backend only
 #   --clean        Remove build directory before building
 #   --help         Show this help message
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-GGML_REPO="https://github.com/ggml-org/ggml.git"
-GGML_BRANCH="master"
-TMP_ROOT="${TMPDIR:-/tmp}"
-BUILD_DIR="$TMP_ROOT/ggml-build"
-SOURCE_DIR="$TMP_ROOT/ggml-source"
-DEFAULT_INSTALL_PREFIX="/usr/local"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+GGML_DIR="$ADDON_ROOT/libs/ggml"
+BUILD_DIR="$GGML_DIR/build"
 JOBS=""
-ENABLE_CUDA=0
-ENABLE_VULKAN=0
-ENABLE_METAL=0
+ENABLE_CUDA=""
+ENABLE_VULKAN=""
+ENABLE_METAL=""
+AUTO_DETECT=1
 CLEAN=0
 
 write_step() {
-printf '==> %s\n' "$1"
+	printf '==> %s\n' "$1"
 }
 
 die() {
-printf 'Error: %s\n' "$1" >&2
-exit 1
+	printf 'Error: %s\n' "$1" >&2
+	exit 1
 }
 
 usage() {
-sed -n '2,/^# ---/{ /^# ---/d; s/^# //; s/^#//; p }' "$0"
-exit 0
+	sed -n '2,/^# ---/{ /^# ---/d; s/^# //; s/^#//; p }' "$0"
+	exit 0
 }
-
-is_windows_like() {
-case "$(uname -s 2>/dev/null || echo unknown)" in
-MINGW*|MSYS*|CYGWIN*)
-return 0
-;;
-*)
-return 1
-;;
-esac
-}
-
-if is_windows_like; then
-ADDON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_INSTALL_PREFIX="$ADDON_ROOT/libs/ggml"
-fi
-INSTALL_PREFIX="$DEFAULT_INSTALL_PREFIX"
-
-detect_cuda() {
-# Check for nvcc (CUDA compiler) first, then nvidia-smi as fallback.
-if command -v nvcc >/dev/null 2>&1; then
-return 0
-fi
-if command -v nvidia-smi >/dev/null 2>&1; then
-return 0
-fi
-# Check common CUDA toolkit paths
-for cuda_dir in /usr/local/cuda /opt/cuda; do
-if [[ -x "$cuda_dir/bin/nvcc" ]]; then
-return 0
-fi
-done
-return 1
-}
-
-detect_vulkan() {
-# Check for Vulkan SDK tools.
-if command -v vulkaninfo >/dev/null 2>&1; then
-return 0
-fi
-if [[ -n "${VULKAN_SDK:-}" ]] && [[ -d "$VULKAN_SDK" ]]; then
-return 0
-fi
-return 1
-}
-
-detect_metal() {
-# Metal is available on macOS.
-if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-return 0
-fi
-return 1
-}
-
-AUTO_DETECT=0
 
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
 
 while [[ $# -gt 0 ]]; do
-case "$1" in
---prefix)
-[[ $# -ge 2 ]] || die "--prefix requires a value"
-INSTALL_PREFIX="$2"
-shift 2
-;;
---jobs)
-[[ $# -ge 2 ]] || die "--jobs requires a value"
-JOBS="$2"
-shift 2
-;;
-	--gpu|--cuda)
-		ENABLE_CUDA=1
-		shift
-		;;
---vulkan)
-ENABLE_VULKAN=1
-shift
-;;
-	--metal)
-		ENABLE_METAL=1
-		shift
-		;;
-	--auto)
-		AUTO_DETECT=1
-		shift
-		;;
-	--clean)
-		CLEAN=1
-		shift
-		;;
---help|-h)
-usage
-;;
-*)
-die "Unknown option: $1"
-;;
-esac
+	case "$1" in
+		--prefix)
+			[[ $# -ge 2 ]] || die "--prefix requires a value"
+			BUILD_DIR="$2"
+			shift 2
+			;;
+		--jobs)
+			[[ $# -ge 2 ]] || die "--jobs requires a value"
+			JOBS="$2"
+			shift 2
+			;;
+		--gpu|--cuda)
+			ENABLE_CUDA="ON"
+			shift
+			;;
+		--vulkan)
+			ENABLE_VULKAN="ON"
+			shift
+			;;
+		--metal)
+			ENABLE_METAL="ON"
+			shift
+			;;
+		--auto)
+			AUTO_DETECT=1
+			shift
+			;;
+		--cpu-only)
+			AUTO_DETECT=0
+			shift
+			;;
+		--clean)
+			CLEAN=1
+			shift
+			;;
+		--help|-h)
+			usage
+			;;
+		*)
+			die "Unknown option: $1"
+			;;
+	esac
 done
 
 if [[ -z "$JOBS" ]]; then
-if command -v nproc >/dev/null 2>&1; then
-JOBS="$(nproc)"
-elif command -v sysctl >/dev/null 2>&1; then
-JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-elif command -v getconf >/dev/null 2>&1; then
-JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-else
-JOBS=4
-fi
-fi
-
-# ---------------------------------------------------------------------------
-# Auto-detect GPU backends
-# ---------------------------------------------------------------------------
-
-if [[ "$AUTO_DETECT" -eq 1 ]]; then
-write_step "Auto-detecting GPU backends..."
-if detect_cuda; then
-write_step "  CUDA detected — enabling CUDA backend."
-ENABLE_CUDA=1
-fi
-if detect_vulkan; then
-write_step "  Vulkan detected — enabling Vulkan backend."
-ENABLE_VULKAN=1
-fi
-if detect_metal; then
-write_step "  Metal detected — enabling Metal backend."
-ENABLE_METAL=1
-fi
-if [[ "$ENABLE_CUDA" -eq 0 ]] && [[ "$ENABLE_VULKAN" -eq 0 ]] && [[ "$ENABLE_METAL" -eq 0 ]]; then
-write_step "  No GPU backends detected — building CPU-only."
-fi
+	if command -v nproc >/dev/null 2>&1; then
+		JOBS="$(nproc)"
+	elif command -v sysctl >/dev/null 2>&1; then
+		JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+	elif command -v getconf >/dev/null 2>&1; then
+		JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+	else
+		JOBS=4
+	fi
 fi
 
 # ---------------------------------------------------------------------------
 # Prerequisites
 # ---------------------------------------------------------------------------
 
-for cmd in git cmake; do
-command -v "$cmd" >/dev/null 2>&1 || die "Required command not found: $cmd"
-done
+command -v cmake >/dev/null 2>&1 || die "Required command not found: cmake"
 
 # ---------------------------------------------------------------------------
-# Clone / update source
+# Clean
 # ---------------------------------------------------------------------------
 
 if [[ "$CLEAN" -eq 1 ]]; then
-write_step "Cleaning previous build..."
-rm -rf "$BUILD_DIR" "$SOURCE_DIR"
-fi
-
-if [[ -d "$SOURCE_DIR/.git" ]]; then
-write_step "Updating existing ggml source in $SOURCE_DIR..."
-cd "$SOURCE_DIR"
-git fetch origin
-git checkout "$GGML_BRANCH"
-git pull origin "$GGML_BRANCH"
-else
-write_step "Cloning ggml from $GGML_REPO..."
-rm -rf "$SOURCE_DIR"
-git clone --branch "$GGML_BRANCH" --depth 1 "$GGML_REPO" "$SOURCE_DIR"
+	write_step "Cleaning previous build..."
+	rm -rf "$BUILD_DIR"
 fi
 
 # ---------------------------------------------------------------------------
@@ -214,105 +131,58 @@ fi
 write_step "Configuring ggml build..."
 
 mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
 
 CMAKE_ARGS=(
--DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
--DCMAKE_BUILD_TYPE=Release
--DBUILD_SHARED_LIBS=ON
--DGGML_BUILD_EXAMPLES=OFF
--DGGML_BUILD_TESTS=OFF
+	-DCMAKE_BUILD_TYPE=Release
 )
 
-if [[ "$ENABLE_CUDA" -eq 1 ]]; then
-write_step "CUDA backend enabled."
-CMAKE_ARGS+=(-DGGML_CUDA=ON)
+# GPU autodetect is on by default
+if [[ "$AUTO_DETECT" -eq 1 ]]; then
+	CMAKE_ARGS+=(-DOFXGGML_GPU_AUTODETECT=ON)
+else
+	CMAKE_ARGS+=(-DOFXGGML_GPU_AUTODETECT=OFF)
 fi
 
-if [[ "$ENABLE_VULKAN" -eq 1 ]]; then
-write_step "Vulkan backend enabled."
-CMAKE_ARGS+=(-DGGML_VULKAN=ON)
+# Explicit backend overrides
+if [[ -n "$ENABLE_CUDA" ]]; then
+	CMAKE_ARGS+=(-DOFXGGML_CUDA="$ENABLE_CUDA")
+fi
+if [[ -n "$ENABLE_VULKAN" ]]; then
+	CMAKE_ARGS+=(-DOFXGGML_VULKAN="$ENABLE_VULKAN")
+fi
+if [[ -n "$ENABLE_METAL" ]]; then
+	CMAKE_ARGS+=(-DOFXGGML_METAL="$ENABLE_METAL")
 fi
 
-if [[ "$ENABLE_METAL" -eq 1 ]]; then
-write_step "Metal backend enabled."
-CMAKE_ARGS+=(-DGGML_METAL=ON)
-fi
-
-cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}"
+cmake -B "$BUILD_DIR" "$GGML_DIR" "${CMAKE_ARGS[@]}"
 
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
 
 write_step "Building ggml with $JOBS parallel jobs..."
-cmake --build . --config Release -j "$JOBS"
-
-# ---------------------------------------------------------------------------
-# Install
-# ---------------------------------------------------------------------------
-
-write_step "Installing ggml to $INSTALL_PREFIX..."
-EFFECTIVE_INSTALL_PREFIX="$INSTALL_PREFIX"
-if [[ -e "$INSTALL_PREFIX" ]] && [[ ! -d "$INSTALL_PREFIX" ]]; then
-	die "Install prefix '$INSTALL_PREFIX' exists but is not a directory."
-fi
-
-if [[ ! -d "$INSTALL_PREFIX" ]]; then
-	INSTALL_PREFIX_PARENT="$(dirname "$INSTALL_PREFIX")"
-	if [[ -w "$INSTALL_PREFIX_PARENT" ]]; then
-		mkdir -p "$INSTALL_PREFIX"
-	fi
-fi
-
-if [[ -d "$INSTALL_PREFIX" ]] && [[ -w "$INSTALL_PREFIX" ]]; then
-	cmake --install .
-elif command -v sudo >/dev/null 2>&1 && ! is_windows_like; then
-	write_step "Requires elevated permissions for $INSTALL_PREFIX — using sudo."
-	sudo cmake --install .
-elif [[ "$INSTALL_PREFIX" == "$DEFAULT_INSTALL_PREFIX" ]] && [[ -n "${HOME:-}" ]]; then
-	EFFECTIVE_INSTALL_PREFIX="${HOME}/.local"
-	write_step "Install prefix '$INSTALL_PREFIX' is not writable; falling back to '$EFFECTIVE_INSTALL_PREFIX'."
-	cmake --install . --prefix "$EFFECTIVE_INSTALL_PREFIX"
-else
-	die "Install prefix '$INSTALL_PREFIX' is not writable. Use --prefix to a writable location."
-fi
+cmake --build "$BUILD_DIR" --config Release -j "$JOBS"
 
 # ---------------------------------------------------------------------------
 # Verify
 # ---------------------------------------------------------------------------
 
-write_step "Verifying installation..."
-if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists ggml 2>/dev/null; then
-	write_step "pkg-config: ggml version $(pkg-config --modversion ggml)"
-else
-	possible_libs=(
-		"$EFFECTIVE_INSTALL_PREFIX/lib/libggml.so"
-		"$EFFECTIVE_INSTALL_PREFIX/lib64/libggml.so"
-		"$EFFECTIVE_INSTALL_PREFIX/lib/libggml.dylib"
-		"$EFFECTIVE_INSTALL_PREFIX/lib/libggml.dll.a"
-		"$EFFECTIVE_INSTALL_PREFIX/lib/ggml.lib"
-		"$EFFECTIVE_INSTALL_PREFIX/bin/libggml.dll"
-		"$EFFECTIVE_INSTALL_PREFIX/bin/ggml.dll"
-	)
-	lib_found=0
-	for lib_path in "${possible_libs[@]}"; do
-		if [[ -f "$lib_path" ]]; then
-			lib_found=1
-			break
-		fi
-	done
+write_step "Verifying build output..."
 
-	if [[ "$lib_found" -eq 1 ]]; then
-		write_step "ggml libraries found under $EFFECTIVE_INSTALL_PREFIX/."
-	else
-		write_step "Warning: could not verify ggml installation. You may need to set your library path."
+LIB_DIR="$BUILD_DIR/src"
+FOUND=0
+for lib in "$LIB_DIR"/libggml*.a "$LIB_DIR"/ggml*.lib "$LIB_DIR"/Release/ggml*.lib; do
+	if [[ -f "$lib" ]]; then
+		FOUND=1
+		write_step "  Found: $lib"
 	fi
+done
+
+if [[ "$FOUND" -eq 0 ]]; then
+	die "No ggml libraries found in $LIB_DIR"
 fi
 
-write_step "Done! ggml has been built and installed to $EFFECTIVE_INSTALL_PREFIX."
+write_step "Done! ggml has been built in $BUILD_DIR"
 write_step ""
-write_step "Next steps:"
-write_step "  1. Run scripts/build-llama-cli.sh to build the llama-cli inference tool."
-write_step "  2. Run scripts/download-model.sh to fetch a GGUF model."
-write_step "  3. Build your OF project with ofxGgml."
+write_step "The addon will automatically find the libraries in this location."
+write_step "Build your OF project with ofxGgml."

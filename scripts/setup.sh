@@ -2,17 +2,22 @@
 # ---------------------------------------------------------------------------
 # setup.sh — One-command setup for the ofxGgml addon.
 #
-# Builds ggml, installs the llama.cpp CLI tools, and downloads a
-# recommended model so you can run the examples right away.
+# Builds ggml (with GPU autodetection), installs the llama.cpp CLI
+# tools, and downloads a recommended model so you can run the examples
+# right away.
+#
+# GPU backends (CUDA, Vulkan, Metal) are auto-detected and enabled
+# automatically — no flags needed.  Use --cpu-only to disable.
 #
 # Usage:
 #   ./scripts/setup.sh [OPTIONS]
 #
 # Options:
-#   --gpu              Enable GPU acceleration (auto-detects CUDA / Vulkan / Metal)
-#   --prefix DIR       Install prefix for ggml and llama tools
+#   --cpu-only         Disable GPU autodetection, build CPU backend only
+#   --gpu              Alias for default behaviour (GPU auto-detect)
+#   --prefix DIR       Install prefix for llama tools
 #                      (default: /usr/local on Linux, addon-local libs/ on Windows)
-#   --skip-ggml        Skip building ggml (if already installed)
+#   --skip-ggml        Skip building ggml (if already built)
 #   --skip-llama       Skip building llama.cpp CLI tools
 #   --skip-model       Skip downloading the model file
 #   --model-preset N   Download a specific model preset (default: both)
@@ -29,6 +34,7 @@ SKIP_GGML=0
 SKIP_LLAMA=0
 SKIP_MODEL=0
 GPU_FLAG=""
+LLAMA_GPU_FLAG=""
 PREFIX_FLAG=""
 JOBS_FLAG=""
 CLEAN_FLAG=""
@@ -63,15 +69,21 @@ usage() {
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--gpu|--cuda)
-			GPU_FLAG="--gpu"
+			# GPU auto-detect is on by default; explicit --gpu is a no-op
+			# for ggml but still passed to llama.cpp build.
+			LLAMA_GPU_FLAG="--gpu"
 			shift
 			;;
 		--vulkan)
-			GPU_FLAG="--vulkan"
+			LLAMA_GPU_FLAG="--vulkan"
 			shift
 			;;
 		--metal)
-			GPU_FLAG="--metal"
+			LLAMA_GPU_FLAG="--metal"
+			shift
+			;;
+		--cpu-only)
+			GPU_FLAG="--cpu-only"
 			shift
 			;;
 		--prefix)
@@ -125,13 +137,13 @@ echo "  └───────────────────────
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 1 — Build ggml
+# Step 1 — Build ggml (GPU auto-detected by default)
 # ---------------------------------------------------------------------------
 
 if [[ "$SKIP_GGML" -eq 0 ]]; then
-	write_step "Step 1/3: Building ggml tensor library..."
+	write_step "Step 1/3: Building ggml tensor library (GPU auto-detect)..."
 	# shellcheck disable=SC2086
-	"$SCRIPT_DIR/build-ggml.sh" $GPU_FLAG $PREFIX_FLAG $JOBS_FLAG $CLEAN_FLAG
+	"$SCRIPT_DIR/build-ggml.sh" $GPU_FLAG $JOBS_FLAG $CLEAN_FLAG
 	write_ok "ggml built successfully."
 else
 	write_warn "Skipping ggml build (--skip-ggml)."
@@ -144,7 +156,7 @@ fi
 if [[ "$SKIP_LLAMA" -eq 0 ]]; then
 	write_step "Step 2/3: Building llama.cpp CLI tools..."
 	# shellcheck disable=SC2086
-	"$SCRIPT_DIR/build-llama-cli.sh" $GPU_FLAG $PREFIX_FLAG $JOBS_FLAG $CLEAN_FLAG
+	"$SCRIPT_DIR/build-llama-cli.sh" $LLAMA_GPU_FLAG $PREFIX_FLAG $JOBS_FLAG $CLEAN_FLAG
 	write_ok "llama.cpp tools built successfully."
 else
 	write_warn "Skipping llama.cpp build (--skip-llama)."
