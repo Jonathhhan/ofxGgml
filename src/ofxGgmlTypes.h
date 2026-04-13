@@ -100,5 +100,14 @@ struct ofxGgmlComputeResult {
 	std::string error;
 };
 
+/// Last recorded timings for major runtime stages.
+struct ofxGgmlTimings {
+	float setupMs = 0.0f;
+	float allocMs = 0.0f;
+	float weightUploadMs = 0.0f;
+	float computeSubmitMs = 0.0f;
+	float computeTotalMs = 0.0f;
+};
+
 /// Progress / log callback signature.
 using ofxGgmlLogCallback = std::function<void(int level, const std::string & message)>;

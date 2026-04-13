@@ -150,6 +150,12 @@ ofxGgmlTensor ofxGgmlGraph::argmax(ofxGgmlTensor a) {
 
 ofxGgmlTensor ofxGgmlGraph::matMul(ofxGgmlTensor a, ofxGgmlTensor b) {
 	if (!a.raw() || !b.raw()) return ofxGgmlTensor();
+	if (a.raw()->ne[0] != b.raw()->ne[0]) {
+		fprintf(stderr, "ofxGgmlGraph: matMul shape mismatch: a.ne[0]=%lld, b.ne[0]=%lld\n",
+			static_cast<long long>(a.raw()->ne[0]),
+			static_cast<long long>(b.raw()->ne[0]));
+		return ofxGgmlTensor();
+	}
 	return ofxGgmlTensor(ggml_mul_mat(m_ctx, a.raw(), b.raw()));
 }
 
@@ -324,13 +330,20 @@ void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
 		return;
 	}
 	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
+	int validCount = 0;
 	bool sawInvalidTensor = false;
 	for (auto t : outputs) {
 		if (t.raw()) {
 			ggml_build_forward_expand(m_graph, t.raw());
+			++validCount;
 		} else {
 			sawInvalidTensor = true;
 		}
+	}
+	if (validCount == 0) {
+		fprintf(stderr, "ofxGgmlGraph: build(outputs) failed: all output tensors were invalid\n");
+		m_graph = nullptr;
+		return;
 	}
 	if (sawInvalidTensor) {
 		fprintf(stderr, "ofxGgmlGraph: build(outputs) skipped one or more invalid tensors\n");

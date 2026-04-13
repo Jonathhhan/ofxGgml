@@ -54,6 +54,17 @@ struct ofxGgml::Impl {
 	/// Backend buffer for uploaded model weights.
 	ggml_backend_buffer_t modelWeightBuf = nullptr;
 
+	/// Last graph reserved/allocated for scheduler reuse.
+	struct ggml_cgraph * reservedGraph = nullptr;
+	struct ggml_cgraph * allocatedGraph = nullptr;
+
+	/// Async compute tracking.
+	bool hasPendingAsync = false;
+	std::chrono::steady_clock::time_point asyncStart;
+
+	/// Last timings.
+	ofxGgmlTimings timings;
+
 	/// Log callback — initialised to the built-in console logger so that
 	/// messages are visible by default.
 	ofxGgmlLogCallback logCb = defaultLogCallback;
@@ -169,6 +180,41 @@ static void ggmlLogCallback(ggml_log_level level, const char * text, void * user
 	}
 }
 
+static bool validateGraphForCompute(struct ggml_cgraph * graph, std::string & error) {
+	if (!graph) {
+		error = "graph not built (call graph.build() first)";
+		return false;
+	}
+	const int n = ggml_graph_n_nodes(graph);
+	if (n <= 0) {
+		error = "graph has no compute nodes";
+		return false;
+	}
+	for (int i = 0; i < n; ++i) {
+		struct ggml_tensor * node = ggml_graph_node(graph, i);
+		if (!node) {
+			error = "graph node " + std::to_string(i) + " is null";
+			return false;
+		}
+		const int nd = ggml_n_dims(node);
+		if (nd <= 0 || nd > GGML_MAX_DIMS) {
+			error = "graph node " + std::to_string(i) + " has invalid rank " + std::to_string(nd);
+			return false;
+		}
+		for (int d = 0; d < nd; ++d) {
+			if (node->ne[d] <= 0) {
+				error = "graph node " + std::to_string(i) + " has non-positive shape at dim " + std::to_string(d);
+				return false;
+			}
+		}
+		if (node->op < 0 || node->op >= GGML_OP_COUNT) {
+			error = "graph node " + std::to_string(i) + " has invalid op code";
+			return false;
+		}
+	}
+	return true;
+}
+
 // --------------------------------------------------------------------------
 //  Lifecycle
 // --------------------------------------------------------------------------
@@ -181,6 +227,8 @@ ofxGgml::~ofxGgml() {
 }
 
 bool ofxGgml::setup(const ofxGgmlSettings & settings) {
+	auto tSetup0 = std::chrono::steady_clock::now();
+
 	if (m_impl->state != ofxGgmlState::Uninitialized) {
 		close();
 	}
@@ -332,6 +380,8 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	}
 
 	m_impl->state = ofxGgmlState::Ready;
+	auto tSetup1 = std::chrono::steady_clock::now();
+	m_impl->timings.setupMs = std::chrono::duration<float, std::milli>(tSetup1 - tSetup0).count();
 	m_impl->log(GGML_LOG_LEVEL_INFO, std::string("ofxGgml: ready (backend: ") +
 		ggml_backend_name(m_impl->backend) + ")\n");
 	return true;
@@ -342,6 +392,11 @@ void ofxGgml::close() {
 		ggml_backend_sched_free(m_impl->sched);
 		m_impl->sched = nullptr;
 	}
+	// Graph tracking is tied to scheduler lifetime; after close(), any
+	// previously tracked graph allocations/reservations are invalid.
+	m_impl->reservedGraph = nullptr;
+	m_impl->allocatedGraph = nullptr;
+	m_impl->hasPendingAsync = false;
 	// Free model weight buffer before backends.
 	if (m_impl->modelWeightBuf) {
 		ggml_backend_buffer_free(m_impl->modelWeightBuf);
@@ -444,48 +499,109 @@ bool ofxGgml::allocGraph(ofxGgmlGraph & graph) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: not ready\n");
 		return false;
 	}
-	if (!graph.raw()) {
-		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: graph not built (call graph.build() first)\n");
+	std::string validationError;
+	if (!validateGraphForCompute(graph.raw(), validationError)) {
+		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: invalid graph: " + validationError + "\n");
 		return false;
 	}
 
+	if (m_impl->allocatedGraph == graph.raw()) {
+		return true;
+	}
+
+	auto t0 = std::chrono::steady_clock::now();
+
 	ggml_backend_sched_reset(m_impl->sched);
+	m_impl->allocatedGraph = nullptr;
+
+	if (m_impl->reservedGraph != graph.raw()) {
+		if (!ggml_backend_sched_reserve(m_impl->sched, graph.raw())) {
+			m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: scheduler reserve failed\n");
+			return false;
+		}
+		m_impl->reservedGraph = graph.raw();
+	}
 
 	if (!ggml_backend_sched_alloc_graph(m_impl->sched, graph.raw())) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: graph allocation failed\n");
 		return false;
 	}
+	m_impl->allocatedGraph = graph.raw();
+	auto t1 = std::chrono::steady_clock::now();
+	m_impl->timings.allocMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 	return true;
 }
 
 ofxGgmlComputeResult ofxGgml::computeGraph(ofxGgmlGraph & graph) {
+	ofxGgmlComputeResult submit = computeGraphAsync(graph);
+	if (!submit.success) {
+		return submit;
+	}
+	return synchronize();
+}
+
+ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 	ofxGgmlComputeResult result;
 
 	if (m_impl->state != ofxGgmlState::Ready) {
+		if (m_impl->state == ofxGgmlState::Computing && m_impl->hasPendingAsync) {
+			result.error = "ofxGgml: async compute already in flight (call synchronize() first)";
+			return result;
+		}
 		result.error = "ofxGgml: not ready";
 		return result;
 	}
-	if (!graph.raw()) {
-		result.error = "ofxGgml: graph not built (call graph.build() first)";
+	std::string validationError;
+	if (!validateGraphForCompute(graph.raw(), validationError)) {
+		result.error = std::string("ofxGgml: invalid graph: ") + validationError;
 		return result;
+	}
+
+	if (m_impl->allocatedGraph != graph.raw()) {
+		if (!allocGraph(graph)) {
+			result.error = "ofxGgml: graph allocation failed";
+			return result;
+		}
 	}
 
 	m_impl->state = ofxGgmlState::Computing;
 
 	auto t0 = std::chrono::steady_clock::now();
 
-	enum ggml_status status = ggml_backend_sched_graph_compute(m_impl->sched, graph.raw());
+	enum ggml_status status = ggml_backend_sched_graph_compute_async(m_impl->sched, graph.raw());
 
 	auto t1 = std::chrono::steady_clock::now();
 	result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
+	m_impl->timings.computeSubmitMs = result.elapsedMs;
 
 	if (status == GGML_STATUS_SUCCESS) {
 		result.success = true;
+		m_impl->hasPendingAsync = true;
+		m_impl->asyncStart = t0;
 	} else {
 		result.error = std::string("ofxGgml: compute failed (status ") +
 			ggml_status_to_string(status) + ")";
+		m_impl->state = ofxGgmlState::Ready;
 	}
 
+	return result;
+}
+
+ofxGgmlComputeResult ofxGgml::synchronize() {
+	ofxGgmlComputeResult result;
+	if (m_impl->state != ofxGgmlState::Computing || !m_impl->hasPendingAsync) {
+		result.success = true;
+		return result;
+	}
+
+	ggml_backend_sched_synchronize(m_impl->sched);
+	auto t1 = std::chrono::steady_clock::now();
+	m_impl->timings.computeTotalMs =
+		std::chrono::duration<float, std::milli>(t1 - m_impl->asyncStart).count();
+
+	result.success = true;
+	result.elapsedMs = m_impl->timings.computeTotalMs;
+	m_impl->hasPendingAsync = false;
 	m_impl->state = ofxGgmlState::Ready;
 	return result;
 }
@@ -521,6 +637,8 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 		return false;
 	}
 
+	auto t0 = std::chrono::steady_clock::now();
+
 	// The model was loaded with no_alloc=false, so every tensor's
 	// data pointer currently points into the ggml_context's host
 	// memory buffer.  We need to:
@@ -555,17 +673,29 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 		ggml_backend_buffer_free(m_impl->modelWeightBuf);
 		m_impl->modelWeightBuf = nullptr;
 	}
-	ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(modelCtx, m_impl->backend);
+	ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors_from_buft(
+		modelCtx, ggml_backend_get_default_buffer_type(m_impl->backend));
+	if (!buf) {
+		m_impl->log(GGML_LOG_LEVEL_WARN,
+			"ofxGgml: alloc_ctx_tensors_from_buft failed, falling back to alloc_ctx_tensors\n");
+		buf = ggml_backend_alloc_ctx_tensors(modelCtx, m_impl->backend);
+	}
 	if (!buf) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to allocate backend buffer for model weights\n");
 		return false;
 	}
+	ggml_backend_buffer_set_usage(buf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
 	m_impl->modelWeightBuf = buf;
 
 	// Step 3 — copy host data into the (possibly GPU-resident) buffer.
+	ggml_backend_t uploadBackend = m_impl->backend ? m_impl->backend : m_impl->cpuBackend;
 	for (const auto & snap : snapshots) {
-		ggml_backend_tensor_set(snap.tensor, snap.hostData, 0, snap.bytes);
+		ggml_backend_tensor_set_async(uploadBackend, snap.tensor, snap.hostData, 0, snap.bytes);
 	}
+	ggml_backend_synchronize(uploadBackend);
+
+	auto t1 = std::chrono::steady_clock::now();
+	m_impl->timings.weightUploadMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
 	m_impl->log(GGML_LOG_LEVEL_INFO, std::string("ofxGgml: model weights loaded (") +
 		std::to_string(snapshots.size()) + " tensors on backend: " +
@@ -579,6 +709,10 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 
 void ofxGgml::setLogCallback(ofxGgmlLogCallback cb) {
 	m_impl->logCb = std::move(cb);
+}
+
+ofxGgmlTimings ofxGgml::getLastTimings() const {
+	return m_impl->timings;
 }
 
 // --------------------------------------------------------------------------

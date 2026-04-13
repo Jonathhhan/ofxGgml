@@ -33,6 +33,8 @@ cd ofxGgml
 | **Tensor wrapper** | Non-owning handle with OF-friendly data access (read/write floats, fill) |
 | **Graph builder** | Fluent API for computation graphs — see [Operations](#supported-operations) |
 | **Scheduled execution** | Multi-backend scheduler with automatic tensor placement and fallback |
+| **Async execution** | Async submit + explicit synchronization for frame-friendly compute |
+| **Profiling** | Built-in timings for setup, graph alloc, model upload, and compute |
 | **Device enumeration** | Query devices, memory, and capabilities at runtime |
 
 ### Supported Operations
@@ -98,15 +100,9 @@ scripts\build-ggml.bat --cpu-only   &:: CPU only
 
 This builds both **Debug** and **Release** configurations, producing libraries in `libs\ggml\build\src\Release\` and `libs\ggml\build\src\Debug\`.
 
-After building ggml, regenerate your project with the openFrameworks Project Generator.  The PG automatically imports `ofxGgml.props`, which selects the correct Debug/Release libraries and sets up include paths.
+After building ggml, regenerate your project with the openFrameworks Project Generator so the generated VS project picks up the latest addon library list.
 
-> **Manual project setup (without the PG):** If you are not using the Project Generator, import the property sheet yourself:
->
-> 1. In Visual Studio, open **View → Property Manager**.
-> 2. Right-click your project and choose **Add Existing Property Sheet**.
-> 3. Browse to `ofxGgml.props` in the addon root directory.
-
-The property sheet automatically selects the correct Debug or Release libraries based on your build configuration, avoiding `LNK2038` CRT mismatch errors.
+> CPU-only builds remain clean by default. CUDA-specific libraries are no longer linked unconditionally.
 
 ### Manual — CMake
 
@@ -245,6 +241,22 @@ ggml.allocGraph(graph);
 // ... set tensor data ...
 auto r = ggml.computeGraph(graph);
 ```
+
+### Async execution + explicit synchronization
+
+```cpp
+ggml.allocGraph(graph);
+auto submit = ggml.computeGraphAsync(graph);
+if (submit.success) {
+    auto done = ggml.synchronize();
+    auto timings = ggml.getLastTimings();
+}
+```
+
+### Allocation reuse for stable graphs
+
+- Repeated `allocGraph(graph)` calls on the same built graph instance (same graph pointer/object) avoid re-allocation.
+- New/different graph instances still use the normal allocation path automatically.
 
 ## API Reference
 
