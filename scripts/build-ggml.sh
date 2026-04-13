@@ -271,7 +271,7 @@ update_addon_config() {
 		if [[ -n "${selected[$base_name]:-}" ]]; then
 			rel_path="${selected[$base_name]#"$ADDON_ROOT"/}"
 			libs+=("$rel_path")
-			unset 'selected[$base_name]'
+			unset selected[$base_name]
 		fi
 	done
 
@@ -280,8 +280,9 @@ update_addon_config() {
 	done
 
 	if [[ ${#remaining_libs[@]} -gt 0 ]]; then
+		local old_ifs="${IFS- }"
 		IFS=$'\n' remaining_libs=($(printf '%s\n' "${remaining_libs[@]}" | sort))
-		unset IFS
+		IFS="$old_ifs"
 		libs+=("${remaining_libs[@]}")
 	fi
 
