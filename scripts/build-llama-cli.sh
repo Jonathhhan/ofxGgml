@@ -262,7 +262,7 @@ if [[ "$ENABLE_METAL" -eq 1 ]]; then
 	CMAKE_ARGS+=(-DGGML_METAL=ON)
 fi
 
-CONFIGURE_LOG="$(mktemp)"
+CONFIGURE_LOG="$(mktemp -t ofxggml-llama-configure.XXXXXX)"
 if ! cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}" 2>&1 | tee "$CONFIGURE_LOG"; then
 	# Auto-detect should be resilient: if Vulkan looked available but CMake
 	# cannot resolve full Vulkan SDK requirements, retry CPU/CUDA/Metal only.
@@ -278,7 +278,8 @@ if ! cmake "$SOURCE_DIR" "${CMAKE_ARGS[@]}" 2>&1 | tee "$CONFIGURE_LOG"; then
 			FALLBACK_ARGS+=("$arg")
 		done
 		FALLBACK_ARGS+=(-DGGML_VULKAN=OFF)
-		if ! cmake "$SOURCE_DIR" "${FALLBACK_ARGS[@]}" 2>&1 | tee -a "$CONFIGURE_LOG"; then
+		: > "$CONFIGURE_LOG"
+		if ! cmake "$SOURCE_DIR" "${FALLBACK_ARGS[@]}" 2>&1 | tee "$CONFIGURE_LOG"; then
 			die "CMake configure failed after retrying with Vulkan disabled."
 		fi
 		CMAKE_ARGS=("${FALLBACK_ARGS[@]}")
