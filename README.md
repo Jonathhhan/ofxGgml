@@ -61,7 +61,7 @@ cd ofxGgml
 
 ## Building ggml
 
-ggml source is bundled in `libs/ggml/`.  It is compiled as a static library.  By default only the CPU backend is built.  GPU backends (CUDA, Vulkan, Metal) must be explicitly enabled via build script flags to avoid linker errors when the required GPU SDK libraries are missing.
+ggml source is bundled in `libs/ggml/`.  It is compiled as a static library.  By default, GPU backend auto-detection is enabled (`--auto`).  Use `--cpu-only` to force CPU-only builds, or explicit flags (`--cuda`, `--vulkan`, `--metal`) to force specific backends.
 
 > **Windows / Visual Studio users:** You must build ggml before opening your OF project, otherwise the linker will report `LNK1181: cannot open input file "ggml.lib"`.  See the [Windows](#windows-visual-studio) section below.
 
@@ -78,8 +78,8 @@ ggml source is bundled in `libs/ggml/`.  It is compiled as a static library.  By
 ### ggml only
 
 ```bash
-./scripts/build-ggml.sh           # CPU only (default)
-./scripts/build-ggml.sh --auto  # auto-detect GPU backends
+./scripts/build-ggml.sh           # auto-detect GPU backends (default)
+./scripts/build-ggml.sh --auto    # explicit auto-detect
 ./scripts/build-ggml.sh --cuda  # force CUDA on
 ./scripts/build-ggml.sh --vulkan  # force Vulkan on
 ./scripts/build-ggml.sh --cpu-only  # CPU only
@@ -292,13 +292,13 @@ Build the tools with:
 | Script | Purpose |
 |--------|---------|
 | `scripts/setup.sh` | **One-command setup**: builds ggml + llama CLI + downloads models |
-| `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, CPU-only by default) |
+| `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, `--auto` by default) |
 | `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, `--auto` default) |
 | `scripts/update-ggml-source.sh` | Update bundled ggml source to latest upstream |
 | `scripts/build-llama-cli.sh` | Clone, compile, and install llama.cpp CLI tools |
 | `scripts/download-model.sh` | Download GGUF model presets |
 
-`build-ggml.sh` supports `--cuda`, `--vulkan`, `--metal`, `--auto`, `--cpu-only`, `--jobs`, `--clean`, and `--help`.  By default only the CPU backend is built; use `--auto` or a specific GPU flag to enable GPU backends.
+`build-ggml.sh` supports `--cuda`, `--vulkan`, `--metal`, `--auto`, `--cpu-only`, `--jobs`, `--clean`, and `--help`.  By default GPU backend auto-detection is enabled; use `--cpu-only` to force CPU-only builds.
 
 ### Model presets
 
