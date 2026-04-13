@@ -56,6 +56,7 @@ cd ofxGgml
 - CMake 3.18+ (for building ggml)
 - C++17 compiler
 - **Optional**: CUDA toolkit, Vulkan SDK, or Metal framework for GPU acceleration
+- **ofxGgmlGuiExample only**: [ofxImGui](https://github.com/jvcleave/ofxImGui) — install it in your `addons/` folder before generating the project with the PG
 
 ## Building ggml
 
@@ -96,11 +97,13 @@ scripts\build-ggml.bat --cpu-only   &:: CPU only
 
 This builds both **Debug** and **Release** configurations, producing libraries in `libs\ggml\build\src\Release\` and `libs\ggml\build\src\Debug\`.
 
-After building ggml, regenerate your project with the openFrameworks Project Generator, then **import the property sheet**:
+After building ggml, regenerate your project with the openFrameworks Project Generator.  The PG automatically imports `ofxGgml.props`, which selects the correct Debug/Release libraries and sets up include paths.
 
-1. In Visual Studio, open **View → Property Manager**.
-2. Right-click your project and choose **Add Existing Property Sheet**.
-3. Browse to `ofxGgml.props` in the addon root directory.
+> **Manual project setup (without the PG):** If you are not using the Project Generator, import the property sheet yourself:
+>
+> 1. In Visual Studio, open **View → Property Manager**.
+> 2. Right-click your project and choose **Add Existing Property Sheet**.
+> 3. Browse to `ofxGgml.props` in the addon root directory.
 
 The property sheet automatically selects the correct Debug or Release libraries based on your build configuration, avoiding `LNK2038` CRT mismatch errors.
 

@@ -23,7 +23,7 @@ meta:
 common:
 	ADDON_INCLUDES += src
 	ADDON_INCLUDES += libs/ggml/include
-	# Exclude bundled ggml source from the oF build — it is compiled
+	# Exclude bundled ggml source from the oF build - it is compiled
 	# separately via CMake (scripts/build-ggml.sh).
 	ADDON_SOURCES_EXCLUDE += libs/ggml/src/%
 	ADDON_SOURCES_EXCLUDE += libs/ggml/build/%
@@ -51,11 +51,12 @@ msys2:
 	ADDON_LDFLAGS += -lpthread
 
 vs:
+	ADDON_INCLUDES += src
+	ADDON_INCLUDES += libs/ggml/include
 	# @DIFFUSION_LIBS_START vs
 	# Libraries are linked via ofxGgml.props (Visual Studio property sheet)
 	# which selects the correct Debug or Release libraries automatically.
-	# Import ofxGgml.props into your VS project via:
-	#   View > Property Manager > Add Existing Property Sheet
+	# The PG auto-imports ofxGgml.props; for manual project setup see README.
 	# @DIFFUSION_LIBS_END vs
 
 android/armeabi:
