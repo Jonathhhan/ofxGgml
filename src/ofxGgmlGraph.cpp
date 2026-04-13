@@ -2,6 +2,7 @@
 
 #include "ggml.h"
 
+#include <cstdio>
 #include <stdexcept>
 
 ofxGgmlGraph::ofxGgmlGraph(size_t maxNodes)
@@ -323,10 +324,16 @@ void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
 		return;
 	}
 	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
+	bool sawInvalidTensor = false;
 	for (auto t : outputs) {
 		if (t.raw()) {
 			ggml_build_forward_expand(m_graph, t.raw());
+		} else {
+			sawInvalidTensor = true;
 		}
+	}
+	if (sawInvalidTensor) {
+		fprintf(stderr, "ofxGgmlGraph: build(outputs) skipped one or more invalid tensors\n");
 	}
 }
 

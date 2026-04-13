@@ -411,20 +411,26 @@ static size_t clampedTensorTransferSize(const struct ggml_tensor * tensor, size_
 
 void ofxGgml::setTensorData(ofxGgmlTensor tensor, const void * data, size_t bytes) {
 	if (!tensor.raw() || !data) return;
+	const size_t tensorBytes = ggml_nbytes(tensor.raw());
 	const size_t safeBytes = clampedTensorTransferSize(tensor.raw(), bytes);
 	if (safeBytes == 0) return;
 	if (safeBytes != bytes) {
-		m_impl->log(GGML_LOG_LEVEL_WARN, "ofxGgml: setTensorData clamped to tensor byte size\n");
+		m_impl->log(GGML_LOG_LEVEL_WARN,
+			"ofxGgml: setTensorData clamped " + std::to_string(bytes) +
+			" bytes to tensor size " + std::to_string(tensorBytes) + " bytes\n");
 	}
 	ggml_backend_tensor_set(tensor.raw(), data, 0, safeBytes);
 }
 
 void ofxGgml::getTensorData(ofxGgmlTensor tensor, void * data, size_t bytes) const {
 	if (!tensor.raw() || !data) return;
+	const size_t tensorBytes = ggml_nbytes(tensor.raw());
 	const size_t safeBytes = clampedTensorTransferSize(tensor.raw(), bytes);
 	if (safeBytes == 0) return;
 	if (safeBytes != bytes) {
-		m_impl->log(GGML_LOG_LEVEL_WARN, "ofxGgml: getTensorData clamped to tensor byte size\n");
+		m_impl->log(GGML_LOG_LEVEL_WARN,
+			"ofxGgml: getTensorData clamped " + std::to_string(bytes) +
+			" bytes to tensor size " + std::to_string(tensorBytes) + " bytes\n");
 	}
 	ggml_backend_tensor_get(tensor.raw(), data, 0, safeBytes);
 }
