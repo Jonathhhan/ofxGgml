@@ -169,6 +169,34 @@ static ggml_backend_t tryInitBackendDev(ggml_backend_dev_t dev) {
 	return result;
 }
 
+static bool hasPrefixIgnoreCase(const char * value, const char * prefix) {
+	if (!value || !prefix) return false;
+	while (*prefix) {
+		if (*value == '\0') return false;
+		const unsigned char a = static_cast<unsigned char>(*value);
+		const unsigned char b = static_cast<unsigned char>(*prefix);
+		const unsigned char la = (a >= 'A' && a <= 'Z') ? static_cast<unsigned char>(a + ('a' - 'A')) : a;
+		const unsigned char lb = (b >= 'A' && b <= 'Z') ? static_cast<unsigned char>(b + ('a' - 'A')) : b;
+		if (la != lb) return false;
+		++value;
+		++prefix;
+	}
+	return true;
+}
+
+static ggml_backend_dev_t findUsableDeviceByNamePrefix(const char * prefix) {
+	const size_t devCount = ggml_backend_dev_count();
+	for (size_t i = 0; i < devCount; ++i) {
+		ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+		if (!dev) continue;
+		const char * name = ggml_backend_dev_name(dev);
+		if (!hasPrefixIgnoreCase(name, prefix)) continue;
+		if (!isDeviceMemoryAvailable(dev)) continue;
+		return dev;
+	}
+	return nullptr;
+}
+
 // --------------------------------------------------------------------------
 //  Static log callback for ggml
 // --------------------------------------------------------------------------
@@ -312,6 +340,29 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 			m_impl->log(GGML_LOG_LEVEL_WARN,
 				"ofxGgml: backend \"" + settings.preferredBackendName +
 				"\" not found or failed to init — trying fallback\n");
+		}
+	}
+	if (!m_impl->backend && settings.preferredBackendName.empty() &&
+		settings.preferredBackend == ofxGgmlBackendType::Gpu) {
+		// Default GPU path: prefer CUDA first, then Vulkan, then any other
+		// usable non-CPU backend.
+		const char * preferredPrefixes[] = { "CUDA", "Vulkan" };
+		for (const char * prefix : preferredPrefixes) {
+			ggml_backend_dev_t dev = findUsableDeviceByNamePrefix(prefix);
+			if (!dev) continue;
+			m_impl->backend = tryInitBackendDev(dev);
+			if (m_impl->backend) break;
+		}
+
+		if (!m_impl->backend) {
+			const size_t devCount = ggml_backend_dev_count();
+			for (size_t i = 0; i < devCount && !m_impl->backend; ++i) {
+				ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+				if (!dev) continue;
+				if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU) continue;
+				if (!isDeviceMemoryAvailable(dev)) continue;
+				m_impl->backend = tryInitBackendDev(dev);
+			}
 		}
 	}
 	if (!m_impl->backend &&

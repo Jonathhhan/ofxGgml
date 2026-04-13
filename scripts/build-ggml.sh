@@ -4,8 +4,8 @@
 #
 # The ggml source is bundled inside libs/ggml/.  This script runs CMake
 # to configure and build it, producing static libraries that the addon
-# links against.  GPU backends (CUDA, Vulkan, Metal) must be explicitly
-# enabled via command-line flags.  By default only the CPU backend is built.
+# links against. GPU backends (CUDA, Vulkan, Metal) are auto-detected by
+# default and enabled when the required SDKs are present.
 #
 # Usage:
 #   ./scripts/build-ggml.sh [OPTIONS]
