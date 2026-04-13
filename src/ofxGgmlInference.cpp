@@ -506,7 +506,7 @@ std::vector<ofxGgmlSimilarityHit> ofxGgmlEmbeddingIndex::search(const std::vecto
 		return a.score > b.score;
 	};
 	if (limit < hits.size()) {
-		std::nth_element(hits.begin(), hits.begin() + static_cast<std::ptrdiff_t>(limit), hits.end(), byScoreDesc);
+		std::nth_element(hits.begin(), hits.begin() + limit, hits.end(), byScoreDesc);
 		hits.resize(limit);
 	}
 	std::sort(hits.begin(), hits.end(), byScoreDesc);
