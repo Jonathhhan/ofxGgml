@@ -260,7 +260,7 @@ auto r = ggml.computeGraph(graph);
 |---------|-------------|
 | **ofxGgmlBasicExample/** | Matrix multiplication with console output |
 | **ofxGgmlNeuralExample/** | Simple feedforward neural network visualized in the OF window |
-| **ofxGgmlGuiExample/** | Full ImGui-based AI Studio with six modes (Chat, Script, Summarize, Write, Translate, Custom) |
+| **ofxGgmlGuiExample/** | Full ImGui-based AI Studio with six modes (Chat, Script, Summarize, Write, Translate, Custom) — requires [ofxImGui](https://github.com/jvcleave/ofxImGui) |
 
 ### ofxGgmlGuiExample features
 
