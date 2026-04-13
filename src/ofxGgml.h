@@ -9,6 +9,7 @@
 ///   - ofxGgmlInference — text generation / embeddings helper (llama CLI)
 ///   - ofxGgmlModel    — GGUF model loading
 ///   - ofxGgmlProjectMemory — persistent prompt memory helper
+///   - ofxGgmlScriptSource — local-folder / GitHub script source browser helper
 ///   - ofxGgmlTensor   — non-owning tensor handle
 ///   - ofxGgmlTypes    — enums, settings, result structs
 ///   - ofxGgmlHelpers  — utility functions
@@ -22,4 +23,5 @@
 #include "ofxGgmlInference.h"
 #include "ofxGgmlModel.h"
 #include "ofxGgmlProjectMemory.h"
+#include "ofxGgmlScriptSource.h"
 #include "ofxGgmlCore.h"

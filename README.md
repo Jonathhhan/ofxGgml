@@ -158,6 +158,7 @@ ofxGgml/
 │   ├── ofxGgmlInference.h/.cpp # llama.cpp CLI generation / embeddings helper
 │   ├── ofxGgmlModel.h/.cpp   # GGUF model loader
 │   ├── ofxGgmlProjectMemory.h/.cpp # prompt memory helper for persistent coding context
+│   ├── ofxGgmlScriptSource.h/.cpp # local-folder / GitHub script source browser helper
 │   ├── ofxGgmlTensor.h/.cpp  # non-owning tensor wrapper
 │   ├── ofxGgmlTypes.h        # enums, settings, result structs
 │   ├── ofxGgmlHelpers.h      # utility functions
@@ -321,6 +322,7 @@ if (q.success) {
 | `ofxGgmlEmbeddingIndex` | In-memory cosine-similarity retrieval helper for RAG-style lookups |
 | `ofxGgmlModel` | Load GGUF model files, inspect metadata and tensor information |
 | `ofxGgmlProjectMemory` | Persist request/response memory and prepend it to future prompts |
+| `ofxGgmlScriptSource` | Browse script sources from local folders or GitHub repos, load files, and save to local source |
 | `ofxGgmlTensor` | Non-owning tensor handle with metadata and data access |
 | `ofxGgmlTypes` | Enums and settings (`ofxGgmlType`, `ofxGgmlBackendType`, …) |
 | `ofxGgmlHelpers` | Utility functions (type names, byte formatting, …) |
@@ -338,7 +340,7 @@ if (q.success) {
 
 - **Model preselection** — choose from recommended GGUF models via sidebar
 - **Script language selector** — 8 language presets (C++, Python, JS, Rust, GLSL, Go, Bash, TS)
-- **Script source browser** — connect to a local folder or GitHub repository
+- **Script source browser** — powered by core addon class `ofxGgmlScriptSource` for local folder + GitHub repository browsing
 - **Project memory (Script mode)** — automatically stores prior coding requests/responses and reuses them in later script prompts
 - **Session persistence** — auto-save/load, File → Save/Load Session
 

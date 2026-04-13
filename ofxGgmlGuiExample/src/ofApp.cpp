@@ -798,6 +798,10 @@ initModelPresets();
 initScriptLanguages();
 initCodeTemplates();
 initPromptTemplates();
+if (!scriptLanguages.empty()) {
+	scriptSource.setPreferredExtension(
+		scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+}
 
 // Default branch for GitHub.
 std::strncpy(scriptSourceBranch, "main", sizeof(scriptSourceBranch) - 1);
@@ -1301,8 +1305,14 @@ ImGui::SetNextItemWidth(140);
 	if (selectedLanguageIndex != i) {
 	selectedLanguageIndex = i;
 	selectedTemplateIndex = -1;
-	if (scriptSourceType == ScriptSourceType::LocalFolder && !scriptSourcePath.empty()) {
-	scanLocalFolder(scriptSourcePath);
+	if (!scriptLanguages.empty()) {
+		scriptSource.setPreferredExtension(
+			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+	}
+	if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder &&
+		!scriptSource.getLocalFolderPath().empty()) {
+		selectedScriptFileIndex = -1;
+		scriptSource.rescan();
 	}
 	}
 	}
@@ -1317,12 +1327,16 @@ ImGui::Text("Source:");
 ImGui::SameLine();
 
 // Source type buttons.
-bool isNone = (scriptSourceType == ScriptSourceType::None);
-bool isLocal = (scriptSourceType == ScriptSourceType::LocalFolder);
-bool isGitHub = (scriptSourceType == ScriptSourceType::GitHubRepo);
+ ofxGgmlScriptSourceType sourceType = scriptSource.getSourceType();
+ bool isNone = (sourceType == ofxGgmlScriptSourceType::None);
+ bool isLocal = (sourceType == ofxGgmlScriptSourceType::LocalFolder);
+ bool isGitHub = (sourceType == ofxGgmlScriptSourceType::GitHubRepo);
 
 if (isNone) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.35f, 1.0f));
-if (ImGui::SmallButton("None")) { scriptSourceType = ScriptSourceType::None; scriptSourceFiles.clear(); }
+if (ImGui::SmallButton("None")) {
+	scriptSource.clear();
+	selectedScriptFileIndex = -1;
+}
 if (isNone) ImGui::PopStyleColor();
 ImGui::SameLine();
 
@@ -1330,9 +1344,12 @@ if (isLocal) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.3f, 1.0
 if (ImGui::SmallButton("Local Folder")) {
 ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
 if (result.bSuccess) {
-scriptSourceType = ScriptSourceType::LocalFolder;
-scriptSourcePath = result.getPath();
-scanLocalFolder(scriptSourcePath);
+	selectedScriptFileIndex = -1;
+	if (!scriptLanguages.empty()) {
+		scriptSource.setPreferredExtension(
+			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+	}
+	scriptSource.setLocalFolder(result.getPath());
 }
 }
 if (isLocal) ImGui::PopStyleColor();
@@ -1340,17 +1357,22 @@ ImGui::SameLine();
 
 if (isGitHub) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.6f, 1.0f));
 if (ImGui::SmallButton("GitHub")) {
-scriptSourceType = ScriptSourceType::GitHubRepo;
+	selectedScriptFileIndex = -1;
+	scriptSource.setGitHubMode();
 }
 if (isGitHub) ImGui::PopStyleColor();
 
 // Script source file browser (inline when active).
-if (scriptSourceType != ScriptSourceType::None && !scriptSourceFiles.empty()) {
+const auto scriptSourceFiles = scriptSource.getFiles();
+if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 ImGui::BeginChild("##ScriptFiles", ImVec2(-1, 80), true);
-if (scriptSourceType == ScriptSourceType::LocalFolder) {
-ImGui::TextDisabled("Folder: %s", scriptSourcePath.c_str());
+if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
+const std::string localPath = scriptSource.getLocalFolderPath();
+ImGui::TextDisabled("Folder: %s", localPath.c_str());
 } else {
-ImGui::TextDisabled("GitHub: %s (%s)", scriptSourceGitHub, scriptSourceBranch);
+const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
+const std::string branch = scriptSource.getGitHubBranch();
+ImGui::TextDisabled("GitHub: %s (%s)", ownerRepo.c_str(), branch.c_str());
 }
 for (int i = 0; i < static_cast<int>(scriptSourceFiles.size()); i++) {
 const auto & entry = scriptSourceFiles[static_cast<size_t>(i)];
@@ -1359,14 +1381,19 @@ std::string icon = entry.isDirectory ? "[dir] " : "      ";
 bool isSelected = (selectedScriptFileIndex == i);
 if (ImGui::Selectable((icon + entry.name).c_str(), isSelected) && !entry.isDirectory) {
 selectedScriptFileIndex = i;
-loadScriptFile(i);
+	std::string content;
+	if (scriptSource.loadFileContent(i, content)) {
+		size_t maxLen = sizeof(scriptInput) - 1;
+		std::strncpy(scriptInput, content.c_str(), maxLen);
+		scriptInput[maxLen] = '\0';
+	}
 }
 ImGui::PopID();
 }
 ImGui::EndChild();
 }
 
-if (scriptSourceType == ScriptSourceType::GitHubRepo) {
+if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
 drawScriptSourcePanel();
 }
 
@@ -1460,11 +1487,11 @@ runInference(AiMode::Script, buildScriptPrompt(
 ImGui::EndDisabled();
 
 // Save output to source.
-if (!scriptOutput.empty() && scriptSourceType == ScriptSourceType::LocalFolder) {
+if (!scriptOutput.empty() && sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 ImGui::SameLine();
 if (ImGui::Button("Save to Folder", ImVec2(130, 0))) {
 std::string filename = buildScriptFilename();
-saveScriptToSource(filename, scriptOutput);
+scriptSource.saveToLocalSource(filename, scriptOutput);
 }
 }
 
@@ -1518,276 +1545,22 @@ if (ImGui::Button("Fetch", ImVec2(60, 0))) {
 if (std::strlen(scriptSourceGitHub) > 0) {
 std::string branch = std::strlen(scriptSourceBranch) > 0
 ? std::string(scriptSourceBranch) : "main";
-scanGitHubRepo(scriptSourceGitHub, branch);
+	selectedScriptFileIndex = -1;
+	if (!scriptLanguages.empty()) {
+		scriptSource.setPreferredExtension(
+			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+	}
+	if (scriptSource.setGitHubRepo(scriptSourceGitHub, branch)) {
+		scriptSource.fetchGitHubRepo();
+	}
 }
 }
-if (!scriptSourceStatus.empty()) {
+const std::string status = scriptSource.getStatus();
+if (!status.empty()) {
 ImGui::SameLine();
-ImGui::TextDisabled("%s", scriptSourceStatus.c_str());
+ImGui::TextDisabled("%s", status.c_str());
 }
 ImGui::Spacing();
-}
-
-// ---------------------------------------------------------------------------
-// Script source — local folder scanning
-// ---------------------------------------------------------------------------
-
-void ofApp::scanLocalFolder(const std::string & path) {
-scriptSourceFiles.clear();
-selectedScriptFileIndex = -1;
-scriptSourceStatus.clear();
-
-std::error_code ec;
-if (!std::filesystem::is_directory(path, ec)) {
-scriptSourceStatus = "Not a directory";
-return;
-}
-
-// Collect matching source files by extension.
-std::string targetExt;
-if (!scriptLanguages.empty()) {
-targetExt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt;
-}
-
-for (const auto & entry : std::filesystem::directory_iterator(path, ec)) {
-ScriptFileEntry fe;
-fe.name = entry.path().filename().string();
-fe.fullPath = entry.path().string();
-fe.isDirectory = entry.is_directory(ec);
-
-if (fe.isDirectory) {
-scriptSourceFiles.push_back(fe);
-} else {
-// Show all source-like files, or filter to selected language.
-const std::string ext = entry.path().extension().string();
-bool match = targetExt.empty() || ext == targetExt;
-if (!match) {
-// Also show common source extensions.
-static const std::vector<std::string> commonExts = {
-".cpp", ".h", ".py", ".js", ".ts", ".rs", ".go",
-".glsl", ".vert", ".frag", ".sh", ".c", ".hpp",
-".java", ".kt", ".swift", ".lua", ".rb", ".cs"
-};
-for (const auto & ce : commonExts) {
-if (ext == ce) { match = true; break; }
-}
-}
-if (match) {
-scriptSourceFiles.push_back(fe);
-}
-}
-}
-
-// Sort: directories first, then alphabetical.
-std::sort(scriptSourceFiles.begin(), scriptSourceFiles.end(),
-[](const ScriptFileEntry & a, const ScriptFileEntry & b) {
-if (a.isDirectory != b.isDirectory) return a.isDirectory > b.isDirectory;
-return a.name < b.name;
-});
-
-scriptSourceStatus = ofToString(scriptSourceFiles.size()) + " items";
-}
-
-// ---------------------------------------------------------------------------
-// Script source — GitHub repo scanning (via GitHub API)
-// ---------------------------------------------------------------------------
-
-void ofApp::scanGitHubRepo(const std::string & ownerRepo, const std::string & branch) {
-scriptSourceFiles.clear();
-selectedScriptFileIndex = -1;
-scriptSourceStatus = "Fetching...";
-
-// Validate: ownerRepo must be "owner/repo" with only alphanumeric, dash, underscore, dot.
-// Branch must be alphanumeric, dash, underscore, dot, slash.
-auto isValidGitHubPath = [](const std::string & s) -> bool {
-	if (s.empty() || s.find('/') == std::string::npos) return false;
-	if (s.find("..") != std::string::npos) return false;
-	for (char c : s) {
-		if (!std::isalnum(static_cast<unsigned char>(c)) &&
-			c != '/' && c != '-' && c != '_' && c != '.') {
-			return false;
-		}
-	}
-	return true;
-};
-auto isValidBranch = [](const std::string & s) -> bool {
-	for (char c : s) {
-		if (!std::isalnum(static_cast<unsigned char>(c)) &&
-			c != '-' && c != '_' && c != '.' && c != '/') {
-			return false;
-		}
-	}
-	return !s.empty();
-};
-
-if (!isValidGitHubPath(ownerRepo)) {
-	scriptSourceStatus = "Invalid repo format (use owner/repo)";
-	return;
-}
-if (!isValidBranch(branch)) {
-	scriptSourceStatus = "Invalid branch name";
-	return;
-}
-
-// Build the GitHub API tree URL.
-// GET https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}
-const std::string apiUrl = "https://api.github.com/repos/" + ownerRepo +
-"/git/trees/" + branch + "?recursive=1";
-
-// Fetch using curl in a background thread to avoid blocking the UI.
-// We parse the raw JSON response for "path" and "type" fields.
-std::string owner = ownerRepo;
-std::string br = branch;
-std::thread([this, apiUrl, owner, br]() {
-std::string tempFile = ofFilePath::join(ofToDataPath("", true), "gh_tree_response.tmp");
-std::string cmd = "curl -s -H \"Accept: application/vnd.github.v3+json\" "
-"\"" + apiUrl + "\" -o \"" + tempFile + "\" 2>/dev/null";
-int ret = std::system(cmd.c_str());
-
-std::vector<ScriptFileEntry> entries;
-std::string status;
-
-if (ret != 0) {
-status = "curl failed";
-} else {
-// Simple JSON parse: look for "path":"..." and "type":"blob"/"tree" pairs.
-std::ifstream file(tempFile);
-std::string content((std::istreambuf_iterator<char>(file)),
-std::istreambuf_iterator<char>());
-file.close();
-
-// Remove temp file.
-std::error_code ec;
-std::filesystem::remove(tempFile, ec);
-
-if (content.find("\"message\"") != std::string::npos &&
-content.find("Not Found") != std::string::npos) {
-status = "Repo not found";
-} else {
-// Extract entries: find "path":"value","type":"value" pairs.
-size_t pos = 0;
-while (pos < content.size()) {
-size_t pathKey = content.find("\"path\":", pos);
-if (pathKey == std::string::npos) break;
-
-size_t pathStart = content.find('"', pathKey + 7);
-if (pathStart == std::string::npos) break;
-pathStart++;
-size_t pathEnd = content.find('"', pathStart);
-if (pathEnd == std::string::npos) break;
-std::string path = content.substr(pathStart, pathEnd - pathStart);
-
-size_t typeKey = content.find("\"type\":", pathEnd);
-if (typeKey == std::string::npos || typeKey - pathEnd > 100) {
-pos = pathEnd + 1;
-continue;
-}
-size_t typeStart = content.find('"', typeKey + 7);
-if (typeStart == std::string::npos) break;
-typeStart++;
-size_t typeEnd = content.find('"', typeStart);
-if (typeEnd == std::string::npos) break;
-std::string type = content.substr(typeStart, typeEnd - typeStart);
-
-ScriptFileEntry fe;
-fe.name = path;
-fe.fullPath = "https://raw.githubusercontent.com/" + owner + "/" + br + "/" + path;
-fe.isDirectory = (type == "tree");
-
-// Filter to source-like files.
-if (!fe.isDirectory) {
-std::filesystem::path p(path);
-std::string ext = p.extension().string();
-static const std::vector<std::string> sourceExts = {
-".cpp", ".h", ".py", ".js", ".ts", ".rs", ".go",
-".glsl", ".vert", ".frag", ".sh", ".c", ".hpp",
-".java", ".kt", ".swift", ".lua", ".rb", ".cs",
-".md", ".txt", ".json", ".yaml", ".yml", ".toml"
-};
-bool isSource = false;
-for (const auto & se : sourceExts) {
-if (ext == se) { isSource = true; break; }
-}
-if (isSource) entries.push_back(fe);
-}
-pos = typeEnd + 1;
-}
-status = ofToString(entries.size()) + " files from GitHub";
-}
-}
-
-// Update on main thread via mutex-protected state.
-std::lock_guard<std::mutex> lock(outputMutex);
-scriptSourceFiles = entries;
-scriptSourceStatus = status;
-}).detach();
-}
-
-// ---------------------------------------------------------------------------
-// Script source — load file content into script input
-// ---------------------------------------------------------------------------
-
-void ofApp::loadScriptFile(int index) {
-if (index < 0 || index >= static_cast<int>(scriptSourceFiles.size())) return;
-const auto & entry = scriptSourceFiles[static_cast<size_t>(index)];
-if (entry.isDirectory) return;
-
-if (scriptSourceType == ScriptSourceType::LocalFolder) {
-// Read local file.
-ofBuffer buf = ofBufferFromFile(entry.fullPath);
-if (buf.size() > 0) {
-std::string content = buf.getText();
-size_t maxLen = sizeof(scriptInput) - 1;
-std::strncpy(scriptInput, content.c_str(), maxLen);
-scriptInput[maxLen] = '\0';
-scriptSourceStatus = "Loaded: " + entry.name;
-}
-} else if (scriptSourceType == ScriptSourceType::GitHubRepo) {
-// Fetch raw file from GitHub — URL was built from validated owner/repo/branch.
-// Additional safety: verify URL starts with expected prefix.
-const std::string expectedPrefix = "https://raw.githubusercontent.com/";
-if (entry.fullPath.substr(0, expectedPrefix.size()) != expectedPrefix) {
-	scriptSourceStatus = "Invalid URL: " + entry.name;
-	return;
-}
-std::string tempFile = ofFilePath::join(ofToDataPath("", true), "gh_file_dl.tmp");
-std::string cmd = "curl -sL \"" + entry.fullPath + "\" -o \"" + tempFile + "\" 2>/dev/null";
-int ret = std::system(cmd.c_str());
-if (ret == 0) {
-ofBuffer buf = ofBufferFromFile(tempFile);
-if (buf.size() > 0) {
-std::string content = buf.getText();
-size_t maxLen = sizeof(scriptInput) - 1;
-std::strncpy(scriptInput, content.c_str(), maxLen);
-scriptInput[maxLen] = '\0';
-scriptSourceStatus = "Loaded: " + entry.name;
-}
-std::error_code ec;
-std::filesystem::remove(tempFile, ec);
-} else {
-scriptSourceStatus = "Failed to download: " + entry.name;
-}
-}
-}
-
-// ---------------------------------------------------------------------------
-// Script source — save generated output to local folder
-// ---------------------------------------------------------------------------
-
-void ofApp::saveScriptToSource(const std::string & filename, const std::string & content) {
-if (scriptSourceType != ScriptSourceType::LocalFolder || scriptSourcePath.empty()) return;
-
-std::string fullPath = ofFilePath::join(scriptSourcePath, filename);
-std::ofstream out(fullPath);
-if (out.is_open()) {
-out << content;
-out.close();
-scriptSourceStatus = "Saved: " + filename;
-// Refresh file list.
-scanLocalFolder(scriptSourcePath);
-} else {
-scriptSourceStatus = "Failed to save: " + filename;
-}
 }
 
 std::string ofApp::buildScriptFilename() const {
@@ -2278,8 +2051,8 @@ out << "mirostatEta=" << ofToString(mirostatEta, 4) << "\n";
 out << "verbose=" << (verbose ? 1 : 0) << "\n";
 
 // Script source.
-out << "scriptSourceType=" << static_cast<int>(scriptSourceType) << "\n";
-out << "scriptSourcePath=" << escapeSessionText(scriptSourcePath) << "\n";
+out << "scriptSourceType=" << static_cast<int>(scriptSource.getSourceType()) << "\n";
+out << "scriptSourcePath=" << escapeSessionText(scriptSource.getLocalFolderPath()) << "\n";
 out << "scriptSourceGitHub=" << escapeSessionText(scriptSourceGitHub) << "\n";
 out << "scriptSourceBranch=" << escapeSessionText(scriptSourceBranch) << "\n";
 out << "useProjectMemory=" << (scriptProjectMemory.isEnabled() ? 1 : 0) << "\n";
@@ -2330,6 +2103,8 @@ return false;
 }
 
 chatMessages.clear();
+int loadedScriptSourceType = static_cast<int>(ofxGgmlScriptSourceType::None);
+std::string loadedScriptSourcePath;
 
 auto copyToBuf = [this](char * buf, size_t bufSize, const std::string & value) {
 std::string text = unescapeSessionText(value);
@@ -2405,10 +2180,9 @@ else if (key == "mirostatEta") mirostatEta = std::clamp(safeStof(value, 0.1f), 0
 else if (key == "verbose") verbose = (safeStoi(value) != 0);
 else if (key == "customCliPath") { /* ignored — CLI path option removed */ }
 else if (key == "scriptSourceType") {
-	int t = std::clamp(safeStoi(value), 0, 2);
-	scriptSourceType = static_cast<ScriptSourceType>(t);
+	loadedScriptSourceType = std::clamp(safeStoi(value), 0, 2);
 }
-else if (key == "scriptSourcePath") scriptSourcePath = unescapeSessionText(value);
+else if (key == "scriptSourcePath") loadedScriptSourcePath = unescapeSessionText(value);
 else if (key == "scriptSourceGitHub") copyToBuf(scriptSourceGitHub, sizeof(scriptSourceGitHub), value);
 else if (key == "scriptSourceBranch") copyToBuf(scriptSourceBranch, sizeof(scriptSourceBranch), value);
 else if (key == "useProjectMemory") scriptProjectMemory.setEnabled(safeStoi(value, 1) != 0);
@@ -2447,9 +2221,26 @@ chatMessages.push_back(msg);
 
 in.close();
 
-// Re-scan the script source if one was loaded.
-if (scriptSourceType == ScriptSourceType::LocalFolder && !scriptSourcePath.empty()) {
-scanLocalFolder(scriptSourcePath);
+if (!scriptLanguages.empty()) {
+	scriptSource.setPreferredExtension(
+		scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+}
+if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::LocalFolder) &&
+	!loadedScriptSourcePath.empty()) {
+	scriptSource.setLocalFolder(loadedScriptSourcePath);
+	selectedScriptFileIndex = -1;
+} else if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::GitHubRepo)) {
+	scriptSource.setGitHubMode();
+	std::string ownerRepo = scriptSourceGitHub;
+	std::string branch = std::strlen(scriptSourceBranch) > 0
+		? std::string(scriptSourceBranch) : "main";
+	if (!ownerRepo.empty()) {
+		scriptSource.setGitHubRepo(ownerRepo, branch);
+	}
+	selectedScriptFileIndex = -1;
+} else {
+	scriptSource.clear();
+	selectedScriptFileIndex = -1;
 }
 
 return true;
