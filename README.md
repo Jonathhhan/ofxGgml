@@ -170,8 +170,7 @@ ofxGgml/
 │   ├── cmake/                # ggml cmake helpers
 │   └── build/                # build output (created by build-ggml.sh)
 ├── scripts/
-│   ├── setup.sh              # full setup (legacy/general entry point)
-│   ├── setup_linux.sh        # Linux/macOS setup entry point
+│   ├── setup_linux.sh        # Linux/macOS full setup entry point
 │   ├── setup_windows.bat     # Windows setup entry point
 │   ├── build-ggml.sh         # build bundled ggml — Linux/macOS
 │   ├── build-ggml.bat        # build bundled ggml — Windows/VS
@@ -364,7 +363,6 @@ Build the tools with:
 |--------|---------|
 | `scripts/setup_linux.sh` | **Linux/macOS setup**: builds ggml + llama CLI + downloads models |
 | `scripts/setup_windows.bat` | **Windows setup**: builds ggml + downloads models |
-| `scripts/setup.sh` | Legacy/general setup entry point (Linux/macOS) |
 | `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, `--auto` by default) |
 | `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, `--auto` default) |
 | `scripts/update-ggml-source.sh` | Update bundled ggml source to latest upstream |
