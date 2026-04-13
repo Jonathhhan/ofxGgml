@@ -545,42 +545,50 @@ void ofxGgml::getTensorData(ofxGgmlTensor tensor, void * data, size_t bytes) con
 //  Computation
 // --------------------------------------------------------------------------
 
-bool ofxGgml::allocGraph(ofxGgmlGraph & graph) {
-	if (m_impl->state != ofxGgmlState::Ready) {
-		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: not ready\n");
-		return false;
-	}
-	std::string validationError;
-	if (!validateGraphForCompute(graph.raw(), validationError)) {
-		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: invalid graph: " + validationError + "\n");
+static bool allocGraphInternal(ofxGgml::Impl * impl, struct ggml_cgraph * graph, bool validateGraph) {
+	if (!impl) return false;
+	if (impl->state != ofxGgmlState::Ready) {
+		impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: not ready\n");
 		return false;
 	}
 
-	if (m_impl->allocatedGraph == graph.raw()) {
+	if (validateGraph) {
+		std::string validationError;
+		if (!validateGraphForCompute(graph, validationError)) {
+			impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: invalid graph: " + validationError + "\n");
+			return false;
+		}
+	}
+
+	if (impl->allocatedGraph == graph) {
 		return true;
 	}
 
 	auto t0 = std::chrono::steady_clock::now();
 
-	ggml_backend_sched_reset(m_impl->sched);
-	m_impl->allocatedGraph = nullptr;
+	ggml_backend_sched_reset(impl->sched);
+	impl->allocatedGraph = nullptr;
 
-	if (m_impl->reservedGraph != graph.raw()) {
-		if (!ggml_backend_sched_reserve(m_impl->sched, graph.raw())) {
-			m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: scheduler reserve failed\n");
+	if (impl->reservedGraph != graph) {
+		if (!ggml_backend_sched_reserve(impl->sched, graph)) {
+			impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: scheduler reserve failed\n");
 			return false;
 		}
-		m_impl->reservedGraph = graph.raw();
+		impl->reservedGraph = graph;
 	}
 
-	if (!ggml_backend_sched_alloc_graph(m_impl->sched, graph.raw())) {
-		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: graph allocation failed\n");
+	if (!ggml_backend_sched_alloc_graph(impl->sched, graph)) {
+		impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: graph allocation failed\n");
 		return false;
 	}
-	m_impl->allocatedGraph = graph.raw();
+	impl->allocatedGraph = graph;
 	auto t1 = std::chrono::steady_clock::now();
-	m_impl->timings.allocMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
+	impl->timings.allocMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 	return true;
+}
+
+bool ofxGgml::allocGraph(ofxGgmlGraph & graph) {
+	return allocGraphInternal(m_impl.get(), graph.raw(), true);
 }
 
 ofxGgmlComputeResult ofxGgml::computeGraph(ofxGgmlGraph & graph) {
@@ -609,7 +617,8 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 	}
 
 	if (m_impl->allocatedGraph != graph.raw()) {
-		if (!allocGraph(graph)) {
+		// Graph was already validated above; skip redundant second validation.
+		if (!allocGraphInternal(m_impl.get(), graph.raw(), false)) {
 			result.error = "ofxGgml: graph allocation failed";
 			return result;
 		}

@@ -171,10 +171,13 @@ return result;
 }
 
 const auto t0 = std::chrono::steady_clock::now();
-const std::string promptPath = makeTempPath("ofxggml_prompt_", ".txt");
+static thread_local std::string promptPath = makeTempPath("ofxggml_prompt_", ".txt");
+if (!writeTextFile(promptPath, prompt)) {
+promptPath = makeTempPath("ofxggml_prompt_", ".txt");
 if (!writeTextFile(promptPath, prompt)) {
 result.error = "failed to write temp prompt file";
 return result;
+}
 }
 
 std::vector<std::string> args = {
@@ -221,8 +224,6 @@ args.push_back(settings.grammarPath);
 std::string raw;
 int exitCode = -1;
 const bool started = runCommandCapture(args, raw, exitCode);
-std::error_code rmEc;
-std::filesystem::remove(promptPath, rmEc);
 
 if (!started) {
 result.error = "failed to start llama completion process";
@@ -257,10 +258,13 @@ result.error = "embedding executable path is empty";
 return result;
 }
 
-const std::string promptPath = makeTempPath("ofxggml_embed_", ".txt");
+static thread_local std::string promptPath = makeTempPath("ofxggml_embed_", ".txt");
+if (!writeTextFile(promptPath, text)) {
+promptPath = makeTempPath("ofxggml_embed_", ".txt");
 if (!writeTextFile(promptPath, text)) {
 result.error = "failed to write temp embedding prompt file";
 return result;
+}
 }
 
 std::vector<std::string> args = {
@@ -277,8 +281,6 @@ args.push_back("--embd-normalize");
 std::string raw;
 int exitCode = -1;
 const bool started = runCommandCapture(args, raw, exitCode);
-std::error_code rmEc;
-std::filesystem::remove(promptPath, rmEc);
 
 if (!started) {
 result.error = "failed to start llama embedding process";
