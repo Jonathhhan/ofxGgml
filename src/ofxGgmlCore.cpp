@@ -7,50 +7,10 @@
 
 #include <chrono>
 #include <csetjmp>
-#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <mutex>
-
-// --------------------------------------------------------------------------
-//  Early environment setup
-// --------------------------------------------------------------------------
-//
-// ggml's static initializer (ggml.cpp:22) installs a custom
-// std::terminate handler.  When a second copy of libggml-base is loaded
-// at runtime (e.g. via dlopen when ggml_backend_load_all() loads GPU
-// backend plugins), its static initializer runs again and asserts that
-// the handler was not already replaced.  Setting GGML_NO_BACKTRACE
-// tells the initializer to skip the handler, avoiding the assertion.
-//
-// We set the variable as early as possible — via a high-priority
-// constructor on GCC/Clang, or via an init_seg(lib) on MSVC — so it is
-// in place before any ggml static initializer runs.
-
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((constructor))
-static void ofxGgml_earlyEnvSetup() {
-	setenv("GGML_NO_BACKTRACE", "1", 0); // don't overwrite if already set
-}
-#elif defined(_MSC_VER)
-#include <crtdbg.h>
-#pragma init_seg(lib)
-static struct OfxGgmlEarlyEnv {
-	OfxGgmlEarlyEnv() {
-		size_t len = 0;
-		// Only set if not already present, matching the setenv() behavior.
-		if (getenv_s(&len, nullptr, 0, "GGML_NO_BACKTRACE") != 0 || len == 0) {
-			_putenv_s("GGML_NO_BACKTRACE", "1");
-		}
-		// Suppress the Windows error dialog and Watson crash dump that
-		// MSVC's abort() shows by default.  Without this, the dialog
-		// blocks execution before SIGABRT is raised, preventing our
-		// longjmp-based recovery from working.
-		_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-	}
-} s_ofxGgmlEarlyEnv;
-#endif
 
 // --------------------------------------------------------------------------
 //  Default console log callback
@@ -126,29 +86,18 @@ static bool isDeviceMemoryAvailable(ggml_backend_dev_t dev) {
 //
 // ggml calls GGML_ABORT("fatal error") → ggml_abort() → abort() when an
 // internal allocation fails (e.g. inside ggml_malloc / ggml_calloc).
-// This can happen during backend loading, device init, scheduler
-// creation, graph allocation, or computation — killing the entire
-// process.
 //
-// Defence is layered:
-//
-//   1. ggml_set_abort_callback()  — intercepts ggml_abort() in the *main*
-//      copy of libggml-base and longjmp's back before abort() is reached.
-//
-//   2. SIGABRT signal handler — catches abort() even when the call
-//      originates inside a GPU-backend *plugin* that was loaded via
-//      dlopen and links to its own copy of libggml-base (whose
-//      g_abort_callback is NULL).
-//
-// Both paths longjmp to the same recovery point so that the caller can
-// handle the failure gracefully instead of crashing.
+// Since ggml is compiled directly into the addon as a static library,
+// there is only a single copy of libggml-base.  The abort callback set
+// via ggml_set_abort_callback() is always effective — no SIGABRT handler
+// or environment-variable workarounds are needed.
 
 static thread_local std::jmp_buf s_ggmlAbortJmpBuf;
 static thread_local bool s_ggmlAbortGuardActive = false;
 static thread_local char s_ggmlAbortMsg[256] = {};
 
-/// ggml abort callback — fires when ggml_abort() is called in the same
-/// libggml copy as the one we linked against.
+/// ggml abort callback — intercepts ggml_abort() and longjmp's back to
+/// the recovery point set by guardedGgmlCall().
 static void ggmlAbortHandler(const char * message) {
 	if (s_ggmlAbortGuardActive) {
 		if (message) {
@@ -163,57 +112,21 @@ static void ggmlAbortHandler(const char * message) {
 	}
 }
 
-/// SIGABRT handler — catches abort() regardless of which shared library
-/// raised it.  Only active while the guard is armed.
-///
-/// Uses only async-signal-safe operations (longjmp is listed as
-/// async-signal-safe in POSIX.1-2024).  String operations are limited
-/// to direct character assignment — no library string functions.
-static void ggmlSigabrtHandler(int /*sig*/) {
-	if (s_ggmlAbortGuardActive) {
-		if (s_ggmlAbortMsg[0] == '\0') {
-			// Inline copy of a short literal — avoids strncpy which
-			// is not guaranteed async-signal-safe by POSIX.
-			const char lit[] = "SIGABRT caught";
-			for (size_t i = 0; i < sizeof(lit) && i < sizeof(s_ggmlAbortMsg); i++) {
-				s_ggmlAbortMsg[i] = lit[i]; // includes '\0'
-			}
-		}
-		s_ggmlAbortGuardActive = false;
-		std::longjmp(s_ggmlAbortJmpBuf, 1);
-	}
-}
-
 /// Execute a callable with abort recovery.  If the callable triggers a
-/// fatal ggml abort (GGML_ABORT / ggml_abort / abort()), the longjmp
-/// fires and this function returns false.  On success it returns true.
+/// fatal ggml abort (GGML_ABORT / ggml_abort()), the longjmp fires and
+/// this function returns false.  On success it returns true.
 ///
-/// @param fn       Callable to execute (should only call C / ggml APIs
-///                 — no C++ objects with non-trivial destructors may be
-///                 alive in the dynamic scope at the time of abort).
-/// @param context  Short label for log messages (e.g. "backend loading").
+/// @param fn       Callable to execute.
+/// @param context  Short label for log messages (e.g. "backend init").
 ///
-/// A mutex serialises access because both ggml_set_abort_callback() and
-/// the SIGABRT handler operate at process-wide scope.
+/// A mutex serialises access because ggml_set_abort_callback() operates
+/// at process-wide scope.
 template<typename F>
 static bool guardedGgmlCall(F && fn, const char * context = nullptr) {
 	static std::mutex mtx;
 	std::lock_guard<std::mutex> lock(mtx);
 
-	// Layer 1: ggml abort callback (covers the local libggml copy).
 	ggml_abort_callback_t prevAbortCb = ggml_set_abort_callback(ggmlAbortHandler);
-
-	// Layer 2: SIGABRT handler (covers plugin / foreign libggml copies).
-#ifdef _WIN32
-	auto prevSig = std::signal(SIGABRT, ggmlSigabrtHandler);
-#else
-	struct sigaction sa = {};
-	sa.sa_handler = ggmlSigabrtHandler;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = 0; // no SA_RESTART — we want longjmp
-	struct sigaction prevSa = {};
-	sigaction(SIGABRT, &sa, &prevSa);
-#endif
 
 	s_ggmlAbortGuardActive = true;
 	s_ggmlAbortMsg[0] = '\0';
@@ -223,7 +136,6 @@ static bool guardedGgmlCall(F && fn, const char * context = nullptr) {
 		fn();
 		ok = true;
 	} else {
-		// longjmp fired — log the abort message to stderr.
 		fprintf(stderr, "ofxGgml: ggml abort caught%s%s: %s\n",
 			context ? " during " : "",
 			context ? context : "",
@@ -231,16 +143,7 @@ static bool guardedGgmlCall(F && fn, const char * context = nullptr) {
 	}
 
 	s_ggmlAbortGuardActive = false;
-
-	// Restore previous handlers.
 	ggml_set_abort_callback(prevAbortCb);
-#ifdef _WIN32
-	if (prevSig != SIG_ERR) {
-		std::signal(SIGABRT, prevSig);
-	}
-#else
-	sigaction(SIGABRT, &prevSa, nullptr);
-#endif
 
 	return ok;
 }
@@ -285,28 +188,15 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	m_impl->settings = settings;
 	ggml_log_set(ggmlLogCallback, m_impl.get());
 
-	// Load all available backend libraries (CUDA, Metal, Vulkan, …).
-	// Guard: only load once per process to avoid triggering the
-	// GGML_ASSERT(prev != ggml_uncaught_exception) in ggml.cpp:22
-	// when backend shared libraries are loaded via dlopen(RTLD_LOCAL)
-	// and pull in a second copy of libggml-base.
+	// With static linking, GPU backends compiled into the library are
+	// registered automatically via the ggml_backend_registry constructor
+	// (triggered by #ifdef GGML_USE_CUDA / GGML_USE_VULKAN / etc. in
+	// ggml-backend-reg.cpp).  We still call ggml_backend_load_all()
+	// to pick up any additional runtime-loadable backends, but this is
+	// safe — there is only one copy of libggml-base so no duplicate
+	// static initializer assertions.
 	static bool backendsLoaded = false;
 	if (!backendsLoaded) {
-		// Set GGML_NO_BACKTRACE so that any additional copies of
-		// libggml-base loaded via dlopen() skip the terminate-handler
-		// static initializer that triggers the assertion.
-#ifdef _WIN32
-		{
-			size_t len = 0;
-			if (getenv_s(&len, nullptr, 0, "GGML_NO_BACKTRACE") != 0 || len == 0) {
-				_putenv_s("GGML_NO_BACKTRACE", "1");
-			}
-		}
-#else
-		setenv("GGML_NO_BACKTRACE", "1", 0); // don't overwrite if already set
-#endif
-		// Guard backend loading: a plugin might call ggml_malloc()
-		// during initialisation and abort on failure.
 		guardedGgmlCall([&]() {
 			ggml_backend_load_all();
 		}, "backend loading");
