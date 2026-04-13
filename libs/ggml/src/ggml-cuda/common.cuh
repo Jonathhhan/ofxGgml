@@ -1,5 +1,12 @@
 #pragma once
 
+// Suppress NVCC warning #221-D: "floating-point value does not fit in required
+// floating-point type" triggered by MSVC's INFINITY macro ((float)(1e+300)).
+// The double-to-float overflow is intentional — it produces IEEE 754 infinity.
+#if defined(__CUDACC__)
+#pragma nv_diag_suppress 221
+#endif
+
 #include "ggml.h"
 #include "ggml-impl.h"
 #include "ggml-cuda.h"

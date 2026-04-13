@@ -63,11 +63,48 @@ apply_mmvf_tmpx_gate_init() {
 }
 
 # ---------------------------------------------------------------------------
+# Patch: Suppress NVCC warning #221-D in common.cuh
+#
+# On Windows MSVC defines the INFINITY macro as ((float)(1e+300)).
+# NVCC warns (#221-D, "floating-point value does not fit in required
+# floating-point type") because the intermediate double 1e+300 overflows
+# when cast to float.  The overflow is intentional — it produces IEEE 754
+# infinity.  Add a pragma to suppress the warning at the top of common.cuh,
+# which is transitively included by every CUDA source file.
+# ---------------------------------------------------------------------------
+apply_cuda_infinity_warning_suppress() {
+	local file="$GGML_DIR/src/ggml-cuda/common.cuh"
+	local desc="common.cuh: suppress NVCC warning #221-D (MSVC INFINITY)"
+
+	if [[ ! -f "$file" ]]; then
+		write_skip "$desc"
+		return
+	fi
+
+	if grep -q 'nv_diag_suppress 221' "$file"; then
+		write_skip "$desc"
+		return
+	fi
+
+	# Insert the pragma block right after #pragma once
+	sedi '/^#pragma once$/a\
+\
+// Suppress NVCC warning #221-D: "floating-point value does not fit in required\
+// floating-point type" triggered by MSVC'\''s INFINITY macro ((float)(1e+300)).\
+// The double-to-float overflow is intentional — it produces IEEE 754 infinity.\
+#if defined(__CUDACC__)\
+#pragma nv_diag_suppress 221\
+#endif' "$file"
+	write_ok "$desc"
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 write_step "Applying local patches to bundled ggml source..."
 
 apply_mmvf_tmpx_gate_init
+apply_cuda_infinity_warning_suppress
 
 write_step "Patches applied."
