@@ -5,7 +5,8 @@ REM build-ggml.bat — Build the bundled ggml tensor library on Windows.
 REM
 REM The ggml source is bundled inside libs\ggml\.  This script runs CMake
 REM to configure and build it, producing static libraries that the addon
-REM links against.  GPU backends (CUDA, Vulkan) are auto-detected by default.
+REM links against.  GPU backends (CUDA, Vulkan) must be explicitly enabled
+REM via command-line flags.  By default only the CPU backend is built.
 REM
 REM Usage:
 REM   scripts\build-ggml.bat [OPTIONS]
@@ -13,7 +14,8 @@ REM
 REM Options:
 REM   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 REM   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
-REM   --cpu-only     Disable GPU autodetection, build CPU backend only
+REM   --auto         Auto-detect available GPU backends
+REM   --cpu-only     Disable GPU autodetection, build CPU backend only (default)
 REM   --clean        Remove build directory before building
 REM   --jobs N       Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
 REM   --help         Show this help message
@@ -26,7 +28,7 @@ set "BUILD_DIR=%GGML_DIR%\build"
 set "JOBS=%NUMBER_OF_PROCESSORS%"
 set "ENABLE_CUDA="
 set "ENABLE_VULKAN="
-set "AUTO_DETECT=1"
+set "AUTO_DETECT=0"
 set "CLEAN=0"
 
 :parse_args
@@ -48,6 +50,11 @@ if /i "%~1"=="--vulkan" (
 )
 if /i "%~1"=="--cpu-only" (
     set "AUTO_DETECT=0"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--auto" (
+    set "AUTO_DETECT=1"
     shift
     goto parse_args
 )
@@ -76,7 +83,8 @@ echo.
 echo Options:
 echo   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 echo   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
-echo   --cpu-only     Disable GPU autodetection, build CPU backend only
+echo   --auto         Auto-detect available GPU backends
+echo   --cpu-only     Disable GPU autodetection, build CPU backend only (default)
 echo   --clean        Remove build directory before building
 echo   --jobs N       Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
 echo   --help         Show this help message

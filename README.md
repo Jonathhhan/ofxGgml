@@ -2,7 +2,7 @@
 
 An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https://github.com/ggml-org/ggml) tensor library for machine-learning computation.
 
-> **Version 0.2** — ggml is now bundled and compiled as a static library with automatic GPU backend detection.
+> **Version 0.2** — ggml is now bundled and compiled as a static library.  GPU backends can be enabled via build script flags.
 
 ---
 
@@ -13,10 +13,11 @@ An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https:/
 cd openFrameworks/addons
 git clone https://github.com/Jonathhhan/ofxGgml.git
 
-# 2. Build ggml (GPU auto-detected) + llama.cpp CLI + download models
+# 2. Build ggml (CPU-only by default) + llama.cpp CLI + download models
 cd ofxGgml
-./scripts/setup.sh            # auto-detects CUDA / Vulkan / Metal
-./scripts/setup.sh --cpu-only # CPU only, no GPU
+./scripts/setup.sh              # CPU only (default)
+./scripts/setup.sh --auto       # auto-detects CUDA / Vulkan / Metal
+./scripts/setup.sh --cuda       # explicitly enable CUDA
 
 # 3. Add ofxGgml to your project's addons.make and build
 ```
@@ -26,7 +27,7 @@ cd ofxGgml
 | Category | Capabilities |
 |----------|-------------|
 | **Backend management** | Automatic discovery of CPU, CUDA, Metal, Vulkan backends; runtime selection |
-| **GPU auto-detect** | GPU backends are auto-detected and compiled in at build time — no manual flags needed |
+| **GPU support** | GPU backends (CUDA, Vulkan, Metal) can be enabled via build script flags (e.g. `--cuda`, `--auto`) |
 | **GGUF model loading** | Load GGUF files, inspect metadata and tensors, upload weights to GPU |
 | **Tensor wrapper** | Non-owning handle with OF-friendly data access (read/write floats, fill) |
 | **Graph builder** | Fluent API for computation graphs — see [Operations](#supported-operations) |
@@ -58,7 +59,7 @@ cd ofxGgml
 
 ## Building ggml
 
-ggml source is bundled in `libs/ggml/`.  It is compiled as a static library with GPU backends auto-detected at build time.
+ggml source is bundled in `libs/ggml/`.  It is compiled as a static library.  By default only the CPU backend is built.  GPU backends (CUDA, Vulkan, Metal) must be explicitly enabled via build script flags to avoid linker errors when the required GPU SDK libraries are missing.
 
 > **Windows / Visual Studio users:** You must build ggml before opening your OF project, otherwise the linker will report `LNK1181: cannot open input file "ggml.lib"`.  See the [Windows](#windows-visual-studio) section below.
 
@@ -66,14 +67,16 @@ ggml source is bundled in `libs/ggml/`.  It is compiled as a static library with
 
 ```bash
 ./scripts/setup.sh              # builds ggml + llama CLI + downloads models
-./scripts/setup.sh --cpu-only   # disable GPU autodetection
+./scripts/setup.sh --auto       # auto-detect GPU backends
+./scripts/setup.sh --cuda       # explicitly enable CUDA
 ./scripts/setup.sh --skip-llama --skip-model  # ggml only
 ```
 
 ### ggml only
 
 ```bash
-./scripts/build-ggml.sh         # GPU auto-detected
+./scripts/build-ggml.sh           # CPU only (default)
+./scripts/build-ggml.sh --auto  # auto-detect GPU backends
 ./scripts/build-ggml.sh --cuda  # force CUDA on
 ./scripts/build-ggml.sh --vulkan  # force Vulkan on
 ./scripts/build-ggml.sh --cpu-only  # CPU only
@@ -84,7 +87,8 @@ ggml source is bundled in `libs/ggml/`.  It is compiled as a static library with
 Open a **Developer Command Prompt for VS** (or any terminal with CMake in your PATH) and run:
 
 ```bat
-scripts\build-ggml.bat              &:: GPU auto-detected
+scripts\build-ggml.bat              &:: CPU only (default)
+scripts\build-ggml.bat --auto      &:: auto-detect GPU backends
 scripts\build-ggml.bat --cuda       &:: force CUDA on
 scripts\build-ggml.bat --vulkan     &:: force Vulkan on
 scripts\build-ggml.bat --cpu-only   &:: CPU only
@@ -106,7 +110,7 @@ CMake options:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `OFXGGML_GPU_AUTODETECT` | `ON` | Auto-detect and enable available GPU backends |
+| `OFXGGML_GPU_AUTODETECT` | `OFF` | Auto-detect and enable available GPU backends |
 | `OFXGGML_CUDA` | `OFF` | Force CUDA backend on/off |
 | `OFXGGML_VULKAN` | `OFF` | Force Vulkan backend on/off |
 | `OFXGGML_METAL` | `OFF` | Force Metal backend on/off |
@@ -134,7 +138,7 @@ ofxGgml/
 │   ├── ofxGgmlHelpers.h      # utility functions
 │   └── ofxGgmlVersion.h      # version macros
 ├── libs/ggml/                # bundled ggml source + CMake build
-│   ├── CMakeLists.txt        # addon's CMake wrapper (GPU autodetect)
+│   ├── CMakeLists.txt        # addon's CMake wrapper (GPU opt-in)
 │   ├── include/              # ggml headers
 │   ├── src/                  # ggml source (core, CPU, CUDA, Vulkan, Metal)
 │   ├── cmake/                # ggml cmake helpers
@@ -277,13 +281,13 @@ Build the tools with:
 | Script | Purpose |
 |--------|---------|
 | `scripts/setup.sh` | **One-command setup**: builds ggml + llama CLI + downloads models |
-| `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, GPU auto-detect by default) |
-| `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, GPU auto-detect by default) |
+| `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, CPU-only by default) |
+| `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, CPU-only by default) |
 | `scripts/update-ggml-source.sh` | Update bundled ggml source to latest upstream |
 | `scripts/build-llama-cli.sh` | Clone, compile, and install llama.cpp CLI tools |
 | `scripts/download-model.sh` | Download GGUF model presets |
 
-`build-ggml.sh` supports `--cuda`, `--vulkan`, `--metal`, `--cpu-only`, `--jobs`, `--clean`, and `--help`.  GPU backends are auto-detected by default (no flags needed).
+`build-ggml.sh` supports `--cuda`, `--vulkan`, `--metal`, `--auto`, `--cpu-only`, `--jobs`, `--clean`, and `--help`.  By default only the CPU backend is built; use `--auto` or a specific GPU flag to enable GPU backends.
 
 ### Model presets
 

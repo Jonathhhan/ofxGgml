@@ -9,7 +9,8 @@
 #
 # ggml is bundled in libs/ggml/ and compiled via CMake as a static
 # library.  Run ./scripts/build-ggml.sh before building your OF project.
-# GPU backends (CUDA, Vulkan, Metal) are auto-detected during the build.
+# GPU backends (CUDA, Vulkan, Metal) must be explicitly enabled via
+# build script flags (e.g. --cuda, --vulkan, --metal, or --auto).
 
 meta:
 	ADDON_NAME = ofxGgml
