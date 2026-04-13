@@ -547,7 +547,14 @@ template<block_reduce_method method_t, typename T>
 struct block_reduce_policy;
 
 template <typename T, typename... Ts>
-inline constexpr bool is_any = (std::is_same_v<T, Ts> || ...);
+struct is_any_impl : std::false_type {};
+
+template <typename T, typename U, typename... Ts>
+struct is_any_impl<T, U, Ts...>
+    : std::conditional<std::is_same<T, U>::value, std::true_type, is_any_impl<T, Ts...>>::type {};
+
+template <typename T, typename... Ts>
+inline constexpr bool is_any = is_any_impl<T, Ts...>::value;
 
 template<typename...>
 inline constexpr bool ggml_cuda_dependent_false_v = false;
