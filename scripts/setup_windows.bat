@@ -159,7 +159,6 @@ echo Next steps:
 echo   1. Add ofxGgml to your project addons.make
 echo   2. Build and run your project
 echo.
-
 exit /b 0
 
 :download_models
