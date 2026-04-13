@@ -5,6 +5,10 @@ find_package(CUDAToolkit)
 if (CUDAToolkit_FOUND)
     message(STATUS "CUDA Toolkit found")
 
+    if (CUDAToolkit_VERSION VERSION_LESS "11.0")
+        message(FATAL_ERROR "CUDA Toolkit >= 11.0 is required for C++17 support (found ${CUDAToolkit_VERSION})")
+    endif()
+
     if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
         # native == GPUs available at build time
         # 50     == Maxwell, lowest CUDA 12 standard
@@ -128,7 +132,7 @@ if (CUDAToolkit_FOUND)
                              ${GGML_SOURCES_CUDA}
                             )
 
-    set_target_properties(ggml-cuda PROPERTIES CUDA_STANDARD 17)
+    set_target_properties(ggml-cuda PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
 
     add_compile_definitions(GGML_CUDA_PEER_MAX_BATCH_SIZE=${GGML_CUDA_PEER_MAX_BATCH_SIZE})
 
