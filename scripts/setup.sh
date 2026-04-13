@@ -16,6 +16,8 @@
 #   --cpu-only         Build CPU backend only (disable GPU auto-detect)
 #   --auto             Auto-detect and enable available GPU backends (default)
 #   --gpu, --cuda      Enable CUDA backend
+#   --vulkan           Enable Vulkan backend
+#   --metal            Enable Metal backend (macOS only)
 #   --prefix DIR       Install prefix for llama tools
 #                      (default: /usr/local on Linux, addon-local libs/ on Windows)
 #   --skip-ggml        Skip building ggml (if already built)
