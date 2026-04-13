@@ -21,6 +21,7 @@ meta:
 	ADDON_LICENSE = MIT
 
 common:
+	ADDON_INCLUDES += src
 	ADDON_INCLUDES += libs/ggml/include
 	# Exclude bundled ggml source from the oF build — it is compiled
 	# separately via CMake (scripts/build-ggml.sh).
