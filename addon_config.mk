@@ -1,4 +1,4 @@
-# All variables and this file are optional, if they are not present the PG and the
+﻿# All variables and this file are optional, if they are not present the PG and the
 # makefiles will try to parse the correct values from the file system.
 #
 # Variables can be specified using = or +=
@@ -18,7 +18,6 @@ meta:
 	ADDON_AUTHOR = Jonathan Frank
 	ADDON_TAGS = "ml,tensor,ggml,machine-learning,neural-network,compute"
 	ADDON_URL = https://github.com/Jonathhhan/ofxGgml
-	ADDON_LICENSE = MIT
 
 common:
 	ADDON_INCLUDES += src
@@ -53,11 +52,16 @@ msys2:
 vs:
 	ADDON_INCLUDES += src
 	ADDON_INCLUDES += libs/ggml/include
-	# @DIFFUSION_LIBS_START vs
-	# Libraries are linked via ofxGgml.props (Visual Studio property sheet)
-	# which selects the correct Debug or Release libraries automatically.
-	# The PG auto-imports ofxGgml.props; for manual project setup see README.
-	# @DIFFUSION_LIBS_END vs
+	# Link directly from addon_config.mk so the Project Generator emits
+	# Visual Studio library paths without relying on an external .props file.
+	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml.lib
+	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml-base.lib
+	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml-cpu.lib
+	ADDON_LIBS += libs/ggml/build/src/ggml-cuda/$(Configuration)/ggml-cuda.lib
+	ADDON_LIBS += $(CUDA_PATH)\lib\x64\cudart.lib
+	ADDON_LIBS += $(CUDA_PATH)\lib\x64\cublas.lib
+	ADDON_LIBS += $(CUDA_PATH)\lib\x64\cublasLt.lib
+	ADDON_LIBS += $(CUDA_PATH)\lib\x64\cuda.lib
 
 android/armeabi:
 
@@ -74,3 +78,6 @@ osx:
 ios:
 
 emscripten:
+
+
+
