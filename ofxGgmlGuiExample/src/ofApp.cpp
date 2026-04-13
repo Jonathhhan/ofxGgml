@@ -1419,59 +1419,43 @@ ImGui::EndCombo();
 }
 }
 
-ImGui::BeginDisabled(generating.load() || std::strlen(scriptInput) == 0);
-if (ImGui::Button("Generate Code", ImVec2(120, 0))) {
+auto buildScriptPrompt = [this](const std::string & body) {
 std::string prompt;
 if (!scriptLanguages.empty()) {
 prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
 }
-prompt += scriptInput;
-runInference(AiMode::Script, prompt);
+prompt += body;
+return prompt;
+};
+
+ImGui::BeginDisabled(generating.load() || std::strlen(scriptInput) == 0);
+if (ImGui::Button("Generate Code", ImVec2(120, 0))) {
+runInference(AiMode::Script, buildScriptPrompt(scriptInput));
 }
 ImGui::SameLine();
 if (ImGui::Button("Explain Code", ImVec2(110, 0))) {
-std::string prompt;
-if (!scriptLanguages.empty()) {
-prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
-}
-prompt += std::string("Explain the following code:\n") + scriptInput;
-runInference(AiMode::Script, prompt);
+runInference(AiMode::Script, buildScriptPrompt(
+	std::string("Explain the following code:\n") + scriptInput));
 }
 ImGui::SameLine();
 if (ImGui::Button("Debug Code", ImVec2(100, 0))) {
-std::string prompt;
-if (!scriptLanguages.empty()) {
-prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
-}
-prompt += std::string("Find bugs in the following code:\n") + scriptInput;
-runInference(AiMode::Script, prompt);
+runInference(AiMode::Script, buildScriptPrompt(
+	std::string("Find bugs in the following code:\n") + scriptInput));
 }
 ImGui::SameLine();
 if (ImGui::Button("Optimize", ImVec2(80, 0))) {
-std::string prompt;
-if (!scriptLanguages.empty()) {
-prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
-}
-prompt += std::string("Optimize the following code for performance. Show the improved version and explain what changed:\n") + scriptInput;
-runInference(AiMode::Script, prompt);
+runInference(AiMode::Script, buildScriptPrompt(
+	std::string("Optimize the following code for performance. Show the improved version and explain what changed:\n") + scriptInput));
 }
 ImGui::SameLine();
 if (ImGui::Button("Refactor", ImVec2(80, 0))) {
-std::string prompt;
-if (!scriptLanguages.empty()) {
-prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
-}
-prompt += std::string("Refactor the following code to improve readability, maintainability, and structure. Show the refactored version:\n") + scriptInput;
-runInference(AiMode::Script, prompt);
+runInference(AiMode::Script, buildScriptPrompt(
+	std::string("Refactor the following code to improve readability, maintainability, and structure. Show the refactored version:\n") + scriptInput));
 }
 ImGui::SameLine();
 if (ImGui::Button("Review", ImVec2(70, 0))) {
-std::string prompt;
-if (!scriptLanguages.empty()) {
-prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
-}
-prompt += std::string("Review the following code for bugs, security issues, and style. Provide specific feedback:\n") + scriptInput;
-runInference(AiMode::Script, prompt);
+runInference(AiMode::Script, buildScriptPrompt(
+	std::string("Review the following code for bugs, security issues, and style. Provide specific feedback:\n") + scriptInput));
 }
 ImGui::EndDisabled();
 
