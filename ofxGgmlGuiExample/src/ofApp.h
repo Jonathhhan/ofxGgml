@@ -213,6 +213,9 @@ private:
 	std::vector<ScriptFileEntry> scriptSourceFiles;  // discovered files
 	int selectedScriptFileIndex = -1;
 	std::string scriptSourceStatus;
+	bool useProjectMemory = true;
+	std::string projectMemory;
+	std::string lastScriptRequest;
 
 	void scanLocalFolder(const std::string & path);
 	void scanGitHubRepo(const std::string & ownerRepo, const std::string & branch);
