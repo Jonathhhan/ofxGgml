@@ -202,16 +202,22 @@ exit /b 0
 set "CFG=%~1"
 set "CFG_LIB_DIR=%BUILD_DIR%\src\%CFG%"
 set "FOUND=0"
-for %%L in (ggml.lib ggml-base.lib ggml-cpu.lib) do (
-    if exist "!CFG_LIB_DIR!\%%L" (
-        echo ==^>   Found (%CFG%): !CFG_LIB_DIR!\%%L
-        set "FOUND=1"
-    )
+if exist "%CFG_LIB_DIR%\ggml.lib" (
+    echo ==^>   Found (%CFG%): %CFG_LIB_DIR%\ggml.lib
+    set "FOUND=1"
+)
+if exist "%CFG_LIB_DIR%\ggml-base.lib" (
+    echo ==^>   Found (%CFG%): %CFG_LIB_DIR%\ggml-base.lib
+    set "FOUND=1"
+)
+if exist "%CFG_LIB_DIR%\ggml-cpu.lib" (
+    echo ==^>   Found (%CFG%): %CFG_LIB_DIR%\ggml-cpu.lib
+    set "FOUND=1"
 )
 
-if "!FOUND!"=="0" (
+if "%FOUND%"=="0" (
     if /i "%CFG%"=="Release" (
-        echo Error: No ggml Release libraries found in !CFG_LIB_DIR!
+        echo Error: No ggml Release libraries found in %CFG_LIB_DIR%
         echo Make sure CMake built successfully with the Visual Studio generator.
         exit /b 1
     ) else (
