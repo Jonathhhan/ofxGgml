@@ -11,12 +11,12 @@ REM Usage:
 REM   scripts\build-ggml.bat [OPTIONS]
 REM
 REM Options:
-REM   --cuda       Enable CUDA backend (requires CUDA toolkit)
-REM   --vulkan     Enable Vulkan backend (requires Vulkan SDK)
-REM   --cpu-only   Disable GPU autodetection, build CPU backend only
-REM   --clean      Remove build directory before building
-REM   --jobs N     Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
-REM   --help       Show this help message
+REM   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
+REM   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
+REM   --cpu-only     Disable GPU autodetection, build CPU backend only
+REM   --clean        Remove build directory before building
+REM   --jobs N       Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
+REM   --help         Show this help message
 REM ---------------------------------------------------------------------------
 
 set "SCRIPT_DIR=%~dp0"
@@ -74,12 +74,12 @@ echo Usage:
 echo   scripts\build-ggml.bat [OPTIONS]
 echo.
 echo Options:
-echo   --cuda       Enable CUDA backend (requires CUDA toolkit)
-echo   --vulkan     Enable Vulkan backend (requires Vulkan SDK)
-echo   --cpu-only   Disable GPU autodetection, build CPU backend only
-echo   --clean      Remove build directory before building
-echo   --jobs N     Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
-echo   --help       Show this help message
+echo   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
+echo   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
+echo   --cpu-only     Disable GPU autodetection, build CPU backend only
+echo   --clean        Remove build directory before building
+echo   --jobs N       Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
+echo   --help         Show this help message
 exit /b 0
 
 :done_args
