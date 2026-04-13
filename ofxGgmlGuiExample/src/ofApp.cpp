@@ -211,8 +211,6 @@ constexpr float kDefaultRepeatPenalty = 1.1f;
 constexpr int kExecNotFound = 127; // POSIX convention when execvp fails
 constexpr float kSpinnerInterval = 0.15f;       // seconds per spinner frame
 constexpr float kDotsAnimationSpeed = 3.0f;     // dots cycle speed multiplier
-constexpr size_t kProjectMemoryMaxChars = 16000;
-constexpr size_t kProjectMemoryEntryMaxChars = 3000;
 const char * const kWaitingLabels[] = {"generating", "generating.", "generating..", "generating..."};
 
 // Llama CLI detection state shared between probe and UI.
@@ -1370,17 +1368,20 @@ ImGui::Text("Describe what you want:");
 ImGui::InputTextMultiline("##ScriptIn", scriptInput, sizeof(scriptInput),
 ImVec2(-1, 100));
 
-ImGui::Checkbox("Use project memory", &useProjectMemory);
+bool useProjectMemory = scriptProjectMemory.isEnabled();
+if (ImGui::Checkbox("Use project memory", &useProjectMemory)) {
+scriptProjectMemory.setEnabled(useProjectMemory);
+}
 ImGui::SameLine();
 ImGui::TextDisabled("(learn from prior script requests in this session)");
 if (ImGui::CollapsingHeader("Project Memory", ImGuiTreeNodeFlags_DefaultOpen)) {
 if (ImGui::SmallButton("Clear Memory")) {
-projectMemory.clear();
+scriptProjectMemory.clear();
 }
 ImGui::SameLine();
-ImGui::TextDisabled("(%d chars)", static_cast<int>(projectMemory.size()));
+ImGui::TextDisabled("(%d chars)", static_cast<int>(scriptProjectMemory.getMemoryText().size()));
 ImGui::BeginChild("##ProjectMemory", ImVec2(-1, 100), true);
-ImGui::TextWrapped("%s", projectMemory.c_str());
+ImGui::TextWrapped("%s", scriptProjectMemory.getMemoryText().c_str());
 ImGui::EndChild();
 }
 
@@ -2270,8 +2271,8 @@ out << "scriptSourceType=" << static_cast<int>(scriptSourceType) << "\n";
 out << "scriptSourcePath=" << escapeSessionText(scriptSourcePath) << "\n";
 out << "scriptSourceGitHub=" << escapeSessionText(scriptSourceGitHub) << "\n";
 out << "scriptSourceBranch=" << escapeSessionText(scriptSourceBranch) << "\n";
-out << "useProjectMemory=" << (useProjectMemory ? 1 : 0) << "\n";
-out << "projectMemory=" << escapeSessionText(projectMemory) << "\n";
+out << "useProjectMemory=" << (scriptProjectMemory.isEnabled() ? 1 : 0) << "\n";
+out << "projectMemory=" << escapeSessionText(scriptProjectMemory.getMemoryText()) << "\n";
 
 // Input buffers.
 out << "chatInput=" << escapeSessionText(chatInput) << "\n";
@@ -2399,12 +2400,9 @@ else if (key == "scriptSourceType") {
 else if (key == "scriptSourcePath") scriptSourcePath = unescapeSessionText(value);
 else if (key == "scriptSourceGitHub") copyToBuf(scriptSourceGitHub, sizeof(scriptSourceGitHub), value);
 else if (key == "scriptSourceBranch") copyToBuf(scriptSourceBranch, sizeof(scriptSourceBranch), value);
-else if (key == "useProjectMemory") useProjectMemory = (safeStoi(value, 1) != 0);
+else if (key == "useProjectMemory") scriptProjectMemory.setEnabled(safeStoi(value, 1) != 0);
 else if (key == "projectMemory") {
-projectMemory = unescapeSessionText(value);
-if (projectMemory.size() > kProjectMemoryMaxChars) {
-projectMemory = projectMemory.substr(projectMemory.size() - kProjectMemoryMaxChars);
-}
+scriptProjectMemory.setMemoryText(unescapeSessionText(value));
 }
 else if (key == "chatInput") copyToBuf(chatInput, sizeof(chatInput), value);
 else if (key == "scriptInput") copyToBuf(scriptInput, sizeof(scriptInput), value);
@@ -2526,9 +2524,8 @@ std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
 	if (!systemPrompt.empty()) {
 		oss << "System:\n" << systemPrompt << "\n\n";
 	}
-	if (mode == AiMode::Script && useProjectMemory && !projectMemory.empty()) {
-		oss << "Project memory from previous coding requests:\n"
-			<< projectMemory << "\n\n";
+	if (mode == AiMode::Script) {
+		oss << scriptProjectMemory.buildPromptContext();
 	}
 
 	switch (mode) {
@@ -2987,24 +2984,8 @@ fprintf(stderr, "[ChatWindow] AI: %s\n", pendingOutput.c_str());
 break;
 case AiMode::Script:
 scriptOutput = pendingOutput;
-if (useProjectMemory && pendingOutput.rfind("[Error]", 0) != 0) {
-std::string request = lastScriptRequest;
-if (request.size() > kProjectMemoryEntryMaxChars) {
-request = request.substr(0, kProjectMemoryEntryMaxChars);
-}
-std::string response = pendingOutput;
-if (response.size() > kProjectMemoryEntryMaxChars) {
-response = response.substr(0, kProjectMemoryEntryMaxChars);
-}
-if (!request.empty() && !response.empty()) {
-if (!projectMemory.empty()) {
-projectMemory += "\n\n---\n\n";
-}
-projectMemory += "Request:\n" + request + "\n\nResponse:\n" + response;
-if (projectMemory.size() > kProjectMemoryMaxChars) {
-projectMemory = projectMemory.substr(projectMemory.size() - kProjectMemoryMaxChars);
-}
-}
+if (pendingOutput.rfind("[Error]", 0) != 0) {
+scriptProjectMemory.addInteraction(lastScriptRequest, pendingOutput);
 }
 fprintf(stderr, "[ChatWindow] Script: %s\n", pendingOutput.c_str());
 break;

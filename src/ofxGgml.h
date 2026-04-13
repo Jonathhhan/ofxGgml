@@ -7,6 +7,7 @@
 ///   - ofxGgml         — backend management, compute scheduling
 ///   - ofxGgmlGraph    — computation graph builder
 ///   - ofxGgmlModel    — GGUF model loading
+///   - ofxGgmlProjectMemory — persistent prompt memory helper
 ///   - ofxGgmlTensor   — non-owning tensor handle
 ///   - ofxGgmlTypes    — enums, settings, result structs
 ///   - ofxGgmlHelpers  — utility functions
@@ -18,4 +19,5 @@
 #include "ofxGgmlTensor.h"
 #include "ofxGgmlGraph.h"
 #include "ofxGgmlModel.h"
+#include "ofxGgmlProjectMemory.h"
 #include "ofxGgmlCore.h"

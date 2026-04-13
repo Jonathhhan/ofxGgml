@@ -155,6 +155,7 @@ ofxGgml/
 │   ├── ofxGgmlCore.h/.cpp    # backend init, compute, model weight loading
 │   ├── ofxGgmlGraph.h/.cpp   # computation graph builder
 │   ├── ofxGgmlModel.h/.cpp   # GGUF model loader
+│   ├── ofxGgmlProjectMemory.h/.cpp # prompt memory helper for persistent coding context
 │   ├── ofxGgmlTensor.h/.cpp  # non-owning tensor wrapper
 │   ├── ofxGgmlTypes.h        # enums, settings, result structs
 │   ├── ofxGgmlHelpers.h      # utility functions
@@ -282,6 +283,7 @@ if (submit.success) {
 | `ofxGgml` | Backend init, device enumeration, compute scheduling, model weight loading |
 | `ofxGgmlGraph` | Build computation graphs (tensor creation + operations) |
 | `ofxGgmlModel` | Load GGUF model files, inspect metadata and tensor information |
+| `ofxGgmlProjectMemory` | Persist request/response memory and prepend it to future prompts |
 | `ofxGgmlTensor` | Non-owning tensor handle with metadata and data access |
 | `ofxGgmlTypes` | Enums and settings (`ofxGgmlType`, `ofxGgmlBackendType`, …) |
 | `ofxGgmlHelpers` | Utility functions (type names, byte formatting, …) |

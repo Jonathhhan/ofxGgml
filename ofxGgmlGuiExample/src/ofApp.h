@@ -213,8 +213,7 @@ private:
 	std::vector<ScriptFileEntry> scriptSourceFiles;  // discovered files
 	int selectedScriptFileIndex = -1;
 	std::string scriptSourceStatus;
-	bool useProjectMemory = true;
-	std::string projectMemory;
+	ofxGgmlProjectMemory scriptProjectMemory;
 	std::string lastScriptRequest;
 
 	void scanLocalFolder(const std::string & path);
