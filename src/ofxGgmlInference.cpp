@@ -44,8 +44,31 @@ static std::string stripLlamaWarnings(const std::string & text) {
 	std::string line;
 
 	while (std::getline(lines, line)) {
-		// Skip lines that are common llama.cpp warnings
-		if (line.find("warning: no usable GPU found") != std::string::npos || line.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos || line.find("warning: consult docs/build.md for compilation instructions") != std::string::npos || line.find("--gpu-layers option will be ignored") != std::string::npos || line.find("ggml_cuda_init") != std::string::npos || line.find("ggml_vulkan_init") != std::string::npos || line.find("ggml_metal_init") != std::string::npos || line.find("[INFO]") != std::string::npos || line.find("Device ") != std::string::npos || line.find("compute capability") != std::string::npos || line.find("ofxGgml: discovered") != std::string::npos || line.find("ofxGgml: ready") != std::string::npos || line.find("backend device") != std::string::npos) {
+		// Skip lines that are common llama.cpp warnings and backend initialization messages
+		// Use more specific patterns to avoid filtering legitimate model output
+		if (line.find("warning: no usable GPU found") != std::string::npos ||
+		    line.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos ||
+		    line.find("warning: consult docs/build.md for compilation instructions") != std::string::npos ||
+		    line.find("--gpu-layers option will be ignored") != std::string::npos ||
+		    line.find("ggml_cuda_init") != std::string::npos ||
+		    line.find("ggml_vulkan_init") != std::string::npos ||
+		    line.find("ggml_metal_init") != std::string::npos) {
+			continue;
+		}
+
+		// Filter backend/GPU log lines that start with specific prefixes
+		// to avoid filtering model output that might mention these terms
+		const std::string trimmedLine = [&line]() {
+			size_t start = 0;
+			while (start < line.size() && std::isspace(static_cast<unsigned char>(line[start]))) {
+				start++;
+			}
+			return line.substr(start);
+		}();
+
+		if (trimmedLine.rfind("ofxGgml [INFO]", 0) == 0 ||
+		    trimmedLine.rfind("ofxGgml [WARN]", 0) == 0 ||
+		    trimmedLine.rfind("ofxGgml [ERROR]", 0) == 0) {
 			continue;
 		}
 
