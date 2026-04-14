@@ -7,6 +7,9 @@ REM This script scans the built ggml libraries and updates addon_config.mk [vs]
 REM section with the correct library list. Run this after building ggml if you
 REM encounter linker errors about missing ggml libraries.
 REM
+REM When CUDA backend is detected, this script also adds the required CUDA
+REM Toolkit libraries (cublas.lib, cudart.lib) to fix CUBLAS linker errors.
+REM
 REM Usage:
 REM   scripts\update-addon-config.bat
 REM ---------------------------------------------------------------------------
@@ -72,6 +75,22 @@ if %COUNT% EQU 0 (
 
 echo ==^> Found %COUNT% libraries
 
+REM Check if CUDA backend is present and add CUDA Toolkit libraries
+set "CUDA_PRESENT=0"
+if exist "%LIB_DIR%\ggml-cuda\Release\ggml-cuda.lib" (
+    set "CUDA_PRESENT=1"
+    echo ==^> CUDA backend detected - adding CUDA Toolkit libraries
+)
+
+REM Add CUDA Toolkit libraries if CUDA is present
+REM These libraries are required by ggml-cuda.lib and must be linked by the final application
+set "CUDA_LIBS="
+if "%CUDA_PRESENT%"=="1" (
+    REM cublas.lib and cudart.lib are the minimum required libraries
+    REM The CUDA Toolkit provides these through CMake's FindCUDAToolkit
+    set "CUDA_LIBS= cublas.lib cudart.lib"
+)
+
 REM Create temporary file with new content
 set "TEMP_FILE=%TEMP%\addon_config_temp.mk"
 set "IN_VS_SECTION=0"
@@ -93,6 +112,12 @@ set "IN_MARKER_BLOCK=0"
                 REM Output library list
                 for %%L in (!LIBS!) do (
                     echo 	ADDON_LIBS += %%L
+                )
+                REM Output CUDA Toolkit libraries if present
+                if defined CUDA_LIBS (
+                    for %%C in (!CUDA_LIBS!) do (
+                        echo 	ADDON_LIBS += %%C
+                    )
                 )
                 echo 	# @DIFFUSION_LIBS_END vs
                 REM Skip until end marker
@@ -116,6 +141,9 @@ REM Replace original file
 move /y "%TEMP_FILE%" "%CONFIG_FILE%" >nul
 
 echo ==^> Updated addon_config.mk [vs] section with %COUNT% libraries
+if "%CUDA_PRESENT%"=="1" (
+    echo ==^> Added CUDA Toolkit libraries: cublas.lib, cudart.lib
+)
 echo ==^> Rebuild your Visual Studio project to apply changes
 
 endlocal
