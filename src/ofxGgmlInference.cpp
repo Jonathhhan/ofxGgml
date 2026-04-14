@@ -49,7 +49,13 @@ static std::string stripLlamaWarnings(const std::string & text) {
 			line.find("--gpu-layers option will be ignored") != std::string::npos ||
 			line.find("ggml_cuda_init") != std::string::npos ||
 			line.find("ggml_vulkan_init") != std::string::npos ||
-			line.find("ggml_metal_init") != std::string::npos) {
+			line.find("ggml_metal_init") != std::string::npos ||
+			line.find("[INFO]") != std::string::npos ||
+			line.find("Device ") != std::string::npos ||
+			line.find("compute capability") != std::string::npos ||
+			line.find("ofxGgml: discovered") != std::string::npos ||
+			line.find("ofxGgml: ready") != std::string::npos ||
+			line.find("backend device") != std::string::npos) {
 			continue;
 		}
 
