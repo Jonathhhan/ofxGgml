@@ -211,11 +211,33 @@ static std::string makeTempPath(const char * prefix, const char * ext) {
 		std::filesystem::path candidate = base / oss.str();
 
 		// Try to create the file exclusively (atomic check-and-create)
-		std::ofstream test(candidate, std::ios::out | std::ios::excl);
-		if (test.is_open()) {
-			test.close();
+		// Use platform-specific approach since std::ios::excl is not standard
+#ifdef _WIN32
+		// On Windows, use CreateFile with CREATE_NEW for atomic exclusive creation
+		HANDLE hFile = CreateFileW(
+			candidate.c_str(),
+			GENERIC_WRITE,
+			0,  // No sharing
+			NULL,
+			CREATE_NEW,  // Fails if file exists (atomic check-and-create)
+			FILE_ATTRIBUTE_NORMAL,
+			NULL
+		);
+		if (hFile != INVALID_HANDLE_VALUE) {
+			CloseHandle(hFile);
 			return candidate.string();
 		}
+#else
+		// On POSIX systems, std::ios::noreplace is C++23, so use filesystem approach
+		std::error_code ec;
+		if (!std::filesystem::exists(candidate, ec) && !ec) {
+			std::ofstream test(candidate, std::ios::out);
+			if (test.is_open()) {
+				test.close();
+				return candidate.string();
+			}
+		}
+#endif
 	}
 
 	// Fallback: use time-based name with random component
