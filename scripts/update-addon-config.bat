@@ -84,22 +84,35 @@ if exist "%LIB_DIR%\ggml-cuda\Release\ggml-cuda.lib" (
 
 REM Add CUDA Toolkit libraries if CUDA is present
 REM These libraries are required by ggml-cuda.lib and must be linked by the final application
-set "CUDA_LIBS="
 set "CUDA_LIB_DIR="
+set "CUDA_CUBLAS="
+set "CUDA_CUDART="
 if "%CUDA_PRESENT%"=="1" (
+    REM Normalize CUDA environment variables (strip any surrounding quotes)
+    set "CUDA_PATH_CLEAN="
+    if defined CUDA_PATH (
+        for %%I in ("%CUDA_PATH%") do set "CUDA_PATH_CLEAN=%%~fI"
+    )
+    set "CUDAToolkit_ROOT_CLEAN="
+    if defined CUDAToolkit_ROOT (
+        for %%I in ("%CUDAToolkit_ROOT%") do set "CUDAToolkit_ROOT_CLEAN=%%~fI"
+    )
+
     REM cublas.lib and cudart.lib are the minimum required libraries
     REM The CUDA Toolkit provides these through CMake's FindCUDAToolkit
-    if defined CUDA_PATH if exist "%CUDA_PATH%\lib\x64\cublas.lib" (
-        set "CUDA_LIB_DIR=%CUDA_PATH%\lib\x64"
+    if defined CUDA_PATH_CLEAN if exist "!CUDA_PATH_CLEAN!\lib\x64\cublas.lib" (
+        set "CUDA_LIB_DIR=!CUDA_PATH_CLEAN!\lib\x64"
     )
-    if not defined CUDA_LIB_DIR if defined CUDAToolkit_ROOT if exist "%CUDAToolkit_ROOT%\lib\x64\cublas.lib" (
-        set "CUDA_LIB_DIR=%CUDAToolkit_ROOT%\lib\x64"
+    if not defined CUDA_LIB_DIR if defined CUDAToolkit_ROOT_CLEAN if exist "!CUDAToolkit_ROOT_CLEAN!\lib\x64\cublas.lib" (
+        set "CUDA_LIB_DIR=!CUDAToolkit_ROOT_CLEAN!\lib\x64"
     )
     if not defined CUDA_LIB_DIR (
         for /f "tokens=1,* delims==" %%A in ('set CUDA_PATH_V 2^>nul') do (
             if not defined CUDA_LIB_DIR (
-                if exist "%%B\lib\x64\cublas.lib" (
-                    set "CUDA_LIB_DIR=%%B\lib\x64"
+                for %%P in ("%%B") do (
+                    if exist "%%~fP\lib\x64\cublas.lib" (
+                        set "CUDA_LIB_DIR=%%~fP\lib\x64"
+                    )
                 )
             )
         )
@@ -107,8 +120,10 @@ if "%CUDA_PRESENT%"=="1" (
     if not defined CUDA_LIB_DIR (
         for /f "delims=" %%D in ('dir /b /ad "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA" 2^>nul ^| sort /R') do (
             if not defined CUDA_LIB_DIR (
-                if exist "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\%%D\lib\x64\cublas.lib" (
-                    set "CUDA_LIB_DIR=%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\%%D\lib\x64"
+                for %%P in ("%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\%%D") do (
+                    if exist "%%~fP\lib\x64\cublas.lib" (
+                        set "CUDA_LIB_DIR=%%~fP\lib\x64"
+                    )
                 )
             )
         )
@@ -124,8 +139,10 @@ if "%CUDA_PRESENT%"=="1" (
         exit /b 1
     )
 
+    for %%P in ("!CUDA_LIB_DIR!") do set "CUDA_LIB_DIR=%%~fP"
     echo ==^> Using CUDA Toolkit libs from "!CUDA_LIB_DIR!"
-    set "CUDA_LIBS=\"!CUDA_LIB_DIR!\cublas.lib\" \"!CUDA_LIB_DIR!\cudart.lib\""
+    set "CUDA_CUBLAS=!CUDA_LIB_DIR!\cublas.lib"
+    set "CUDA_CUDART=!CUDA_LIB_DIR!\cudart.lib"
 )
 
 REM Create temporary file with new content
@@ -151,10 +168,9 @@ set "IN_MARKER_BLOCK=0"
                     echo 	ADDON_LIBS += %%L
                 )
                 REM Output CUDA Toolkit libraries if present
-                if defined CUDA_LIBS (
-                    for %%C in (!CUDA_LIBS!) do (
-                        echo 	ADDON_LIBS += %%C
-                    )
+                if defined CUDA_CUBLAS (
+                    echo 	ADDON_LIBS += "!CUDA_CUBLAS!"
+                    echo 	ADDON_LIBS += "!CUDA_CUDART!"
                 )
                 echo 	# @DIFFUSION_LIBS_END vs
                 REM Skip until end marker
