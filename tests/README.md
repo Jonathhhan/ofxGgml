@@ -21,24 +21,25 @@ cd tests
 
 ### Running Specific Tests
 
-Run tests by tag:
+Use CTest to run a specific test executable:
 
 ```bash
-./build/tests/ofxGgml-tests "[tensor]"       # Only tensor tests
-./build/tests/ofxGgml-tests "[graph]"        # Only graph tests
-./build/tests/ofxGgml-tests "[result]"       # Only result/error tests
-./build/tests/ofxGgml-tests "[core]"         # Only core backend tests
-./build/tests/ofxGgml-tests "[model]"        # Only model loading tests
-./build/tests/ofxGgml-tests "[inference]"    # Only inference tests
-./build/tests/ofxGgml-tests "[integration]"  # Only integration tests
-./build/tests/ofxGgml-tests "[benchmark]"    # Only benchmarks
+ctest --test-dir build/tests -R test_tensor-tests --output-on-failure       # Only tensor tests
+ctest --test-dir build/tests -R test_graph-tests --output-on-failure        # Only graph tests
+ctest --test-dir build/tests -R test_result-tests --output-on-failure       # Only result/error tests
+ctest --test-dir build/tests -R test_core-tests --output-on-failure         # Only core backend tests
+ctest --test-dir build/tests -R test_model-tests --output-on-failure        # Only model loading tests
+ctest --test-dir build/tests -R test_inference-tests --output-on-failure    # Only inference tests
+ctest --test-dir build/tests -R test_integration-tests --output-on-failure  # Only integration tests
+ctest --test-dir build/tests -R test_benchmark-tests --output-on-failure    # Only benchmarks
 ```
 
-Run tests by name pattern:
+Run tests by tag or name pattern within a single executable:
 
 ```bash
-./build/tests/ofxGgml-tests "Tensor creation*"
-./build/tests/ofxGgml-tests "*operations"
+./build/tests/test_tensor-tests "[tensor]"
+./build/tests/test_graph-tests "Tensor creation*"
+./build/tests/test_graph-tests "*operations"
 ```
 
 ### Code Coverage
@@ -53,7 +54,7 @@ cmake -B build -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 
 # Run tests
-./build/ofxGgml-tests
+ctest --test-dir build --output-on-failure
 
 # Generate coverage report
 lcov --capture --directory build --output-file coverage.info --rc lcov_branch_coverage=1
@@ -153,7 +154,7 @@ Benchmarks are marked with `[benchmark][!hide]` and don't run by default.
 To run benchmarks:
 
 ```bash
-./build/tests/ofxGgml-tests "[benchmark]"
+./build/tests/test_benchmark-tests "[benchmark]"
 ```
 
 Benchmarks measure:
@@ -169,6 +170,7 @@ Benchmark results are printed with timing statistics and throughput metrics.
 Create a new test file in `tests/`:
 
 ```cpp
+#define CATCH_CONFIG_MAIN
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
 
@@ -188,8 +190,7 @@ TEST_CASE("My test case", "[mytag]") {
 Add the file to CMakeLists.txt:
 
 ```cmake
-set(TEST_SOURCES
-    test_main.cpp
+set(TEST_FILES
     test_tensor.cpp
     test_graph.cpp
     test_result.cpp

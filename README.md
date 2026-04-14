@@ -416,10 +416,10 @@ ofxGgml includes a comprehensive unit test suite using Catch2.
 cd tests
 ./run-tests.sh
 
-# Run specific test tags
-./build/tests/ofxGgml-tests "[tensor]"
-./build/tests/ofxGgml-tests "[graph]"
-./build/tests/ofxGgml-tests "[result]"
+# Run specific test suites
+ctest --test-dir build/tests -R test_tensor-tests --output-on-failure
+ctest --test-dir build/tests -R test_graph-tests --output-on-failure
+ctest --test-dir build/tests -R test_result-tests --output-on-failure
 ```
 
 ### Test Coverage

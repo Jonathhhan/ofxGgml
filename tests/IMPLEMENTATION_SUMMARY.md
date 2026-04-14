@@ -13,7 +13,6 @@ Successfully implemented high-priority recommendations from the deep code review
 
 **Files Created:**
 - `tests/catch2.hpp` - Catch2 v2.13.10 header-only framework (642KB)
-- `tests/test_main.cpp` - Test runner main function
 - `tests/CMakeLists.txt` - CMake build configuration for tests
 - `tests/run-tests.sh` - Convenience script to build and run tests
 - `tests/README.md` - Comprehensive testing documentation
@@ -185,12 +184,12 @@ cd tests
 ./run-tests.sh
 
 # Run specific test categories
-./build/tests/ofxGgml-tests "[tensor]"
-./build/tests/ofxGgml-tests "[graph]"
-./build/tests/ofxGgml-tests "[result]"
+ctest --test-dir build/tests -R test_tensor-tests --output-on-failure
+ctest --test-dir build/tests -R test_graph-tests --output-on-failure
+ctest --test-dir build/tests -R test_result-tests --output-on-failure
 
 # Run tests matching pattern
-./build/tests/ofxGgml-tests "Matrix operations"
+./build/tests/test_graph-tests "Matrix operations"
 ```
 
 ### Using Result<T> in Code
@@ -232,13 +231,12 @@ float avg = result.valueOr(0.0f);
 - `README.md` (+63 lines)
 - `src/ofxGgml.h` (+2 lines)
 
-**Created (9):**
+**Created (8):**
 - `src/ofxGgmlResult.h` (253 lines)
 - `tests/CMakeLists.txt` (97 lines)
 - `tests/README.md` (134 lines)
 - `tests/catch2.hpp` (18,221 lines - third party)
 - `tests/run-tests.sh` (29 lines)
-- `tests/test_main.cpp` (5 lines)
 - `tests/test_tensor.cpp` (149 lines)
 - `tests/test_graph.cpp` (264 lines)
 - `tests/test_result.cpp` (165 lines)

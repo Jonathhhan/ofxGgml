@@ -305,17 +305,17 @@ cd tests
 
 ### By Category
 ```bash
-./build/tests/ofxGgml-tests "[core]"
-./build/tests/ofxGgml-tests "[model]"
-./build/tests/ofxGgml-tests "[inference]"
-./build/tests/ofxGgml-tests "[integration]"
-./build/tests/ofxGgml-tests "[benchmark]"
+ctest --test-dir build/tests -R test_core-tests --output-on-failure
+ctest --test-dir build/tests -R test_model-tests --output-on-failure
+ctest --test-dir build/tests -R test_inference-tests --output-on-failure
+ctest --test-dir build/tests -R test_integration-tests --output-on-failure
+ctest --test-dir build/tests -R test_benchmark-tests --output-on-failure
 ```
 
 ### Specific Test
 ```bash
-./build/tests/ofxGgml-tests "Matrix multiplication"
-./build/tests/ofxGgml-tests "Backend initialization"
+./build/tests/test_integration-tests "Matrix multiplication"
+./build/tests/test_core-tests "Backend initialization"
 ```
 
 ## Documentation Updates
