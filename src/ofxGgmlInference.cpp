@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -15,20 +15,22 @@
 #include <sstream>
 
 #ifdef _WIN32
-#include <windows.h>
+	#include <windows.h>
 #else
-#include <unistd.h>
-#include <sys/wait.h>
+	#include <sys/wait.h>
+	#include <unistd.h>
 #endif
 
 namespace {
 
 static std::string trim(const std::string & s) {
-size_t b = 0;
-while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
-size_t e = s.size();
-while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
-return s.substr(b, e - b);
+	size_t b = 0;
+	while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b])))
+		++b;
+	size_t e = s.size();
+	while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
+		--e;
+	return s.substr(b, e - b);
 }
 
 /// Strip common llama.cpp warning messages from output.
@@ -43,19 +45,7 @@ static std::string stripLlamaWarnings(const std::string & text) {
 
 	while (std::getline(lines, line)) {
 		// Skip lines that are common llama.cpp warnings
-		if (line.find("warning: no usable GPU found") != std::string::npos ||
-			line.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos ||
-			line.find("warning: consult docs/build.md for compilation instructions") != std::string::npos ||
-			line.find("--gpu-layers option will be ignored") != std::string::npos ||
-			line.find("ggml_cuda_init") != std::string::npos ||
-			line.find("ggml_vulkan_init") != std::string::npos ||
-			line.find("ggml_metal_init") != std::string::npos ||
-			line.find("[INFO]") != std::string::npos ||
-			line.find("Device ") != std::string::npos ||
-			line.find("compute capability") != std::string::npos ||
-			line.find("ofxGgml: discovered") != std::string::npos ||
-			line.find("ofxGgml: ready") != std::string::npos ||
-			line.find("backend device") != std::string::npos) {
+		if (line.find("warning: no usable GPU found") != std::string::npos || line.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos || line.find("warning: consult docs/build.md for compilation instructions") != std::string::npos || line.find("--gpu-layers option will be ignored") != std::string::npos || line.find("ggml_cuda_init") != std::string::npos || line.find("ggml_vulkan_init") != std::string::npos || line.find("ggml_metal_init") != std::string::npos || line.find("[INFO]") != std::string::npos || line.find("Device ") != std::string::npos || line.find("compute capability") != std::string::npos || line.find("ofxGgml: discovered") != std::string::npos || line.find("ofxGgml: ready") != std::string::npos || line.find("backend device") != std::string::npos) {
 			continue;
 		}
 
@@ -65,8 +55,7 @@ static std::string stripLlamaWarnings(const std::string & text) {
 
 	std::string result = filtered.str();
 	// Remove trailing newline if original didn't have one
-	if (!result.empty() && result.back() == '\n' &&
-		(text.empty() || text.back() != '\n')) {
+	if (!result.empty() && result.back() == '\n' && (text.empty() || text.back() != '\n')) {
 		result.pop_back();
 	}
 	return result;
@@ -101,7 +90,7 @@ static bool isValidExecutablePath(const std::string & path) {
 
 	// Check for null bytes and suspicious characters
 	if (path.find('\0') != std::string::npos) return false;
-	if (path.find("..") != std::string::npos) return false;  // Path traversal
+	if (path.find("..") != std::string::npos) return false; // Path traversal
 
 	std::error_code ec;
 	std::filesystem::path fsPath(path);
@@ -125,8 +114,7 @@ static std::string sanitizeArgument(const std::string & arg) {
 
 	for (char c : arg) {
 		// Remove null bytes and control characters (except common whitespace)
-		if (c == '\0' || (std::iscntrl(static_cast<unsigned char>(c)) &&
-		    c != '\t' && c != '\n' && c != '\r')) {
+		if (c == '\0' || (std::iscntrl(static_cast<unsigned char>(c)) && c != '\t' && c != '\n' && c != '\r')) {
 			continue;
 		}
 		result += c;
@@ -172,7 +160,7 @@ static bool runCommandCapture(const std::vector<std::string> & args, std::string
 	exitCode = -1;
 	if (args.empty() || args.front().empty()) return false;
 #ifdef _WIN32
-	SECURITY_ATTRIBUTES sa{};
+	SECURITY_ATTRIBUTES sa {};
 	sa.nLength = sizeof(sa);
 	sa.bInheritHandle = TRUE;
 	sa.lpSecurityDescriptor = nullptr;
@@ -186,17 +174,18 @@ static bool runCommandCapture(const std::vector<std::string> & args, std::string
 		return false;
 	}
 
-	STARTUPINFOA si{};
+	STARTUPINFOA si {};
 	si.cb = sizeof(si);
 	si.dwFlags = STARTF_USESTDHANDLES;
 	HANDLE nullInput = CreateFileA("NUL", GENERIC_READ, 0, &sa,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	si.hStdInput = (nullInput != INVALID_HANDLE_VALUE)
-		? nullInput : GetStdHandle(STD_INPUT_HANDLE);
+		? nullInput
+		: GetStdHandle(STD_INPUT_HANDLE);
 	si.hStdOutput = writePipe;
 	si.hStdError = writePipe;
 
-	PROCESS_INFORMATION pi{};
+	PROCESS_INFORMATION pi {};
 	std::string cmdLine;
 	for (size_t i = 0; i < args.size(); ++i) {
 		if (i > 0) cmdLine.push_back(' ');
@@ -215,8 +204,7 @@ static bool runCommandCapture(const std::vector<std::string> & args, std::string
 		nullptr,
 		nullptr,
 		&si,
-		&pi
-	);
+		&pi);
 	CloseHandle(writePipe);
 	if (nullInput != INVALID_HANDLE_VALUE) {
 		CloseHandle(nullInput);
@@ -226,7 +214,7 @@ static bool runCommandCapture(const std::vector<std::string> & args, std::string
 		return false;
 	}
 
-	std::array<char, 4096> buf{};
+	std::array<char, 4096> buf {};
 	DWORD bytesRead = 0;
 	while (ReadFile(readPipe, buf.data(), static_cast<DWORD>(buf.size()), &bytesRead, nullptr) && bytesRead > 0) {
 		output.append(buf.data(), bytesRead);
@@ -240,7 +228,7 @@ static bool runCommandCapture(const std::vector<std::string> & args, std::string
 	CloseHandle(pi.hThread);
 	exitCode = static_cast<int>(code);
 #else
-	int pipeFds[2] = {-1, -1};
+	int pipeFds[2] = { -1, -1 };
 	if (pipe(pipeFds) != 0) {
 		return false;
 	}
@@ -270,7 +258,7 @@ static bool runCommandCapture(const std::vector<std::string> & args, std::string
 	}
 
 	close(pipeFds[1]);
-	std::array<char, 4096> buf{};
+	std::array<char, 4096> buf {};
 	ssize_t bytesRead = 0;
 	while ((bytesRead = read(pipeFds[0], buf.data(), buf.size())) > 0) {
 		output.append(buf.data(), static_cast<size_t>(bytesRead));
@@ -316,12 +304,11 @@ static std::string makeTempPath(const char * prefix, const char * ext) {
 		HANDLE hFile = CreateFileW(
 			candidate.c_str(),
 			GENERIC_WRITE,
-			0,  // No sharing
+			0, // No sharing
 			NULL,
-			CREATE_NEW,  // Fails if file exists (atomic check-and-create)
+			CREATE_NEW, // Fails if file exists (atomic check-and-create)
 			FILE_ATTRIBUTE_NORMAL,
-			NULL
-		);
+			NULL);
 		if (hFile != INVALID_HANDLE_VALUE) {
 			CloseHandle(hFile);
 			return candidate.string();
@@ -356,37 +343,37 @@ static uint32_t makeRandomSeed() {
 }
 
 static bool writeTextFile(const std::string & path, const std::string & text) {
-std::ofstream out(path, std::ios::binary);
-if (!out.is_open()) return false;
-out << text;
-return out.good();
+	std::ofstream out(path, std::ios::binary);
+	if (!out.is_open()) return false;
+	out << text;
+	return out.good();
 }
 
 struct ThreadLocalTempFile {
-std::string path;
-~ThreadLocalTempFile() {
-if (path.empty()) return;
-std::error_code ec;
-std::filesystem::remove(path, ec);
-}
+	std::string path;
+	~ThreadLocalTempFile() {
+		if (path.empty()) return;
+		std::error_code ec;
+		std::filesystem::remove(path, ec);
+	}
 };
 
 static bool writeReusableTempTextFile(
-ThreadLocalTempFile & slot,
-const char * prefix,
-const std::string & text,
-std::string & outPath) {
-if (slot.path.empty()) {
-slot.path = makeTempPath(prefix, ".txt");
-}
-if (!writeTextFile(slot.path, text)) {
-slot.path = makeTempPath(prefix, ".txt");
-if (!writeTextFile(slot.path, text)) {
-return false;
-}
-}
-outPath = slot.path;
-return true;
+	ThreadLocalTempFile & slot,
+	const char * prefix,
+	const std::string & text,
+	std::string & outPath) {
+	if (slot.path.empty()) {
+		slot.path = makeTempPath(prefix, ".txt");
+	}
+	if (!writeTextFile(slot.path, text)) {
+		slot.path = makeTempPath(prefix, ".txt");
+		if (!writeTextFile(slot.path, text)) {
+			return false;
+		}
+	}
+	outPath = slot.path;
+	return true;
 }
 
 /// Extracts float values from a JSON array into the output vector.
@@ -508,7 +495,7 @@ static int parseVerbosePromptTokenCount(const std::string & raw) {
 
 		// Check for "token" keyword (case-insensitive, inline comparison)
 		// More efficient than creating a lowercase copy of entire line
-		const char* tokenKeyword = "token";
+		const char * tokenKeyword = "token";
 		size_t pos = 0;
 		bool foundToken = false;
 		while (pos + 5 <= line.size()) {
@@ -560,270 +547,266 @@ static int parseVerbosePromptTokenCount(const std::string & raw) {
 } // namespace
 
 ofxGgmlInference::ofxGgmlInference()
-: m_completionExe("llama-cli")
-, m_embeddingExe("llama-embedding") {}
+	: m_completionExe("llama-cli")
+	, m_embeddingExe("llama-embedding") { }
 
 void ofxGgmlInference::setCompletionExecutable(const std::string & path) {
-m_completionExe = path;
+	m_completionExe = path;
 }
 
 void ofxGgmlInference::setEmbeddingExecutable(const std::string & path) {
-m_embeddingExe = path;
+	m_embeddingExe = path;
 }
 
 const std::string & ofxGgmlInference::getCompletionExecutable() const {
-return m_completionExe;
+	return m_completionExe;
 }
 
 const std::string & ofxGgmlInference::getEmbeddingExecutable() const {
-return m_embeddingExe;
+	return m_embeddingExe;
 }
 
 ofxGgmlInferenceResult ofxGgmlInference::generate(
-const std::string & modelPath,
-const std::string & prompt,
-const ofxGgmlInferenceSettings & settings) const {
-ofxGgmlInferenceResult result;
-if (modelPath.empty()) {
-result.error = "model path is empty";
-return result;
-}
-if (m_completionExe.empty()) {
-result.error = "completion executable path is empty";
-return result;
-}
-
-// Security: Validate model path
-if (!isValidFilePath(modelPath)) {
-	result.error = "invalid or inaccessible model path: " + modelPath;
-	return result;
-}
-
-// Security: Validate executable path
-if (!isValidExecutablePath(m_completionExe)) {
-	result.error = "invalid or inaccessible completion executable: " + m_completionExe;
-	return result;
-}
-
-// Security: Sanitize prompt
-std::string sanitizedPrompt = sanitizeArgument(prompt);
-if (sanitizedPrompt.empty() && !prompt.empty()) {
-	result.error = "prompt contains only invalid characters";
-	return result;
-}
-
-const auto t0 = std::chrono::steady_clock::now();
-static thread_local ThreadLocalTempFile promptTempFile;
-std::string promptPath;
-if (!writeReusableTempTextFile(promptTempFile, "ofxggml_prompt_", sanitizedPrompt, promptPath)) {
-result.error = "failed to write temp prompt file";
-return result;
-}
-
-std::vector<std::string> args = {
-m_completionExe,
-"-m", modelPath,
-"--file", promptPath,
-"-n", std::to_string(std::clamp(settings.maxTokens, 1, 8192)),
-"-c", std::to_string(std::clamp(settings.contextSize, 128, 131072)),
-"-b", std::to_string(std::clamp(settings.batchSize, 1, 8192)),
-"-ngl", std::to_string(std::max(0, settings.gpuLayers)),
-"--temp", std::to_string(std::clamp(settings.temperature, 0.0f, 3.0f)),
-"--top-p", std::to_string(std::clamp(settings.topP, 0.0f, 1.0f)),
-"--repeat-penalty", std::to_string(std::clamp(settings.repeatPenalty, 1.0f, 3.0f)),
-"--no-display-prompt",
-"--log-disable"
-};
-
-if (settings.simpleIo) {
-args.push_back("--simple-io");
-}
-if (settings.threads > 0) {
-args.push_back("--threads");
-args.push_back(std::to_string(std::clamp(settings.threads, 1, 256)));
-}
-if (settings.seed >= 0) {
-args.push_back("--seed");
-args.push_back(std::to_string(settings.seed));
-}
-if (!settings.promptCachePath.empty()) {
-	// Security: Validate cache path if it exists, or allow creation of new file
-	std::error_code ec;
-	std::filesystem::path cachePath(settings.promptCachePath);
-	if (std::filesystem::exists(cachePath, ec)) {
-		if (!isValidFilePath(settings.promptCachePath)) {
-			result.error = "invalid prompt cache path: " + settings.promptCachePath;
-			return result;
-		}
-	}
-	args.push_back("--prompt-cache");
-	args.push_back(settings.promptCachePath);
-	if (settings.promptCacheAll) {
-		args.push_back("--prompt-cache-all");
-	}
-}
-if (!settings.jsonSchema.empty()) {
-	// Security: Sanitize JSON schema
-	std::string sanitizedSchema = sanitizeArgument(settings.jsonSchema);
-	args.push_back("--json-schema");
-	args.push_back(sanitizedSchema);
-}
-if (!settings.grammarPath.empty()) {
-	// Security: Validate grammar file path
-	if (!isValidFilePath(settings.grammarPath)) {
-		result.error = "invalid grammar file path: " + settings.grammarPath;
+	const std::string & modelPath,
+	const std::string & prompt,
+	const ofxGgmlInferenceSettings & settings) const {
+	ofxGgmlInferenceResult result;
+	if (modelPath.empty()) {
+		result.error = "model path is empty";
 		return result;
 	}
-	args.push_back("--grammar-file");
-	args.push_back(settings.grammarPath);
-}
-
-std::string raw;
-int exitCode = -1;
-const bool started = runCommandCapture(args, raw, exitCode);
-
-if (!started) {
-result.error = "failed to start llama completion process";
-return result;
-}
-
-// Strip warnings before checking exit code and output
-raw = stripLlamaWarnings(raw);
-
-// Exit code 130 (128 + SIGINT) specifically indicates SIGINT, often from EOF on stdin
-// or Ctrl+C. This is frequently benign even without output (e.g., initialization only).
-// For other exit codes, only treat as benign if we have actual output.
-if (exitCode != 0) {
-	const bool isSigint = (exitCode == 130);
-	const bool hasOutput = !trim(raw).empty();
-	const bool benignExit =
-		isSigint                          // SIGINT (EOF on stdin) - benign even without output
-		|| (hasOutput && (
-			exitCode == -1073740791        // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
-			|| exitCode == -1073741819     // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
-			|| exitCode == 1               // generic error (may occur during cleanup)
-			|| exitCode == -1              // signal-killed on POSIX
-			|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
-		));
-	if (benignExit) {
-		exitCode = 0;
+	if (m_completionExe.empty()) {
+		result.error = "completion executable path is empty";
+		return result;
 	}
-}
 
-if (exitCode != 0) {
-result.error = trim(raw);
-if (result.error.empty()) {
-result.error = "llama completion failed with exit code " + std::to_string(exitCode);
-}
-return result;
-}
+	// Security: Validate model path
+	if (!isValidFilePath(modelPath)) {
+		result.error = "invalid or inaccessible model path: " + modelPath;
+		return result;
+	}
 
-result.success = true;
-result.text = trim(raw);
-const auto t1 = std::chrono::steady_clock::now();
-result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
-return result;
+	// Security: Validate executable path
+	if (!isValidExecutablePath(m_completionExe)) {
+		result.error = "invalid or inaccessible completion executable: " + m_completionExe;
+		return result;
+	}
+
+	// Security: Sanitize prompt
+	std::string sanitizedPrompt = sanitizeArgument(prompt);
+	if (sanitizedPrompt.empty() && !prompt.empty()) {
+		result.error = "prompt contains only invalid characters";
+		return result;
+	}
+
+	const auto t0 = std::chrono::steady_clock::now();
+	static thread_local ThreadLocalTempFile promptTempFile;
+	std::string promptPath;
+	if (!writeReusableTempTextFile(promptTempFile, "ofxggml_prompt_", sanitizedPrompt, promptPath)) {
+		result.error = "failed to write temp prompt file";
+		return result;
+	}
+
+	std::vector<std::string> args = {
+		m_completionExe,
+		"-m", modelPath,
+		"--file", promptPath,
+		"-n", std::to_string(std::clamp(settings.maxTokens, 1, 8192)),
+		"-c", std::to_string(std::clamp(settings.contextSize, 128, 131072)),
+		"-b", std::to_string(std::clamp(settings.batchSize, 1, 8192)),
+		"-ngl", std::to_string(std::max(0, settings.gpuLayers)),
+		"--temp", std::to_string(std::clamp(settings.temperature, 0.0f, 3.0f)),
+		"--top-p", std::to_string(std::clamp(settings.topP, 0.0f, 1.0f)),
+		"--repeat-penalty", std::to_string(std::clamp(settings.repeatPenalty, 1.0f, 3.0f)),
+		"--no-display-prompt",
+		"--log-disable"
+	};
+
+	if (settings.simpleIo) {
+		args.push_back("--simple-io");
+	}
+	if (settings.threads > 0) {
+		args.push_back("--threads");
+		args.push_back(std::to_string(std::clamp(settings.threads, 1, 256)));
+	}
+	if (settings.seed >= 0) {
+		args.push_back("--seed");
+		args.push_back(std::to_string(settings.seed));
+	}
+	if (!settings.promptCachePath.empty()) {
+		// Security: Validate cache path if it exists, or allow creation of new file
+		std::error_code ec;
+		std::filesystem::path cachePath(settings.promptCachePath);
+		if (std::filesystem::exists(cachePath, ec)) {
+			if (!isValidFilePath(settings.promptCachePath)) {
+				result.error = "invalid prompt cache path: " + settings.promptCachePath;
+				return result;
+			}
+		}
+		args.push_back("--prompt-cache");
+		args.push_back(settings.promptCachePath);
+		if (settings.promptCacheAll) {
+			args.push_back("--prompt-cache-all");
+		}
+	}
+	if (!settings.jsonSchema.empty()) {
+		// Security: Sanitize JSON schema
+		std::string sanitizedSchema = sanitizeArgument(settings.jsonSchema);
+		args.push_back("--json-schema");
+		args.push_back(sanitizedSchema);
+	}
+	if (!settings.grammarPath.empty()) {
+		// Security: Validate grammar file path
+		if (!isValidFilePath(settings.grammarPath)) {
+			result.error = "invalid grammar file path: " + settings.grammarPath;
+			return result;
+		}
+		args.push_back("--grammar-file");
+		args.push_back(settings.grammarPath);
+	}
+
+	std::string raw;
+	int exitCode = -1;
+	const bool started = runCommandCapture(args, raw, exitCode);
+
+	if (!started) {
+		result.error = "failed to start llama completion process";
+		return result;
+	}
+
+	// Strip warnings before checking exit code and output
+	raw = stripLlamaWarnings(raw);
+
+	// Exit code 130 (128 + SIGINT) specifically indicates SIGINT, often from EOF on stdin
+	// or Ctrl+C. This is frequently benign even without output (e.g., initialization only).
+	// For other exit codes, only treat as benign if we have actual output.
+	if (exitCode != 0) {
+		const bool isSigint = (exitCode == 130);
+		const bool hasOutput = !trim(raw).empty();
+		const bool benignExit = isSigint // SIGINT (EOF on stdin) - benign even without output
+			|| (hasOutput && (exitCode == -1073740791 // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
+					|| exitCode == -1073741819 // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
+					|| exitCode == 1 // generic error (may occur during cleanup)
+					|| exitCode == -1 // signal-killed on POSIX
+					|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
+					));
+		if (benignExit) {
+			exitCode = 0;
+		}
+	}
+
+	if (exitCode != 0) {
+		result.error = trim(raw);
+		if (result.error.empty()) {
+			result.error = "llama completion failed with exit code " + std::to_string(exitCode);
+		}
+		return result;
+	}
+
+	result.success = true;
+	result.text = trim(raw);
+	const auto t1 = std::chrono::steady_clock::now();
+	result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
+	return result;
 }
 
 ofxGgmlEmbeddingResult ofxGgmlInference::embed(
-const std::string & modelPath,
-const std::string & text,
-const ofxGgmlEmbeddingSettings & settings) const {
-ofxGgmlEmbeddingResult result;
-if (modelPath.empty()) {
-result.error = "model path is empty";
-return result;
-}
-if (m_embeddingExe.empty()) {
-result.error = "embedding executable path is empty";
-return result;
-}
-
-// Security: Validate model path
-if (!isValidFilePath(modelPath)) {
-	result.error = "invalid or inaccessible model path: " + modelPath;
-	return result;
-}
-
-// Security: Validate executable path
-if (!isValidExecutablePath(m_embeddingExe)) {
-	result.error = "invalid or inaccessible embedding executable: " + m_embeddingExe;
-	return result;
-}
-
-// Security: Sanitize input text
-std::string sanitizedText = sanitizeArgument(text);
-if (sanitizedText.empty() && !text.empty()) {
-	result.error = "text contains only invalid characters";
-	return result;
-}
-
-static thread_local ThreadLocalTempFile promptTempFile;
-std::string promptPath;
-if (!writeReusableTempTextFile(promptTempFile, "ofxggml_embed_", sanitizedText, promptPath)) {
-result.error = "failed to write temp embedding prompt file";
-return result;
-}
-
-std::vector<std::string> args = {
-m_embeddingExe,
-"-m", modelPath,
-"--file", promptPath,
-"--embd-output-format", "json",
-"--pooling", settings.pooling,
-"--log-disable"
-};
-if (settings.normalize) {
-args.push_back("--embd-normalize");
-}
-
-std::string raw;
-int exitCode = -1;
-const bool started = runCommandCapture(args, raw, exitCode);
-
-if (!started) {
-result.error = "failed to start llama embedding process";
-return result;
-}
-
-// Strip warnings before checking exit code and parsing
-raw = stripLlamaWarnings(raw);
-
-// Exit code 130 (128 + SIGINT) specifically indicates SIGINT, often from EOF on stdin
-// or Ctrl+C. This is frequently benign even without output (e.g., initialization only).
-// For other exit codes, only treat as benign if we have actual output.
-if (exitCode != 0) {
-	const bool isSigint = (exitCode == 130);
-	const bool hasOutput = !trim(raw).empty();
-	const bool benignExit =
-		isSigint                          // SIGINT (EOF on stdin) - benign even without output
-		|| (hasOutput && (
-			exitCode == -1073740791        // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
-			|| exitCode == -1073741819     // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
-			|| exitCode == 1               // generic error (may occur during cleanup)
-			|| exitCode == -1              // signal-killed on POSIX
-			|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
-		));
-	if (benignExit) {
-		exitCode = 0;
+	const std::string & modelPath,
+	const std::string & text,
+	const ofxGgmlEmbeddingSettings & settings) const {
+	ofxGgmlEmbeddingResult result;
+	if (modelPath.empty()) {
+		result.error = "model path is empty";
+		return result;
 	}
-}
+	if (m_embeddingExe.empty()) {
+		result.error = "embedding executable path is empty";
+		return result;
+	}
 
-if (exitCode != 0) {
-result.error = trim(raw);
-if (result.error.empty()) {
-result.error = "llama embedding failed with exit code " + std::to_string(exitCode);
-}
-return result;
-}
+	// Security: Validate model path
+	if (!isValidFilePath(modelPath)) {
+		result.error = "invalid or inaccessible model path: " + modelPath;
+		return result;
+	}
 
-if (!parseEmbeddingVector(raw, result.embedding)) {
-result.error = "failed to parse embedding output";
-return result;
-}
+	// Security: Validate executable path
+	if (!isValidExecutablePath(m_embeddingExe)) {
+		result.error = "invalid or inaccessible embedding executable: " + m_embeddingExe;
+		return result;
+	}
 
-result.success = true;
-return result;
+	// Security: Sanitize input text
+	std::string sanitizedText = sanitizeArgument(text);
+	if (sanitizedText.empty() && !text.empty()) {
+		result.error = "text contains only invalid characters";
+		return result;
+	}
+
+	static thread_local ThreadLocalTempFile promptTempFile;
+	std::string promptPath;
+	if (!writeReusableTempTextFile(promptTempFile, "ofxggml_embed_", sanitizedText, promptPath)) {
+		result.error = "failed to write temp embedding prompt file";
+		return result;
+	}
+
+	std::vector<std::string> args = {
+		m_embeddingExe,
+		"-m", modelPath,
+		"--file", promptPath,
+		"--embd-output-format", "json",
+		"--pooling", settings.pooling,
+		"--log-disable"
+	};
+	if (settings.normalize) {
+		args.push_back("--embd-normalize");
+	}
+
+	std::string raw;
+	int exitCode = -1;
+	const bool started = runCommandCapture(args, raw, exitCode);
+
+	if (!started) {
+		result.error = "failed to start llama embedding process";
+		return result;
+	}
+
+	// Strip warnings before checking exit code and parsing
+	raw = stripLlamaWarnings(raw);
+
+	// Exit code 130 (128 + SIGINT) specifically indicates SIGINT, often from EOF on stdin
+	// or Ctrl+C. This is frequently benign even without output (e.g., initialization only).
+	// For other exit codes, only treat as benign if we have actual output.
+	if (exitCode != 0) {
+		const bool isSigint = (exitCode == 130);
+		const bool hasOutput = !trim(raw).empty();
+		const bool benignExit = isSigint // SIGINT (EOF on stdin) - benign even without output
+			|| (hasOutput && (exitCode == -1073740791 // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
+					|| exitCode == -1073741819 // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
+					|| exitCode == 1 // generic error (may occur during cleanup)
+					|| exitCode == -1 // signal-killed on POSIX
+					|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
+					));
+		if (benignExit) {
+			exitCode = 0;
+		}
+	}
+
+	if (exitCode != 0) {
+		result.error = trim(raw);
+		if (result.error.empty()) {
+			result.error = "llama embedding failed with exit code " + std::to_string(exitCode);
+		}
+		return result;
+	}
+
+	if (!parseEmbeddingVector(raw, result.embedding)) {
+		result.error = "failed to parse embedding output";
+		return result;
+	}
+
+	result.success = true;
+	return result;
 }
 
 int ofxGgmlInference::countPromptTokens(
@@ -870,81 +853,82 @@ int ofxGgmlInference::countPromptTokens(
 }
 
 std::vector<std::string> ofxGgmlInference::tokenize(const std::string & text) {
-std::vector<std::string> tokens;
-std::istringstream iss(text);
-std::string tok;
-while (iss >> tok) {
-tokens.push_back(tok);
-}
-return tokens;
+	std::vector<std::string> tokens;
+	std::istringstream iss(text);
+	std::string tok;
+	while (iss >> tok) {
+		tokens.push_back(tok);
+	}
+	return tokens;
 }
 
 std::string ofxGgmlInference::detokenize(const std::vector<std::string> & tokens) {
-std::ostringstream oss;
-for (size_t i = 0; i < tokens.size(); ++i) {
-if (i > 0) oss << ' ';
-oss << tokens[i];
-}
-return oss.str();
+	std::ostringstream oss;
+	for (size_t i = 0; i < tokens.size(); ++i) {
+		if (i > 0) oss << ' ';
+		oss << tokens[i];
+	}
+	return oss.str();
 }
 
 int ofxGgmlInference::sampleFromLogits(
-const std::vector<float> & logits,
-float temperature,
-float topP,
-uint32_t seed) {
-if (logits.empty()) return -1;
-if (!std::isfinite(temperature) || temperature <= 0.0f) {
-return static_cast<int>(std::distance(logits.begin(), std::max_element(logits.begin(), logits.end())));
-}
+	const std::vector<float> & logits,
+	float temperature,
+	float topP,
+	uint32_t seed) {
+	if (logits.empty()) return -1;
+	if (!std::isfinite(temperature) || temperature <= 0.0f) {
+		return static_cast<int>(std::distance(logits.begin(), std::max_element(logits.begin(), logits.end())));
+	}
 
-const float maxLogit = *std::max_element(logits.begin(), logits.end());
-std::vector<float> probs(logits.size(), 0.0f);
-float sum = 0.0f;
-for (size_t i = 0; i < logits.size(); ++i) {
-const float z = (logits[i] - maxLogit) / temperature;
-const float p = std::exp(z);
-probs[i] = std::isfinite(p) ? p : 0.0f;
-sum += probs[i];
-}
-if (sum <= 0.0f) {
-return static_cast<int>(std::distance(logits.begin(), std::max_element(logits.begin(), logits.end())));
-}
-for (float & p : probs) p /= sum;
+	const float maxLogit = *std::max_element(logits.begin(), logits.end());
+	std::vector<float> probs(logits.size(), 0.0f);
+	float sum = 0.0f;
+	for (size_t i = 0; i < logits.size(); ++i) {
+		const float z = (logits[i] - maxLogit) / temperature;
+		const float p = std::exp(z);
+		probs[i] = std::isfinite(p) ? p : 0.0f;
+		sum += probs[i];
+	}
+	if (sum <= 0.0f) {
+		return static_cast<int>(std::distance(logits.begin(), std::max_element(logits.begin(), logits.end())));
+	}
+	for (float & p : probs)
+		p /= sum;
 
-std::vector<size_t> idx(probs.size());
-std::iota(idx.begin(), idx.end(), static_cast<size_t>(0));
-std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return probs[a] > probs[b]; });
+	std::vector<size_t> idx(probs.size());
+	std::iota(idx.begin(), idx.end(), static_cast<size_t>(0));
+	std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return probs[a] > probs[b]; });
 
-topP = std::clamp(topP, 0.0f, 1.0f);
-if (topP <= 0.0f) {
-return static_cast<int>(idx.front());
-}
+	topP = std::clamp(topP, 0.0f, 1.0f);
+	if (topP <= 0.0f) {
+		return static_cast<int>(idx.front());
+	}
 
-std::vector<double> filtered;
-std::vector<size_t> filteredIdx;
-filtered.reserve(probs.size());
-filteredIdx.reserve(probs.size());
-float cum = 0.0f;
-for (size_t i : idx) {
-filtered.push_back(probs[i]);
-filteredIdx.push_back(i);
-cum += probs[i];
-if (cum >= topP) break;
-}
+	std::vector<double> filtered;
+	std::vector<size_t> filteredIdx;
+	filtered.reserve(probs.size());
+	filteredIdx.reserve(probs.size());
+	float cum = 0.0f;
+	for (size_t i : idx) {
+		filtered.push_back(probs[i]);
+		filteredIdx.push_back(i);
+		cum += probs[i];
+		if (cum >= topP) break;
+	}
 
 	std::mt19937 rng(seed == 0 ? makeRandomSeed() : seed);
-std::discrete_distribution<size_t> dist(filtered.begin(), filtered.end());
-return static_cast<int>(filteredIdx[dist(rng)]);
+	std::discrete_distribution<size_t> dist(filtered.begin(), filtered.end());
+	return static_cast<int>(filteredIdx[dist(rng)]);
 }
 
 void ofxGgmlEmbeddingIndex::clear() {
-m_entries.clear();
+	m_entries.clear();
 }
 
 void ofxGgmlEmbeddingIndex::add(const std::string & id, const std::string & text, const std::vector<float> & embedding) {
-if (embedding.empty()) return;
-m_entries.push_back({ id, text, embedding });
+	if (embedding.empty()) return;
+	m_entries.push_back({ id, text, embedding });
 }
 
 std::vector<ofxGgmlSimilarityHit> ofxGgmlEmbeddingIndex::search(const std::vector<float> & queryEmbedding, size_t topK) const {
@@ -970,17 +954,17 @@ std::vector<ofxGgmlSimilarityHit> ofxGgmlEmbeddingIndex::search(const std::vecto
 }
 
 float ofxGgmlEmbeddingIndex::cosineSimilarity(const std::vector<float> & a, const std::vector<float> & b) {
-if (a.empty() || b.empty() || a.size() != b.size()) return 0.0f;
-double dot = 0.0;
-double na = 0.0;
-double nb = 0.0;
-for (size_t i = 0; i < a.size(); ++i) {
-const double da = a[i];
-const double db = b[i];
-dot += da * db;
-na += da * da;
-nb += db * db;
-}
-if (na <= 0.0 || nb <= 0.0) return 0.0f;
-return static_cast<float>(dot / (std::sqrt(na) * std::sqrt(nb)));
+	if (a.empty() || b.empty() || a.size() != b.size()) return 0.0f;
+	double dot = 0.0;
+	double na = 0.0;
+	double nb = 0.0;
+	for (size_t i = 0; i < a.size(); ++i) {
+		const double da = a[i];
+		const double db = b[i];
+		dot += da * db;
+		na += da * da;
+		nb += db * db;
+	}
+	if (na <= 0.0 || nb <= 0.0) return 0.0f;
+	return static_cast<float>(dot / (std::sqrt(na) * std::sqrt(nb)));
 }
