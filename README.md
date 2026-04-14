@@ -368,6 +368,7 @@ Build the tools with:
 | `scripts/setup_windows.bat` | **Windows setup**: builds ggml + downloads models |
 | `scripts/build-ggml.sh` | Build the bundled ggml library (Linux/macOS, `--auto` by default) |
 | `scripts/build-ggml.bat` | Build the bundled ggml library (Windows/VS, `--auto` default) |
+| `scripts/update-addon-config.bat` | **Windows only**: Update `addon_config.mk` with built libraries (fixes linker errors) |
 | `scripts/update-ggml-source.sh` | Update bundled ggml source to latest upstream |
 | `scripts/build-llama-cli.sh` | Clone, compile, and install llama.cpp CLI tools |
 | `scripts/download-model.sh` | Download GGUF model presets |
@@ -482,6 +483,28 @@ The GUI example searches for `llama-completion`, `llama-cli`, or `llama` in:
 5. Common directories (`/usr/local/bin`, `~/.local/bin`)
 
 Build with: `./scripts/build-llama-cli.sh`
+
+### Visual Studio linker error: unresolved external symbol "ggml_backend_cuda_reg"
+
+This error occurs when ggml was built with CUDA support, but the `addon_config.mk` file doesn't include the CUDA library in the link list.
+
+**Solution 1 (Automatic):** Run the update script to scan built libraries and update the config:
+
+```bat
+scripts\update-addon-config.bat
+```
+
+Then regenerate your Visual Studio project with the openFrameworks Project Generator.
+
+**Solution 2 (Rebuild):** Re-run the build script, which now automatically updates the addon config:
+
+```bat
+scripts\build-ggml.bat
+```
+
+Then regenerate your Visual Studio project with the openFrameworks Project Generator.
+
+**Note:** This issue was fixed in recent versions. If you built ggml before this fix, use one of the solutions above to update your configuration.
 
 ## Extending the Addon
 
