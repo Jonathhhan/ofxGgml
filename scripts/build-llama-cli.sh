@@ -243,19 +243,27 @@ CMAKE_ARGS=(
 	-DLLAMA_CURL=OFF
 )
 
+# Explicitly set all GPU backends to prevent llama.cpp's CMake from auto-detecting
+# and failing when dependencies are incomplete (e.g., Vulkan without glslc).
 if [[ "$ENABLE_CUDA" -eq 1 ]]; then
 	write_step "CUDA backend enabled."
 	CMAKE_ARGS+=(-DGGML_CUDA=ON)
+else
+	CMAKE_ARGS+=(-DGGML_CUDA=OFF)
 fi
 
 if [[ "$ENABLE_VULKAN" -eq 1 ]]; then
 	write_step "Vulkan backend enabled."
 	CMAKE_ARGS+=(-DGGML_VULKAN=ON)
+else
+	CMAKE_ARGS+=(-DGGML_VULKAN=OFF)
 fi
 
 if [[ "$ENABLE_METAL" -eq 1 ]]; then
 	write_step "Metal backend enabled."
 	CMAKE_ARGS+=(-DGGML_METAL=ON)
+else
+	CMAKE_ARGS+=(-DGGML_METAL=OFF)
 fi
 
 CONFIGURE_LOG="$(mktemp "${TMPDIR:-/tmp}/ofxggml-llama-configure.XXXXXX")"
