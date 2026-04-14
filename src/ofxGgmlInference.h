@@ -71,15 +71,21 @@ const std::string & prompt,
 const ofxGgmlInferenceSettings & settings = {}) const;
 
 ofxGgmlEmbeddingResult embed(
-const std::string & modelPath,
-const std::string & text,
-const ofxGgmlEmbeddingSettings & settings = {}) const;
+	const std::string & modelPath,
+	const std::string & text,
+	const ofxGgmlEmbeddingSettings & settings = {}) const;
+
+/// Count tokens for a given text using the model's tokenizer. Returns
+/// -1 on failure (e.g. missing executable or model file).
+int countPromptTokens(
+	const std::string & modelPath,
+	const std::string & text) const;
 
 static std::vector<std::string> tokenize(const std::string & text);
 static std::string detokenize(const std::vector<std::string> & tokens);
 static int sampleFromLogits(
-const std::vector<float> & logits,
-float temperature = 1.0f,
+	const std::vector<float> & logits,
+	float temperature = 1.0f,
 float topP = 1.0f,
 uint32_t seed = 0);
 

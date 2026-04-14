@@ -7,9 +7,11 @@
 #include <atomic>
 #include <deque>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -56,6 +58,31 @@ struct ScriptLanguage {
 	std::string name;          // e.g. "C++"
 	std::string fileExt;       // e.g. ".cpp"
 	std::string systemPrompt;  // language-specific system prompt prefix
+};
+
+// ---------------------------------------------------------------------------
+// ScriptFileReviewInfo — precomputed data for hierarchical review.
+// ---------------------------------------------------------------------------
+
+struct ScriptFileReviewInfo {
+	std::string name;
+	std::string fullPath;
+	std::string content;
+	std::string truncatedContent;
+	std::vector<std::string> dependencies;
+	size_t loc = 0;
+	size_t complexity = 0;
+	size_t dependencyFanOut = 0;
+	size_t dependencyFanIn = 0;
+	float recencyScore = 0.0f;
+	float importanceScore = 0.0f;
+	float similarityScore = 0.0f;
+	float priorityScore = 0.0f;
+	int tokenCount = 0;
+	bool truncated = false;
+	bool selected = false;
+	std::vector<float> embedding;
+	std::string summary;
 };
 
 // ---------------------------------------------------------------------------
@@ -178,6 +205,10 @@ private:
 	int selectedScriptFileIndex = -1;
 	ofxGgmlProjectMemory scriptProjectMemory;
 	std::string lastScriptRequest;
+	ofxGgmlInference scriptReviewInference;
+	ofxGgmlEmbeddingIndex scriptEmbeddingIndex;
+	std::vector<ScriptFileReviewInfo> lastScriptReviewFiles;
+	std::string lastScriptReviewStatus;
 
 	std::string buildScriptFilename() const;
 
@@ -196,6 +227,7 @@ private:
 	void syncSelectedBackendIndex();
 	void runInference(AiMode mode, const std::string & userText,
 		const std::string & systemPrompt = "");
+	void runHierarchicalReview();
 	bool runRealInference(const std::string & prompt, std::string & output, std::string & error,
 		std::function<void(const std::string &)> onStreamData = nullptr);
 	std::string buildPromptForMode(AiMode mode, const std::string & userText,
@@ -223,4 +255,33 @@ private:
 	void applyTheme(int index);
 	void copyToClipboard(const std::string & text);
 	void exportChatHistory(const std::string & path);
+
+	// -- hierarchical review helpers --
+	std::vector<ScriptFileReviewInfo> collectScriptFilesForReview(std::string & status);
+	void computeFileHeuristics(std::vector<ScriptFileReviewInfo> & files,
+		const std::string & baseFolder);
+	void computeDependencyFanIn(std::vector<ScriptFileReviewInfo> & files);
+	int countTokensAccurate(const std::string & text, int fallback = -1);
+	std::string buildRepoTableOfContents(const std::vector<ScriptFileReviewInfo> & files,
+		size_t maxFiles) const;
+	std::string buildRepoTree(const std::vector<ScriptFileReviewInfo> & files) const;
+	std::vector<ScriptFileReviewInfo *> selectFilesForReview(
+		std::vector<ScriptFileReviewInfo> & files,
+		const std::string & reviewQuery,
+		int availableTokens,
+		int responseReserveTokens);
+	std::string runFileSummary(const ScriptFileReviewInfo & info,
+		const std::string & reviewQuery,
+		int perFileBudget,
+		const std::string & modelPath);
+	std::string runArchitectureReview(
+		const std::vector<ScriptFileReviewInfo> & files,
+		const std::string & repoTree,
+		const std::string & reviewQuery,
+		const std::string & modelPath);
+	std::string runIntegrationReview(
+		const std::vector<ScriptFileReviewInfo> & files,
+		const std::string & repoTree,
+		const std::string & reviewQuery,
+		const std::string & modelPath);
 };

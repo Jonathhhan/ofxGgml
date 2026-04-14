@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <sstream>
@@ -364,6 +365,48 @@ static bool parseEmbeddingVector(const std::string & raw, std::vector<float> & o
 	return !out.empty();
 }
 
+static int parseVerbosePromptTokenCount(const std::string & raw) {
+	if (raw.empty()) return -1;
+
+	int explicitCount = -1;
+	int bracketMax = -1;
+	int bracketLines = 0;
+	std::istringstream iss(raw);
+	std::string line;
+	while (std::getline(iss, line)) {
+		std::string lower = line;
+		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+			return static_cast<char>(std::tolower(c));
+		});
+		if (lower.find("token") != std::string::npos) {
+			std::istringstream ls(line);
+			long value = 0;
+			while (ls >> value) {
+				if (value > explicitCount && value < std::numeric_limits<int>::max()) {
+					explicitCount = static_cast<int>(value);
+				}
+			}
+		}
+		if (!line.empty() && line.front() == '[') {
+			const size_t end = line.find(']');
+			if (end != std::string::npos && end > 1) {
+				try {
+					int idx = std::stoi(line.substr(1, end - 1));
+					if (idx > bracketMax) bracketMax = idx;
+				} catch (...) {
+					// ignore parse errors
+				}
+			}
+			++bracketLines;
+		}
+	}
+
+	if (explicitCount >= 0) return explicitCount;
+	if (bracketMax >= 0) return bracketMax + 1; // assume zero-based indices
+	if (bracketLines > 0) return bracketLines;
+	return -1;
+}
+
 } // namespace
 
 ofxGgmlInference::ofxGgmlInference()
@@ -581,6 +624,48 @@ return result;
 
 result.success = true;
 return result;
+}
+
+int ofxGgmlInference::countPromptTokens(
+	const std::string & modelPath,
+	const std::string & text) const {
+	if (modelPath.empty() || m_completionExe.empty()) return -1;
+
+	if (!isValidFilePath(modelPath)) {
+		return -1;
+	}
+	if (!isValidExecutablePath(m_completionExe)) {
+		return -1;
+	}
+
+	std::string sanitized = sanitizeArgument(text);
+	if (sanitized.empty() && !text.empty()) {
+		return -1;
+	}
+
+	static thread_local ThreadLocalTempFile promptTempFile;
+	std::string promptPath;
+	if (!writeReusableTempTextFile(promptTempFile, "ofxggml_tok_", sanitized, promptPath)) {
+		return -1;
+	}
+
+	std::vector<std::string> args = {
+		m_completionExe,
+		"-m", modelPath,
+		"--file", promptPath,
+		"--vocab-only",
+		"-n", "0",
+		"--verbose-prompt",
+		"--no-display-prompt"
+	};
+
+	std::string raw;
+	int exitCode = -1;
+	if (!runCommandCapture(args, raw, exitCode) || exitCode != 0) {
+		return -1;
+	}
+
+	return parseVerbosePromptTokenCount(raw);
 }
 
 std::vector<std::string> ofxGgmlInference::tokenize(const std::string & text) {
