@@ -684,18 +684,21 @@ return result;
 // Strip warnings before checking exit code and output
 raw = stripLlamaWarnings(raw);
 
-// Exit code 130 (128 + SIGINT) can occur when llama-cli is interrupted
-// or receives EOF on stdin. Treat it as success if we have valid output.
-// Also tolerate other benign exit codes that can occur during cleanup.
-if (exitCode != 0 && !trim(raw).empty()) {
+// Exit code 130 (128 + SIGINT) specifically indicates SIGINT, often from EOF on stdin
+// or Ctrl+C. This is frequently benign even without output (e.g., initialization only).
+// For other exit codes, only treat as benign if we have actual output.
+if (exitCode != 0) {
+	const bool isSigint = (exitCode == 130);
+	const bool hasOutput = !trim(raw).empty();
 	const bool benignExit =
-		exitCode == 130                   // SIGINT (EOF on stdin)
-		|| exitCode == -1073740791        // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
-		|| exitCode == -1073741819        // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
-		|| exitCode == 1                  // generic error (may occur during cleanup)
-		|| exitCode == -1                 // signal-killed on POSIX
-		|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
-		;
+		isSigint                          // SIGINT (EOF on stdin) - benign even without output
+		|| (hasOutput && (
+			exitCode == -1073740791        // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
+			|| exitCode == -1073741819     // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
+			|| exitCode == 1               // generic error (may occur during cleanup)
+			|| exitCode == -1              // signal-killed on POSIX
+			|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
+		));
 	if (benignExit) {
 		exitCode = 0;
 	}
@@ -780,18 +783,21 @@ return result;
 // Strip warnings before checking exit code and parsing
 raw = stripLlamaWarnings(raw);
 
-// Exit code 130 (128 + SIGINT) can occur when llama-embedding is interrupted
-// or receives EOF on stdin. Treat it as success if we have valid output.
-// Also tolerate other benign exit codes that can occur during cleanup.
-if (exitCode != 0 && !trim(raw).empty()) {
+// Exit code 130 (128 + SIGINT) specifically indicates SIGINT, often from EOF on stdin
+// or Ctrl+C. This is frequently benign even without output (e.g., initialization only).
+// For other exit codes, only treat as benign if we have actual output.
+if (exitCode != 0) {
+	const bool isSigint = (exitCode == 130);
+	const bool hasOutput = !trim(raw).empty();
 	const bool benignExit =
-		exitCode == 130                   // SIGINT (EOF on stdin)
-		|| exitCode == -1073740791        // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
-		|| exitCode == -1073741819        // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
-		|| exitCode == 1                  // generic error (may occur during cleanup)
-		|| exitCode == -1                 // signal-killed on POSIX
-		|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
-		;
+		isSigint                          // SIGINT (EOF on stdin) - benign even without output
+		|| (hasOutput && (
+			exitCode == -1073740791        // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
+			|| exitCode == -1073741819     // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
+			|| exitCode == 1               // generic error (may occur during cleanup)
+			|| exitCode == -1              // signal-killed on POSIX
+			|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
+		));
 	if (benignExit) {
 		exitCode = 0;
 	}
