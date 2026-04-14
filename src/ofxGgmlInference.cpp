@@ -95,53 +95,110 @@ static std::string sanitizeArgument(const std::string & arg) {
 }
 
 #ifdef _WIN32
-static std::string quoteArg(const std::string & arg) {
+static std::string quoteWindowsArg(const std::string & arg) {
+	bool needsQuotes = arg.find_first_of(" \t\"%^&|<>") != std::string::npos;
+	if (!needsQuotes) return arg;
 	std::string out;
-	out.reserve(arg.size() + 2);
-	out += '"';
+	out.push_back('"');
+	size_t backslashes = 0;
 	for (char c : arg) {
-		if (c == '"') out += '\\';
-		out += c;
+		if (c == '\\') {
+			backslashes++;
+			continue;
+		}
+		if (c == '"') {
+			out.append(backslashes * 2 + 1, '\\');
+			out.push_back('"');
+			backslashes = 0;
+			continue;
+		}
+		if (backslashes > 0) {
+			out.append(backslashes, '\\');
+			backslashes = 0;
+		}
+		out.push_back(c);
 	}
-	out += '"';
+	if (backslashes > 0) {
+		out.append(backslashes * 2, '\\');
+	}
+	out.push_back('"');
 	return out;
-}
-
-static std::string joinCommand(const std::vector<std::string> & args) {
-	if (args.empty()) return " 2>&1";
-	std::string cmd;
-	size_t totalSize = 0;
-	for (const auto & arg : args) {
-		totalSize += arg.size() + 3; // quotes and space
-	}
-	cmd.reserve(totalSize + 6);
-	for (size_t i = 0; i < args.size(); ++i) {
-		if (i > 0) cmd += ' ';
-		cmd += quoteArg(args[i]);
-	}
-	cmd += " 2>&1";
-	return cmd;
 }
 #endif
 
 static bool runCommandCapture(const std::vector<std::string> & args, std::string & output, int & exitCode) {
-output.clear();
-exitCode = -1;
+	output.clear();
+	exitCode = -1;
+	if (args.empty() || args.front().empty()) return false;
 #ifdef _WIN32
-const std::string cmd = joinCommand(args);
+	SECURITY_ATTRIBUTES sa{};
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = TRUE;
+	sa.lpSecurityDescriptor = nullptr;
 
-FILE * pipe = _popen(cmd.c_str(), "r");
-if (!pipe) return false;
+	HANDLE readPipe = nullptr;
+	HANDLE writePipe = nullptr;
+	if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) return false;
+	if (!SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0)) {
+		CloseHandle(readPipe);
+		CloseHandle(writePipe);
+		return false;
+	}
 
-std::array<char, 4096> buf{};
-while (fgets(buf.data(), static_cast<int>(buf.size()), pipe) != nullptr) {
-output += buf.data();
-}
+	STARTUPINFOA si{};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESTDHANDLES;
+	HANDLE nullInput = CreateFileA("NUL", GENERIC_READ, 0, &sa,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	si.hStdInput = (nullInput != INVALID_HANDLE_VALUE)
+		? nullInput : GetStdHandle(STD_INPUT_HANDLE);
+	si.hStdOutput = writePipe;
+	si.hStdError = writePipe;
 
-exitCode = _pclose(pipe);
+	PROCESS_INFORMATION pi{};
+	std::string cmdLine;
+	for (size_t i = 0; i < args.size(); ++i) {
+		if (i > 0) cmdLine.push_back(' ');
+		cmdLine += quoteWindowsArg(args[i]);
+	}
+	std::vector<char> mutableCmd(cmdLine.begin(), cmdLine.end());
+	mutableCmd.push_back('\0');
+
+	BOOL ok = CreateProcessA(
+		nullptr,
+		mutableCmd.data(),
+		nullptr,
+		nullptr,
+		TRUE,
+		CREATE_NO_WINDOW,
+		nullptr,
+		nullptr,
+		&si,
+		&pi
+	);
+	CloseHandle(writePipe);
+	if (nullInput != INVALID_HANDLE_VALUE) {
+		CloseHandle(nullInput);
+	}
+	if (!ok) {
+		CloseHandle(readPipe);
+		return false;
+	}
+
+	std::array<char, 4096> buf{};
+	DWORD bytesRead = 0;
+	while (ReadFile(readPipe, buf.data(), static_cast<DWORD>(buf.size()), &bytesRead, nullptr) && bytesRead > 0) {
+		output.append(buf.data(), bytesRead);
+	}
+	CloseHandle(readPipe);
+
+	WaitForSingleObject(pi.hProcess, INFINITE);
+	DWORD code = 1;
+	GetExitCodeProcess(pi.hProcess, &code);
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+	exitCode = static_cast<int>(code);
 #else
-if (args.empty() || args.front().empty()) return false;
-
 	int pipeFds[2] = {-1, -1};
 	if (pipe(pipeFds) != 0) {
 		return false;
@@ -189,7 +246,7 @@ if (args.empty() || args.front().empty()) return false;
 		exitCode = 128 + WTERMSIG(status);
 	}
 #endif
-return true;
+	return true;
 }
 
 static std::string makeTempPath(const char * prefix, const char * ext) {
