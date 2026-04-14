@@ -345,6 +345,7 @@ if (q.success) {
 - **Model preselection** — choose from recommended GGUF models via sidebar
 - **Script language selector** — 8 language presets (C++, Python, JS, Rust, GLSL, Go, Bash, TS)
 - **Script source browser** — powered by core addon class `ofxGgmlScriptSource` for local folder + GitHub repository browsing
+- **Hierarchical repository review** — “Review All Files” now uses embeddings + RAG to select relevant files, runs multi-pass summaries (file → architecture → integration), applies smart file filtering (recency, complexity, deps, type), and manages token budgets with sliding windows
 - **Project memory (Script mode)** — automatically stores prior coding requests/responses and reuses them in later script prompts
 - **Session persistence** — auto-save/load, File → Save/Load Session
 

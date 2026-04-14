@@ -1431,56 +1431,12 @@ ImGui::EndDisabled();
 if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 	ImGui::BeginDisabled(generating.load());
 	if (ImGui::Button("Review All Files", ImVec2(120, 0))) {
-		// Gather all source file contents
-		std::string allFilesContent;
-		allFilesContent += "Review all code files in this ";
-		allFilesContent += (sourceType == ofxGgmlScriptSourceType::LocalFolder) ? "folder" : "repository";
-		allFilesContent += " for bugs, security issues, and style. Provide specific feedback:\n\n";
-
-		size_t fileCount = 0;
-		const size_t maxFilesToReview = 20; // Limit to avoid overwhelming context
-		// Estimate max prompt size: use conservative estimate of ~3 chars per token
-		// Reserve 50% of context for system prompt + response generation
-		const size_t maxPromptChars = static_cast<size_t>(contextSize) * 3 / 2;
-		size_t currentPromptSize = allFilesContent.size();
-		bool hitSizeLimit = false;
-
-		for (size_t i = 0; i < scriptSourceFiles.size() && fileCount < maxFilesToReview; i++) {
-			const auto & entry = scriptSourceFiles[i];
-			if (!entry.isDirectory) {
-				std::string content;
-				if (scriptSource.loadFileContent(static_cast<int>(i), content)) {
-					const size_t fileHeaderSize = entry.name.size() + 20; // "=== File: ... ===\n"
-					const size_t addedSize = fileHeaderSize + content.size() + 2; // +2 for "\n\n"
-
-					// Check if adding this file would exceed the limit
-					if (currentPromptSize + addedSize > maxPromptChars) {
-						hitSizeLimit = true;
-						break;
-					}
-
-					allFilesContent += "=== File: " + entry.name + " ===\n";
-					allFilesContent += content + "\n\n";
-					currentPromptSize += addedSize;
-					fileCount++;
-				}
-			}
-		}
-
-		if (hitSizeLimit && fileCount > 0) {
-			allFilesContent += "\n[Note: Additional files were excluded to stay within context limit. ";
-			allFilesContent += std::to_string(fileCount) + " of " + std::to_string(scriptSourceFiles.size());
-			allFilesContent += " files included]\n";
-		}
-
-		if (fileCount > 0) {
-			runInference(AiMode::Script, buildScriptPrompt(allFilesContent));
-		}
+		runHierarchicalReview();
 	}
 	ImGui::EndDisabled();
 
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Automatically review all source files in the loaded folder/repository");
+		ImGui::SetTooltip("Run embedding-powered, multi-pass review over the loaded folder/repository");
 	}
 }
 
@@ -2316,6 +2272,699 @@ void ofApp::detectModelLayers() {
 
 	model.close();
 }
+
+// Hierarchical review helpers (shared across passes)
+namespace {
+
+size_t countLines(const std::string & text) {
+	if (text.empty()) return 0;
+	return static_cast<size_t>(std::count(text.begin(), text.end(), '\n') + 1);
+}
+
+size_t estimateCyclomaticComplexity(const std::string & text) {
+	static const std::vector<std::string> tokens = {
+		" if ", " for ", " while ", " case ", "&&", "||", "?", " catch ", " else if ",
+		" switch ", " foreach ", " guard ", " when ", " except ", " elif ", " goto "
+	};
+	size_t score = 1; // baseline path
+	std::string lower = text;
+	std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+		return static_cast<char>(std::tolower(c));
+	});
+	for (const auto & tok : tokens) {
+		size_t pos = 0;
+		while ((pos = lower.find(tok, pos)) != std::string::npos) {
+			++score;
+			pos += tok.size();
+		}
+	}
+	return score;
+}
+
+std::vector<std::string> extractDependencies(const std::string & text) {
+	std::vector<std::string> deps;
+	std::istringstream iss(text);
+	std::string line;
+	while (std::getline(iss, line)) {
+		std::string trimmed = trim(line);
+		if (trimmed.empty()) continue;
+		auto addDep = [&](const std::string & dep) {
+			if (!dep.empty()) deps.push_back(dep);
+		};
+		if (trimmed.rfind("#include", 0) == 0) {
+			size_t quote = trimmed.find('"');
+			if (quote != std::string::npos) {
+				size_t end = trimmed.find('"', quote + 1);
+				if (end != std::string::npos && end > quote + 1) {
+					addDep(trimmed.substr(quote + 1, end - quote - 1));
+					continue;
+				}
+			}
+			size_t lt = trimmed.find('<');
+			size_t gt = trimmed.find('>', lt == std::string::npos ? 0 : lt + 1);
+			if (lt != std::string::npos && gt != std::string::npos && gt > lt + 1) {
+				addDep(trimmed.substr(lt + 1, gt - lt - 1));
+				continue;
+			}
+		}
+		// import / require / from statements
+		auto lower = trimmed;
+		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+			return static_cast<char>(std::tolower(c));
+		});
+		const std::vector<std::string> prefixes = {"import ", "from ", "require("};
+		for (const auto & p : prefixes) {
+			if (lower.rfind(p, 0) == 0) {
+				size_t quote = trimmed.find('"');
+				if (quote == std::string::npos) quote = trimmed.find('\'');
+				if (quote != std::string::npos) {
+					size_t end = trimmed.find(trimmed[quote], quote + 1);
+					if (end != std::string::npos && end > quote + 1) {
+						addDep(trimmed.substr(quote + 1, end - quote - 1));
+					}
+				} else {
+					// fallback: grab next token
+					std::istringstream ls(trimmed.substr(p.size()));
+					std::string dep;
+					if (ls >> dep) addDep(dep);
+				}
+				break;
+			}
+		}
+	}
+	return deps;
+}
+
+float importanceFromExtension(const std::string & name) {
+	std::string lower = name;
+	std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+		return static_cast<char>(std::tolower(c));
+	});
+	const std::vector<std::string> coreExt = {
+		".cpp", ".c", ".h", ".hpp", ".cc", ".hh", ".cxx", ".hxx",
+		".py", ".js", ".ts", ".go", ".rs", ".java", ".kt", ".swift",
+		".cs", ".m", ".mm"
+	};
+	const std::vector<std::string> testExt = {
+		".spec", ".test", ".tests", ".stories", ".snap"
+	};
+	const std::vector<std::string> docExt = {
+		".md", ".rst", ".txt"
+	};
+	const std::vector<std::string> configExt = {
+		".json", ".yaml", ".yml", ".toml", ".ini"
+	};
+
+	for (const auto & ext : testExt) {
+		if (lower.rfind(ext) != std::string::npos) return 0.7f;
+	}
+	for (const auto & ext : docExt) {
+		if (lower.size() >= ext.size() &&
+			lower.compare(lower.size() - ext.size(), ext.size(), ext) == 0) {
+			return 0.3f;
+		}
+	}
+	for (const auto & ext : configExt) {
+		if (lower.size() >= ext.size() &&
+			lower.compare(lower.size() - ext.size(), ext.size(), ext) == 0) {
+			return 0.5f;
+		}
+	}
+	for (const auto & ext : coreExt) {
+		if (lower.size() >= ext.size() &&
+			lower.compare(lower.size() - ext.size(), ext.size(), ext) == 0) {
+			return 1.2f;
+		}
+	}
+	return 0.6f; // default importance for miscellaneous files
+}
+
+std::string slidingWindowText(const std::string & content, size_t maxChars) {
+	if (content.size() <= maxChars) return content;
+	const size_t half = maxChars / 2;
+	return content.substr(0, half) + "\n...\n" + content.substr(content.size() - half);
+}
+
+} // namespace
+
+
+int ofApp::countTokensAccurate(const std::string & text, int fallback) {
+	const std::string modelPath = getSelectedModelPath();
+	if (!modelPath.empty()) {
+		int tokens = scriptReviewInference.countPromptTokens(modelPath, text);
+		if (tokens >= 0) return tokens;
+	}
+	if (fallback >= 0) return fallback;
+	if (text.empty()) return 0;
+	return static_cast<int>(text.size() / 4 + 1); // conservative char->token fallback
+}
+
+std::vector<ScriptFileReviewInfo> ofApp::collectScriptFilesForReview(std::string & status) {
+	std::vector<ScriptFileReviewInfo> files;
+	const auto entries = scriptSource.getFiles();
+	if (entries.empty()) {
+		status = "No files loaded";
+		return files;
+	}
+	files.reserve(entries.size());
+	for (int i = 0; i < static_cast<int>(entries.size()); i++) {
+		if (cancelRequested.load()) break;
+		const auto & entry = entries[static_cast<size_t>(i)];
+		if (entry.isDirectory) continue;
+
+		std::string content;
+		if (!scriptSource.loadFileContent(i, content)) {
+			continue;
+		}
+
+		ScriptFileReviewInfo info;
+		info.name = entry.name;
+		info.fullPath = entry.fullPath;
+		info.content = std::move(content);
+		info.truncatedContent = info.content;
+		files.push_back(std::move(info));
+	}
+	status = "Loaded " + ofToString(files.size()) + " files";
+	return files;
+}
+
+void ofApp::computeFileHeuristics(std::vector<ScriptFileReviewInfo> & files,
+	const std::string & baseFolder) {
+	const bool hasGit = !baseFolder.empty();
+	const auto now = std::chrono::system_clock::now();
+
+	for (auto & f : files) {
+		f.loc = countLines(f.content);
+		f.complexity = estimateCyclomaticComplexity(f.content);
+		f.dependencies = extractDependencies(f.content);
+		f.dependencyFanOut = f.dependencies.size();
+		f.importanceScore = importanceFromExtension(f.name);
+
+		if (hasGit) {
+			std::string rel = f.name;
+			std::string out;
+			int exitCode = -1;
+			if (runProcessCapture({"git", "-C", baseFolder, "log", "-1", "--format=%ct", "--", rel},
+				out, exitCode, false, nullptr, true) && exitCode == 0) {
+				try {
+					long ts = std::stol(trim(out));
+					auto fileTime = std::chrono::system_clock::from_time_t(static_cast<time_t>(ts));
+					auto age = now - fileTime;
+					float days = std::chrono::duration_cast<std::chrono::hours>(age).count() / 24.0f;
+					f.recencyScore = 1.0f / (1.0f + (days / 30.0f));
+				} catch (...) {
+					f.recencyScore = 0.2f;
+				}
+			} else {
+				f.recencyScore = 0.2f; // unknown recency still modestly relevant
+			}
+		} else {
+			f.recencyScore = 0.2f;
+		}
+
+		f.tokenCount = countTokensAccurate(f.truncatedContent,
+			static_cast<int>(f.truncatedContent.size() / 4 + 1));
+	}
+
+	computeDependencyFanIn(files);
+}
+
+void ofApp::computeDependencyFanIn(std::vector<ScriptFileReviewInfo> & files) {
+	std::unordered_map<std::string, size_t> fanIn;
+	for (const auto & f : files) {
+		for (const auto & dep : f.dependencies) {
+			fanIn[dep]++;
+			std::filesystem::path p(dep);
+			fanIn[p.filename().string()]++;
+		}
+	}
+	for (auto & f : files) {
+		auto it = fanIn.find(f.name);
+		if (it != fanIn.end()) f.dependencyFanIn = std::max(f.dependencyFanIn, it->second);
+		const std::string base = std::filesystem::path(f.name).filename().string();
+		auto itBase = fanIn.find(base);
+		if (itBase != fanIn.end()) f.dependencyFanIn = std::max(f.dependencyFanIn, itBase->second);
+	}
+}
+
+std::string ofApp::buildRepoTableOfContents(const std::vector<ScriptFileReviewInfo> & files,
+	size_t maxFiles) const {
+	if (files.empty()) return {};
+	std::vector<std::string> names;
+	names.reserve(files.size());
+	for (const auto & f : files) names.push_back(f.name);
+	std::sort(names.begin(), names.end());
+	std::string toc = "Repository files (table of contents):\n";
+	size_t listed = 0;
+	for (const auto & n : names) {
+		toc += "  - " + n + "\n";
+		listed++;
+		if (listed >= maxFiles) break;
+	}
+	if (names.size() > maxFiles) {
+		toc += "  ... and " + ofToString(names.size() - maxFiles) + " more\n";
+	}
+	return toc;
+}
+
+std::string ofApp::buildRepoTree(const std::vector<ScriptFileReviewInfo> & files) const {
+	if (files.empty()) return {};
+	std::vector<std::string> names;
+	names.reserve(files.size());
+	for (const auto & f : files) names.push_back(f.name);
+	std::sort(names.begin(), names.end());
+
+	std::string tree = "Repository tree:\n";
+	for (const auto & n : names) {
+		size_t depth = std::count(n.begin(), n.end(), '/');
+		tree += std::string(depth * 2, ' ');
+		tree += "- ";
+		tree += n;
+		tree += "\n";
+	}
+	return tree;
+}
+
+std::vector<ScriptFileReviewInfo *> ofApp::selectFilesForReview(
+	std::vector<ScriptFileReviewInfo> & files,
+	const std::string & reviewQuery,
+	int availableTokens,
+	int responseReserveTokens) {
+	(void)reviewQuery;
+	std::vector<ScriptFileReviewInfo *> ordered;
+	if (files.empty()) return ordered;
+
+	size_t maxLoc = 0;
+	size_t maxComplexity = 0;
+	size_t maxFanIn = 0;
+	size_t maxFanOut = 0;
+	float maxSimilarity = 0.0f;
+	for (const auto & f : files) {
+		maxLoc = std::max(maxLoc, f.loc);
+		maxComplexity = std::max(maxComplexity, f.complexity);
+		maxFanIn = std::max(maxFanIn, f.dependencyFanIn);
+		maxFanOut = std::max(maxFanOut, f.dependencyFanOut);
+		maxSimilarity = std::max(maxSimilarity, f.similarityScore);
+	}
+
+	for (auto & f : files) {
+		const float normComplexity = maxComplexity > 0
+			? static_cast<float>(f.complexity) / static_cast<float>(maxComplexity) : 0.0f;
+		const float normLoc = maxLoc > 0
+			? static_cast<float>(f.loc) / static_cast<float>(maxLoc) : 0.0f;
+		const float normFan = (maxFanIn + maxFanOut) > 0
+			? static_cast<float>(f.dependencyFanIn + f.dependencyFanOut) /
+				static_cast<float>(maxFanIn + maxFanOut) : 0.0f;
+		const float normSim = maxSimilarity > 0.0f
+			? f.similarityScore / maxSimilarity : f.similarityScore;
+
+		f.priorityScore =
+			0.30f * f.importanceScore +
+			0.20f * normComplexity +
+			0.15f * normLoc +
+			0.15f * normFan +
+			0.20f * std::clamp(normSim, 0.0f, 1.0f) +
+			0.10f * std::clamp(f.recencyScore, 0.0f, 1.5f);
+		ordered.push_back(&f);
+	}
+
+	std::sort(ordered.begin(), ordered.end(),
+		[](const ScriptFileReviewInfo * a, const ScriptFileReviewInfo * b) {
+			return a->priorityScore > b->priorityScore;
+		});
+
+	const int safetyReserve = std::max(responseReserveTokens, contextSize / 4);
+	int remaining = std::max(128, availableTokens - safetyReserve);
+	std::vector<ScriptFileReviewInfo *> chosen;
+
+	for (auto * f : ordered) {
+		if (remaining <= 0) break;
+		int tokens = f->tokenCount > 0 ? f->tokenCount
+			: countTokensAccurate(f->truncatedContent,
+				static_cast<int>(f->truncatedContent.size() / 4 + 1));
+		const int maxPerFile = std::max(96, contextSize / 6);
+		if (tokens > maxPerFile) {
+			f->truncatedContent = slidingWindowText(f->content,
+				static_cast<size_t>(maxPerFile * 4));
+			f->truncated = true;
+			tokens = countTokensAccurate(f->truncatedContent,
+				static_cast<int>(f->truncatedContent.size() / 4 + 1));
+		}
+		if (tokens <= remaining) {
+			f->selected = true;
+			f->tokenCount = tokens;
+			chosen.push_back(f);
+			remaining -= tokens;
+		}
+	}
+
+	if (chosen.empty() && !ordered.empty()) {
+		// Always pick at least one file even if it exceeds budget.
+		auto * f = ordered.front();
+		f->selected = true;
+		f->truncatedContent = slidingWindowText(f->content, static_cast<size_t>(std::max(256, responseReserveTokens * 2)));
+		f->truncated = true;
+		f->tokenCount = countTokensAccurate(f->truncatedContent,
+			static_cast<int>(f->truncatedContent.size() / 4 + 1));
+		chosen.push_back(f);
+	}
+	return chosen;
+}
+
+std::string ofApp::runFileSummary(const ScriptFileReviewInfo & info,
+	const std::string & reviewQuery,
+	int perFileBudget,
+	const std::string & modelPath) {
+	ofxGgmlInferenceSettings settings;
+	settings.maxTokens = std::clamp(perFileBudget, 96, maxTokens);
+	settings.temperature = temperature;
+	settings.topP = topP;
+	settings.repeatPenalty = repeatPenalty;
+	settings.contextSize = contextSize;
+	settings.batchSize = batchSize;
+	settings.gpuLayers = gpuLayers;
+	settings.threads = numThreads;
+	settings.simpleIo = true;
+
+	std::ostringstream prompt;
+	prompt << "First pass: Review this single file in isolation. "
+		"Return a concise summary plus concrete issues (bugs, security, tests, readability)."
+		"\nRequested focus: " << reviewQuery << "\n";
+	prompt << "\nFile: " << info.name << "\n";
+	prompt << "Metrics: LOC=" << info.loc
+		<< "  complexity~" << info.complexity
+		<< "  fan-in=" << info.dependencyFanIn
+		<< "  fan-out=" << info.dependencyFanOut
+		<< "  recencyScore=" << ofToString(info.recencyScore, 2)
+		<< "  importance=" << ofToString(info.importanceScore, 2) << "\n";
+	if (info.truncated) {
+		prompt << "Note: content truncated with a sliding window to fit context.\n";
+	}
+	prompt << "\nContent:\n" << info.truncatedContent << "\n";
+	prompt << "\nFormat:\n- Summary\n- Risks\n- Tests to add\n";
+
+	auto result = scriptReviewInference.generate(modelPath, prompt.str(), settings);
+	if (!result.success) {
+		return "[error] " + result.error;
+	}
+	return trim(result.text);
+}
+
+std::string ofApp::runArchitectureReview(
+	const std::vector<ScriptFileReviewInfo> & files,
+	const std::string & repoTree,
+	const std::string & reviewQuery,
+	const std::string & modelPath) {
+	ofxGgmlInferenceSettings settings;
+	settings.maxTokens = maxTokens;
+	settings.temperature = temperature;
+	settings.topP = topP;
+	settings.repeatPenalty = repeatPenalty;
+	settings.contextSize = contextSize;
+	settings.batchSize = batchSize;
+	settings.gpuLayers = gpuLayers;
+	settings.threads = numThreads;
+	settings.simpleIo = true;
+
+	std::ostringstream prompt;
+	prompt << "Second pass: Architectural review using only the summaries below.\n";
+	prompt << "Request: " << reviewQuery << "\n\n";
+	prompt << repoTree << "\n";
+	prompt << "File summaries:\n";
+	int listed = 0;
+	for (const auto & f : files) {
+		if (f.summary.empty()) continue;
+		prompt << "- " << f.name << ": " << f.summary << "\n";
+		if (++listed >= 24) break; // guard context
+	}
+	prompt << "\nIdentify architecture, layering, and dependency issues. "
+		"Highlight risky boundaries, missing invariants, and testing gaps. "
+		"Keep output concise and actionable.\n";
+
+	auto result = scriptReviewInference.generate(modelPath, prompt.str(), settings);
+	if (!result.success) {
+		return "[error] " + result.error;
+	}
+	return trim(result.text);
+}
+
+std::string ofApp::runIntegrationReview(
+	const std::vector<ScriptFileReviewInfo> & files,
+	const std::string & repoTree,
+	const std::string & reviewQuery,
+	const std::string & modelPath) {
+	ofxGgmlInferenceSettings settings;
+	settings.maxTokens = maxTokens;
+	settings.temperature = temperature;
+	settings.topP = topP;
+	settings.repeatPenalty = repeatPenalty;
+	settings.contextSize = contextSize;
+	settings.batchSize = batchSize;
+	settings.gpuLayers = gpuLayers;
+	settings.threads = numThreads;
+	settings.simpleIo = true;
+
+	std::ostringstream prompt;
+	prompt << "Third pass: Cross-file dependency and integration analysis.\n";
+	prompt << "Request: " << reviewQuery << "\n\n";
+	prompt << repoTree << "\n";
+	prompt << "Per-file findings:\n";
+	int listed = 0;
+	for (const auto & f : files) {
+		if (f.summary.empty()) continue;
+		prompt << "- " << f.name << " (fan-in " << f.dependencyFanIn
+			<< ", fan-out " << f.dependencyFanOut << "): "
+			<< f.summary << "\n";
+		if (++listed >= 24) break;
+	}
+	prompt << "\nFocus on contract mismatches, API misuse, inconsistent assumptions, "
+		"shared state, and missing integration tests. "
+		"Propose cross-file actions and dependency trims.\n";
+
+	auto result = scriptReviewInference.generate(modelPath, prompt.str(), settings);
+	if (!result.success) {
+		return "[error] " + result.error;
+	}
+	return trim(result.text);
+}
+
+void ofApp::runHierarchicalReview() {
+	if (generating.load() || !engineReady) return;
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::Script;
+	generationStartTime = ofGetElapsedTimef();
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput = "Building review plan...";
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	workerThread = std::thread([this]() {
+		auto setError = [this](const std::string & msg) {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingOutput = msg;
+			pendingRole = "assistant";
+			pendingMode = AiMode::Script;
+		};
+
+		try {
+			if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+				probeLlamaCli(logMutex, logMessages);
+			}
+
+			const std::string modelPath = getSelectedModelPath();
+			if (modelPath.empty()) {
+				setError("[Error] No model selected for review.");
+				generating.store(false);
+				return;
+			}
+
+			// Keep inference helpers aligned with detected CLI paths.
+			scriptReviewInference.setCompletionExecutable(llamaCliCommand);
+			scriptReviewInference.setEmbeddingExecutable("llama-embedding");
+
+			std::string reviewQuery = std::strlen(scriptInput) > 0
+				? std::string(scriptInput)
+				: std::string("Comprehensive repository code review. Focus on bugs, security, architecture, and missing tests.");
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = "Loading files...";
+			}
+			std::string status;
+			auto files = collectScriptFilesForReview(status);
+			if (files.empty()) {
+				setError("[Error] No source files available for review.");
+				generating.store(false);
+				return;
+			}
+			if (verbose && !status.empty()) {
+				std::lock_guard<std::mutex> lock(logMutex);
+				logMessages.push_back("[info] " + status);
+				if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+			}
+
+			const std::string baseFolder =
+				(scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder)
+					? scriptSource.getLocalFolderPath() : "";
+			computeFileHeuristics(files, baseFolder);
+
+			const std::string toc = buildRepoTableOfContents(files, 50);
+			const std::string repoTree = buildRepoTree(files);
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = "Computing embeddings...";
+			}
+
+			// Query embedding for semantic selection.
+			std::vector<float> queryEmbedding;
+			auto queryEmbed = scriptReviewInference.embed(modelPath, reviewQuery);
+			if (queryEmbed.success) {
+				queryEmbedding = queryEmbed.embedding;
+			} else {
+				std::lock_guard<std::mutex> lock(logMutex);
+				logMessages.push_back("[warn] embedding query failed: " + queryEmbed.error);
+				if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+			}
+
+			// Build embeddings for all files (parallel, bounded).
+			scriptEmbeddingIndex.clear();
+			const size_t maxEmbedParallel = std::max<size_t>(1, std::min<size_t>(4, std::thread::hardware_concurrency()));
+			std::mutex embedMutex;
+			std::vector<std::future<void>> embedTasks;
+			for (auto & f : files) {
+				auto task = std::async(std::launch::async, [this, &f, &modelPath, &embedMutex]() {
+					std::string snippet = f.truncatedContent;
+					if (snippet.size() > 4000) {
+						snippet = slidingWindowText(snippet, 4000);
+					}
+					auto er = scriptReviewInference.embed(modelPath, snippet);
+					if (er.success) {
+						f.embedding = er.embedding;
+						// Avoid data races when multiple threads update the index.
+						std::lock_guard<std::mutex> lock(embedMutex);
+						scriptEmbeddingIndex.add(f.name, snippet, er.embedding);
+					}
+				});
+				embedTasks.push_back(std::move(task));
+				if (embedTasks.size() >= maxEmbedParallel) {
+					embedTasks.front().get();
+					embedTasks.erase(embedTasks.begin());
+				}
+				if (cancelRequested.load()) break;
+			}
+			for (auto & t : embedTasks) t.get();
+
+			if (!queryEmbedding.empty()) {
+				for (auto & f : files) {
+					if (!f.embedding.empty()) {
+						f.similarityScore = ofxGgmlEmbeddingIndex::cosineSimilarity(queryEmbedding, f.embedding);
+					}
+				}
+			}
+
+			const int responseReserve = std::max(maxTokens, contextSize / 3);
+			auto selected = selectFilesForReview(files, reviewQuery, contextSize, responseReserve);
+			if (selected.empty()) {
+				setError("[Error] Unable to select files for review within token budget.");
+				generating.store(false);
+				return;
+			}
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = "Running first-pass summaries...";
+			}
+
+			const size_t maxSummaryParallel = std::max<size_t>(1, std::min<size_t>(3, std::thread::hardware_concurrency()));
+			std::vector<std::future<void>> summaryTasks;
+			for (auto * f : selected) {
+				auto task = std::async(std::launch::async, [this, f, &reviewQuery, &modelPath, responseReserve]() {
+					const int perFileBudget = std::max(96, std::min(responseReserve, maxTokens));
+					f->summary = runFileSummary(*f, reviewQuery, perFileBudget, modelPath);
+				});
+				summaryTasks.push_back(std::move(task));
+				if (summaryTasks.size() >= maxSummaryParallel) {
+					summaryTasks.front().get();
+					summaryTasks.erase(summaryTasks.begin());
+				}
+				if (cancelRequested.load()) break;
+			}
+			for (auto & t : summaryTasks) t.get();
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = "Aggregating architecture review...";
+			}
+			const std::string archReview = runArchitectureReview(selected, repoTree, reviewQuery, modelPath);
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = "Running integration analysis...";
+			}
+			const std::string integrationReview = runIntegrationReview(selected, repoTree, reviewQuery, modelPath);
+
+			std::ostringstream summaries;
+			for (auto * f : selected) {
+				summaries << "### " << f->name << "\n";
+				summaries << f->summary << "\n\n";
+			}
+
+			std::ostringstream final;
+			final << "Hierarchical code review (embeddings + multi-pass)\n\n";
+			final << toc << "\n";
+			final << "Selected files (priority + similarity):\n";
+			for (auto * f : selected) {
+				final << "- " << f->name
+					<< " | priority " << ofToString(f->priorityScore, 2)
+					<< " | sim " << ofToString(f->similarityScore, 2)
+					<< " | loc " << f->loc
+					<< (f->truncated ? " (truncated)" : "")
+					<< "\n";
+			}
+			final << "\nFirst pass — per-file summaries and issues:\n" << summaries.str();
+			final << "Second pass — architecture issues:\n" << archReview << "\n\n";
+			final << "Third pass — cross-file integration:\n" << integrationReview << "\n\n";
+			final << "Context management: reserved " << responseReserve
+				<< " tokens for responses; counted via tokenizer when available. "
+				<< "Sliding windows applied to oversized files.\n";
+
+			lastScriptReviewFiles = files;
+			lastScriptReviewStatus = "reviewed " + ofToString(selected.size()) + " files";
+			lastScriptRequest = reviewQuery;
+
+			scriptProjectMemory.addInteraction("First-pass summaries", summaries.str());
+			scriptProjectMemory.addInteraction("Architecture review", archReview);
+			scriptProjectMemory.addInteraction("Integration review", integrationReview);
+
+			{
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingOutput = final.str();
+				pendingRole = "assistant";
+				pendingMode = AiMode::Script;
+			}
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput.clear();
+			}
+		} catch (const std::exception & e) {
+			setError(std::string("[Error] Hierarchical review failed: ") + e.what());
+		} catch (...) {
+			setError("[Error] Unknown failure during hierarchical review.");
+		}
+
+		generating.store(false);
+	});
+}
+
 
 std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
 	const std::string & systemPrompt) const {

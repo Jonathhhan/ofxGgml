@@ -165,6 +165,12 @@ TEST_CASE("Inference embedding - without executable", "[inference]") {
 	}
 }
 
+TEST_CASE("Token counting handles missing artifacts", "[inference]") {
+	ofxGgmlInference inf;
+	int tokens = inf.countPromptTokens("nonexistent_model.gguf", "hello world");
+	REQUIRE(tokens < 0);
+}
+
 TEST_CASE("Tokenization utilities", "[inference]") {
 	SECTION("Tokenize simple text") {
 		auto tokens = ofxGgmlInference::tokenize("Hello world");
