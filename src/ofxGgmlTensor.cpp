@@ -63,13 +63,13 @@ const void * ofxGgmlTensor::getData() const {
 std::vector<float> ofxGgmlTensor::toFloatVector() const {
 	if (!m_tensor || !m_tensor->data) return {};
 	const int64_t n = ggml_nelements(m_tensor);
-	if (n < 0) return {};
+	if (n <= 0) return {};
 	if (m_tensor->type != GGML_TYPE_F32 && n > std::numeric_limits<int>::max()) return {};
 	std::vector<float> out(static_cast<size_t>(n));
 	if (m_tensor->type == GGML_TYPE_F32) {
 		std::memcpy(out.data(), m_tensor->data, static_cast<size_t>(n) * sizeof(float));
 	} else {
-		for (int64_t i = 0; i < n; i++) {
+		for (int64_t i = 0; i < n; ++i) {
 			out[static_cast<size_t>(i)] = ggml_get_f32_1d(m_tensor, static_cast<int>(i));
 		}
 	}
@@ -84,7 +84,7 @@ void ofxGgmlTensor::setFromFloats(const float * data, size_t count) {
 		std::memcpy(m_tensor->data, data, actual * sizeof(float));
 	} else {
 		if (actual > static_cast<size_t>(std::numeric_limits<int>::max())) return;
-		for (size_t i = 0; i < actual; i++) {
+		for (size_t i = 0; i < actual; ++i) {
 			ggml_set_f32_1d(m_tensor, static_cast<int>(i), data[i]);
 		}
 	}

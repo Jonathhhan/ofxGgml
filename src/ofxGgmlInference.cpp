@@ -32,23 +32,31 @@ return s.substr(b, e - b);
 
 #ifdef _WIN32
 static std::string quoteArg(const std::string & arg) {
-std::string out = "\"";
-for (char c : arg) {
-if (c == '"') out += '\\';
-out += c;
-}
-out += '"';
-return out;
+	std::string out;
+	out.reserve(arg.size() + 2);
+	out += '"';
+	for (char c : arg) {
+		if (c == '"') out += '\\';
+		out += c;
+	}
+	out += '"';
+	return out;
 }
 
 static std::string joinCommand(const std::vector<std::string> & args) {
-std::string cmd;
-for (size_t i = 0; i < args.size(); ++i) {
-if (i > 0) cmd += " ";
-cmd += quoteArg(args[i]);
-}
-cmd += " 2>&1";
-return cmd;
+	if (args.empty()) return " 2>&1";
+	std::string cmd;
+	size_t totalSize = 0;
+	for (const auto & arg : args) {
+		totalSize += arg.size() + 3; // quotes and space
+	}
+	cmd.reserve(totalSize + 6);
+	for (size_t i = 0; i < args.size(); ++i) {
+		if (i > 0) cmd += ' ';
+		cmd += quoteArg(args[i]);
+	}
+	cmd += " 2>&1";
+	return cmd;
 }
 #endif
 

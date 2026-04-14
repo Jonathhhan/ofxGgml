@@ -258,7 +258,7 @@ ofxGgmlTensor ofxGgmlGraph::softmax(ofxGgmlTensor a) {
 ofxGgmlTensor ofxGgmlGraph::flashAttn(ofxGgmlTensor q, ofxGgmlTensor k, ofxGgmlTensor v,
 	ofxGgmlTensor mask) {
 	if (!q.raw() || !k.raw() || !v.raw()) return ofxGgmlTensor();
-	float scale = 1.0f;
+	constexpr float scale = 1.0f;
 	return ofxGgmlTensor(ggml_flash_attn_ext(m_ctx, q.raw(), k.raw(), v.raw(),
 		mask.raw(), scale, 0.0f, 0.0f));
 }
@@ -331,21 +331,16 @@ void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
 	}
 	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
 	int validCount = 0;
-	bool sawInvalidTensor = false;
-	for (auto t : outputs) {
+	for (const auto & t : outputs) {
 		if (t.raw()) {
 			ggml_build_forward_expand(m_graph, t.raw());
 			++validCount;
-		} else {
-			sawInvalidTensor = true;
 		}
 	}
 	if (validCount == 0) {
 		fprintf(stderr, "ofxGgmlGraph: build(outputs) failed: all output tensors were invalid\n");
 		m_graph = nullptr;
-		return;
-	}
-	if (sawInvalidTensor) {
+	} else if (validCount < static_cast<int>(outputs.size())) {
 		fprintf(stderr, "ofxGgmlGraph: build(outputs) skipped one or more invalid tensors\n");
 	}
 }
