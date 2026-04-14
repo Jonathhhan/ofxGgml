@@ -8,7 +8,7 @@ REM section with the correct library list. Run this after building ggml if you
 REM encounter linker errors about missing ggml libraries.
 REM
 REM When CUDA backend is detected, this script also adds the required CUDA
-REM Toolkit libraries (cublas.lib, cudart.lib) to fix CUBLAS linker errors.
+REM Toolkit libraries (cublas.lib, cudart.lib, cuda.lib) to fix linker errors.
 REM
 REM Usage:
 REM   scripts\update-addon-config.bat
@@ -88,6 +88,7 @@ REM These libraries are required by ggml-cuda.lib and must be linked by the fina
 set "CUDA_LIB_DIR="
 set "CUDA_CUBLAS="
 set "CUDA_CUDART="
+set "CUDA_DRIVER="
 if "%CUDA_PRESENT%"=="1" (
     REM Normalize CUDA environment variables (strip any surrounding quotes)
     set "CUDA_PATH_CLEAN="
@@ -99,19 +100,24 @@ if "%CUDA_PRESENT%"=="1" (
         for %%I in ("%CUDAToolkit_ROOT%") do set "CUDAToolkit_ROOT_CLEAN=%%~fI"
     )
 
-    REM cublas.lib and cudart.lib are the minimum required libraries
+    REM cublas.lib, cudart.lib, and cuda.lib are the required libraries
+    REM cuda.lib provides the CUDA Driver API (cuDevice*, cuMem*, etc.)
     REM The CUDA Toolkit provides these through CMake's FindCUDAToolkit
     if defined CUDA_PATH_CLEAN (
         echo ==^>   Checking CUDA_PATH: !CUDA_PATH_CLEAN!
         if exist "!CUDA_PATH_CLEAN!\lib\x64\cublas.lib" (
-            set "CUDA_LIB_DIR=!CUDA_PATH_CLEAN!\lib\x64"
+            if exist "!CUDA_PATH_CLEAN!\lib\x64\cuda.lib" (
+                set "CUDA_LIB_DIR=!CUDA_PATH_CLEAN!\lib\x64"
+            )
         )
     )
     if not defined CUDA_LIB_DIR if defined CUDAToolkit_ROOT_CLEAN (
         echo ==^>   Checking environment variable: CUDA root path
         echo ==^>   Path: !CUDAToolkit_ROOT_CLEAN!
         if exist "!CUDAToolkit_ROOT_CLEAN!\lib\x64\cublas.lib" (
-            set "CUDA_LIB_DIR=!CUDAToolkit_ROOT_CLEAN!\lib\x64"
+            if exist "!CUDAToolkit_ROOT_CLEAN!\lib\x64\cuda.lib" (
+                set "CUDA_LIB_DIR=!CUDAToolkit_ROOT_CLEAN!\lib\x64"
+            )
         )
     )
     if not defined CUDA_LIB_DIR (
@@ -120,7 +126,9 @@ if "%CUDA_PRESENT%"=="1" (
             if not defined CUDA_LIB_DIR (
                 for %%P in ("%%B") do (
                     if exist "%%~fP\lib\x64\cublas.lib" (
-                        set "CUDA_LIB_DIR=%%~fP\lib\x64"
+                        if exist "%%~fP\lib\x64\cuda.lib" (
+                            set "CUDA_LIB_DIR=%%~fP\lib\x64"
+                        )
                     )
                 )
             )
@@ -133,8 +141,10 @@ if "%CUDA_PRESENT%"=="1" (
             for /f "delims=" %%D in ('dir /b /ad /o-n 2^>nul') do (
                 if not defined CUDA_LIB_DIR (
                     if exist "%%D\lib\x64\cublas.lib" (
-                        for %%P in ("%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\%%D") do (
-                            set "CUDA_LIB_DIR=%%~fP\lib\x64"
+                        if exist "%%D\lib\x64\cuda.lib" (
+                            for %%P in ("%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\%%D") do (
+                                set "CUDA_LIB_DIR=%%~fP\lib\x64"
+                            )
                         )
                     )
                 )
@@ -144,7 +154,7 @@ if "%CUDA_PRESENT%"=="1" (
     )
 
     if not defined CUDA_LIB_DIR (
-        echo Error: CUDA backend detected but could not locate CUDA lib directory with cublas.lib
+        echo Error: CUDA backend detected but could not locate CUDA lib directory with required libraries
         if defined CUDA_PATH (
             echo   CUDA_PATH environment variable is set
             echo   Value: %CUDA_PATH%
@@ -165,6 +175,7 @@ if "%CUDA_PRESENT%"=="1" (
     echo ==^> Located CUDA libraries at: !CUDA_LIB_DIR!
     set "CUDA_CUBLAS=!CUDA_LIB_DIR!\cublas.lib"
     set "CUDA_CUDART=!CUDA_LIB_DIR!\cudart.lib"
+    set "CUDA_DRIVER=!CUDA_LIB_DIR!\cuda.lib"
 )
 
 REM Create temporary file with new content
@@ -193,6 +204,7 @@ set "IN_MARKER_BLOCK=0"
                 if defined CUDA_CUBLAS (
                     echo 	ADDON_LIBS += "!CUDA_CUBLAS!"
                     echo 	ADDON_LIBS += "!CUDA_CUDART!"
+                    echo 	ADDON_LIBS += "!CUDA_DRIVER!"
                 )
                 echo 	# @DIFFUSION_LIBS_END vs
                 REM Skip until end marker
@@ -217,7 +229,7 @@ move /y "%TEMP_FILE%" "%CONFIG_FILE%" >nul
 
 echo ==^> Updated addon_config.mk [vs] section with %COUNT% libraries
 if "%CUDA_PRESENT%"=="1" (
-    echo ==^> Added CUDA libraries: cublas.lib, cudart.lib
+    echo ==^> Added CUDA libraries: cublas.lib, cudart.lib, cuda.lib
 )
 echo ==^> Rebuild your Visual Studio project to apply changes
 
