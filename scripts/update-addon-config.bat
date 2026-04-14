@@ -85,10 +85,43 @@ if exist "%LIB_DIR%\ggml-cuda\Release\ggml-cuda.lib" (
 REM Add CUDA Toolkit libraries if CUDA is present
 REM These libraries are required by ggml-cuda.lib and must be linked by the final application
 set "CUDA_LIBS="
+set "CUDA_LIB_DIR="
 if "%CUDA_PRESENT%"=="1" (
     REM cublas.lib and cudart.lib are the minimum required libraries
     REM The CUDA Toolkit provides these through CMake's FindCUDAToolkit
-    set "CUDA_LIBS= cublas.lib cudart.lib"
+    if defined CUDA_PATH if exist "%CUDA_PATH%\lib\x64\cublas.lib" (
+        set "CUDA_LIB_DIR=%CUDA_PATH%\lib\x64"
+    )
+    if not defined CUDA_LIB_DIR if defined CUDAToolkit_ROOT if exist "%CUDAToolkit_ROOT%\lib\x64\cublas.lib" (
+        set "CUDA_LIB_DIR=%CUDAToolkit_ROOT%\lib\x64"
+    )
+    if not defined CUDA_LIB_DIR (
+        for /f "tokens=1,* delims==" %%A in ('set CUDA_PATH_V 2^>nul') do (
+            if not defined CUDA_LIB_DIR (
+                if exist "%%B\lib\x64\cublas.lib" (
+                    set "CUDA_LIB_DIR=%%B\lib\x64"
+                )
+            )
+        )
+    )
+    if not defined CUDA_LIB_DIR (
+        for /f "delims=" %%D in ('dir /b /ad "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA" 2^>nul ^| sort /R') do (
+            if not defined CUDA_LIB_DIR (
+                if exist "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\%%D\lib\x64\cublas.lib" (
+                    set "CUDA_LIB_DIR=%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\%%D\lib\x64"
+                )
+            )
+        )
+    )
+
+    if defined CUDA_LIB_DIR (
+        echo ==^> Using CUDA Toolkit libs from "!CUDA_LIB_DIR!"
+        set "CUDA_LIBS=\"!CUDA_LIB_DIR!\cublas.lib\" \"!CUDA_LIB_DIR!\cudart.lib\""
+    ) else (
+        echo Warning: Could not locate CUDA Toolkit lib directory - falling back to library names
+        echo Warning: Ensure your project links against the CUDA Toolkit lib path (e.g. %CUDA_PATH%\lib\x64)
+        set "CUDA_LIBS=cublas.lib cudart.lib"
+    )
 )
 
 REM Create temporary file with new content
