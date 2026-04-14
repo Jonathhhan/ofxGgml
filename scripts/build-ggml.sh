@@ -213,10 +213,10 @@ update_addon_config() {
 			;;
 		MINGW*|MSYS*|CYGWIN*)
 			if [[ -d "$LIB_DIR/Release" ]]; then
-				# VS libraries are linked via ofxGgml.props — skip
-				# addon_config.mk update for the vs section.
-				write_step "VS libraries are linked via ofxGgml.props (skipping addon_config.mk [vs] update)."
-				return 0
+				# Visual Studio multi-config build
+				section="vs"
+				search_dir="$LIB_DIR/Release"
+				ext=".lib"
 			else
 				section="msys2"
 				search_dir="$LIB_DIR"
@@ -262,7 +262,12 @@ update_addon_config() {
 	)
 
 	shopt -s nullglob
-	all_libs=("$search_dir"/libggml*"$ext" "$search_dir"/ggml*"$ext")
+	if [[ "$section" == "vs" ]]; then
+		# For VS, search recursively in subdirectories
+		all_libs=("$search_dir"/ggml*"$ext" "$search_dir"/*/ggml*"$ext")
+	else
+		all_libs=("$search_dir"/libggml*"$ext" "$search_dir"/ggml*"$ext")
+	fi
 	shopt -u nullglob
 
 	for lib in "${all_libs[@]}"; do
@@ -273,6 +278,10 @@ update_addon_config() {
 	for base_name in "${ordered_names[@]}"; do
 		if [[ -n "${selected[$base_name]:-}" ]]; then
 			rel_path="${selected[$base_name]#"$ADDON_ROOT"/}"
+			# For VS, replace /Release with /$(Configuration) for multi-config support
+			if [[ "$section" == "vs" ]]; then
+				rel_path="${rel_path/\/Release\//\/\$(Configuration)\/}"
+			fi
 			libs+=("$rel_path")
 			consumed["$base_name"]=1
 		fi
@@ -281,7 +290,12 @@ update_addon_config() {
 	mapfile -t sorted_keys < <(printf '%s\n' "${!selected[@]}" | sort)
 	for base_name in "${sorted_keys[@]}"; do
 		if [[ -z "${consumed[$base_name]:-}" ]]; then
-			remaining_libs+=("${selected[$base_name]#"$ADDON_ROOT"/}")
+			rel_path="${selected[$base_name]#"$ADDON_ROOT"/}"
+			# For VS, replace /Release with /$(Configuration) for multi-config support
+			if [[ "$section" == "vs" ]]; then
+				rel_path="${rel_path/\/Release\//\/\$(Configuration)\/}"
+			fi
+			remaining_libs+=("$rel_path")
 		fi
 	done
 

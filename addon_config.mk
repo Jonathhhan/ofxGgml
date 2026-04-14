@@ -53,9 +53,6 @@ vs:
 	ADDON_INCLUDES += src
 	ADDON_INCLUDES += libs/ggml/include
 	# @DIFFUSION_LIBS_START vs
-	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml.lib
-	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml-base.lib
-	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml-cpu.lib
 	# @DIFFUSION_LIBS_END vs
 
 android/armeabi:
