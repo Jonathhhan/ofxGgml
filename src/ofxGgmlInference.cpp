@@ -128,17 +128,75 @@ static bool runCommandCapture(const std::vector<std::string> & args, std::string
 output.clear();
 exitCode = -1;
 #ifdef _WIN32
-const std::string cmd = joinCommand(args);
+	if (args.empty() || args[0].empty()) return false;
 
-FILE * pipe = _popen(cmd.c_str(), "r");
-if (!pipe) return false;
+	SECURITY_ATTRIBUTES sa{};
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = TRUE;
+	sa.lpSecurityDescriptor = nullptr;
 
-std::array<char, 4096> buf{};
-while (fgets(buf.data(), static_cast<int>(buf.size()), pipe) != nullptr) {
-output += buf.data();
-}
+	HANDLE readPipe = nullptr;
+	HANDLE writePipe = nullptr;
+	if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) return false;
+	if (!SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0)) {
+		CloseHandle(readPipe);
+		CloseHandle(writePipe);
+		return false;
+	}
 
-exitCode = _pclose(pipe);
+	STARTUPINFOA si{};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESTDHANDLES;
+	// Redirect stdin to NUL so child processes that expect EOF terminate.
+	HANDLE nullInput = CreateFileA("NUL", GENERIC_READ, 0, &sa,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	si.hStdInput = (nullInput != INVALID_HANDLE_VALUE)
+		? nullInput : GetStdHandle(STD_INPUT_HANDLE);
+	si.hStdOutput = writePipe;
+	si.hStdError = writePipe;
+
+	std::string cmdLine;
+	for (size_t i = 0; i < args.size(); ++i) {
+		if (i > 0) cmdLine += ' ';
+		cmdLine += quoteArg(args[i]);
+	}
+	std::vector<char> mutableCmd(cmdLine.begin(), cmdLine.end());
+	mutableCmd.push_back('\0');
+
+	PROCESS_INFORMATION pi{};
+	BOOL ok = CreateProcessA(
+		nullptr,
+		mutableCmd.data(),
+		nullptr,
+		nullptr,
+		TRUE,
+		CREATE_NO_WINDOW,
+		nullptr,
+		nullptr,
+		&si,
+		&pi
+	);
+
+	if (nullInput != INVALID_HANDLE_VALUE) CloseHandle(nullInput);
+	CloseHandle(writePipe);
+	if (!ok) {
+		CloseHandle(readPipe);
+		return false;
+	}
+
+	std::array<char, 4096> buf{};
+	DWORD bytesRead = 0;
+	while (ReadFile(readPipe, buf.data(), static_cast<DWORD>(buf.size()), &bytesRead, nullptr) && bytesRead > 0) {
+		output.append(buf.data(), bytesRead);
+	}
+	CloseHandle(readPipe);
+
+	WaitForSingleObject(pi.hProcess, INFINITE);
+	DWORD code = 1;
+	GetExitCodeProcess(pi.hProcess, &code);
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+	exitCode = static_cast<int>(code);
 #else
 if (args.empty() || args.front().empty()) return false;
 
