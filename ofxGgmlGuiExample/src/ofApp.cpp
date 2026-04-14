@@ -11,6 +11,7 @@
 #include <functional>
 #include <iomanip>
 #include <numeric>
+#include <regex>
 #include <random>
 #include <sstream>
 #include <vector>
@@ -76,6 +77,33 @@ std::string trim(const std::string & s) {
 		end--;
 	}
 	return s.substr(start, end - start);
+}
+
+std::vector<std::string> extractHttpUrls(const std::string & text) {
+	static const std::regex urlRegex(R"(https?://[^\s<>\"]+)", std::regex::icase);
+	std::vector<std::string> urls;
+	for (std::sregex_iterator it(text.begin(), text.end(), urlRegex), end; it != end; ++it) {
+		urls.push_back(it->str());
+	}
+	// Deduplicate while preserving order.
+	std::vector<std::string> unique;
+	for (const auto & url : urls) {
+		if (std::find(unique.begin(), unique.end(), url) == unique.end()) {
+			unique.push_back(url);
+		}
+	}
+	return unique;
+}
+
+std::string fetchUrlContentLimited(const std::string & url, size_t maxChars) {
+	if (url.empty()) return "";
+	ofHttpResponse resp = ofLoadURL(url);
+	if (resp.status < 200 || resp.status >= 300) return "";
+	std::string body = resp.data.getText();
+	if (body.size() > maxChars) {
+		body = body.substr(0, maxChars) + "\n...[truncated]";
+	}
+	return body;
 }
 
 // Remove the llama.cpp interactive banner/instruction block that can
@@ -3433,7 +3461,33 @@ workerThread.join();
 
  workerThread = std::thread([this, mode, userText, systemPrompt]() {
  try {
- std::string prompt = buildPromptForMode(mode, userText, systemPrompt);
+ std::string userTextWithInternet = userText;
+ if (mode == AiMode::Chat) {
+ const auto urls = extractHttpUrls(userText);
+ static constexpr size_t kMaxUrls = 3;
+ static constexpr size_t kMaxCharsPerUrl = 2000;
+ static constexpr size_t kMaxTotalChars = 6000;
+ size_t used = 0;
+ size_t fetched = 0;
+ std::ostringstream ctx;
+ for (size_t i = 0; i < urls.size() && fetched < kMaxUrls; i++) {
+ const std::string content = fetchUrlContentLimited(urls[i], kMaxCharsPerUrl);
+ if (content.empty()) continue;
+ std::string clipped = content;
+ if (used + clipped.size() > kMaxTotalChars) {
+ clipped = clipped.substr(0, kMaxTotalChars - used) + "\n...[truncated]";
+ }
+ ctx << "\nURL: " << urls[i] << "\n" << clipped << "\n";
+ used += clipped.size();
+ fetched++;
+ if (used >= kMaxTotalChars) break;
+ }
+ if (used > 0) {
+ userTextWithInternet += "\n\nContext fetched from URLs in your message:" + ctx.str();
+ }
+ }
+
+ std::string prompt = buildPromptForMode(mode, userTextWithInternet, systemPrompt);
  std::string result;
  std::string error;
 
