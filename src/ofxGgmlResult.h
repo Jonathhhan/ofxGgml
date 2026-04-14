@@ -3,6 +3,7 @@
 #include <string>
 #include <stdexcept>
 #include <utility>
+#include <type_traits>
 
 /// Error codes for ofxGgml operations.
 enum class ofxGgmlErrorCode {
@@ -223,13 +224,16 @@ public:
 
 private:
 	bool m_hasValue;
+	// Use aligned storage to ensure proper alignment for both T and ofxGgmlError
 	union Storage {
-		T value;
-		ofxGgmlError error;
+		alignas(T) alignas(ofxGgmlError) T value;
+		alignas(T) alignas(ofxGgmlError) ofxGgmlError error;
 
 		Storage() {} // Uninitialized
 		~Storage() {} // Handled by Result destructor
 	} m_storage;
+	static_assert(alignof(Storage) >= alignof(T), "Storage alignment must satisfy T alignment");
+	static_assert(alignof(Storage) >= alignof(ofxGgmlError), "Storage alignment must satisfy ofxGgmlError alignment");
 };
 
 /// Specialization for void (operations that don't return a value).

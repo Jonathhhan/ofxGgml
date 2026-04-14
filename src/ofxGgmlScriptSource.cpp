@@ -216,15 +216,19 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 
 	std::string ownerRepo;
 	std::string branch;
+	std::string preferredExt;
+	ofxGgmlScriptSourceType sourceType;
 	uint64_t generation = 0;
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-		if (m_sourceType != ofxGgmlScriptSourceType::GitHubRepo) {
+		sourceType = m_sourceType;
+		if (sourceType != ofxGgmlScriptSourceType::GitHubRepo) {
 			m_status = "Source is not GitHub";
 			return false;
 		}
 		ownerRepo = m_gitHubOwnerRepo;
 		branch = m_gitHubBranch;
+		preferredExt = m_preferredExtension;
 		if (!isValidOwnerRepo(ownerRepo)) {
 			m_status = "Invalid repo format (use owner/repo)";
 			return false;
@@ -235,26 +239,25 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 		}
 		m_files.clear();
 		m_status = "Fetching...";
-		m_cancelFetch.store(false);
-		generation = m_fetchGeneration.fetch_add(1) + 1;
+		m_cancelFetch.store(false, std::memory_order_release);
+		generation = m_fetchGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
 		pushFetchDiagnosticLocked("start", "GitHub fetch started", generation);
 	}
-	m_fetching.store(true);
+	m_fetching.store(true, std::memory_order_release);
 
 	const std::string apiUrl = "https://api.github.com/repos/" + ownerRepo +
 		"/git/trees/" + branch + "?recursive=1";
 	const std::string rawPrefix = "https://raw.githubusercontent.com/" +
 		ownerRepo + "/" + branch + "/";
-	const std::string preferredExt = getPreferredExtension();
 
-	std::thread worker([this, generation, apiUrl, rawPrefix, preferredExt]() {
+	std::thread worker([this, generation, apiUrl, rawPrefix, preferredExt, sourceType]() {
 		std::vector<ofxGgmlScriptSourceFileEntry> entries;
 		std::string status;
 		bool hadError = false;
 
 		ofHttpResponse response = ofLoadURL(apiUrl);
-		if (m_cancelFetch.load() || m_fetchGeneration.load() != generation) {
-			m_fetching.store(false);
+		if (m_cancelFetch.load(std::memory_order_acquire) || m_fetchGeneration.load(std::memory_order_acquire) != generation) {
+			m_fetching.store(false, std::memory_order_release);
 			return;
 		}
 		if (response.status < 200 || response.status >= 300) {
@@ -272,8 +275,8 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 				hadError = true;
 			} else {
 				for (const auto & item : json["tree"]) {
-					if (m_cancelFetch.load() || m_fetchGeneration.load() != generation) {
-						m_fetching.store(false);
+					if (m_cancelFetch.load(std::memory_order_acquire) || m_fetchGeneration.load(std::memory_order_acquire) != generation) {
+						m_fetching.store(false, std::memory_order_release);
 						return;
 					}
 					if (!item.is_object()) continue;
@@ -307,15 +310,15 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 			}
 		}
 
-		if (m_cancelFetch.load() || m_fetchGeneration.load() != generation) {
-			m_fetching.store(false);
+		if (m_cancelFetch.load(std::memory_order_acquire) || m_fetchGeneration.load(std::memory_order_acquire) != generation) {
+			m_fetching.store(false, std::memory_order_release);
 			return;
 		}
 
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
-			if (m_sourceType == ofxGgmlScriptSourceType::GitHubRepo &&
-				m_fetchGeneration.load() == generation) {
+			if (m_sourceType == sourceType &&
+				m_fetchGeneration.load(std::memory_order_acquire) == generation) {
 				m_files = std::move(entries);
 				m_status = status;
 				pushFetchDiagnosticLocked(
@@ -324,7 +327,7 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 					generation);
 			}
 		}
-		m_fetching.store(false);
+		m_fetching.store(false, std::memory_order_release);
 	});
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
@@ -627,9 +630,15 @@ bool ofxGgmlScriptSource::isValidOwnerRepo(const std::string & ownerRepo) {
 }
 
 bool ofxGgmlScriptSource::isValidBranch(const std::string & branch) {
-	if (branch.empty() || branch.find("..") != std::string::npos) return false;
+	if (branch.empty()) return false;
+	// Reject any path traversal patterns
+	if (branch.find("..") != std::string::npos) return false;
+	// Reject leading/trailing slashes and double slashes
 	if (branch.front() == '/' || branch.back() == '/') return false;
+	if (branch.find("//") != std::string::npos) return false;
+	// Reject control characters
 	for (char c : branch) {
+		if (static_cast<unsigned char>(c) < 32) return false;
 		if (!std::isalnum(static_cast<unsigned char>(c)) &&
 			c != '-' && c != '_' && c != '.' && c != '/') {
 			return false;
@@ -640,11 +649,19 @@ bool ofxGgmlScriptSource::isValidBranch(const std::string & branch) {
 
 bool ofxGgmlScriptSource::isSafeRepoPath(const std::string & path) {
 	if (path.empty()) return false;
+	// Reject any path traversal patterns
 	if (path.find("..") != std::string::npos) return false;
+	// Reject absolute paths and backslashes
 	if (path.front() == '/' || path.find('\\') != std::string::npos) return false;
+	// Reject double slashes (could indicate path manipulation)
+	if (path.find("//") != std::string::npos) return false;
+	// Reject all control characters (ASCII < 32)
 	for (char c : path) {
 		if (static_cast<unsigned char>(c) < 32) return false;
 	}
+	// Validate that the path doesn't contain any suspicious patterns
+	// that could be used for injection
+	if (path.find('\0') != std::string::npos) return false;
 	return true;
 }
 
@@ -658,10 +675,39 @@ std::string ofxGgmlScriptSource::trim(const std::string & s) {
 
 bool ofxGgmlScriptSource::isValidUrl(const std::string & url) {
 	if (url.empty()) return false;
+	// Reject whitespace characters
 	if (url.find(' ') != std::string::npos || url.find('\t') != std::string::npos) return false;
+	// Reject control characters
+	for (char c : url) {
+		if (static_cast<unsigned char>(c) < 32) return false;
+	}
+	// Reject null bytes
+	if (url.find('\0') != std::string::npos) return false;
+
 	const std::string lower = normalizeLower(url);
-	return (lower.rfind("http://", 0) == 0 || lower.rfind("https://", 0) == 0) &&
-		lower.size() > std::string("http://").size();
+	// Only allow http and https schemes
+	const bool hasValidScheme = (lower.rfind("http://", 0) == 0 || lower.rfind("https://", 0) == 0);
+	if (!hasValidScheme) return false;
+
+	// Ensure URL has content after the scheme
+	const size_t schemeEnd = lower.find("://");
+	if (schemeEnd == std::string::npos || schemeEnd + 3 >= url.size()) return false;
+
+	// Reject URLs with potentially dangerous characters in query/fragment
+	// These could be used for shell injection if URLs are ever passed to shell commands
+	const size_t queryStart = url.find('?');
+	if (queryStart != std::string::npos) {
+		const std::string query = url.substr(queryStart);
+		// Reject shell metacharacters in query parameters
+		if (query.find(';') != std::string::npos ||
+		    query.find('`') != std::string::npos ||
+		    query.find('$') != std::string::npos ||
+		    query.find('|') != std::string::npos) {
+			return false;
+		}
+	}
+
+	return true;
 }
 
 bool ofxGgmlScriptSource::hasSourceExtension(

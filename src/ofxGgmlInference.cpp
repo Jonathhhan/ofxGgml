@@ -409,7 +409,8 @@ static bool parseEmbeddingVector(const std::string & raw, std::vector<float> & o
 
 	const size_t begin = raw.find('[');
 	const size_t end = raw.find(']', begin == std::string::npos ? 0 : begin + 1);
-	if (begin == std::string::npos || end == std::string::npos || end <= begin + 1) return false;
+	// Validate that brackets exist and are properly positioned to avoid underflow
+	if (begin == std::string::npos || end == std::string::npos || end <= begin || (end - begin) < 2) return false;
 	std::string body = raw.substr(begin + 1, end - begin - 1);
 	for (char & c : body) {
 		if (c == ',') c = ' ';

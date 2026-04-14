@@ -64,11 +64,16 @@ std::vector<float> ofxGgmlTensor::toFloatVector() const {
 	if (!m_tensor || !m_tensor->data) return {};
 	const int64_t n = ggml_nelements(m_tensor);
 	if (n <= 0) return {};
-	if (m_tensor->type != GGML_TYPE_F32 && n > std::numeric_limits<int>::max()) return {};
+
+	// Validate bounds for both F32 and non-F32 types to prevent integer overflow
+	if (n > std::numeric_limits<int>::max()) return {};
+
 	std::vector<float> out(static_cast<size_t>(n));
 	if (m_tensor->type == GGML_TYPE_F32) {
+		// Direct memcpy is safe since we validated n <= INT_MAX
 		std::memcpy(out.data(), m_tensor->data, static_cast<size_t>(n) * sizeof(float));
 	} else {
+		// Safe to cast since we validated n <= INT_MAX
 		for (int64_t i = 0; i < n; ++i) {
 			out[static_cast<size_t>(i)] = ggml_get_f32_1d(m_tensor, static_cast<int>(i));
 		}
