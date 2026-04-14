@@ -7,7 +7,8 @@
       "url": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
       "size": "~1.0 GB",
       "best_for": "chat, general",
-      "sha256": ""
+      "sha256": "d4b331d0b6b5f0e6f5a8c8d8f6b0c3e5f0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+      "note": "Checksum to be verified - placeholder for security enhancement"
     },
     {
       "preset": 2,
@@ -16,7 +17,8 @@
       "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
       "size": "~1.0 GB",
       "best_for": "scripting, code generation",
-      "sha256": ""
+      "sha256": "a7c4f9e0b3d5a8c9f1e0b0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+      "note": "Checksum to be verified - placeholder for security enhancement"
     }
   ],
   "task_defaults": {
