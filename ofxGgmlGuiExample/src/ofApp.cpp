@@ -1439,16 +1439,38 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 
 		size_t fileCount = 0;
 		const size_t maxFilesToReview = 20; // Limit to avoid overwhelming context
+		// Estimate max prompt size: use conservative estimate of ~3 chars per token
+		// Reserve 50% of context for system prompt + response generation
+		const size_t maxPromptChars = static_cast<size_t>(contextSize) * 3 / 2;
+		size_t currentPromptSize = allFilesContent.size();
+		bool hitSizeLimit = false;
+
 		for (size_t i = 0; i < scriptSourceFiles.size() && fileCount < maxFilesToReview; i++) {
 			const auto & entry = scriptSourceFiles[i];
 			if (!entry.isDirectory) {
 				std::string content;
 				if (scriptSource.loadFileContent(static_cast<int>(i), content)) {
+					const size_t fileHeaderSize = entry.name.size() + 20; // "=== File: ... ===\n"
+					const size_t addedSize = fileHeaderSize + content.size() + 2; // +2 for "\n\n"
+
+					// Check if adding this file would exceed the limit
+					if (currentPromptSize + addedSize > maxPromptChars) {
+						hitSizeLimit = true;
+						break;
+					}
+
 					allFilesContent += "=== File: " + entry.name + " ===\n";
 					allFilesContent += content + "\n\n";
+					currentPromptSize += addedSize;
 					fileCount++;
 				}
 			}
+		}
+
+		if (hitSizeLimit && fileCount > 0) {
+			allFilesContent += "\n[Note: Additional files were excluded to stay within context limit. ";
+			allFilesContent += std::to_string(fileCount) + " of " + std::to_string(scriptSourceFiles.size());
+			allFilesContent += " files included]\n";
 		}
 
 		if (fileCount > 0) {
@@ -2649,6 +2671,31 @@ workerThread.join();
  fprintf(stderr, "\n[ofxGgml] === Generation started ===\n");
  fprintf(stderr, "[ofxGgml] Mode: %s\n", modeLabels[static_cast<int>(mode)]);
  fprintf(stderr, "[ofxGgml] Prompt (%zu chars):\n%s\n", prompt.size(), prompt.c_str());
+ }
+
+ // Safety check: Estimate if prompt is too large for context window
+ // Use conservative estimate of ~3 chars per token
+ const size_t estimatedTokens = prompt.size() / 3;
+ const size_t maxTokens = static_cast<size_t>(contextSize);
+ if (estimatedTokens > maxTokens) {
+ const std::string warningMsg =
+ "[Warning] Prompt is very large (~" + std::to_string(estimatedTokens) +
+ " estimated tokens) and may exceed context size (" + std::to_string(maxTokens) +
+ " tokens). Consider reducing input size or increasing context size in settings.";
+
+ fprintf(stderr, "[ofxGgml] %s\n", warningMsg.c_str());
+
+ // Provide a helpful error message to the user
+ result = warningMsg + "\n\nPrompt size: " + std::to_string(prompt.size()) + " characters";
+
+ std::lock_guard<std::mutex> lock(outputMutex);
+ if (!cancelRequested.load()) {
+ pendingOutput = result;
+ pendingRole = "assistant";
+ pendingMode = mode;
+ }
+ generating.store(false);
+ return;
  }
 
  const std::string trimmedPrompt = trim(prompt);
