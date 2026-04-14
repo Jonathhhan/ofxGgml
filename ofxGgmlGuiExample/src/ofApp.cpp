@@ -1320,10 +1320,11 @@ ImGui::Text("Source:");
 ImGui::SameLine();
 
 // Source type buttons.
- ofxGgmlScriptSourceType sourceType = scriptSource.getSourceType();
- bool isNone = (sourceType == ofxGgmlScriptSourceType::None);
- bool isLocal = (sourceType == ofxGgmlScriptSourceType::LocalFolder);
- bool isGitHub = (sourceType == ofxGgmlScriptSourceType::GitHubRepo);
+ofxGgmlScriptSourceType sourceType = scriptSource.getSourceType();
+bool isNone = (sourceType == ofxGgmlScriptSourceType::None);
+bool isLocal = (sourceType == ofxGgmlScriptSourceType::LocalFolder);
+bool isGitHub = (sourceType == ofxGgmlScriptSourceType::GitHubRepo);
+bool isInternet = (sourceType == ofxGgmlScriptSourceType::Internet);
 
 if (isNone) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.35f, 1.0f));
 if (ImGui::SmallButton("None")) {
@@ -1354,6 +1355,14 @@ if (ImGui::SmallButton("GitHub")) {
 	scriptSource.setGitHubMode();
 }
 if (isGitHub) ImGui::PopStyleColor();
+ImGui::SameLine();
+
+if (isInternet) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.5f, 0.7f, 1.0f));
+if (ImGui::SmallButton("Internet")) {
+	selectedScriptFileIndex = -1;
+	scriptSource.setInternetMode();
+}
+if (isInternet) ImGui::PopStyleColor();
 
 // Script source file browser (inline when active).
 const auto scriptSourceFiles = scriptSource.getFiles();
@@ -1362,10 +1371,12 @@ ImGui::BeginChild("##ScriptFiles", ImVec2(-1, 80), true);
 if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 const std::string localPath = scriptSource.getLocalFolderPath();
 ImGui::TextDisabled("Folder: %s", localPath.c_str());
-} else {
+} else if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
 const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
 const std::string branch = scriptSource.getGitHubBranch();
 ImGui::TextDisabled("GitHub: %s (%s)", ownerRepo.c_str(), branch.c_str());
+} else {
+ImGui::TextDisabled("Internet sources");
 }
 for (int i = 0; i < static_cast<int>(scriptSourceFiles.size()); i++) {
 const auto & entry = scriptSourceFiles[static_cast<size_t>(i)];
@@ -1386,7 +1397,8 @@ ImGui::PopID();
 ImGui::EndChild();
 }
 
-if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
+if (sourceType == ofxGgmlScriptSourceType::GitHubRepo ||
+	sourceType == ofxGgmlScriptSourceType::Internet) {
 drawScriptSourcePanel();
 }
 
@@ -1423,11 +1435,13 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 		const std::string folderPath = scriptSource.getLocalFolderPath();
 		prompt += "\nContext: Loaded folder: " + folderPath + "\n";
 		prompt += "Available files in this folder:\n";
-	} else {
+	} else if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
 		const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
 		const std::string branch = scriptSource.getGitHubBranch();
 		prompt += "\nContext: Loaded GitHub repository: " + ownerRepo + " (branch: " + branch + ")\n";
 		prompt += "Available files in this repository:\n";
+	} else {
+		prompt += "\nContext: Loaded internet sources (URLs):\n";
 	}
 	// List up to 50 files to avoid overly long prompts
 	const size_t maxFilesToList = 50;
@@ -1541,33 +1555,67 @@ ImGui::EndChild();
 
 void ofApp::drawScriptSourcePanel() {
 ImGui::Spacing();
-ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "GitHub Repository:");
-ImGui::SetNextItemWidth(250);
-ImGui::InputText("##GHRepo", scriptSourceGitHub, sizeof(scriptSourceGitHub));
-ImGui::SameLine();
-ImGui::Text("Branch:");
-ImGui::SameLine();
-ImGui::SetNextItemWidth(100);
-ImGui::InputText("##GHBranch", scriptSourceBranch, sizeof(scriptSourceBranch));
-ImGui::SameLine();
-if (ImGui::Button("Fetch", ImVec2(60, 0))) {
-if (std::strlen(scriptSourceGitHub) > 0) {
-std::string branch = std::strlen(scriptSourceBranch) > 0
-? std::string(scriptSourceBranch) : "main";
-	selectedScriptFileIndex = -1;
-	if (!scriptLanguages.empty()) {
-		scriptSource.setPreferredExtension(
-			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+const ofxGgmlScriptSourceType sourceType = scriptSource.getSourceType();
+
+if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
+	ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "GitHub Repository:");
+	ImGui::SetNextItemWidth(250);
+	ImGui::InputText("##GHRepo", scriptSourceGitHub, sizeof(scriptSourceGitHub));
+	ImGui::SameLine();
+	ImGui::Text("Branch:");
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(100);
+	ImGui::InputText("##GHBranch", scriptSourceBranch, sizeof(scriptSourceBranch));
+	ImGui::SameLine();
+	if (ImGui::Button("Fetch", ImVec2(60, 0))) {
+		if (std::strlen(scriptSourceGitHub) > 0) {
+			std::string branch = std::strlen(scriptSourceBranch) > 0
+				? std::string(scriptSourceBranch) : "main";
+			selectedScriptFileIndex = -1;
+			if (!scriptLanguages.empty()) {
+				scriptSource.setPreferredExtension(
+					scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+			}
+			if (scriptSource.setGitHubRepo(scriptSourceGitHub, branch)) {
+				scriptSource.fetchGitHubRepo();
+			}
+		}
 	}
-	if (scriptSource.setGitHubRepo(scriptSourceGitHub, branch)) {
-		scriptSource.fetchGitHubRepo();
+} else if (sourceType == ofxGgmlScriptSourceType::Internet) {
+	ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.9f, 1.0f), "Internet Sources (URLs):");
+	ImGui::SetNextItemWidth(360);
+	ImGui::InputText("##InternetUrl", scriptSourceInternetUrl, sizeof(scriptSourceInternetUrl));
+	ImGui::SameLine();
+	if (ImGui::Button("Add URL", ImVec2(80, 0))) {
+		if (std::strlen(scriptSourceInternetUrl) > 0) {
+			scriptSource.addInternetUrl(scriptSourceInternetUrl);
+			scriptSource.rescan();
+			scriptSourceInternetUrl[0] = '\0';
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Clear URLs", ImVec2(90, 0))) {
+		scriptSource.setInternetUrls({});
+		selectedScriptFileIndex = -1;
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Remove all added URLs.");
+	}
+	if (selectedScriptFileIndex >= 0) {
+		ImGui::SameLine();
+		if (ImGui::Button("Remove Selected", ImVec2(130, 0))) {
+			if (scriptSource.removeInternetUrl(static_cast<size_t>(selectedScriptFileIndex))) {
+				selectedScriptFileIndex = -1;
+				scriptSource.rescan();
+			}
+		}
 	}
 }
-}
+
 const std::string status = scriptSource.getStatus();
 if (!status.empty()) {
-ImGui::SameLine();
-ImGui::TextDisabled("%s", status.c_str());
+	ImGui::SameLine();
+	ImGui::TextDisabled("%s", status.c_str());
 }
 ImGui::Spacing();
 }
@@ -2064,6 +2112,15 @@ out << "scriptSourceType=" << static_cast<int>(scriptSource.getSourceType()) << 
 out << "scriptSourcePath=" << escapeSessionText(scriptSource.getLocalFolderPath()) << "\n";
 out << "scriptSourceGitHub=" << escapeSessionText(scriptSourceGitHub) << "\n";
 out << "scriptSourceBranch=" << escapeSessionText(scriptSourceBranch) << "\n";
+{
+	const auto internetUrls = scriptSource.getInternetUrls();
+	std::string packed;
+	for (size_t i = 0; i < internetUrls.size(); i++) {
+		if (i > 0) packed += "\n";
+		packed += internetUrls[i];
+	}
+	out << "scriptSourceInternetUrls=" << escapeSessionText(packed) << "\n";
+}
 out << "useProjectMemory=" << (scriptProjectMemory.isEnabled() ? 1 : 0) << "\n";
 out << "projectMemory=" << escapeSessionText(scriptProjectMemory.getMemoryText()) << "\n";
 
@@ -2114,6 +2171,7 @@ return false;
 chatMessages.clear();
 int loadedScriptSourceType = static_cast<int>(ofxGgmlScriptSourceType::None);
 std::string loadedScriptSourcePath;
+std::string loadedScriptSourceInternetUrls;
 
 auto copyToBuf = [this](char * buf, size_t bufSize, const std::string & value) {
 std::string text = unescapeSessionText(value);
@@ -2189,11 +2247,12 @@ else if (key == "mirostatEta") mirostatEta = std::clamp(safeStof(value, 0.1f), 0
 else if (key == "verbose") verbose = (safeStoi(value) != 0);
 else if (key == "customCliPath") { /* ignored — CLI path option removed */ }
 else if (key == "scriptSourceType") {
-	loadedScriptSourceType = std::clamp(safeStoi(value), 0, 2);
+	loadedScriptSourceType = std::clamp(safeStoi(value), 0, 3);
 }
 else if (key == "scriptSourcePath") loadedScriptSourcePath = unescapeSessionText(value);
 else if (key == "scriptSourceGitHub") copyToBuf(scriptSourceGitHub, sizeof(scriptSourceGitHub), value);
 else if (key == "scriptSourceBranch") copyToBuf(scriptSourceBranch, sizeof(scriptSourceBranch), value);
+else if (key == "scriptSourceInternetUrls") loadedScriptSourceInternetUrls = unescapeSessionText(value);
 else if (key == "useProjectMemory") scriptProjectMemory.setEnabled(safeStoi(value, 1) != 0);
 else if (key == "projectMemory") {
 scriptProjectMemory.setMemoryText(unescapeSessionText(value));
@@ -2246,6 +2305,13 @@ if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::LocalFol
 	if (!ownerRepo.empty()) {
 		scriptSource.setGitHubRepo(ownerRepo, branch);
 	}
+	selectedScriptFileIndex = -1;
+} else if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::Internet)) {
+	std::vector<std::string> urls;
+	if (!loadedScriptSourceInternetUrls.empty()) {
+		urls = ofSplitString(loadedScriptSourceInternetUrls, "\n", true, true);
+	}
+	scriptSource.setInternetUrls(urls);
 	selectedScriptFileIndex = -1;
 } else {
 	scriptSource.clear();

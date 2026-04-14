@@ -202,6 +202,7 @@ private:
 	ofxGgmlScriptSource scriptSource;
 	char scriptSourceGitHub[512] = {};               // "owner/repo" input
 	char scriptSourceBranch[128] = {};               // branch name, default "main"
+	char scriptSourceInternetUrl[1024] = {};         // internet URL input
 	int selectedScriptFileIndex = -1;
 	ofxGgmlProjectMemory scriptProjectMemory;
 	std::string lastScriptRequest;

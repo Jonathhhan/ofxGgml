@@ -12,7 +12,8 @@
 enum class ofxGgmlScriptSourceType {
 	None = 0,
 	LocalFolder = 1,
-	GitHubRepo = 2
+	GitHubRepo = 2,
+	Internet = 3
 };
 
 struct ofxGgmlScriptSourceFileEntry {
@@ -34,12 +35,16 @@ public:
 
 	void clear();
 	void setGitHubMode();
+	void setInternetMode();
 
 	void setPreferredExtension(const std::string & ext);
 	std::string getPreferredExtension() const;
 
 	bool setLocalFolder(const std::string & path);
 	bool setGitHubRepo(const std::string & ownerRepo, const std::string & branch);
+	void setInternetUrls(const std::vector<std::string> & urls);
+	bool addInternetUrl(const std::string & url);
+	bool removeInternetUrl(size_t index);
 	bool fetchGitHubRepo();
 	bool rescan();
 
@@ -50,6 +55,7 @@ public:
 	std::string getLocalFolderPath() const;
 	std::string getGitHubOwnerRepo() const;
 	std::string getGitHubBranch() const;
+	std::vector<std::string> getInternetUrls() const;
 	std::vector<ofxGgmlScriptSourceFileEntry> getFiles() const;
 	std::string getStatus() const;
 	bool isFetching() const;
@@ -68,6 +74,7 @@ private:
 	static bool isValidBranch(const std::string & branch);
 	static bool isSafeRepoPath(const std::string & path);
 	static std::string trim(const std::string & s);
+	static bool isValidUrl(const std::string & url);
 	static bool hasSourceExtension(
 		const std::string & ext, bool includeTextLikeExtensions);
 
@@ -77,6 +84,7 @@ private:
 	std::string m_gitHubOwnerRepo;
 	std::string m_gitHubBranch;
 	std::string m_preferredExtension;
+	std::vector<std::string> m_internetUrls;
 	std::vector<ofxGgmlScriptSourceFileEntry> m_files;
 	std::string m_status;
 	std::vector<ofxGgmlScriptSourceFetchDiagnostic> m_fetchDiagnostics;
