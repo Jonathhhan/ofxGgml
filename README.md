@@ -119,6 +119,8 @@ If a parallel Windows build hits a transient CUDA/MSBuild object-link race (for 
 
 After building ggml, regenerate your project with the openFrameworks Project Generator so the generated VS project picks up the latest addon library list.
 
+`scripts\build-ggml.bat` also refreshes `addon_config.mk` for the `vs` section so Visual Studio links the exact ggml libraries you just built. When CUDA is enabled, it injects the CUDA Toolkit dependencies (`cublas.lib`, `cudart.lib`) using your installed CUDA path—rerun the script if you see `LNK1181` about `cublas.lib`.
+
 > CPU-only builds remain clean by default. CUDA-specific libraries are no longer linked unconditionally.
 
 ### Manual — CMake
@@ -151,7 +153,6 @@ CMake options:
 ```
 ofxGgml/
 ├── addon_config.mk          # oF project generator configuration
-├── ofxGgml.props            # VS property sheet for Debug/Release linking
 ├── src/
 │   ├── ofxGgml.h             # umbrella header — include this
 │   ├── ofxGgmlCore.h/.cpp    # backend init, compute, model weight loading
@@ -175,6 +176,7 @@ ofxGgml/
 │   ├── setup_windows.bat     # Windows setup entry point
 │   ├── build-ggml.sh         # build bundled ggml — Linux/macOS
 │   ├── build-ggml.bat        # build bundled ggml — Windows/VS
+│   ├── update-addon-config.bat # refresh addon_config.mk [vs] with ggml/CUDA libs
 │   ├── update-ggml-source.sh # update bundled ggml to latest upstream
 │   ├── build-llama-cli.sh    # build & install llama.cpp CLI tools
 │   └── download-model.sh     # download GGUF model presets

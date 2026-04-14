@@ -190,17 +190,22 @@ if errorlevel 2 (
 )
 
 REM ---------------------------------------------------------------------------
-REM addon_config.mk — VS libraries are handled by ofxGgml.props
+REM addon_config.mk — Update VS library list (ggml + CUDA deps)
 REM ---------------------------------------------------------------------------
 
-echo ==^> VS libraries are linked via ofxGgml.props (no addon_config.mk update needed).
+echo ==^> Updating addon_config.mk for Visual Studio...
+call "%SCRIPT_DIR%update-addon-config.bat"
+if errorlevel 1 (
+    echo Error: addon_config.mk update failed.
+    exit /b 1
+)
 
 echo ==^> Done! ggml has been built in %BUILD_DIR%
 echo ==^>   Release libs: %LIB_DIR_REL%
 echo ==^>   Debug libs:   %LIB_DIR_DBG%
+echo ==^>   addon_config.mk [vs] updated with ggml libraries
+echo ==^>   CUDA builds also add CUDA Toolkit libs (cublas.lib, cudart.lib)
 echo ==^>
-echo ==^> Import ofxGgml.props into your VS project to link the libraries:
-echo ==^>   View ^> Property Manager ^> Add Existing Property Sheet
 
 endlocal
 exit /b 0
