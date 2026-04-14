@@ -79,8 +79,8 @@ REM Check if CUDA backend is present and add CUDA Toolkit libraries
 set "CUDA_PRESENT=0"
 if exist "%LIB_DIR%\ggml-cuda\Release\ggml-cuda.lib" (
     set "CUDA_PRESENT=1"
-    echo ==^> CUDA backend detected - adding CUDA Toolkit libraries
-    echo ==^> Locating CUDA Toolkit library directory...
+    echo ==^> CUDA backend detected - adding required CUDA libraries
+    echo ==^> Locating CUDA library directory...
 )
 
 REM Add CUDA Toolkit libraries if CUDA is present
@@ -108,7 +108,8 @@ if "%CUDA_PRESENT%"=="1" (
         )
     )
     if not defined CUDA_LIB_DIR if defined CUDAToolkit_ROOT_CLEAN (
-        echo ==^>   Checking CUDAToolkit_ROOT: !CUDAToolkit_ROOT_CLEAN!
+        echo ==^>   Checking environment variable: CUDA root path
+        echo ==^>   Path: !CUDAToolkit_ROOT_CLEAN!
         if exist "!CUDAToolkit_ROOT_CLEAN!\lib\x64\cublas.lib" (
             set "CUDA_LIB_DIR=!CUDAToolkit_ROOT_CLEAN!\lib\x64"
         )
@@ -126,7 +127,7 @@ if "%CUDA_PRESENT%"=="1" (
         )
     )
     if not defined CUDA_LIB_DIR (
-        echo ==^>   Checking Program Files for CUDA Toolkit installation...
+        echo ==^>   Checking Program Files for CUDA installation...
         if exist "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA" (
             pushd "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA"
             for /f "delims=" %%D in ('dir /b /ad /o-n 2^>nul') do (
@@ -143,17 +144,25 @@ if "%CUDA_PRESENT%"=="1" (
     )
 
     if not defined CUDA_LIB_DIR (
-        echo Error: CUDA backend detected but could not locate CUDA Toolkit lib directory with cublas.lib
-        if defined CUDA_PATH echo   CUDA_PATH=%CUDA_PATH%
-        if defined CUDAToolkit_ROOT echo   CUDAToolkit_ROOT=%CUDAToolkit_ROOT%
-        echo   Expected example: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\lib\x64
-        echo   Set CUDA_PATH (or CUDAToolkit_ROOT) to your CUDA install root and rerun this script.
+        echo Error: CUDA backend detected but could not locate CUDA lib directory with cublas.lib
+        if defined CUDA_PATH (
+            echo   CUDA_PATH environment variable is set
+            echo   Value: %CUDA_PATH%
+        )
+        if defined CUDAToolkit_ROOT (
+            echo   CUDA root environment variable is set
+            echo   Value: %CUDAToolkit_ROOT%
+        )
+        echo   Expected path format example:
+        echo   C:\Program Files\NVIDIA GPU Computing\CUDA\v13.2\lib\x64
+        echo.
+        echo   Solution: Set CUDA_PATH environment variable and rerun this script.
         echo   If you meant to build CPU-only, rebuild ggml with --cpu-only to drop the CUDA dependency.
         exit /b 1
     )
 
     for %%P in ("!CUDA_LIB_DIR!") do set "CUDA_LIB_DIR=%%~fP"
-    echo ==^> Using CUDA Toolkit libs: !CUDA_LIB_DIR!
+    echo ==^> Located CUDA libraries at: !CUDA_LIB_DIR!
     set "CUDA_CUBLAS=!CUDA_LIB_DIR!\cublas.lib"
     set "CUDA_CUDART=!CUDA_LIB_DIR!\cudart.lib"
 )
@@ -208,7 +217,7 @@ move /y "%TEMP_FILE%" "%CONFIG_FILE%" >nul
 
 echo ==^> Updated addon_config.mk [vs] section with %COUNT% libraries
 if "%CUDA_PRESENT%"=="1" (
-    echo ==^> Added CUDA Toolkit libraries: cublas.lib, cudart.lib
+    echo ==^> Added CUDA libraries: cublas.lib, cudart.lib
 )
 echo ==^> Rebuild your Visual Studio project to apply changes
 

@@ -86,7 +86,7 @@ echo Usage:
 echo   scripts\build-ggml.bat [OPTIONS]
 echo.
 echo Options:
-echo   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
+echo   --gpu, --cuda  Enable CUDA backend (requires CUDA installed)
 echo   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
 echo   --auto         Auto-detect available GPU backends (default)
 echo   --cpu-only     Disable GPU autodetection, build CPU backend only
@@ -204,7 +204,7 @@ echo ==^> Done! ggml has been built in %BUILD_DIR%
 echo ==^>   Release libs: %LIB_DIR_REL%
 echo ==^>   Debug libs:   %LIB_DIR_DBG%
 echo ==^>   addon_config.mk [vs] updated with ggml libraries
-echo ==^>   CUDA builds also add CUDA Toolkit libs (cublas.lib, cudart.lib)
+echo ==^>   CUDA builds also add CUDA libs: cublas.lib, cudart.lib
 echo ==^>
 
 endlocal
