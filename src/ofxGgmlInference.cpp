@@ -31,6 +31,41 @@ while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
 return s.substr(b, e - b);
 }
 
+/// Strip common llama.cpp warning messages from output.
+/// Even with --log-disable, some warnings may still appear in stderr
+/// which gets captured alongside stdout by runCommandCapture.
+static std::string stripLlamaWarnings(const std::string & text) {
+	if (text.empty()) return text;
+
+	std::ostringstream filtered;
+	std::istringstream lines(text);
+	std::string line;
+
+	while (std::getline(lines, line)) {
+		// Skip lines that are common llama.cpp warnings
+		if (line.find("warning: no usable GPU found") != std::string::npos ||
+			line.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos ||
+			line.find("warning: consult docs/build.md for compilation instructions") != std::string::npos ||
+			line.find("--gpu-layers option will be ignored") != std::string::npos ||
+			line.find("ggml_cuda_init") != std::string::npos ||
+			line.find("ggml_vulkan_init") != std::string::npos ||
+			line.find("ggml_metal_init") != std::string::npos) {
+			continue;
+		}
+
+		// Keep non-warning lines
+		filtered << line << '\n';
+	}
+
+	std::string result = filtered.str();
+	// Remove trailing newline if original didn't have one
+	if (!result.empty() && result.back() == '\n' &&
+		(text.empty() || text.back() != '\n')) {
+		result.pop_back();
+	}
+	return result;
+}
+
 /// Validate that a file path exists and is a regular file.
 /// Returns true if the path is valid and safe to use.
 static bool isValidFilePath(const std::string & path) {
@@ -646,7 +681,7 @@ result.error = "failed to start llama completion process";
 return result;
 }
 if (exitCode != 0) {
-result.error = trim(raw);
+result.error = trim(stripLlamaWarnings(raw));
 if (result.error.empty()) {
 result.error = "llama completion failed with exit code " + std::to_string(exitCode);
 }
@@ -654,7 +689,7 @@ return result;
 }
 
 result.success = true;
-result.text = trim(raw);
+result.text = trim(stripLlamaWarnings(raw));
 const auto t1 = std::chrono::steady_clock::now();
 result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 return result;
@@ -721,12 +756,15 @@ result.error = "failed to start llama embedding process";
 return result;
 }
 if (exitCode != 0) {
-result.error = trim(raw);
+result.error = trim(stripLlamaWarnings(raw));
 if (result.error.empty()) {
 result.error = "llama embedding failed with exit code " + std::to_string(exitCode);
 }
 return result;
 }
+
+// Strip warnings before parsing to avoid JSON parse errors
+raw = stripLlamaWarnings(raw);
 
 if (!parseEmbeddingVector(raw, result.embedding)) {
 result.error = "failed to parse embedding output";
