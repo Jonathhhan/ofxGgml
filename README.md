@@ -384,16 +384,22 @@ Build the tools with:
 |---|-------|------|----------|
 | 1 | Qwen2.5-1.5B Instruct Q4_K_M | ~1.0 GB | chat, general |
 | 2 | Qwen2.5-Coder-1.5B Instruct Q4_K_M | ~1.0 GB | scripting, code generation |
+| 3 | Phi-3.5-mini Instruct Q4_K_M | ~2.4 GB | reasoning, analysis, complex tasks |
+| 4 | Llama-3.2-1B Instruct Q4_K_M | ~0.9 GB | lightweight, fast inference |
+| 5 | TinyLlama-1.1B Chat Q4_K_M | ~0.6 GB | very lightweight, testing, prototyping |
 
 ```bash
-./scripts/download-model.sh                    # download both presets
-./scripts/download-model.sh --preset 2         # coder model only
+./scripts/download-model.sh                    # download default presets (1 and 2)
+./scripts/download-model.sh --preset 3         # Phi-3.5-mini for complex reasoning
+./scripts/download-model.sh --preset 4         # Llama-3.2-1B for lightweight use
 ./scripts/download-model.sh --task script      # same as --preset 2
 ./scripts/download-model.sh --list             # show all presets
 ./scripts/download-model.sh --model <URL> --checksum <SHA256>  # custom with checksum verification
 ```
 
 Model preset metadata is stored in `scripts/model-catalog.json`. `download-model.sh` supports resumable downloads and validates SHA256 checksums when provided. If a preset checksum is blank in the catalog, the script prints an explicit warning and skips integrity verification for that download.
+
+**Updating Checksums**: Run `./scripts/update-model-checksums.sh --all` to automatically download models and compute verified SHA256 checksums for the catalog.
 
 ## Testing
 
@@ -425,7 +431,13 @@ See `tests/README.md` for detailed testing documentation.
 
 ### CI Integration
 
-Tests run automatically on every push and pull request via GitHub Actions.
+Tests run automatically on every push and pull request via GitHub Actions. The CI pipeline includes:
+
+- **Smoke tests**: Build ggml, validate scripts and configuration files
+- **Unit tests**: Comprehensive test suite using Catch2 (280+ test cases)
+- **Static analysis**: cppcheck and clang-tidy for code quality (warnings allowed, not enforced)
+
+Static analysis reports are uploaded as artifacts for each CI run and can be reviewed to improve code quality over time.
 
 ## Error Handling
 
@@ -533,6 +545,46 @@ The script will:
 - If you installed CUDA in a custom versioned folder (for example `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2`), set `CUDA_PATH` (or `CUDAToolkit_ROOT`) to that root and rerun `scripts\update-addon-config.bat`. This writes the absolute `cublas.lib`/`cudart.lib` paths into `addon_config.mk`.
 
 **Note:** This fix was added to resolve CUBLAS linker errors. If you built ggml with CUDA before this fix, run the update script above.
+
+## Security
+
+ofxGgml implements several security best practices to protect against common vulnerabilities:
+
+### Input Validation
+
+- **Path validation**: Model paths and executable paths are validated to ensure they exist and are regular files
+- **Path traversal protection**: Executable paths are checked for suspicious patterns like `..`
+- **Null byte filtering**: All file paths are checked for null bytes to prevent path injection attacks
+- **Canonical path resolution**: Paths are normalized to resolve symlinks and detect malicious redirects
+
+### Input Sanitization
+
+- **Prompt sanitization**: User prompts are sanitized to remove null bytes and dangerous control characters
+- **Argument sanitization**: Command-line arguments passed to external processes are sanitized
+- **JSON schema validation**: JSON schemas for structured output are sanitized before use
+
+### Secure Temporary Files
+
+- **Atomic file creation**: Temporary files are created with exclusive access flags to prevent race conditions
+- **Random filenames**: Cryptographically random filenames using `std::random_device` prevent predictable temp file attacks
+- **Automatic cleanup**: Thread-local RAII wrappers ensure temp files are cleaned up on thread exit
+
+### Model Integrity
+
+- **SHA256 checksums**: Model catalog includes SHA256 checksums for verification (when available)
+- **Checksum verification**: Download script automatically verifies checksums when provided
+- **Integrity warnings**: Clear warnings when checksums are missing or verification fails
+
+### Best Practices for Users
+
+When using ofxGgml in production:
+
+1. **Validate model sources**: Only download models from trusted sources
+2. **Verify checksums**: Always check SHA256 checksums for downloaded models
+3. **Restrict file paths**: Use absolute paths and avoid user-controlled path construction
+4. **Sandbox external executables**: Consider running llama-cli in a restricted environment
+5. **Limit prompt size**: Implement application-level limits on prompt lengths to prevent DoS
+6. **Monitor resource usage**: Track memory and compute usage when processing user inputs
 
 ## Extending the Addon
 

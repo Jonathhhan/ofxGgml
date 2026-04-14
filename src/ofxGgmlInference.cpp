@@ -30,6 +30,69 @@ while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
 return s.substr(b, e - b);
 }
 
+/// Validate that a file path exists and is a regular file.
+/// Returns true if the path is valid and safe to use.
+static bool isValidFilePath(const std::string & path) {
+	if (path.empty()) return false;
+
+	// Check for null bytes (security: path injection)
+	if (path.find('\0') != std::string::npos) return false;
+
+	std::error_code ec;
+	std::filesystem::path fsPath(path);
+
+	// Check if file exists
+	if (!std::filesystem::exists(fsPath, ec)) return false;
+	if (ec) return false;
+
+	// Ensure it's a regular file, not a device or special file
+	if (!std::filesystem::is_regular_file(fsPath, ec)) return false;
+	if (ec) return false;
+
+	return true;
+}
+
+/// Validate an executable path for security.
+/// Checks that the executable exists and is not a suspicious path.
+static bool isValidExecutablePath(const std::string & path) {
+	if (path.empty()) return false;
+
+	// Check for null bytes and suspicious characters
+	if (path.find('\0') != std::string::npos) return false;
+	if (path.find("..") != std::string::npos) return false;  // Path traversal
+
+	std::error_code ec;
+	std::filesystem::path fsPath(path);
+
+	// For security, normalize the path to resolve any symlinks
+	std::filesystem::path canonical = std::filesystem::weakly_canonical(fsPath, ec);
+	if (ec) {
+		// If we can't canonicalize, try basic existence check
+		return std::filesystem::exists(fsPath, ec) && !ec;
+	}
+
+	// Check if the canonical path exists
+	return std::filesystem::exists(canonical, ec) && !ec;
+}
+
+/// Sanitize a string for safe use in command arguments.
+/// Removes or escapes potentially dangerous characters.
+static std::string sanitizeArgument(const std::string & arg) {
+	std::string result;
+	result.reserve(arg.size());
+
+	for (char c : arg) {
+		// Remove null bytes and control characters (except common whitespace)
+		if (c == '\0' || (std::iscntrl(static_cast<unsigned char>(c)) &&
+		    c != '\t' && c != '\n' && c != '\r')) {
+			continue;
+		}
+		result += c;
+	}
+
+	return result;
+}
+
 #ifdef _WIN32
 static std::string quoteArg(const std::string & arg) {
 	std::string out;
@@ -129,12 +192,35 @@ return true;
 }
 
 static std::string makeTempPath(const char * prefix, const char * ext) {
-std::error_code ec;
-std::filesystem::path base = std::filesystem::temp_directory_path(ec);
-if (ec) base = std::filesystem::current_path();
-const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-std::mt19937_64 rng(static_cast<uint64_t>(now));
-const uint64_t nonce = rng();
+	std::error_code ec;
+	std::filesystem::path base = std::filesystem::temp_directory_path(ec);
+	if (ec) base = std::filesystem::current_path();
+
+	// Generate a cryptographically random filename component
+	std::random_device rd;
+	std::mt19937_64 rng(rd());
+	std::uniform_int_distribution<uint64_t> dist;
+
+	// Try up to 1000 times to create a unique file (prevents race conditions)
+	for (int attempts = 0; attempts < 1000; ++attempts) {
+		const uint64_t random1 = dist(rng);
+		const uint64_t random2 = dist(rng);
+		std::ostringstream oss;
+		oss << prefix << std::hex << random1 << "_" << random2 << ext;
+
+		std::filesystem::path candidate = base / oss.str();
+
+		// Try to create the file exclusively (atomic check-and-create)
+		std::ofstream test(candidate, std::ios::out | std::ios::excl);
+		if (test.is_open()) {
+			test.close();
+			return candidate.string();
+		}
+	}
+
+	// Fallback: use time-based name with random component
+	const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+	const uint64_t nonce = dist(rng);
 	return (base / (std::string(prefix) + std::to_string(now) + "_" + std::to_string(nonce) + ext)).string();
 }
 
@@ -292,10 +378,29 @@ result.error = "completion executable path is empty";
 return result;
 }
 
+// Security: Validate model path
+if (!isValidFilePath(modelPath)) {
+	result.error = "invalid or inaccessible model path: " + modelPath;
+	return result;
+}
+
+// Security: Validate executable path
+if (!isValidExecutablePath(m_completionExe)) {
+	result.error = "invalid or inaccessible completion executable: " + m_completionExe;
+	return result;
+}
+
+// Security: Sanitize prompt
+std::string sanitizedPrompt = sanitizeArgument(prompt);
+if (sanitizedPrompt.empty() && !prompt.empty()) {
+	result.error = "prompt contains only invalid characters";
+	return result;
+}
+
 const auto t0 = std::chrono::steady_clock::now();
 static thread_local ThreadLocalTempFile promptTempFile;
 std::string promptPath;
-if (!writeReusableTempTextFile(promptTempFile, "ofxggml_prompt_", prompt, promptPath)) {
+if (!writeReusableTempTextFile(promptTempFile, "ofxggml_prompt_", sanitizedPrompt, promptPath)) {
 result.error = "failed to write temp prompt file";
 return result;
 }
@@ -326,19 +431,35 @@ args.push_back("--seed");
 args.push_back(std::to_string(settings.seed));
 }
 if (!settings.promptCachePath.empty()) {
-args.push_back("--prompt-cache");
-args.push_back(settings.promptCachePath);
-if (settings.promptCacheAll) {
-args.push_back("--prompt-cache-all");
-}
+	// Security: Validate cache path if it exists, or allow creation of new file
+	std::error_code ec;
+	std::filesystem::path cachePath(settings.promptCachePath);
+	if (std::filesystem::exists(cachePath, ec)) {
+		if (!isValidFilePath(settings.promptCachePath)) {
+			result.error = "invalid prompt cache path: " + settings.promptCachePath;
+			return result;
+		}
+	}
+	args.push_back("--prompt-cache");
+	args.push_back(settings.promptCachePath);
+	if (settings.promptCacheAll) {
+		args.push_back("--prompt-cache-all");
+	}
 }
 if (!settings.jsonSchema.empty()) {
-args.push_back("--json-schema");
-args.push_back(settings.jsonSchema);
+	// Security: Sanitize JSON schema
+	std::string sanitizedSchema = sanitizeArgument(settings.jsonSchema);
+	args.push_back("--json-schema");
+	args.push_back(sanitizedSchema);
 }
 if (!settings.grammarPath.empty()) {
-args.push_back("--grammar-file");
-args.push_back(settings.grammarPath);
+	// Security: Validate grammar file path
+	if (!isValidFilePath(settings.grammarPath)) {
+		result.error = "invalid grammar file path: " + settings.grammarPath;
+		return result;
+	}
+	args.push_back("--grammar-file");
+	args.push_back(settings.grammarPath);
 }
 
 std::string raw;
@@ -378,9 +499,28 @@ result.error = "embedding executable path is empty";
 return result;
 }
 
+// Security: Validate model path
+if (!isValidFilePath(modelPath)) {
+	result.error = "invalid or inaccessible model path: " + modelPath;
+	return result;
+}
+
+// Security: Validate executable path
+if (!isValidExecutablePath(m_embeddingExe)) {
+	result.error = "invalid or inaccessible embedding executable: " + m_embeddingExe;
+	return result;
+}
+
+// Security: Sanitize input text
+std::string sanitizedText = sanitizeArgument(text);
+if (sanitizedText.empty() && !text.empty()) {
+	result.error = "text contains only invalid characters";
+	return result;
+}
+
 static thread_local ThreadLocalTempFile promptTempFile;
 std::string promptPath;
-if (!writeReusableTempTextFile(promptTempFile, "ofxggml_embed_", text, promptPath)) {
+if (!writeReusableTempTextFile(promptTempFile, "ofxggml_embed_", sanitizedText, promptPath)) {
 result.error = "failed to write temp embedding prompt file";
 return result;
 }

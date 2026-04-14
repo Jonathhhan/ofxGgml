@@ -28,3 +28,114 @@ jobs:
 
       - name: Build and run unit tests
         run: ./tests/run-tests.sh
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install static analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck clang-tidy
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=warning,style,performance,portability \
+                   --suppressions-list=.cppcheck-suppressions \
+                   --inline-suppr \
+                   --error-exitcode=0 \
+                   --quiet \
+                   src/ 2>&1 | tee cppcheck-report.txt
+          echo "==> cppcheck completed (warnings allowed for now)"
+
+      - name: Run clang-tidy on source files
+        run: |
+          # Build compile_commands.json for clang-tidy
+          cd tests
+          cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cd ..
+
+          # Run clang-tidy on addon source files (not examples)
+          find src -name "*.cpp" -type f | while read -r file; do
+            echo "Analyzing: $file"
+            clang-tidy "$file" -- \
+              -Ilibs/ggml/include \
+              -Isrc \
+              -std=c++17 \
+              -DGLM_FORCE_CTOR_INIT || echo "  (warnings ignored)"
+          done
+
+          echo "==> clang-tidy completed (warnings allowed for now)"
+
+      - name: Upload static analysis reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: static-analysis-reports
+          path: |
+            cppcheck-report.txt
+
+  code-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install coverage tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
+
+      - name: Build bundled ggml (CPU-only)
+        run: ./scripts/build-ggml.sh --cpu-only
+
+      - name: Build tests with coverage instrumentation
+        run: |
+          cd tests
+          cmake -B build -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build
+
+      - name: Run tests
+        run: ./tests/build/ofxGgml-tests
+
+      - name: Generate coverage report
+        run: |
+          # Capture coverage data
+          lcov --capture \
+               --directory tests/build \
+               --output-file coverage.info \
+               --rc lcov_branch_coverage=1
+
+          # Filter out system headers and test code
+          lcov --remove coverage.info \
+               '/usr/*' \
+               '*/tests/*' \
+               '*/libs/ggml/*' \
+               --output-file coverage_filtered.info \
+               --rc lcov_branch_coverage=1
+
+          # Generate summary
+          lcov --list coverage_filtered.info
+
+          # Generate HTML report
+          genhtml coverage_filtered.info \
+                  --output-directory coverage_html \
+                  --branch-coverage \
+                  --title "ofxGgml Code Coverage"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage_filtered.info
+          flags: unittests
+          name: codecov-ofxggml
+          fail_ci_if_error: false
+
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: coverage_html/

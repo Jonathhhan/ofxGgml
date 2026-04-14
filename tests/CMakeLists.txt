@@ -7,6 +7,14 @@
 #   cmake -B build/tests -S tests
 #   cmake --build build/tests
 #   ./build/tests/ofxGgml-tests
+#
+# Code Coverage:
+#   cmake -B build/tests -S tests -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+#   cmake --build build/tests
+#   ./build/tests/ofxGgml-tests
+#   lcov --capture --directory build/tests --output-file coverage.info
+#   lcov --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage_filtered.info
+#   genhtml coverage_filtered.info --output-directory coverage_html
 # ---------------------------------------------------------------------------
 
 cmake_minimum_required(VERSION 3.18)
@@ -14,6 +22,22 @@ project(ofxGgml-tests CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# ---------------------------------------------------------------------------
+# Code Coverage Option
+# ---------------------------------------------------------------------------
+
+option(ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
+
+if(ENABLE_COVERAGE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        message(STATUS "Enabling code coverage")
+        add_compile_options(--coverage -O0 -g)
+        add_link_options(--coverage)
+    else()
+        message(WARNING "Code coverage only supported with GCC/Clang")
+    endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # Find ggml library (must be built first)

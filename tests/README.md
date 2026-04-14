@@ -41,6 +41,33 @@ Run tests by name pattern:
 ./build/tests/ofxGgml-tests "*operations"
 ```
 
+### Code Coverage
+
+Generate code coverage reports locally:
+
+```bash
+cd tests
+
+# Build with coverage instrumentation
+cmake -B build -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+
+# Run tests
+./build/ofxGgml-tests
+
+# Generate coverage report
+lcov --capture --directory build --output-file coverage.info --rc lcov_branch_coverage=1
+lcov --remove coverage.info '/usr/*' '*/tests/*' '*/libs/ggml/*' --output-file coverage_filtered.info --rc lcov_branch_coverage=1
+
+# View summary
+lcov --list coverage_filtered.info
+
+# Generate HTML report (optional)
+genhtml coverage_filtered.info --output-directory coverage_html --branch-coverage --title "ofxGgml Code Coverage"
+```
+
+Coverage reports are automatically generated in CI and uploaded to Codecov. View detailed coverage statistics at: https://codecov.io/gh/Jonathhhan/ofxGgml
+
 ### Test Coverage
 
 Current test coverage includes:
