@@ -42,14 +42,22 @@ static std::string stripLlamaWarnings(const std::string & text) {
 	std::string line;
 
 	while (std::getline(lines, line)) {
-		// Skip lines that are common llama.cpp warnings
+		// Skip lines that are common llama.cpp warnings and GPU detection messages
 		if (line.find("warning: no usable GPU found") != std::string::npos ||
 			line.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos ||
 			line.find("warning: consult docs/build.md for compilation instructions") != std::string::npos ||
 			line.find("--gpu-layers option will be ignored") != std::string::npos ||
 			line.find("ggml_cuda_init") != std::string::npos ||
 			line.find("ggml_vulkan_init") != std::string::npos ||
-			line.find("ggml_metal_init") != std::string::npos) {
+			line.find("ggml_metal_init") != std::string::npos ||
+			line.find("Device 0:") != std::string::npos ||
+			line.find("Device 1:") != std::string::npos ||
+			line.find("Device 2:") != std::string::npos ||
+			line.find("Device 3:") != std::string::npos ||
+			line.find("compute capability") != std::string::npos ||
+			line.find("ofxGgml: discovered") != std::string::npos ||
+			line.find("ofxGgml: ready (backend:") != std::string::npos ||
+			line.find("[INFO]") != std::string::npos) {
 			continue;
 		}
 
