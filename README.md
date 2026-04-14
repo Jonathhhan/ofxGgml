@@ -324,6 +324,8 @@ if (q.success) {
 | `ofxGgmlProjectMemory` | Persist request/response memory and prepend it to future prompts |
 | `ofxGgmlScriptSource` | Browse script sources from local folders or GitHub repos, load files, and save to local source |
 | `ofxGgmlTensor` | Non-owning tensor handle with metadata and data access |
+| `Result<T>` | Type-safe result containing either success value or error (similar to C++23 std::expected) |
+| `ofxGgmlError` | Detailed error information with error codes and messages |
 | `ofxGgmlTypes` | Enums and settings (`ofxGgmlType`, `ofxGgmlBackendType`, …) |
 | `ofxGgmlHelpers` | Utility functions (type names, byte formatting, …) |
 | `ofxGgmlVersion` | Version macros (`OFX_GGML_VERSION_STRING`, etc.) |
@@ -389,6 +391,67 @@ Build the tools with:
 ```
 
 Model preset metadata is stored in `scripts/model-catalog.json`. `download-model.sh` supports resumable downloads and validates SHA256 checksums when provided. If a preset checksum is blank in the catalog, the script prints an explicit warning and skips integrity verification for that download.
+
+## Testing
+
+ofxGgml includes a comprehensive unit test suite using Catch2.
+
+### Running Tests
+
+```bash
+# Build ggml first (required)
+./scripts/build-ggml.sh --cpu-only
+
+# Run all tests
+cd tests
+./run-tests.sh
+
+# Run specific test tags
+./build/tests/ofxGgml-tests "[tensor]"
+./build/tests/ofxGgml-tests "[graph]"
+./build/tests/ofxGgml-tests "[result]"
+```
+
+### Test Coverage
+
+- **Tensor operations**: Creation, element-wise ops, unary ops
+- **Graph building**: Lifecycle, matrix ops, activations, normalization
+- **Error handling**: Result<T> type, error codes, exception safety
+
+See `tests/README.md` for detailed testing documentation.
+
+### CI Integration
+
+Tests run automatically on every push and pull request via GitHub Actions.
+
+## Error Handling
+
+ofxGgml uses a `Result<T>` pattern for robust error handling:
+
+```cpp
+#include "ofxGgml.h"
+
+// Functions return Result<T> for operations that can fail
+Result<int> myOperation() {
+    if (errorCondition) {
+        return ofxGgmlError(ofxGgmlErrorCode::InvalidArgument, "description");
+    }
+    return successValue;
+}
+
+// Check success and handle errors
+auto result = myOperation();
+if (result.isOk()) {
+    int value = result.value();
+} else {
+    std::cout << "Error: " << result.error().toString() << std::endl;
+}
+
+// Or use valueOr for a default
+int value = result.valueOr(defaultValue);
+```
+
+Available error codes: `BackendInitFailed`, `DeviceNotFound`, `OutOfMemory`, `GraphNotBuilt`, `InvalidTensor`, `ComputeFailed`, `ModelLoadFailed`, `InferenceExecutableMissing`, and more. See `src/ofxGgmlResult.h` for the complete list.
 
 ## Troubleshooting
 
