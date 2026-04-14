@@ -106,6 +106,70 @@ std::string fetchUrlContentLimited(const std::string & url, size_t maxChars) {
 	return body;
 }
 
+std::string urlEncode(const std::string & value) {
+	std::ostringstream escaped;
+	escaped.fill('0');
+	escaped << std::hex;
+	for (unsigned char c : value) {
+		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+			escaped << c;
+		} else {
+			escaped << '%' << std::setw(2) << std::uppercase << int(c);
+		}
+	}
+	return escaped.str();
+}
+
+std::string fetchWeatherContext(const std::string & userText, size_t maxChars) {
+	static const std::regex weatherLocRegex(
+		R"(weather\s+(in|for)\s+([A-Za-z0-9 ,._-]+))",
+		std::regex::icase);
+	std::string location = "home";
+	std::smatch m;
+	if (std::regex_search(userText, m, weatherLocRegex) && m.size() >= 3) {
+		location = trim(m[2].str());
+		if (location.size() > 64) location = location.substr(0, 64);
+	}
+	const std::string url = "https://wttr.in/" + urlEncode(location) + "?format=3";
+	return fetchUrlContentLimited(url, maxChars);
+}
+
+std::string stripHtmlTags(const std::string & html) {
+	std::string out;
+	out.reserve(html.size());
+	bool inTag = false;
+	for (char c : html) {
+		if (c == '<') {
+			inTag = true;
+		} else if (c == '>') {
+			inTag = false;
+			out.push_back(' ');
+		} else if (!inTag) {
+			out.push_back(c);
+		}
+	}
+	return out;
+}
+
+std::string fetchSearchSnippet(const std::string & query, size_t maxChars) {
+	if (query.empty()) return "";
+	const std::string url = "https://lite.duckduckgo.com/lite/?q=" + urlEncode(query);
+	ofHttpResponse resp = ofLoadURL(url);
+	if (resp.status < 200 || resp.status >= 300) return "";
+	const std::string body = resp.data.getText();
+	std::regex snippetRe(R"(<td[^>]*class=\"result-snippet\"[^>]*>(.*?)</td>)",
+		std::regex::icase | std::regex::dotall);
+	std::smatch m;
+	if (std::regex_search(body, m, snippetRe) && m.size() >= 2) {
+		std::string snippet = stripHtmlTags(m[1].str());
+		if (snippet.size() > maxChars) {
+			snippet = snippet.substr(0, maxChars) + "\n...[truncated]";
+		}
+		return trim(snippet);
+	}
+	return "";
+}
+
 // Remove the llama.cpp interactive banner/instruction block that can
 // precede the actual model response when the CLI runs in chat mode.
 std::string stripInteractivePreamble(const std::string & text) {
@@ -3484,6 +3548,26 @@ workerThread.join();
  }
  if (used > 0) {
  userTextWithInternet += "\n\nContext fetched from URLs in your message:" + ctx.str();
+ } else {
+ std::string lowered = userText;
+ std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+ 	[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+ std::string autoContext;
+ if (lowered.find("weather") != std::string::npos) {
+ 	autoContext = fetchWeatherContext(userText, 512);
+ } else if (lowered.find("today") != std::string::npos ||
+ 	lowered.find("latest") != std::string::npos ||
+ 	lowered.find("current") != std::string::npos ||
+ 	lowered.find("verify") != std::string::npos ||
+ 	lowered.find("confirm") != std::string::npos ||
+ 	lowered.find("news") != std::string::npos ||
+ 	lowered.find("price") != std::string::npos ||
+ 	lowered.find("stock") != std::string::npos) {
+ 	autoContext = fetchSearchSnippet(userText, 1200);
+ }
+ if (!autoContext.empty()) {
+ 	userTextWithInternet += "\n\nInternet context:\n" + autoContext + "\n";
+ }
  }
  }
 
