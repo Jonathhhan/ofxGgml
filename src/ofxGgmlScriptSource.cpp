@@ -30,6 +30,7 @@ void ofxGgmlScriptSource::clear() {
 	m_localFolderPath.clear();
 	m_gitHubOwnerRepo.clear();
 	m_gitHubBranch.clear();
+	m_internetUrls.clear();
 	m_files.clear();
 	m_status.clear();
 	m_fetchDiagnostics.clear();
@@ -40,8 +41,23 @@ void ofxGgmlScriptSource::setGitHubMode() {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_sourceType = ofxGgmlScriptSourceType::GitHubRepo;
 	m_localFolderPath.clear();
+	m_internetUrls.clear();
 	m_files.clear();
 	m_status.clear();
+}
+
+void ofxGgmlScriptSource::setInternetMode() {
+	cancelFetchWorker("Fetch canceled: switched to Internet mode");
+	std::lock_guard<std::mutex> lock(m_mutex);
+	if (m_sourceType != ofxGgmlScriptSourceType::Internet) {
+		m_internetUrls.clear();
+		m_files.clear();
+		m_status.clear();
+	}
+	m_sourceType = ofxGgmlScriptSourceType::Internet;
+	m_localFolderPath.clear();
+	m_gitHubOwnerRepo.clear();
+	m_gitHubBranch.clear();
 }
 
 void ofxGgmlScriptSource::setPreferredExtension(const std::string & ext) {
@@ -69,6 +85,7 @@ bool ofxGgmlScriptSource::setLocalFolder(const std::string & path) {
 	m_localFolderPath = path;
 	m_gitHubOwnerRepo.clear();
 	m_gitHubBranch.clear();
+	m_internetUrls.clear();
 	return scanLocalFolderLocked();
 }
 
@@ -102,10 +119,95 @@ bool ofxGgmlScriptSource::setGitHubRepo(const std::string & ownerRepo, const std
 		m_localFolderPath.clear();
 		m_gitHubOwnerRepo = ownerRepoTrim;
 		m_gitHubBranch = branchTrim;
+		m_internetUrls.clear();
 		m_files.clear();
 		m_status.clear();
 	}
 
+	return true;
+}
+
+void ofxGgmlScriptSource::setInternetUrls(const std::vector<std::string> & urls) {
+	cancelFetchWorker("Fetch canceled: internet sources updated");
+	std::lock_guard<std::mutex> lock(m_mutex);
+	m_sourceType = ofxGgmlScriptSourceType::Internet;
+	m_localFolderPath.clear();
+	m_gitHubOwnerRepo.clear();
+	m_gitHubBranch.clear();
+	m_internetUrls.clear();
+	for (const auto & url : urls) {
+		const std::string trimmed = trim(url);
+		if (isValidUrl(trimmed)) {
+			m_internetUrls.push_back(trimmed);
+		}
+	}
+
+	m_files.clear();
+	for (const auto & url : m_internetUrls) {
+		ofxGgmlScriptSourceFileEntry fe;
+		fe.name = url.size() > 96 ? url.substr(0, 96) + "..." : url;
+		fe.fullPath = url;
+		fe.isDirectory = false;
+		m_files.push_back(std::move(fe));
+	}
+	m_status = m_internetUrls.empty()
+		? "No internet sources"
+		: ofToString(m_internetUrls.size()) + " internet sources";
+}
+
+bool ofxGgmlScriptSource::addInternetUrl(const std::string & url) {
+	const std::string trimmed = trim(url);
+	if (!isValidUrl(trimmed)) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_sourceType = ofxGgmlScriptSourceType::Internet;
+		m_status = "Invalid URL (use http/https)";
+		return false;
+	}
+
+	std::lock_guard<std::mutex> lock(m_mutex);
+	m_sourceType = ofxGgmlScriptSourceType::Internet;
+	m_localFolderPath.clear();
+	m_gitHubOwnerRepo.clear();
+	m_gitHubBranch.clear();
+
+	auto it = std::find(m_internetUrls.begin(), m_internetUrls.end(), trimmed);
+	if (it == m_internetUrls.end()) {
+		m_internetUrls.push_back(trimmed);
+	}
+
+	// Rebuild file list to reflect latest URLs.
+	m_files.clear();
+	for (const auto & entryUrl : m_internetUrls) {
+		ofxGgmlScriptSourceFileEntry fe;
+		fe.name = entryUrl.size() > 96 ? entryUrl.substr(0, 96) + "..." : entryUrl;
+		fe.fullPath = entryUrl;
+		fe.isDirectory = false;
+		m_files.push_back(std::move(fe));
+	}
+
+	m_status = m_internetUrls.empty()
+		? "No internet sources"
+		: ofToString(m_internetUrls.size()) + " internet sources";
+	return true;
+}
+
+bool ofxGgmlScriptSource::removeInternetUrl(size_t index) {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	if (index >= m_internetUrls.size()) return false;
+	m_internetUrls.erase(m_internetUrls.begin() + static_cast<long>(index));
+
+	m_files.clear();
+	for (const auto & entryUrl : m_internetUrls) {
+		ofxGgmlScriptSourceFileEntry fe;
+		fe.name = entryUrl.size() > 96 ? entryUrl.substr(0, 96) + "..." : entryUrl;
+		fe.fullPath = entryUrl;
+		fe.isDirectory = false;
+		m_files.push_back(std::move(fe));
+	}
+
+	m_status = m_internetUrls.empty()
+		? "No internet sources"
+		: ofToString(m_internetUrls.size()) + " internet sources";
 	return true;
 }
 
@@ -241,6 +343,20 @@ bool ofxGgmlScriptSource::rescan() {
 	if (type == ofxGgmlScriptSourceType::LocalFolder) {
 		std::lock_guard<std::mutex> lock(m_mutex);
 		return scanLocalFolderLocked();
+	} else if (type == ofxGgmlScriptSourceType::Internet) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_files.clear();
+		for (const auto & url : m_internetUrls) {
+			ofxGgmlScriptSourceFileEntry fe;
+			fe.name = url.size() > 96 ? url.substr(0, 96) + "..." : url;
+			fe.fullPath = url;
+			fe.isDirectory = false;
+			m_files.push_back(std::move(fe));
+		}
+		m_status = m_internetUrls.empty()
+			? "No internet sources"
+			: ofToString(m_internetUrls.size()) + " internet sources";
+		return true;
 	}
 	return true;
 }
@@ -276,6 +392,24 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 	if (type == ofxGgmlScriptSourceType::GitHubRepo) {
 		const std::string expectedPrefix = "https://raw.githubusercontent.com/";
 		if (entry.fullPath.rfind(expectedPrefix, 0) != 0) {
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_status = "Invalid URL: " + entry.name;
+			return false;
+		}
+		ofHttpResponse response = ofLoadURL(entry.fullPath);
+		if (response.status < 200 || response.status >= 300) {
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_status = "Failed to download: " + entry.name;
+			return false;
+		}
+		outContent = response.data.getText();
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_status = "Loaded: " + entry.name;
+		return true;
+	}
+
+	if (type == ofxGgmlScriptSourceType::Internet) {
+		if (!isValidUrl(entry.fullPath)) {
 			std::lock_guard<std::mutex> lock(m_mutex);
 			m_status = "Invalid URL: " + entry.name;
 			return false;
@@ -347,6 +481,11 @@ std::string ofxGgmlScriptSource::getGitHubOwnerRepo() const {
 std::string ofxGgmlScriptSource::getGitHubBranch() const {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	return m_gitHubBranch;
+}
+
+std::vector<std::string> ofxGgmlScriptSource::getInternetUrls() const {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	return m_internetUrls;
 }
 
 std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::getFiles() const {
@@ -515,6 +654,14 @@ std::string ofxGgmlScriptSource::trim(const std::string & s) {
 	size_t end = s.size();
 	while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) end--;
 	return s.substr(start, end - start);
+}
+
+bool ofxGgmlScriptSource::isValidUrl(const std::string & url) {
+	if (url.empty()) return false;
+	if (url.find(' ') != std::string::npos || url.find('\t') != std::string::npos) return false;
+	const std::string lower = normalizeLower(url);
+	return (lower.rfind("http://", 0) == 0 || lower.rfind("https://", 0) == 0) &&
+		lower.size() > std::string("http://").size();
 }
 
 bool ofxGgmlScriptSource::hasSourceExtension(

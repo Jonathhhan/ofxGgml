@@ -177,6 +177,7 @@ private:
 	ofLogLevel logLevel = OF_LOG_NOTICE;
 	std::deque<std::string> logMessages;
 	std::mutex logMutex;
+	bool chatAutoInternet = true;
 
 	// -- performance tracking --
 	float lastComputeMs = 0.0f;
@@ -202,6 +203,7 @@ private:
 	ofxGgmlScriptSource scriptSource;
 	char scriptSourceGitHub[512] = {};               // "owner/repo" input
 	char scriptSourceBranch[128] = {};               // branch name, default "main"
+	char scriptSourceInternetUrl[1024] = {};         // internet URL input
 	int selectedScriptFileIndex = -1;
 	ofxGgmlProjectMemory scriptProjectMemory;
 	std::string lastScriptRequest;

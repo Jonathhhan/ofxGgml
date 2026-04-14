@@ -12,6 +12,7 @@
 #include <functional>
 #include <iomanip>
 #include <numeric>
+#include <regex>
 #include <random>
 #include <sstream>
 #include <vector>
@@ -114,6 +115,97 @@ std::string trim(const std::string & s) {
 		end--;
 	}
 	return s.substr(start, end - start);
+}
+
+std::vector<std::string> extractHttpUrls(const std::string & text) {
+	static const std::regex urlRegex(R"(https?://[^\s<>\"]+)", std::regex::icase);
+	std::vector<std::string> urls;
+	for (std::sregex_iterator it(text.begin(), text.end(), urlRegex), end; it != end; ++it) {
+		urls.push_back(it->str());
+	}
+	// Deduplicate while preserving order.
+	std::vector<std::string> unique;
+	for (const auto & url : urls) {
+		if (std::find(unique.begin(), unique.end(), url) == unique.end()) {
+			unique.push_back(url);
+		}
+	}
+	return unique;
+}
+
+std::string fetchUrlContentLimited(const std::string & url, size_t maxChars) {
+	if (url.empty()) return "";
+	ofHttpResponse resp = ofLoadURL(url);
+	if (resp.status < 200 || resp.status >= 300) return "";
+	std::string body = resp.data.getText();
+	if (body.size() > maxChars) {
+		body = body.substr(0, maxChars) + "\n...[truncated]";
+	}
+	return body;
+}
+
+std::string urlEncode(const std::string & value) {
+	std::ostringstream escaped;
+	escaped.fill('0');
+	escaped << std::hex;
+	for (unsigned char c : value) {
+		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+			escaped << c;
+		} else {
+			escaped << '%' << std::setw(2) << std::uppercase << int(c);
+		}
+	}
+	return escaped.str();
+}
+
+std::string fetchWeatherContext(const std::string & userText, size_t maxChars) {
+	static const std::regex weatherLocRegex(
+		R"(weather\s+(in|for)\s+([A-Za-z0-9 ,._-]+))",
+		std::regex::icase);
+	std::string location = "home";
+	std::smatch m;
+	if (std::regex_search(userText, m, weatherLocRegex) && m.size() >= 3) {
+		location = trim(m[2].str());
+		if (location.size() > 64) location = location.substr(0, 64);
+	}
+	const std::string url = "https://wttr.in/" + urlEncode(location) + "?format=3";
+	return fetchUrlContentLimited(url, maxChars);
+}
+
+std::string stripHtmlTags(const std::string & html) {
+	std::string out;
+	out.reserve(html.size());
+	bool inTag = false;
+	for (char c : html) {
+		if (c == '<') {
+			inTag = true;
+		} else if (c == '>') {
+			inTag = false;
+			out.push_back(' ');
+		} else if (!inTag) {
+			out.push_back(c);
+		}
+	}
+	return out;
+}
+
+std::string fetchSearchSnippet(const std::string & query, size_t maxChars) {
+	if (query.empty()) return "";
+	const std::string url = "https://lite.duckduckgo.com/lite/?q=" + urlEncode(query);
+	ofHttpResponse resp = ofLoadURL(url);
+	if (resp.status < 200 || resp.status >= 300) return "";
+	const std::string body = resp.data.getText();
+	std::regex snippetRe(R"(<td[^>]*class=\"result-snippet\"[^>]*>(.*?)</td>)",
+		std::regex::icase | std::regex::dotall);
+	std::smatch m;
+	if (std::regex_search(body, m, snippetRe) && m.size() >= 2) {
+		std::string snippet = stripHtmlTags(m[1].str());
+		if (snippet.size() > maxChars) {
+			snippet = snippet.substr(0, maxChars) + "\n...[truncated]";
+		}
+		return trim(snippet);
+	}
+	return "";
 }
 
 // Remove the llama.cpp interactive banner/instruction block that can
@@ -1331,11 +1423,17 @@ ImGui::SetScrollHereY(1.0f);
 ImGui::EndChild();
 
 // Input.
-ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 80.0f);
+float availW = ImGui::GetContentRegionAvail().x;
+ImGui::SetNextItemWidth(availW - 190.0f);
 bool submitted = ImGui::InputText("##ChatIn", chatInput, sizeof(chatInput),
 ImGuiInputTextFlags_EnterReturnsTrue);
 ImGui::SameLine();
 bool sendClicked = ImGui::Button("Send", ImVec2(70, 0));
+ImGui::SameLine();
+ImGui::Checkbox("Use internet context", &chatAutoInternet);
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("When on, the assistant will fetch concise web snippets to ground answers.");
+}
 
 if ((submitted || sendClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
 std::string userText(chatInput);
@@ -1412,10 +1510,11 @@ ImGui::Text("Source:");
 ImGui::SameLine();
 
 // Source type buttons.
- ofxGgmlScriptSourceType sourceType = scriptSource.getSourceType();
- bool isNone = (sourceType == ofxGgmlScriptSourceType::None);
- bool isLocal = (sourceType == ofxGgmlScriptSourceType::LocalFolder);
- bool isGitHub = (sourceType == ofxGgmlScriptSourceType::GitHubRepo);
+ofxGgmlScriptSourceType sourceType = scriptSource.getSourceType();
+bool isNone = (sourceType == ofxGgmlScriptSourceType::None);
+bool isLocal = (sourceType == ofxGgmlScriptSourceType::LocalFolder);
+bool isGitHub = (sourceType == ofxGgmlScriptSourceType::GitHubRepo);
+bool isInternet = (sourceType == ofxGgmlScriptSourceType::Internet);
 
 if (isNone) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.35f, 1.0f));
 if (ImGui::SmallButton("None")) {
@@ -1446,6 +1545,14 @@ if (ImGui::SmallButton("GitHub")) {
 	scriptSource.setGitHubMode();
 }
 if (isGitHub) ImGui::PopStyleColor();
+ImGui::SameLine();
+
+if (isInternet) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.5f, 0.7f, 1.0f));
+if (ImGui::SmallButton("Internet")) {
+	selectedScriptFileIndex = -1;
+	scriptSource.setInternetMode();
+}
+if (isInternet) ImGui::PopStyleColor();
 
 // Script source file browser (inline when active).
 const auto scriptSourceFiles = scriptSource.getFiles();
@@ -1454,10 +1561,12 @@ ImGui::BeginChild("##ScriptFiles", ImVec2(-1, 80), true);
 if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 const std::string localPath = scriptSource.getLocalFolderPath();
 ImGui::TextDisabled("Folder: %s", localPath.c_str());
-} else {
+} else if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
 const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
 const std::string branch = scriptSource.getGitHubBranch();
 ImGui::TextDisabled("GitHub: %s (%s)", ownerRepo.c_str(), branch.c_str());
+} else {
+ImGui::TextDisabled("Internet sources");
 }
 for (int i = 0; i < static_cast<int>(scriptSourceFiles.size()); i++) {
 const auto & entry = scriptSourceFiles[static_cast<size_t>(i)];
@@ -1478,7 +1587,8 @@ ImGui::PopID();
 ImGui::EndChild();
 }
 
-if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
+if (sourceType == ofxGgmlScriptSourceType::GitHubRepo ||
+	sourceType == ofxGgmlScriptSourceType::Internet) {
 drawScriptSourcePanel();
 }
 
@@ -1515,11 +1625,13 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 		const std::string folderPath = scriptSource.getLocalFolderPath();
 		prompt += "\nContext: Loaded folder: " + folderPath + "\n";
 		prompt += "Available files in this folder:\n";
-	} else {
+	} else if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
 		const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
 		const std::string branch = scriptSource.getGitHubBranch();
 		prompt += "\nContext: Loaded GitHub repository: " + ownerRepo + " (branch: " + branch + ")\n";
 		prompt += "Available files in this repository:\n";
+	} else {
+		prompt += "\nContext: Loaded internet sources (URLs):\n";
 	}
 	// List up to 50 files to avoid overly long prompts
 	const size_t maxFilesToList = 50;
@@ -1633,33 +1745,67 @@ ImGui::EndChild();
 
 void ofApp::drawScriptSourcePanel() {
 ImGui::Spacing();
-ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "GitHub Repository:");
-ImGui::SetNextItemWidth(250);
-ImGui::InputText("##GHRepo", scriptSourceGitHub, sizeof(scriptSourceGitHub));
-ImGui::SameLine();
-ImGui::Text("Branch:");
-ImGui::SameLine();
-ImGui::SetNextItemWidth(100);
-ImGui::InputText("##GHBranch", scriptSourceBranch, sizeof(scriptSourceBranch));
-ImGui::SameLine();
-if (ImGui::Button("Fetch", ImVec2(60, 0))) {
-if (std::strlen(scriptSourceGitHub) > 0) {
-std::string branch = std::strlen(scriptSourceBranch) > 0
-? std::string(scriptSourceBranch) : "main";
-	selectedScriptFileIndex = -1;
-	if (!scriptLanguages.empty()) {
-		scriptSource.setPreferredExtension(
-			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+const ofxGgmlScriptSourceType sourceType = scriptSource.getSourceType();
+
+if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
+	ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "GitHub Repository:");
+	ImGui::SetNextItemWidth(250);
+	ImGui::InputText("##GHRepo", scriptSourceGitHub, sizeof(scriptSourceGitHub));
+	ImGui::SameLine();
+	ImGui::Text("Branch:");
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(100);
+	ImGui::InputText("##GHBranch", scriptSourceBranch, sizeof(scriptSourceBranch));
+	ImGui::SameLine();
+	if (ImGui::Button("Fetch", ImVec2(60, 0))) {
+		if (std::strlen(scriptSourceGitHub) > 0) {
+			std::string branch = std::strlen(scriptSourceBranch) > 0
+				? std::string(scriptSourceBranch) : "main";
+			selectedScriptFileIndex = -1;
+			if (!scriptLanguages.empty()) {
+				scriptSource.setPreferredExtension(
+					scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+			}
+			if (scriptSource.setGitHubRepo(scriptSourceGitHub, branch)) {
+				scriptSource.fetchGitHubRepo();
+			}
+		}
 	}
-	if (scriptSource.setGitHubRepo(scriptSourceGitHub, branch)) {
-		scriptSource.fetchGitHubRepo();
+} else if (sourceType == ofxGgmlScriptSourceType::Internet) {
+	ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.9f, 1.0f), "Internet Sources (URLs):");
+	ImGui::SetNextItemWidth(360);
+	ImGui::InputText("##InternetUrl", scriptSourceInternetUrl, sizeof(scriptSourceInternetUrl));
+	ImGui::SameLine();
+	if (ImGui::Button("Add URL", ImVec2(80, 0))) {
+		if (std::strlen(scriptSourceInternetUrl) > 0) {
+			scriptSource.addInternetUrl(scriptSourceInternetUrl);
+			scriptSource.rescan();
+			scriptSourceInternetUrl[0] = '\0';
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Clear URLs", ImVec2(90, 0))) {
+		scriptSource.setInternetUrls({});
+		selectedScriptFileIndex = -1;
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Remove all added URLs.");
+	}
+	if (selectedScriptFileIndex >= 0) {
+		ImGui::SameLine();
+		if (ImGui::Button("Remove Selected", ImVec2(130, 0))) {
+			if (scriptSource.removeInternetUrl(static_cast<size_t>(selectedScriptFileIndex))) {
+				selectedScriptFileIndex = -1;
+				scriptSource.rescan();
+			}
+		}
 	}
 }
-}
+
 const std::string status = scriptSource.getStatus();
 if (!status.empty()) {
-ImGui::SameLine();
-ImGui::TextDisabled("%s", status.c_str());
+	ImGui::SameLine();
+	ImGui::TextDisabled("%s", status.c_str());
 }
 ImGui::Spacing();
 }
@@ -2156,6 +2302,15 @@ out << "scriptSourceType=" << static_cast<int>(scriptSource.getSourceType()) << 
 out << "scriptSourcePath=" << escapeSessionText(scriptSource.getLocalFolderPath()) << "\n";
 out << "scriptSourceGitHub=" << escapeSessionText(scriptSourceGitHub) << "\n";
 out << "scriptSourceBranch=" << escapeSessionText(scriptSourceBranch) << "\n";
+{
+	const auto internetUrls = scriptSource.getInternetUrls();
+	std::string packed;
+	for (size_t i = 0; i < internetUrls.size(); i++) {
+		if (i > 0) packed += "\n";
+		packed += internetUrls[i];
+	}
+	out << "scriptSourceInternetUrls=" << escapeSessionText(packed) << "\n";
+}
 out << "useProjectMemory=" << (scriptProjectMemory.isEnabled() ? 1 : 0) << "\n";
 out << "projectMemory=" << escapeSessionText(scriptProjectMemory.getMemoryText()) << "\n";
 
@@ -2176,6 +2331,7 @@ out << "summarizeOutput=" << escapeSessionText(summarizeOutput) << "\n";
 out << "writeOutput=" << escapeSessionText(writeOutput) << "\n";
 out << "translateOutput=" << escapeSessionText(translateOutput) << "\n";
 out << "customOutput=" << escapeSessionText(customOutput) << "\n";
+out << "chatAutoInternet=" << (chatAutoInternet ? 1 : 0) << "\n";
 
 // Chat messages.
 out << "chatMessageCount=" << chatMessages.size() << "\n";
@@ -2206,6 +2362,7 @@ return false;
 chatMessages.clear();
 int loadedScriptSourceType = static_cast<int>(ofxGgmlScriptSourceType::None);
 std::string loadedScriptSourcePath;
+std::string loadedScriptSourceInternetUrls;
 bool logLevelSpecified = false;
 bool legacyVerbose = false;
 bool legacyVerboseSeen = false;
@@ -2295,11 +2452,12 @@ else if (key == "verbose") {
 }
 else if (key == "customCliPath") { /* ignored — CLI path option removed */ }
 else if (key == "scriptSourceType") {
-	loadedScriptSourceType = std::clamp(safeStoi(value), 0, 2);
+	loadedScriptSourceType = std::clamp(safeStoi(value), 0, 3);
 }
 else if (key == "scriptSourcePath") loadedScriptSourcePath = unescapeSessionText(value);
 else if (key == "scriptSourceGitHub") copyToBuf(scriptSourceGitHub, sizeof(scriptSourceGitHub), value);
 else if (key == "scriptSourceBranch") copyToBuf(scriptSourceBranch, sizeof(scriptSourceBranch), value);
+else if (key == "scriptSourceInternetUrls") loadedScriptSourceInternetUrls = unescapeSessionText(value);
 else if (key == "useProjectMemory") scriptProjectMemory.setEnabled(safeStoi(value, 1) != 0);
 else if (key == "projectMemory") {
 scriptProjectMemory.setMemoryText(unescapeSessionText(value));
@@ -2318,6 +2476,7 @@ else if (key == "summarizeOutput") summarizeOutput = unescapeSessionText(value);
 else if (key == "writeOutput") writeOutput = unescapeSessionText(value);
 else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
 else if (key == "customOutput") customOutput = unescapeSessionText(value);
+else if (key == "chatAutoInternet") chatAutoInternet = (safeStoi(value, 1) != 0);
 else if (key == "msg") {
 // Parse: role|timestamp|text
 size_t sep1 = value.find('|');
@@ -2357,6 +2516,13 @@ if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::LocalFol
 	if (!ownerRepo.empty()) {
 		scriptSource.setGitHubRepo(ownerRepo, branch);
 	}
+	selectedScriptFileIndex = -1;
+} else if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::Internet)) {
+	std::vector<std::string> urls;
+	if (!loadedScriptSourceInternetUrls.empty()) {
+		urls = ofSplitString(loadedScriptSourceInternetUrls, "\n", true, true);
+	}
+	scriptSource.setInternetUrls(urls);
 	selectedScriptFileIndex = -1;
 } else {
 	scriptSource.clear();
@@ -3468,7 +3634,47 @@ workerThread.join();
 
  workerThread = std::thread([this, mode, userText, systemPrompt]() {
  try {
- std::string prompt = buildPromptForMode(mode, userText, systemPrompt);
+ std::string userTextWithInternet = userText;
+ if (mode == AiMode::Chat && chatAutoInternet) {
+ const auto urls = extractHttpUrls(userText);
+ static constexpr size_t kMaxUrls = 3;
+ static constexpr size_t kMaxCharsPerUrl = 2000;
+ static constexpr size_t kMaxTotalChars = 6000;
+ size_t used = 0;
+ size_t fetched = 0;
+ std::ostringstream ctx;
+ for (size_t i = 0; i < urls.size() && fetched < kMaxUrls; i++) {
+ const std::string content = fetchUrlContentLimited(urls[i], kMaxCharsPerUrl);
+ if (content.empty()) continue;
+ std::string clipped = content;
+ if (used + clipped.size() > kMaxTotalChars) {
+ clipped = clipped.substr(0, kMaxTotalChars - used) + "\n...[truncated]";
+ }
+ ctx << "\nURL: " << urls[i] << "\n" << clipped << "\n";
+ used += clipped.size();
+ fetched++;
+ if (used >= kMaxTotalChars) break;
+ }
+ if (used > 0) {
+ userTextWithInternet += "\n\nContext fetched from URLs in your message:" + ctx.str();
+ } else {
+ std::string lowered = userText;
+ std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+ 	[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+ std::string autoContext;
+ if (lowered.find("weather") != std::string::npos) {
+ 	autoContext = fetchWeatherContext(userText, 512);
+ }
+ if (autoContext.empty()) {
+ 	autoContext = fetchSearchSnippet(userText, 1200);
+ }
+ if (!autoContext.empty()) {
+ 	userTextWithInternet += "\n\nInternet context:\n" + autoContext + "\n";
+ }
+ }
+ }
+
+ std::string prompt = buildPromptForMode(mode, userTextWithInternet, systemPrompt);
  std::string result;
  std::string error;
 
