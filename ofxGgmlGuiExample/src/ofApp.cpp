@@ -1427,6 +1427,41 @@ runInference(AiMode::Script, buildScriptPrompt(
 }
 ImGui::EndDisabled();
 
+// Review all files button (enabled when folder/repo is loaded)
+if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
+	ImGui::BeginDisabled(generating.load());
+	if (ImGui::Button("Review All Files", ImVec2(120, 0))) {
+		// Gather all source file contents
+		std::string allFilesContent;
+		allFilesContent += "Review all code files in this ";
+		allFilesContent += (sourceType == ofxGgmlScriptSourceType::LocalFolder) ? "folder" : "repository";
+		allFilesContent += " for bugs, security issues, and style. Provide specific feedback:\n\n";
+
+		size_t fileCount = 0;
+		const size_t maxFilesToReview = 20; // Limit to avoid overwhelming context
+		for (size_t i = 0; i < scriptSourceFiles.size() && fileCount < maxFilesToReview; i++) {
+			const auto & entry = scriptSourceFiles[i];
+			if (!entry.isDirectory) {
+				std::string content;
+				if (scriptSource.loadFileContent(static_cast<int>(i), content)) {
+					allFilesContent += "=== File: " + entry.name + " ===\n";
+					allFilesContent += content + "\n\n";
+					fileCount++;
+				}
+			}
+		}
+
+		if (fileCount > 0) {
+			runInference(AiMode::Script, buildScriptPrompt(allFilesContent));
+		}
+	}
+	ImGui::EndDisabled();
+
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Automatically review all source files in the loaded folder/repository");
+	}
+}
+
 // Save output to source.
 if (!scriptOutput.empty() && sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 ImGui::SameLine();
