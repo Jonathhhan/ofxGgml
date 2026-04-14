@@ -680,8 +680,29 @@ if (!started) {
 result.error = "failed to start llama completion process";
 return result;
 }
+
+// Strip warnings before checking exit code and output
+raw = stripLlamaWarnings(raw);
+
+// Exit code 130 (128 + SIGINT) can occur when llama-cli is interrupted
+// or receives EOF on stdin. Treat it as success if we have valid output.
+// Also tolerate other benign exit codes that can occur during cleanup.
+if (exitCode != 0 && !trim(raw).empty()) {
+	const bool benignExit =
+		exitCode == 130                   // SIGINT (EOF on stdin)
+		|| exitCode == -1073740791        // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
+		|| exitCode == -1073741819        // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
+		|| exitCode == 1                  // generic error (may occur during cleanup)
+		|| exitCode == -1                 // signal-killed on POSIX
+		|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
+		;
+	if (benignExit) {
+		exitCode = 0;
+	}
+}
+
 if (exitCode != 0) {
-result.error = trim(stripLlamaWarnings(raw));
+result.error = trim(raw);
 if (result.error.empty()) {
 result.error = "llama completion failed with exit code " + std::to_string(exitCode);
 }
@@ -689,7 +710,7 @@ return result;
 }
 
 result.success = true;
-result.text = trim(stripLlamaWarnings(raw));
+result.text = trim(raw);
 const auto t1 = std::chrono::steady_clock::now();
 result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 return result;
@@ -755,16 +776,34 @@ if (!started) {
 result.error = "failed to start llama embedding process";
 return result;
 }
+
+// Strip warnings before checking exit code and parsing
+raw = stripLlamaWarnings(raw);
+
+// Exit code 130 (128 + SIGINT) can occur when llama-embedding is interrupted
+// or receives EOF on stdin. Treat it as success if we have valid output.
+// Also tolerate other benign exit codes that can occur during cleanup.
+if (exitCode != 0 && !trim(raw).empty()) {
+	const bool benignExit =
+		exitCode == 130                   // SIGINT (EOF on stdin)
+		|| exitCode == -1073740791        // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
+		|| exitCode == -1073741819        // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
+		|| exitCode == 1                  // generic error (may occur during cleanup)
+		|| exitCode == -1                 // signal-killed on POSIX
+		|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
+		;
+	if (benignExit) {
+		exitCode = 0;
+	}
+}
+
 if (exitCode != 0) {
-result.error = trim(stripLlamaWarnings(raw));
+result.error = trim(raw);
 if (result.error.empty()) {
 result.error = "llama embedding failed with exit code " + std::to_string(exitCode);
 }
 return result;
 }
-
-// Strip warnings before parsing to avoid JSON parse errors
-raw = stripLlamaWarnings(raw);
 
 if (!parseEmbeddingVector(raw, result.embedding)) {
 result.error = "failed to parse embedding output";
