@@ -1,5 +1,7 @@
 #include "ofApp.h"
 
+#include "ofJson.h"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -863,22 +865,101 @@ void ofApp::probeLlamaCli(const std::string & customPath) {
 // ---------------------------------------------------------------------------
 
 void ofApp::initModelPresets() {
-modelPresets = {
-{
-"Qwen2.5-1.5B Instruct Q4_K_M",
-"qwen2.5-1.5b-instruct-q4_k_m.gguf",
-"https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
-"Alibaba Qwen2.5 — balanced chat model",
-"~1.0 GB", "chat, general"
-},
-{
-"Qwen2.5-Coder-1.5B Instruct Q4_K_M",
-"qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-"https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-"Alibaba Qwen2.5-Coder — optimized for code generation",
-"~1.0 GB", "scripting, code generation"
-}
-};
+	modelPresets.clear();
+	taskDefaultModelIndices.fill(0);
+
+	auto setFallbackPresets = [this]() {
+		modelPresets = {
+			{
+				"Qwen2.5-1.5B Instruct Q4_K_M",
+				"qwen2.5-1.5b-instruct-q4_k_m.gguf",
+				"https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+				"Alibaba Qwen2.5 — balanced chat model",
+				"~1.0 GB", "chat, general"
+			},
+			{
+				"Qwen2.5-Coder-1.5B Instruct Q4_K_M",
+				"qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+				"https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+				"Alibaba Qwen2.5-Coder — optimized for code generation",
+				"~1.0 GB", "scripting, code generation"
+			}
+		};
+		// Match the CLI defaults: preset 1 for most modes, preset 2 for Script.
+		taskDefaultModelIndices = {0, 1, 0, 0, 0, 0};
+	};
+
+	// Try to load presets from scripts/model-catalog.json first.
+	std::error_code ec;
+	std::filesystem::path catalogPath = ofToDataPath("model-catalog.json", true);
+	bool loaded = false;
+
+	if (!std::filesystem::exists(catalogPath, ec) || ec) {
+		// Fallback: resolve relative to addon root (…/ofxGgmlGuiExample/src -> addon root).
+		auto srcPath = std::filesystem::path(__FILE__).parent_path();
+		auto addonRoot = std::filesystem::weakly_canonical(srcPath / ".." / "..", ec);
+		if (!ec) {
+			catalogPath = addonRoot / "scripts" / "model-catalog.json";
+		}
+	}
+
+	if (std::filesystem::exists(catalogPath, ec) && !ec) {
+		try {
+			std::ifstream in(catalogPath);
+			ofJson json;
+			in >> json;
+			if (json.contains("models") && json["models"].is_array()) {
+				for (const auto & model : json["models"]) {
+					ModelPreset preset;
+					preset.name = model.value("name", "");
+					preset.filename = model.value("filename", "");
+					preset.url = model.value("url", "");
+					preset.sizeMB = model.value("size", "");
+					preset.bestFor = model.value("best_for", "");
+					preset.description = model.value("description", preset.bestFor);
+					if (preset.description.empty()) {
+						preset.description = "Recommended model";
+					}
+					if (preset.name.empty() || preset.filename.empty() || preset.url.empty()) {
+						continue;
+					}
+					modelPresets.push_back(std::move(preset));
+				}
+			}
+			if (!modelPresets.empty() &&
+				json.contains("task_defaults") && json["task_defaults"].is_object()) {
+				auto defaults = json["task_defaults"];
+				auto setDefault = [&](const char * key, AiMode mode) {
+					const int idxOneBased = defaults.value(key, 0);
+					if (idxOneBased > 0) {
+						const int idx = std::clamp(idxOneBased - 1, 0,
+							static_cast<int>(modelPresets.size()) - 1);
+						taskDefaultModelIndices[static_cast<int>(mode)] = idx;
+					}
+				};
+				setDefault("chat", AiMode::Chat);
+				setDefault("script", AiMode::Script);
+				setDefault("summarize", AiMode::Summarize);
+				setDefault("write", AiMode::Write);
+				setDefault("translate", AiMode::Translate);
+				setDefault("custom", AiMode::Custom);
+			}
+			loaded = !modelPresets.empty();
+		} catch (const std::exception & e) {
+			logWithLevel(OF_LOG_WARNING,
+				std::string("Failed to load model-catalog.json: ") + e.what());
+		} catch (...) {
+			logWithLevel(OF_LOG_WARNING,
+				"Failed to load model-catalog.json: unknown parse error");
+		}
+	}
+
+	if (!loaded) {
+		setFallbackPresets();
+	}
+
+	selectedModelIndex = std::clamp(selectedModelIndex, 0,
+		std::max(0, static_cast<int>(modelPresets.size()) - 1));
 }
 
 // ---------------------------------------------------------------------------
@@ -1290,6 +1371,44 @@ if (isSelected) ImGui::SetItemDefaultFocus();
 }
 ImGui::EndCombo();
 }
+}
+
+if (!modelPresets.empty()) {
+	const int recommendedIdx = std::clamp(
+		taskDefaultModelIndices[static_cast<int>(activeMode)],
+		0, static_cast<int>(modelPresets.size()) - 1);
+	ImGui::BeginDisabled(recommendedIdx == selectedModelIndex);
+	if (ImGui::Button("Use recommended", ImVec2(-1, 0))) {
+		selectedModelIndex = recommendedIdx;
+		detectModelLayers();
+		if (detectedModelLayers > 0) {
+			gpuLayers = detectedModelLayers;
+		}
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Switch to the catalog default for this mode.");
+	}
+
+	const std::string modelPath = getSelectedModelPath();
+	if (!modelPath.empty()) {
+		std::error_code modelEc;
+		if (std::filesystem::exists(modelPath, modelEc) && !modelEc) {
+			ImGui::TextDisabled("File: %s", modelPath.c_str());
+		} else {
+			ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.3f, 1.0f),
+				"Model missing: %s", ofFilePath::getFileName(modelPath).c_str());
+			ImGui::TextDisabled("Place file at: %s", modelPath.c_str());
+			const int presetNumber = selectedModelIndex + 1;
+			std::string downloadCmd = "./scripts/download-model.sh --preset " + ofToString(presetNumber);
+			if (ImGui::SmallButton("Copy download command")) {
+				copyToClipboard(downloadCmd);
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Copies a shell command to fetch preset %d into bin/data/models/", presetNumber);
+			}
+		}
+	}
 }
 
 ImGui::Spacing();

@@ -5,6 +5,7 @@
 #include "ofxImGui.h"
 
 #include <atomic>
+#include <array>
 #include <deque>
 #include <functional>
 #include <future>
@@ -187,6 +188,7 @@ private:
 	// -- model presets --
 	std::vector<ModelPreset> modelPresets;
 	int selectedModelIndex = 0;
+	std::array<int, kModeCount> taskDefaultModelIndices = {};
 	void initModelPresets();
 
 	// -- script language presets --
