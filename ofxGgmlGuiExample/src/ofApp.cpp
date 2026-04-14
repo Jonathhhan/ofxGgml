@@ -78,12 +78,67 @@ std::string trim(const std::string & s) {
 	return s.substr(start, end - start);
 }
 
+// Remove the llama.cpp interactive banner/instruction block that can
+// precede the actual model response when the CLI runs in chat mode.
+std::string stripInteractivePreamble(const std::string & text) {
+	std::string out;
+	out.reserve(text.size());
+
+	bool skipping = true;
+	size_t pos = 0;
+	while (pos <= text.size()) {
+		const size_t end = text.find('\n', pos);
+		const std::string line = (end == std::string::npos)
+			? text.substr(pos)
+			: text.substr(pos, end - pos);
+		const std::string trimmed = trim(line);
+
+		if (skipping) {
+			if (!trimmed.empty()) {
+				static const std::vector<std::string> preambleMarkers = {
+					"Running in interactive mode",
+					"Press Ctrl+C to interject",
+					"Press Return to return control to the AI",
+					"To return control without starting a new line",
+					"If you want to submit another line",
+					"Not using system message",
+					"Using system message",
+					"Reverse prompt"
+				};
+				bool isPreamble = false;
+				for (const auto & marker : preambleMarkers) {
+					if (trimmed.find(marker) != std::string::npos) {
+						isPreamble = true;
+						break;
+					}
+				}
+				if (!isPreamble) {
+					skipping = false;
+				}
+			}
+		}
+
+		if (!skipping) {
+			if (!out.empty()) out.push_back('\n');
+			out += line;
+		}
+
+		if (end == std::string::npos) break;
+		pos = end + 1;
+	}
+
+	return trim(out);
+}
+
 // Strip common chat-template role markers and prompt artefacts that
 // llama-completion may emit around the actual generated text.
 // Examples of markers removed: "user", "assistant", "system",
 // "<|...|>" ChatML tokens, and leading/trailing ">" prompt chars.
 std::string cleanChatOutput(const std::string & text) {
 	std::string out = text;
+
+	// Drop llama-cli interactive banners before further cleanup.
+	out = stripInteractivePreamble(out);
 
 	// Strip <|...|> ChatML-style tokens (e.g. <|assistant|>, <|end|>).
 	{
