@@ -195,8 +195,8 @@ std::string fetchSearchSnippet(const std::string & query, size_t maxChars) {
 	ofHttpResponse resp = ofLoadURL(url);
 	if (resp.status < 200 || resp.status >= 300) return "";
 	const std::string body = resp.data.getText();
-	std::regex snippetRe(R"(<td[^>]*class=\"result-snippet\"[^>]*>(.*?)</td>)",
-		std::regex::icase | std::regex::dotall);
+	std::regex snippetRe(R"(<td[^>]*class=\"result-snippet\"[^>]*>([\s\S]*?)</td>)",
+		std::regex::icase);
 	std::smatch m;
 	if (std::regex_search(body, m, snippetRe) && m.size() >= 2) {
 		std::string snippet = stripHtmlTags(m[1].str());
