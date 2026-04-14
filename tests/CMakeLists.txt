@@ -50,6 +50,11 @@ set(TEST_SOURCES
     test_tensor.cpp
     test_graph.cpp
     test_result.cpp
+    test_core.cpp
+    test_model.cpp
+    test_inference.cpp
+    test_integration.cpp
+    test_benchmark.cpp
 )
 
 # ---------------------------------------------------------------------------

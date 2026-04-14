@@ -24,9 +24,14 @@ cd tests
 Run tests by tag:
 
 ```bash
-./build/tests/ofxGgml-tests "[tensor]"     # Only tensor tests
-./build/tests/ofxGgml-tests "[graph]"      # Only graph tests
-./build/tests/ofxGgml-tests "[result]"     # Only result/error tests
+./build/tests/ofxGgml-tests "[tensor]"       # Only tensor tests
+./build/tests/ofxGgml-tests "[graph]"        # Only graph tests
+./build/tests/ofxGgml-tests "[result]"       # Only result/error tests
+./build/tests/ofxGgml-tests "[core]"         # Only core backend tests
+./build/tests/ofxGgml-tests "[model]"        # Only model loading tests
+./build/tests/ofxGgml-tests "[inference]"    # Only inference tests
+./build/tests/ofxGgml-tests "[integration]"  # Only integration tests
+./build/tests/ofxGgml-tests "[benchmark]"    # Only benchmarks
 ```
 
 Run tests by name pattern:
@@ -61,6 +66,76 @@ Current test coverage includes:
   - Error codes and messages
   - Copy and move semantics
   - Exception safety
+
+- **Core Backend** (test_core.cpp)
+  - Backend initialization and lifecycle
+  - Device enumeration
+  - Backend information queries
+  - Graph allocation
+  - Tensor data operations (set/get)
+  - Synchronous and asynchronous computation
+  - Timing tracking
+  - Log callback configuration
+
+- **Model Loading** (test_model.cpp)
+  - Model initialization and state
+  - GGUF file loading (with and without actual files)
+  - Metadata querying
+  - Tensor access and iteration
+  - Model weight loading to backend
+  - API robustness
+
+- **Inference** (test_inference.cpp)
+  - Inference class initialization
+  - Executable configuration
+  - Settings structures
+  - Result structures
+  - Tokenization utilities
+  - Sampling utilities
+  - Embedding index and similarity search
+  - Cosine similarity calculations
+
+- **Integration Tests** (test_integration.cpp)
+  - End-to-end matrix multiplication
+  - Element-wise operation chains
+  - Activation function verification
+  - Reduction operation correctness
+  - Normalization operations
+  - Complex neural network layers
+  - Sequential computations
+  - Async computation workflows
+  - Graph reuse and allocation
+  - Large tensor computations
+
+- **Benchmarks** (test_benchmark.cpp)
+  - Tensor operation performance
+  - Matrix multiplication GFLOPS
+  - Activation function speed
+  - Reduction operation benchmarks
+  - Graph allocation timing
+  - Data transfer bandwidth
+  - Sync vs async comparison
+  - Memory operation benchmarks
+
+**Total test cases: 280+** (140 original + 140+ new)
+
+### Benchmarks
+
+Benchmarks are marked with `[benchmark][!hide]` and don't run by default.
+
+To run benchmarks:
+
+```bash
+./build/tests/ofxGgml-tests "[benchmark]"
+```
+
+Benchmarks measure:
+- **Performance**: Tensor operations, matrix multiplication (with GFLOPS calculation)
+- **Throughput**: Data transfer bandwidth
+- **Latency**: Graph allocation, computation times
+- **Comparison**: Sync vs async execution
+
+Benchmark results are printed with timing statistics and throughput metrics.
 
 ### Writing New Tests
 
