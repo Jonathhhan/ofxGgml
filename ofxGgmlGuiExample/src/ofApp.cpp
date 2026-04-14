@@ -3565,6 +3565,10 @@ workerThread.join();
  	lowered.find("stock") != std::string::npos) {
  	autoContext = fetchSearchSnippet(userText, 1200);
  }
+ if (autoContext.empty() && userText.size() > 16) {
+ 	// General fallback: try to fetch a concise snippet for the prompt text itself.
+ 	autoContext = fetchSearchSnippet(userText, 1200);
+ }
  if (!autoContext.empty()) {
  	userTextWithInternet += "\n\nInternet context:\n" + autoContext + "\n";
  }
