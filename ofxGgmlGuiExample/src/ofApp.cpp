@@ -1439,16 +1439,38 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 
 		size_t fileCount = 0;
 		const size_t maxFilesToReview = 20; // Limit to avoid overwhelming context
+		// Estimate max prompt size: use conservative estimate of ~3 chars per token
+		// Reserve 50% of context for system prompt + response generation
+		const size_t maxPromptChars = static_cast<size_t>(contextSize) * 3 / 2;
+		size_t currentPromptSize = allFilesContent.size();
+		bool hitSizeLimit = false;
+
 		for (size_t i = 0; i < scriptSourceFiles.size() && fileCount < maxFilesToReview; i++) {
 			const auto & entry = scriptSourceFiles[i];
 			if (!entry.isDirectory) {
 				std::string content;
 				if (scriptSource.loadFileContent(static_cast<int>(i), content)) {
+					const size_t fileHeaderSize = entry.name.size() + 20; // "=== File: ... ===\n"
+					const size_t addedSize = fileHeaderSize + content.size() + 2; // +2 for "\n\n"
+
+					// Check if adding this file would exceed the limit
+					if (currentPromptSize + addedSize > maxPromptChars) {
+						hitSizeLimit = true;
+						break;
+					}
+
 					allFilesContent += "=== File: " + entry.name + " ===\n";
 					allFilesContent += content + "\n\n";
+					currentPromptSize += addedSize;
 					fileCount++;
 				}
 			}
+		}
+
+		if (hitSizeLimit && fileCount > 0) {
+			allFilesContent += "\n[Note: Additional files were excluded to stay within context limit. ";
+			allFilesContent += std::to_string(fileCount) + " of " + std::to_string(scriptSourceFiles.size());
+			allFilesContent += " files included]\n";
 		}
 
 		if (fileCount > 0) {
