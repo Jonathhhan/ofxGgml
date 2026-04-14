@@ -12,11 +12,13 @@
 ///   - ofxGgmlScriptSource — local-folder / GitHub script source browser helper
 ///   - ofxGgmlTensor   — non-owning tensor handle
 ///   - ofxGgmlTypes    — enums, settings, result structs
+///   - ofxGgmlResult   — Result<T> type for error handling
 ///   - ofxGgmlHelpers  — utility functions
 ///   - ofxGgmlVersion  — version macros
 
 #include "ofxGgmlVersion.h"
 #include "ofxGgmlTypes.h"
+#include "ofxGgmlResult.h"
 #include "ofxGgmlHelpers.h"
 #include "ofxGgmlTensor.h"
 #include "ofxGgmlGraph.h"

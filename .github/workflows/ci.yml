@@ -25,3 +25,6 @@ jobs:
         run: |
           ./scripts/download-model.sh --list
           ./scripts/benchmark-llama-cli.sh --help
+
+      - name: Build and run unit tests
+        run: ./tests/run-tests.sh
