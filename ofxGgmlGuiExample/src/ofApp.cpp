@@ -3257,9 +3257,9 @@ void ofApp::runHierarchicalReview() {
 					<< (f->truncated ? " (truncated)" : "")
 					<< "\n";
 			}
-			final << "\nFirst pass — per-file summaries and issues:\n" << summaries.str();
-			final << "Second pass — architecture issues:\n" << archReview << "\n\n";
-			final << "Third pass — cross-file integration:\n" << integrationReview << "\n\n";
+			final << "\nFirst pass - per-file summaries and issues:\n" << summaries.str();
+			final << "Second pass - architecture issues:\n" << archReview << "\n\n";
+			final << "Third pass - cross-file integration:\n" << integrationReview << "\n\n";
 			final << "Context management: reserved " << responseReserve
 				<< " tokens for responses; counted via tokenizer when available. "
 				<< "Sliding windows applied to oversized files.\n";
