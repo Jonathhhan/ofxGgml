@@ -384,16 +384,22 @@ Build the tools with:
 |---|-------|------|----------|
 | 1 | Qwen2.5-1.5B Instruct Q4_K_M | ~1.0 GB | chat, general |
 | 2 | Qwen2.5-Coder-1.5B Instruct Q4_K_M | ~1.0 GB | scripting, code generation |
+| 3 | Phi-3.5-mini Instruct Q4_K_M | ~2.4 GB | reasoning, analysis, complex tasks |
+| 4 | Llama-3.2-1B Instruct Q4_K_M | ~0.9 GB | lightweight, fast inference |
+| 5 | TinyLlama-1.1B Chat Q4_K_M | ~0.6 GB | very lightweight, testing, prototyping |
 
 ```bash
-./scripts/download-model.sh                    # download both presets
-./scripts/download-model.sh --preset 2         # coder model only
+./scripts/download-model.sh                    # download default presets (1 and 2)
+./scripts/download-model.sh --preset 3         # Phi-3.5-mini for complex reasoning
+./scripts/download-model.sh --preset 4         # Llama-3.2-1B for lightweight use
 ./scripts/download-model.sh --task script      # same as --preset 2
 ./scripts/download-model.sh --list             # show all presets
 ./scripts/download-model.sh --model <URL> --checksum <SHA256>  # custom with checksum verification
 ```
 
 Model preset metadata is stored in `scripts/model-catalog.json`. `download-model.sh` supports resumable downloads and validates SHA256 checksums when provided. If a preset checksum is blank in the catalog, the script prints an explicit warning and skips integrity verification for that download.
+
+**Updating Checksums**: Run `./scripts/update-model-checksums.sh --all` to automatically download models and compute verified SHA256 checksums for the catalog.
 
 ## Testing
 
