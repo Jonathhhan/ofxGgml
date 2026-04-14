@@ -153,7 +153,7 @@ if "%CUDA_PRESENT%"=="1" (
     )
 
     for %%P in ("!CUDA_LIB_DIR!") do set "CUDA_LIB_DIR=%%~fP"
-    echo ==^> Using CUDA Toolkit libs from "!CUDA_LIB_DIR!"
+    echo ==^> Using CUDA Toolkit libs: !CUDA_LIB_DIR!
     set "CUDA_CUBLAS=!CUDA_LIB_DIR!\cublas.lib"
     set "CUDA_CUDART=!CUDA_LIB_DIR!\cudart.lib"
 )
