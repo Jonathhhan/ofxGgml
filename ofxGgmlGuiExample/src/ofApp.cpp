@@ -2727,7 +2727,7 @@ workerThread.join();
 {
 std::lock_guard<std::mutex> lock(outputMutex);
 if (!cancelRequested.load()) {
-pendingOutput = result;
+pendingOutput = cleanChatOutput(result);
 pendingRole = "assistant";
 pendingMode = mode;
 }
