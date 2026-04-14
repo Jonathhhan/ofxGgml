@@ -10,7 +10,9 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <algorithm>
 #include <mutex>
+#include <vector>
 
 // --------------------------------------------------------------------------
 //  Default console log callback
@@ -208,6 +210,26 @@ static void ggmlLogCallback(ggml_log_level level, const char * text, void * user
 	}
 }
 
+static std::mutex s_logOwnerMutex;
+static std::vector<ofxGgml::Impl *> s_logOwners;
+
+static void registerLogCallbackOwner(ofxGgml::Impl * impl) {
+	std::lock_guard<std::mutex> lock(s_logOwnerMutex);
+	s_logOwners.erase(std::remove(s_logOwners.begin(), s_logOwners.end(), impl), s_logOwners.end());
+	s_logOwners.push_back(impl);
+	ggml_log_set(ggmlLogCallback, impl);
+}
+
+static void unregisterLogCallbackOwner(ofxGgml::Impl * impl) {
+	std::lock_guard<std::mutex> lock(s_logOwnerMutex);
+	s_logOwners.erase(std::remove(s_logOwners.begin(), s_logOwners.end(), impl), s_logOwners.end());
+	if (s_logOwners.empty()) {
+		ggml_log_set(nullptr, nullptr);
+		return;
+	}
+	ggml_log_set(ggmlLogCallback, s_logOwners.back());
+}
+
 static bool validateGraphForCompute(struct ggml_cgraph * graph, std::string & error) {
 	if (!graph) {
 		error = "graph not built (call graph.build() first)";
@@ -262,7 +284,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	}
 
 	m_impl->settings = settings;
-	ggml_log_set(ggmlLogCallback, m_impl.get());
+	registerLogCallbackOwner(m_impl.get());
 
 	// With static linking, GPU backends compiled into the library are
 	// registered automatically via the ggml_backend_registry constructor
@@ -300,7 +322,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 			}
 			std::string devMsg = "ofxGgml:   [" + std::to_string(i) + "] ";
 			devMsg += (devName ? devName : "?");
-			devMsg += " — ";
+			devMsg += " - ";
 			devMsg += (devDesc ? devDesc : "");
 			devMsg += " (";
 			devMsg += typeLabel;
@@ -310,7 +332,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		if (!hasGpu && settings.preferredBackendName.empty() &&
 			settings.preferredBackend != ofxGgmlBackendType::Cpu) {
 			m_impl->log(GGML_LOG_LEVEL_WARN,
-				"ofxGgml: no usable GPU found — will fall back to CPU\n");
+				"ofxGgml: no usable GPU found - will fall back to CPU\n");
 		}
 	}
 
@@ -343,7 +365,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		if (!m_impl->backend) {
 			m_impl->log(GGML_LOG_LEVEL_WARN,
 				"ofxGgml: backend \"" + settings.preferredBackendName +
-				"\" not found or failed to init — trying fallback\n");
+				"\" not found or failed to init - trying fallback\n");
 		}
 	}
 	if (!m_impl->backend && settings.preferredBackendName.empty() &&
@@ -379,7 +401,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		} else if (typeDev) {
 			m_impl->log(GGML_LOG_LEVEL_WARN,
 				"ofxGgml: preferred device type reports no usable memory"
-				" — falling back\n");
+				" - falling back\n");
 		}
 	}
 	if (!m_impl->backend) {
@@ -470,8 +492,9 @@ void ofxGgml::close() {
 		ggml_backend_free(m_impl->cpuBackend);
 	}
 	m_impl->cpuBackend = nullptr;
-	// Clear the global log callback to prevent use-after-free.
-	ggml_log_set(nullptr, nullptr);
+	// ggml logging is process-global, so only unregister this instance and
+	// reactivate the previous live owner if one still exists.
+	unregisterLogCallbackOwner(m_impl.get());
 	m_impl->state = ofxGgmlState::Uninitialized;
 }
 
@@ -607,6 +630,7 @@ ofxGgmlComputeResult ofxGgml::computeGraph(ofxGgmlGraph & graph) {
 
 ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 	ofxGgmlComputeResult result;
+	struct ggml_cgraph * rawGraph = graph.raw();
 
 	if (m_impl->state != ofxGgmlState::Ready) {
 		if (m_impl->state == ofxGgmlState::Computing && m_impl->hasPendingAsync) {
@@ -616,15 +640,18 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 		result.error = "ofxGgml: not ready";
 		return result;
 	}
-	std::string validationError;
-	if (!validateGraphForCompute(graph.raw(), validationError)) {
-		result.error = std::string("ofxGgml: invalid graph: ") + validationError;
-		return result;
-	}
 
-	if (m_impl->allocatedGraph != graph.raw()) {
+	// Reused graphs are already validated and allocated, so skip the
+	// O(node-count) validation pass on the steady-state compute path.
+	if (m_impl->allocatedGraph != rawGraph) {
+		std::string validationError;
+		if (!validateGraphForCompute(rawGraph, validationError)) {
+			result.error = std::string("ofxGgml: invalid graph: ") + validationError;
+			return result;
+		}
+
 		// Graph was already validated above; skip redundant second validation.
-		if (!allocGraphInternal(m_impl.get(), graph.raw(), false)) {
+		if (!allocGraphInternal(m_impl.get(), rawGraph, false)) {
 			result.error = "ofxGgml: graph allocation failed";
 			return result;
 		}
@@ -634,7 +661,7 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 
 	auto t0 = std::chrono::steady_clock::now();
 
-	enum ggml_status status = ggml_backend_sched_graph_compute_async(m_impl->sched, graph.raw());
+	enum ggml_status status = ggml_backend_sched_graph_compute_async(m_impl->sched, rawGraph);
 
 	auto t1 = std::chrono::steady_clock::now();
 	result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();

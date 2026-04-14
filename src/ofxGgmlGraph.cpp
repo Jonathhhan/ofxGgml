@@ -320,7 +320,13 @@ void ofxGgmlGraph::build(ofxGgmlTensor output) {
 		m_graph = nullptr;
 		return;
 	}
-	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
+	if (!m_graph) {
+		m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
+	} else {
+		// Reuse the existing cgraph storage so repeated build() calls do not
+		// keep consuming metadata space from the fixed ggml context arena.
+		ggml_graph_clear(m_graph);
+	}
 	ggml_build_forward_expand(m_graph, output.raw());
 }
 
@@ -329,7 +335,11 @@ void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
 		m_graph = nullptr;
 		return;
 	}
-	m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
+	if (!m_graph) {
+		m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
+	} else {
+		ggml_graph_clear(m_graph);
+	}
 	int validCount = 0;
 	for (auto t : outputs) {
 		if (t.raw()) {

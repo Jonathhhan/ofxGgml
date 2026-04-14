@@ -17,6 +17,7 @@
 #ifdef _WIN32
 	#include <windows.h>
 #else
+	#include <fcntl.h>
 	#include <sys/wait.h>
 	#include <unistd.h>
 #endif
@@ -44,8 +45,23 @@ static std::string stripLlamaWarnings(const std::string & text) {
 	std::string line;
 
 	while (std::getline(lines, line)) {
-		// Skip lines that are common llama.cpp warnings
-		if (line.find("warning: no usable GPU found") != std::string::npos || line.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos || line.find("warning: consult docs/build.md for compilation instructions") != std::string::npos || line.find("--gpu-layers option will be ignored") != std::string::npos || line.find("ggml_cuda_init") != std::string::npos || line.find("ggml_vulkan_init") != std::string::npos || line.find("ggml_metal_init") != std::string::npos || line.find("[INFO]") != std::string::npos || line.find("Device ") != std::string::npos || line.find("compute capability") != std::string::npos || line.find("ofxGgml: discovered") != std::string::npos || line.find("ofxGgml: ready") != std::string::npos || line.find("backend device") != std::string::npos) {
+		// Skip lines that are common llama.cpp warnings and backend initialization messages
+		// Use more specific patterns to avoid filtering legitimate model output
+		if (line.find("warning: no usable GPU found") != std::string::npos || line.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos || line.find("warning: consult docs/build.md for compilation instructions") != std::string::npos || line.find("--gpu-layers option will be ignored") != std::string::npos || line.find("ggml_cuda_init") != std::string::npos || line.find("ggml_vulkan_init") != std::string::npos || line.find("ggml_metal_init") != std::string::npos) {
+			continue;
+		}
+
+		// Filter backend/GPU log lines that start with specific prefixes
+		// to avoid filtering model output that might mention these terms
+		const std::string trimmedLine = [&line]() {
+			size_t start = 0;
+			while (start < line.size() && std::isspace(static_cast<unsigned char>(line[start]))) {
+				start++;
+			}
+			return line.substr(start);
+		}();
+
+		if (trimmedLine.rfind("ofxGgml [INFO]", 0) == 0 || trimmedLine.rfind("ofxGgml [WARN]", 0) == 0 || trimmedLine.rfind("ofxGgml [ERROR]", 0) == 0) {
 			continue;
 		}
 
@@ -59,6 +75,168 @@ static std::string stripLlamaWarnings(const std::string & text) {
 		result.pop_back();
 	}
 	return result;
+}
+
+static bool startsWithWord(const std::string & text, const std::string & word) {
+	if (text.size() < word.size()) return false;
+	if (text.compare(0, word.size(), word) != 0) return false;
+	if (text.size() == word.size()) return true;
+	const char after = text[word.size()];
+	return after == '\n' || after == '\r' || after == ':' || after == ' ';
+}
+
+static bool isRuntimeNoiseLine(const std::string & trimmedLine) {
+	if (trimmedLine.empty()) return true;
+	if (trimmedLine.rfind("ofxGgml [", 0) == 0) return true;
+	if (trimmedLine.find("ggml_cuda_init") != std::string::npos) return true;
+	if (trimmedLine.find("ggml_vulkan_init") != std::string::npos) return true;
+	if (trimmedLine.find("ggml_metal_init") != std::string::npos) return true;
+	if (trimmedLine.find("warning: no usable GPU found") != std::string::npos) return true;
+	if (trimmedLine.find("--gpu-layers option will be ignored") != std::string::npos) return true;
+	if (trimmedLine.find("Total VRAM:") != std::string::npos) return true;
+	if (trimmedLine.find("compute capability") != std::string::npos) return true;
+	if (trimmedLine.find("VMM:") != std::string::npos) return true;
+	if (trimmedLine.rfind("Device ", 0) == 0) {
+		const size_t colon = trimmedLine.find(':');
+		if (colon != std::string::npos && colon > 7) {
+			bool digitsOnly = true;
+			for (size_t i = 7; i < colon; ++i) {
+				if (!std::isdigit(static_cast<unsigned char>(trimmedLine[i]))) {
+					digitsOnly = false;
+					break;
+				}
+			}
+			if (digitsOnly) return true;
+		}
+	}
+	return false;
+}
+
+static std::string stripLeadingRuntimeNoise(const std::string & text) {
+	std::ostringstream filtered;
+	std::istringstream lines(text);
+	std::string line;
+	bool skipping = true;
+
+	while (std::getline(lines, line)) {
+		const std::string trimmedLine = trim(line);
+		if (skipping) {
+			if (isRuntimeNoiseLine(trimmedLine)) {
+				continue;
+			}
+			skipping = false;
+		}
+
+		filtered << line;
+		if (!lines.eof()) {
+			filtered << '\n';
+		}
+	}
+
+	return trim(filtered.str());
+}
+
+static std::string stripChatTemplateMarkers(const std::string & text) {
+	std::string out;
+	out.reserve(text.size());
+	size_t i = 0;
+	while (i < text.size()) {
+		if (i + 1 < text.size() && text[i] == '<' && text[i + 1] == '<') {
+			out.push_back(text[i]);
+			++i;
+			continue;
+		}
+		if (i + 1 < text.size() && text[i] == '<' && text[i + 1] == '|') {
+			const size_t end = text.find("|>", i + 2);
+			if (end != std::string::npos) {
+				i = end + 2;
+				continue;
+			}
+		}
+		out.push_back(text[i]);
+		++i;
+	}
+	return out;
+}
+
+static std::string stripPromptEcho(const std::string & text, const std::string & prompt) {
+	std::string out = trim(text);
+	const std::string trimmedPrompt = trim(prompt);
+	if (trimmedPrompt.empty()) return out;
+	if (out.size() >= trimmedPrompt.size() &&
+		out.compare(0, trimmedPrompt.size(), trimmedPrompt) == 0) {
+		return trim(out.substr(trimmedPrompt.size()));
+	}
+	return out;
+}
+
+static std::string stripLeadingRoleLabels(const std::string & text) {
+	std::string out = trim(text);
+	bool changed = true;
+	while (changed) {
+		changed = false;
+		for (const auto & label : {
+			std::string("user"),
+			std::string("assistant"),
+			std::string("system"),
+			std::string("User"),
+			std::string("Assistant"),
+			std::string("System"),
+			std::string("A:"),
+			std::string("> ")
+		}) {
+			if (startsWithWord(out, label)) {
+				out = trim(out.substr(label.size()));
+				if (!out.empty() && out.front() == ':') {
+					out = trim(out.substr(1));
+				}
+				changed = true;
+				break;
+			}
+		}
+		if (!out.empty() && out.front() == '>') {
+			out = trim(out.substr(1));
+			changed = true;
+		}
+	}
+	return out;
+}
+
+static std::string stripTrailingArtifacts(const std::string & text) {
+	std::string out = trim(text);
+	bool stripped = true;
+	while (stripped) {
+		stripped = false;
+		for (const auto & artifact : {
+			std::string("> EOF by user"),
+			std::string("> EOF"),
+			std::string("EOF"),
+			std::string("Interrupted by user")
+		}) {
+			if (out.size() >= artifact.size() &&
+				out.compare(out.size() - artifact.size(), artifact.size(), artifact) == 0) {
+				out = trim(out.substr(0, out.size() - artifact.size()));
+				stripped = true;
+				break;
+			}
+		}
+	}
+	return out;
+}
+
+static std::string cleanCompletionOutput(const std::string & raw, const std::string & prompt) {
+	std::string cleaned = stripLlamaWarnings(raw);
+	cleaned = stripLeadingRuntimeNoise(cleaned);
+	cleaned = stripChatTemplateMarkers(cleaned);
+	cleaned = stripPromptEcho(cleaned, prompt);
+	cleaned = stripLeadingRoleLabels(cleaned);
+	cleaned = stripTrailingArtifacts(cleaned);
+	cleaned = stripLeadingRuntimeNoise(cleaned);
+	return trim(cleaned);
+}
+
+static std::string cleanStructuredOutput(const std::string & raw) {
+	return trim(stripLeadingRuntimeNoise(stripLlamaWarnings(raw)));
 }
 
 /// Validate that a file path exists and is a regular file.
@@ -155,7 +333,11 @@ static std::string quoteWindowsArg(const std::string & arg) {
 }
 #endif
 
-static bool runCommandCapture(const std::vector<std::string> & args, std::string & output, int & exitCode) {
+static bool runCommandCapture(
+	const std::vector<std::string> & args,
+	std::string & output,
+	int & exitCode,
+	bool mergeStderr = true) {
 	output.clear();
 	exitCode = -1;
 	if (args.empty() || args.front().empty()) return false;
@@ -183,7 +365,16 @@ static bool runCommandCapture(const std::vector<std::string> & args, std::string
 		? nullInput
 		: GetStdHandle(STD_INPUT_HANDLE);
 	si.hStdOutput = writePipe;
-	si.hStdError = writePipe;
+	HANDLE nullErr = INVALID_HANDLE_VALUE;
+	if (mergeStderr) {
+		si.hStdError = writePipe;
+	} else {
+		nullErr = CreateFileA("NUL", GENERIC_WRITE, 0, &sa,
+			OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+		si.hStdError = (nullErr != INVALID_HANDLE_VALUE)
+			? nullErr
+			: GetStdHandle(STD_ERROR_HANDLE);
+	}
 
 	PROCESS_INFORMATION pi {};
 	std::string cmdLine;
@@ -208,6 +399,9 @@ static bool runCommandCapture(const std::vector<std::string> & args, std::string
 	CloseHandle(writePipe);
 	if (nullInput != INVALID_HANDLE_VALUE) {
 		CloseHandle(nullInput);
+	}
+	if (nullErr != INVALID_HANDLE_VALUE) {
+		CloseHandle(nullErr);
 	}
 	if (!ok) {
 		CloseHandle(readPipe);
@@ -242,7 +436,17 @@ static bool runCommandCapture(const std::vector<std::string> & args, std::string
 
 	if (pid == 0) {
 		dup2(pipeFds[1], STDOUT_FILENO);
-		dup2(pipeFds[1], STDERR_FILENO);
+		if (mergeStderr) {
+			dup2(pipeFds[1], STDERR_FILENO);
+		} else {
+			const int devNull = open("/dev/null", O_WRONLY);
+			if (devNull >= 0) {
+				dup2(devNull, STDERR_FILENO);
+				close(devNull);
+			} else {
+				close(STDERR_FILENO);
+			}
+		}
 		close(pipeFds[0]);
 		close(pipeFds[1]);
 
@@ -667,22 +871,33 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 
 	std::string raw;
 	int exitCode = -1;
-	const bool started = runCommandCapture(args, raw, exitCode);
+	const bool started = runCommandCapture(args, raw, exitCode, false);
 
 	if (!started) {
 		result.error = "failed to start llama completion process";
 		return result;
 	}
 
-	// Strip warnings before checking exit code and output
-	raw = stripLlamaWarnings(raw);
+	std::string cleaned = cleanCompletionOutput(raw, sanitizedPrompt);
+	if (exitCode != 0 && cleaned.empty()) {
+		std::string diagRaw;
+		int diagExitCode = -1;
+		if (runCommandCapture(args, diagRaw, diagExitCode, true)) {
+			const std::string diagCleaned = cleanCompletionOutput(diagRaw, sanitizedPrompt);
+			if (!diagCleaned.empty()) {
+				cleaned = diagCleaned;
+			} else {
+				raw = cleanStructuredOutput(diagRaw);
+			}
+		}
+	}
 
 	// Exit code 130 (128 + SIGINT) specifically indicates SIGINT, often from EOF on stdin
 	// or Ctrl+C. This is frequently benign even without output (e.g., initialization only).
 	// For other exit codes, only treat as benign if we have actual output.
 	if (exitCode != 0) {
 		const bool isSigint = (exitCode == 130);
-		const bool hasOutput = !trim(raw).empty();
+		const bool hasOutput = !cleaned.empty();
 		const bool benignExit = isSigint // SIGINT (EOF on stdin) - benign even without output
 			|| (hasOutput && (exitCode == -1073740791 // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
 					|| exitCode == -1073741819 // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
@@ -696,7 +911,7 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 	}
 
 	if (exitCode != 0) {
-		result.error = trim(raw);
+		result.error = !raw.empty() ? trim(raw) : cleaned;
 		if (result.error.empty()) {
 			result.error = "llama completion failed with exit code " + std::to_string(exitCode);
 		}
@@ -704,7 +919,7 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 	}
 
 	result.success = true;
-	result.text = trim(raw);
+	result.text = cleaned;
 	const auto t1 = std::chrono::steady_clock::now();
 	result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 	return result;
@@ -764,15 +979,21 @@ ofxGgmlEmbeddingResult ofxGgmlInference::embed(
 
 	std::string raw;
 	int exitCode = -1;
-	const bool started = runCommandCapture(args, raw, exitCode);
+	const bool started = runCommandCapture(args, raw, exitCode, false);
 
 	if (!started) {
 		result.error = "failed to start llama embedding process";
 		return result;
 	}
 
-	// Strip warnings before checking exit code and parsing
-	raw = stripLlamaWarnings(raw);
+	raw = cleanStructuredOutput(raw);
+	if (exitCode != 0 && raw.empty()) {
+		std::string diagRaw;
+		int diagExitCode = -1;
+		if (runCommandCapture(args, diagRaw, diagExitCode, true)) {
+			raw = cleanStructuredOutput(diagRaw);
+		}
+	}
 
 	// Exit code 130 (128 + SIGINT) specifically indicates SIGINT, often from EOF on stdin
 	// or Ctrl+C. This is frequently benign even without output (e.g., initialization only).
@@ -845,10 +1066,11 @@ int ofxGgmlInference::countPromptTokens(
 
 	std::string raw;
 	int exitCode = -1;
-	if (!runCommandCapture(args, raw, exitCode) || exitCode != 0) {
+	if (!runCommandCapture(args, raw, exitCode, false) || exitCode != 0) {
 		return -1;
 	}
 
+	raw = cleanStructuredOutput(raw);
 	return parseVerbosePromptTokenCount(raw);
 }
 
