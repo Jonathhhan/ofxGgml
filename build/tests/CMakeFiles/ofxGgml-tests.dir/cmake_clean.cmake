@@ -1,0 +1,42 @@
+file(REMOVE_RECURSE
+  "CMakeFiles/ofxGgml-tests.dir/link.d"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/test_core.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/test_core.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/test_graph.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/test_graph.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/test_integration.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/test_integration.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/test_main.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/test_main.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/test_model.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/test_model.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/test_result.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/test_result.cpp.o.d"
+  "CMakeFiles/ofxGgml-tests.dir/test_tensor.cpp.o"
+  "CMakeFiles/ofxGgml-tests.dir/test_tensor.cpp.o.d"
+  "ofxGgml-tests"
+  "ofxGgml-tests.pdb"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang CXX)
+  include(CMakeFiles/ofxGgml-tests.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()
