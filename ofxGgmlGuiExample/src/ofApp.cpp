@@ -2671,7 +2671,7 @@ std::string ofApp::runFileSummary(const ScriptFileReviewInfo & info,
 }
 
 std::string ofApp::runArchitectureReview(
-	const std::vector<ScriptFileReviewInfo> & files,
+	const std::vector<ScriptFileReviewInfo *> & files,
 	const std::string & repoTree,
 	const std::string & reviewQuery,
 	const std::string & modelPath) {
@@ -2693,8 +2693,8 @@ std::string ofApp::runArchitectureReview(
 	prompt << "File summaries:\n";
 	int listed = 0;
 	for (const auto & f : files) {
-		if (f.summary.empty()) continue;
-		prompt << "- " << f.name << ": " << f.summary << "\n";
+		if (f->summary.empty()) continue;
+		prompt << "- " << f->name << ": " << f->summary << "\n";
 		if (++listed >= 24) break; // guard context
 	}
 	prompt << "\nIdentify architecture, layering, and dependency issues. "
@@ -2709,7 +2709,7 @@ std::string ofApp::runArchitectureReview(
 }
 
 std::string ofApp::runIntegrationReview(
-	const std::vector<ScriptFileReviewInfo> & files,
+	const std::vector<ScriptFileReviewInfo *> & files,
 	const std::string & repoTree,
 	const std::string & reviewQuery,
 	const std::string & modelPath) {
@@ -2731,10 +2731,10 @@ std::string ofApp::runIntegrationReview(
 	prompt << "Per-file findings:\n";
 	int listed = 0;
 	for (const auto & f : files) {
-		if (f.summary.empty()) continue;
-		prompt << "- " << f.name << " (fan-in " << f.dependencyFanIn
-			<< ", fan-out " << f.dependencyFanOut << "): "
-			<< f.summary << "\n";
+		if (f->summary.empty()) continue;
+		prompt << "- " << f->name << " (fan-in " << f->dependencyFanIn
+			<< ", fan-out " << f->dependencyFanOut << "): "
+			<< f->summary << "\n";
 		if (++listed >= 24) break;
 	}
 	prompt << "\nFocus on contract mismatches, API misuse, inconsistent assumptions, "

@@ -275,12 +275,12 @@ private:
 		int perFileBudget,
 		const std::string & modelPath);
 	std::string runArchitectureReview(
-		const std::vector<ScriptFileReviewInfo> & files,
+		const std::vector<ScriptFileReviewInfo *> & files,
 		const std::string & repoTree,
 		const std::string & reviewQuery,
 		const std::string & modelPath);
 	std::string runIntegrationReview(
-		const std::vector<ScriptFileReviewInfo> & files,
+		const std::vector<ScriptFileReviewInfo *> & files,
 		const std::string & repoTree,
 		const std::string & reviewQuery,
 		const std::string & modelPath);
