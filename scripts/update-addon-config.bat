@@ -80,6 +80,7 @@ set "CUDA_PRESENT=0"
 if exist "%LIB_DIR%\ggml-cuda\Release\ggml-cuda.lib" (
     set "CUDA_PRESENT=1"
     echo ==^> CUDA backend detected - adding CUDA Toolkit libraries
+    echo ==^> Locating CUDA Toolkit library directory...
 )
 
 REM Add CUDA Toolkit libraries if CUDA is present
@@ -100,13 +101,20 @@ if "%CUDA_PRESENT%"=="1" (
 
     REM cublas.lib and cudart.lib are the minimum required libraries
     REM The CUDA Toolkit provides these through CMake's FindCUDAToolkit
-    if defined CUDA_PATH_CLEAN if exist "!CUDA_PATH_CLEAN!\lib\x64\cublas.lib" (
-        set "CUDA_LIB_DIR=!CUDA_PATH_CLEAN!\lib\x64"
+    if defined CUDA_PATH_CLEAN (
+        echo ==^>   Checking CUDA_PATH: !CUDA_PATH_CLEAN!
+        if exist "!CUDA_PATH_CLEAN!\lib\x64\cublas.lib" (
+            set "CUDA_LIB_DIR=!CUDA_PATH_CLEAN!\lib\x64"
+        )
     )
-    if not defined CUDA_LIB_DIR if defined CUDAToolkit_ROOT_CLEAN if exist "!CUDAToolkit_ROOT_CLEAN!\lib\x64\cublas.lib" (
-        set "CUDA_LIB_DIR=!CUDAToolkit_ROOT_CLEAN!\lib\x64"
+    if not defined CUDA_LIB_DIR if defined CUDAToolkit_ROOT_CLEAN (
+        echo ==^>   Checking CUDAToolkit_ROOT: !CUDAToolkit_ROOT_CLEAN!
+        if exist "!CUDAToolkit_ROOT_CLEAN!\lib\x64\cublas.lib" (
+            set "CUDA_LIB_DIR=!CUDAToolkit_ROOT_CLEAN!\lib\x64"
+        )
     )
     if not defined CUDA_LIB_DIR (
+        echo ==^>   Checking CUDA_PATH_V* environment variables...
         for /f "tokens=1,* delims==" %%A in ('set CUDA_PATH_V 2^>nul') do (
             if not defined CUDA_LIB_DIR (
                 for %%P in ("%%B") do (
@@ -118,6 +126,7 @@ if "%CUDA_PRESENT%"=="1" (
         )
     )
     if not defined CUDA_LIB_DIR (
+        echo ==^>   Checking Program Files for CUDA Toolkit installation...
         for /f "delims=" %%D in ('dir /b /ad "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA" 2^>nul ^| sort /R') do (
             if not defined CUDA_LIB_DIR (
                 for %%P in ("%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\%%D") do (
