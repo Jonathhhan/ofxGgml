@@ -1446,11 +1446,42 @@ ImGui::EndCombo();
 }
 }
 
-auto buildScriptPrompt = [this](const std::string & body) {
+auto buildScriptPrompt = [this, sourceType, &scriptSourceFiles](const std::string & body) {
 std::string prompt;
 if (!scriptLanguages.empty()) {
 prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
 }
+
+// If a folder or GitHub repo is loaded, provide context about available files
+if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
+	if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
+		const std::string folderPath = scriptSource.getLocalFolderPath();
+		prompt += "\nContext: Loaded folder: " + folderPath + "\n";
+		prompt += "Available files in this folder:\n";
+	} else {
+		const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
+		const std::string branch = scriptSource.getGitHubBranch();
+		prompt += "\nContext: Loaded GitHub repository: " + ownerRepo + " (branch: " + branch + ")\n";
+		prompt += "Available files in this repository:\n";
+	}
+	// List up to 50 files to avoid overly long prompts
+	const size_t maxFilesToList = 50;
+	size_t fileCount = 0;
+	for (const auto & entry : scriptSourceFiles) {
+		if (!entry.isDirectory) {
+			prompt += "  - " + entry.name + "\n";
+			fileCount++;
+			if (fileCount >= maxFilesToList) {
+				if (scriptSourceFiles.size() > maxFilesToList) {
+					prompt += "  ... and " + std::to_string(scriptSourceFiles.size() - maxFilesToList) + " more files\n";
+				}
+				break;
+			}
+		}
+	}
+	prompt += "\n";
+}
+
 prompt += body;
 return prompt;
 };
