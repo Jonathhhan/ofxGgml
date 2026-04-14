@@ -684,66 +684,6 @@ scriptLanguages = {
 }
 
 // ---------------------------------------------------------------------------
-// Presets — code templates (per-language quick-start skeletons)
-// ---------------------------------------------------------------------------
-
-void ofApp::initCodeTemplates() {
-codeTemplates.resize(scriptLanguages.size());
-
-// C++ templates
-codeTemplates[0] = {
-{"Hello World", "#include <iostream>\n\nint main() {\n    std::cout << \"Hello, World!\" << std::endl;\n    return 0;\n}\n"},
-{"Class Definition", "#pragma once\n\n#include <string>\n\nclass MyClass {\npublic:\n    MyClass() = default;\n    ~MyClass() = default;\n\n    void doSomething();\n    const std::string & getName() const { return m_name; }\n\nprivate:\n    std::string m_name;\n};\n"},
-{"Unit Test", "#include <cassert>\n#include <cstdio>\n\nstatic int passed = 0;\n\nvoid testExample() {\n    assert(1 + 1 == 2);\n    passed++;\n}\n\nint main() {\n    testExample();\n    std::printf(\"%d tests passed.\\n\", passed);\n    return 0;\n}\n"},
-};
-
-// Python templates
-codeTemplates[1] = {
-{"Hello World", "def main():\n    print(\"Hello, World!\")\n\nif __name__ == \"__main__\":\n    main()\n"},
-{"Class Definition", "class MyClass:\n    def __init__(self, name: str = \"\"):\n        self._name = name\n\n    @property\n    def name(self) -> str:\n        return self._name\n\n    def do_something(self) -> None:\n        pass\n"},
-{"FastAPI Server", "from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get(\"/\")\nasync def root():\n    return {\"message\": \"Hello, World!\"}\n\n@app.get(\"/items/{item_id}\")\nasync def read_item(item_id: int):\n    return {\"item_id\": item_id}\n"},
-};
-
-// JavaScript templates
-codeTemplates[2] = {
-{"Hello World", "console.log('Hello, World!');\n"},
-{"Express Server", "const express = require('express');\nconst app = express();\nconst port = 3000;\n\napp.get('/', (req, res) => {\n    res.json({ message: 'Hello, World!' });\n});\n\napp.listen(port, () => {\n    console.log(`Server running on port ${port}`);\n});\n"},
-{"Async/Await", "async function fetchData(url) {\n    try {\n        const response = await fetch(url);\n        const data = await response.json();\n        return data;\n    } catch (error) {\n        console.error('Fetch failed:', error);\n        throw error;\n    }\n}\n"},
-};
-
-// Rust templates
-codeTemplates[3] = {
-{"Hello World", "fn main() {\n    println!(\"Hello, World!\");\n}\n"},
-{"Struct + Impl", "pub struct MyStruct {\n    name: String,\n    value: i32,\n}\n\nimpl MyStruct {\n    pub fn new(name: &str, value: i32) -> Self {\n        Self {\n            name: name.to_string(),\n            value,\n        }\n    }\n\n    pub fn name(&self) -> &str {\n        &self.name\n    }\n}\n"},
-{"Error Handling", "use std::io;\nuse std::fs;\n\nfn read_config(path: &str) -> Result<String, io::Error> {\n    let content = fs::read_to_string(path)?;\n    Ok(content)\n}\n\nfn main() {\n    match read_config(\"config.toml\") {\n        Ok(content) => println!(\"Config: {}\", content),\n        Err(e) => eprintln!(\"Error: {}\", e),\n    }\n}\n"},
-};
-
-// GLSL templates
-codeTemplates[4] = {
-{"Vertex Shader", "#version 330 core\n\nlayout(location = 0) in vec3 aPosition;\nlayout(location = 1) in vec2 aTexCoord;\n\nout vec2 vTexCoord;\n\nuniform mat4 uModelViewProjection;\n\nvoid main() {\n    vTexCoord = aTexCoord;\n    gl_Position = uModelViewProjection * vec4(aPosition, 1.0);\n}\n"},
-{"Fragment Shader", "#version 330 core\n\nin vec2 vTexCoord;\nout vec4 fragColor;\n\nuniform sampler2D uTexture;\nuniform float uTime;\n\nvoid main() {\n    vec4 color = texture(uTexture, vTexCoord);\n    fragColor = color;\n}\n"},
-};
-
-// Go templates
-codeTemplates[5] = {
-{"Hello World", "package main\n\nimport \"fmt\"\n\nfunc main() {\n    fmt.Println(\"Hello, World!\")\n}\n"},
-{"HTTP Server", "package main\n\nimport (\n    \"fmt\"\n    \"net/http\"\n)\n\nfunc handler(w http.ResponseWriter, r *http.Request) {\n    fmt.Fprintf(w, \"Hello, World!\")\n}\n\nfunc main() {\n    http.HandleFunc(\"/\", handler)\n    fmt.Println(\"Server starting on :8080\")\n    http.ListenAndServe(\":8080\", nil)\n}\n"},
-};
-
-// Bash templates
-codeTemplates[6] = {
-{"Hello World", "#!/usr/bin/env bash\nset -euo pipefail\n\necho \"Hello, World!\"\n"},
-{"Script with Args", "#!/usr/bin/env bash\nset -euo pipefail\n\nusage() {\n    echo \"Usage: $0 [-h] [-v] <input>\"\n    exit 1\n}\n\nVERBOSE=false\nwhile getopts \"hv\" opt; do\n    case $opt in\n        h) usage ;;\n        v) VERBOSE=true ;;\n        *) usage ;;\n    esac\ndone\nshift $((OPTIND - 1))\n\n[[ $# -lt 1 ]] && usage\n\nINPUT=\"$1\"\nif $VERBOSE; then\n    echo \"Processing: $INPUT\"\nfi\n"},
-};
-
-// TypeScript templates
-codeTemplates[7] = {
-{"Hello World", "const greeting: string = 'Hello, World!';\nconsole.log(greeting);\n"},
-{"Interface + Class", "interface IUser {\n    id: number;\n    name: string;\n    email: string;\n}\n\nclass UserService {\n    private users: IUser[] = [];\n\n    addUser(user: IUser): void {\n        this.users.push(user);\n    }\n\n    findById(id: number): IUser | undefined {\n        return this.users.find(u => u.id === id);\n    }\n\n    getAll(): readonly IUser[] {\n        return this.users;\n    }\n}\n"},
-};
-}
-
-// ---------------------------------------------------------------------------
 // Presets — prompt templates for Custom panel
 // ---------------------------------------------------------------------------
 
@@ -796,7 +736,6 @@ ImGui::GetIO().IniFilename = "imgui_ggml_studio.ini";
 // Initialize presets.
 initModelPresets();
 initScriptLanguages();
-initCodeTemplates();
 initPromptTemplates();
 if (!scriptLanguages.empty()) {
 	scriptSource.setPreferredExtension(
@@ -1304,7 +1243,6 @@ ImGui::SetNextItemWidth(140);
 	if (ImGui::Selectable(scriptLanguages[static_cast<size_t>(i)].name.c_str(), isSelected)) {
 	if (selectedLanguageIndex != i) {
 	selectedLanguageIndex = i;
-	selectedTemplateIndex = -1;
 	if (!scriptLanguages.empty()) {
 		scriptSource.setPreferredExtension(
 			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
@@ -1418,39 +1356,42 @@ ImGui::TextWrapped("%s", scriptProjectMemory.getMemoryText().c_str());
 ImGui::EndChild();
 }
 
-// Code template selector.
-if (selectedLanguageIndex >= 0 &&
-selectedLanguageIndex < static_cast<int>(codeTemplates.size()) &&
-!codeTemplates[static_cast<size_t>(selectedLanguageIndex)].empty()) {
-const auto & templates = codeTemplates[static_cast<size_t>(selectedLanguageIndex)];
-ImGui::Text("Template:");
-ImGui::SameLine();
-ImGui::SetNextItemWidth(200);
-const char * preview = (selectedTemplateIndex >= 0 &&
-selectedTemplateIndex < static_cast<int>(templates.size()))
-? templates[static_cast<size_t>(selectedTemplateIndex)].name.c_str()
-: "(select template)";
-if (ImGui::BeginCombo("##TplSel", preview)) {
-for (int i = 0; i < static_cast<int>(templates.size()); i++) {
-bool sel = (selectedTemplateIndex == i);
-if (ImGui::Selectable(templates[static_cast<size_t>(i)].name.c_str(), sel)) {
-selectedTemplateIndex = i;
-const auto & code = templates[static_cast<size_t>(i)].code;
-size_t maxLen = sizeof(scriptInput) - 1;
-std::strncpy(scriptInput, code.c_str(), maxLen);
-scriptInput[maxLen] = '\0';
-}
-if (sel) ImGui::SetItemDefaultFocus();
-}
-ImGui::EndCombo();
-}
-}
-
-auto buildScriptPrompt = [this](const std::string & body) {
+auto buildScriptPrompt = [this, sourceType, &scriptSourceFiles](const std::string & body) {
 std::string prompt;
 if (!scriptLanguages.empty()) {
 prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
 }
+
+// If a folder or GitHub repo is loaded, provide context about available files
+if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
+	if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
+		const std::string folderPath = scriptSource.getLocalFolderPath();
+		prompt += "\nContext: Loaded folder: " + folderPath + "\n";
+		prompt += "Available files in this folder:\n";
+	} else {
+		const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
+		const std::string branch = scriptSource.getGitHubBranch();
+		prompt += "\nContext: Loaded GitHub repository: " + ownerRepo + " (branch: " + branch + ")\n";
+		prompt += "Available files in this repository:\n";
+	}
+	// List up to 50 files to avoid overly long prompts
+	const size_t maxFilesToList = 50;
+	size_t fileCount = 0;
+	for (const auto & entry : scriptSourceFiles) {
+		if (!entry.isDirectory) {
+			prompt += "  - " + entry.name + "\n";
+			fileCount++;
+			if (fileCount >= maxFilesToList) {
+				if (scriptSourceFiles.size() > maxFilesToList) {
+					prompt += "  ... and " + std::to_string(scriptSourceFiles.size() - maxFilesToList) + " more files\n";
+				}
+				break;
+			}
+		}
+	}
+	prompt += "\n";
+}
+
 prompt += body;
 return prompt;
 };

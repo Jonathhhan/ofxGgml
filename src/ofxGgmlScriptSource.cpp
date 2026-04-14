@@ -433,11 +433,18 @@ std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::scanLocalFolderEn
 	std::vector<ofxGgmlScriptSourceFileEntry> files;
 	std::error_code ec;
 	const std::string preferredExt = m_preferredExtension;
+	const std::filesystem::path basePath(path);
 
-	for (const auto & entry : std::filesystem::directory_iterator(path, ec)) {
+	for (const auto & entry : std::filesystem::recursive_directory_iterator(path, ec)) {
 		if (ec) break;
 		ofxGgmlScriptSourceFileEntry fe;
-		fe.name = entry.path().filename().string();
+		// Use relative path from base directory for better organization
+		const std::filesystem::path relativePath = std::filesystem::relative(entry.path(), basePath, ec);
+		if (ec) {
+			fe.name = entry.path().filename().string();
+		} else {
+			fe.name = relativePath.string();
+		}
 		fe.fullPath = entry.path().string();
 		fe.isDirectory = entry.is_directory(ec);
 		if (ec) continue;

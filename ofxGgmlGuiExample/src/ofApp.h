@@ -59,15 +59,6 @@ struct ScriptLanguage {
 };
 
 // ---------------------------------------------------------------------------
-// CodeTemplate — quick-start code skeleton for each language.
-// ---------------------------------------------------------------------------
-
-struct CodeTemplate {
-	std::string name;       // e.g. "Hello World"
-	std::string code;       // skeleton source
-};
-
-// ---------------------------------------------------------------------------
 // PromptTemplate — predefined system prompt for the Custom panel.
 // ---------------------------------------------------------------------------
 
@@ -174,11 +165,6 @@ private:
 	std::vector<ScriptLanguage> scriptLanguages;
 	int selectedLanguageIndex = 0;
 	void initScriptLanguages();
-
-	// -- code templates --
-	std::vector<std::vector<CodeTemplate>> codeTemplates;  // per-language
-	int selectedTemplateIndex = -1;
-	void initCodeTemplates();
 
 	// -- prompt templates (Custom panel) --
 	std::vector<PromptTemplate> promptTemplates;
