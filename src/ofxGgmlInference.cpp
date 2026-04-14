@@ -192,12 +192,35 @@ return true;
 }
 
 static std::string makeTempPath(const char * prefix, const char * ext) {
-std::error_code ec;
-std::filesystem::path base = std::filesystem::temp_directory_path(ec);
-if (ec) base = std::filesystem::current_path();
-const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-std::mt19937_64 rng(static_cast<uint64_t>(now));
-const uint64_t nonce = rng();
+	std::error_code ec;
+	std::filesystem::path base = std::filesystem::temp_directory_path(ec);
+	if (ec) base = std::filesystem::current_path();
+
+	// Generate a cryptographically random filename component
+	std::random_device rd;
+	std::mt19937_64 rng(rd());
+	std::uniform_int_distribution<uint64_t> dist;
+
+	// Try up to 1000 times to create a unique file (prevents race conditions)
+	for (int attempts = 0; attempts < 1000; ++attempts) {
+		const uint64_t random1 = dist(rng);
+		const uint64_t random2 = dist(rng);
+		std::ostringstream oss;
+		oss << prefix << std::hex << random1 << "_" << random2 << ext;
+
+		std::filesystem::path candidate = base / oss.str();
+
+		// Try to create the file exclusively (atomic check-and-create)
+		std::ofstream test(candidate, std::ios::out | std::ios::excl);
+		if (test.is_open()) {
+			test.close();
+			return candidate.string();
+		}
+	}
+
+	// Fallback: use time-based name with random component
+	const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+	const uint64_t nonce = dist(rng);
 	return (base / (std::string(prefix) + std::to_string(now) + "_" + std::to_string(nonce) + ext)).string();
 }
 
