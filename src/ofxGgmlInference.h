@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ofMain.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
