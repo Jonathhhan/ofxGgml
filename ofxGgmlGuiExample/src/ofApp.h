@@ -177,6 +177,7 @@ private:
 	bool verbose = false;
 	std::deque<std::string> logMessages;
 	std::mutex logMutex;
+	bool chatAutoInternet = true;
 
 	// -- performance tracking --
 	float lastComputeMs = 0.0f;

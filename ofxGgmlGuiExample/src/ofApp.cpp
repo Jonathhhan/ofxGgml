@@ -1331,11 +1331,17 @@ ImGui::SetScrollHereY(1.0f);
 ImGui::EndChild();
 
 // Input.
-ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 80.0f);
+float availW = ImGui::GetContentRegionAvail().x;
+ImGui::SetNextItemWidth(availW - 190.0f);
 bool submitted = ImGui::InputText("##ChatIn", chatInput, sizeof(chatInput),
 ImGuiInputTextFlags_EnterReturnsTrue);
 ImGui::SameLine();
 bool sendClicked = ImGui::Button("Send", ImVec2(70, 0));
+ImGui::SameLine();
+ImGui::Checkbox("Use internet context", &chatAutoInternet);
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("When on, the assistant will fetch concise web snippets to ground answers.");
+}
 
 if ((submitted || sendClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
 std::string userText(chatInput);
@@ -2233,6 +2239,7 @@ out << "summarizeOutput=" << escapeSessionText(summarizeOutput) << "\n";
 out << "writeOutput=" << escapeSessionText(writeOutput) << "\n";
 out << "translateOutput=" << escapeSessionText(translateOutput) << "\n";
 out << "customOutput=" << escapeSessionText(customOutput) << "\n";
+out << "chatAutoInternet=" << (chatAutoInternet ? 1 : 0) << "\n";
 
 // Chat messages.
 out << "chatMessageCount=" << chatMessages.size() << "\n";
@@ -2363,6 +2370,7 @@ else if (key == "summarizeOutput") summarizeOutput = unescapeSessionText(value);
 else if (key == "writeOutput") writeOutput = unescapeSessionText(value);
 else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
 else if (key == "customOutput") customOutput = unescapeSessionText(value);
+else if (key == "chatAutoInternet") chatAutoInternet = (safeStoi(value, 1) != 0);
 else if (key == "msg") {
 // Parse: role|timestamp|text
 size_t sep1 = value.find('|');
@@ -3526,7 +3534,7 @@ workerThread.join();
  workerThread = std::thread([this, mode, userText, systemPrompt]() {
  try {
  std::string userTextWithInternet = userText;
- if (mode == AiMode::Chat) {
+ if (mode == AiMode::Chat && chatAutoInternet) {
  const auto urls = extractHttpUrls(userText);
  static constexpr size_t kMaxUrls = 3;
  static constexpr size_t kMaxCharsPerUrl = 2000;
@@ -3555,18 +3563,8 @@ workerThread.join();
  std::string autoContext;
  if (lowered.find("weather") != std::string::npos) {
  	autoContext = fetchWeatherContext(userText, 512);
- } else if (lowered.find("today") != std::string::npos ||
- 	lowered.find("latest") != std::string::npos ||
- 	lowered.find("current") != std::string::npos ||
- 	lowered.find("verify") != std::string::npos ||
- 	lowered.find("confirm") != std::string::npos ||
- 	lowered.find("news") != std::string::npos ||
- 	lowered.find("price") != std::string::npos ||
- 	lowered.find("stock") != std::string::npos) {
- 	autoContext = fetchSearchSnippet(userText, 1200);
  }
- if (autoContext.empty() && userText.size() > 16) {
- 	// General fallback: try to fetch a concise snippet for the prompt text itself.
+ if (autoContext.empty()) {
  	autoContext = fetchSearchSnippet(userText, 1200);
  }
  if (!autoContext.empty()) {
