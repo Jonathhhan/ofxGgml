@@ -506,6 +506,31 @@ Then regenerate your Visual Studio project with the openFrameworks Project Gener
 
 **Note:** This issue was fixed in recent versions. If you built ggml before this fix, use one of the solutions above to update your configuration.
 
+### Visual Studio linker error: unresolved external symbol "cublasCreate_v2", "cublasDestroy_v2", etc.
+
+These errors occur when ggml was built with CUDA support, but the Visual Studio project doesn't link against the required CUDA Toolkit libraries (`cublas.lib`, `cudart.lib`).
+
+The `ggml-cuda.lib` library depends on CUBLAS (CUDA Basic Linear Algebra Subroutines) from the CUDA Toolkit. When linking your final application, Visual Studio needs to be told to also link these CUDA Toolkit libraries.
+
+**Solution (Automatic):** Run the update script to scan for CUDA and add the required CUDA Toolkit libraries:
+
+```bat
+scripts\update-addon-config.bat
+```
+
+Then regenerate your Visual Studio project with the openFrameworks Project Generator.
+
+The script will:
+1. Detect if CUDA backend was built (by checking for `ggml-cuda.lib`)
+2. Add `cublas.lib` and `cudart.lib` to the `addon_config.mk` file
+3. Display a message confirming the CUDA libraries were added
+
+**Requirements:**
+- The CUDA Toolkit must be installed and in your system PATH
+- Visual Studio must be able to find the CUDA libraries (usually automatic if CUDA Toolkit is installed correctly)
+
+**Note:** This fix was added to resolve CUBLAS linker errors. If you built ggml with CUDA before this fix, run the update script above.
+
 ## Extending the Addon
 
 The addon is structured for easy extension:
