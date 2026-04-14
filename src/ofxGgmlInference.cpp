@@ -538,7 +538,8 @@ m_completionExe,
 "--temp", std::to_string(std::clamp(settings.temperature, 0.0f, 3.0f)),
 "--top-p", std::to_string(std::clamp(settings.topP, 0.0f, 1.0f)),
 "--repeat-penalty", std::to_string(std::clamp(settings.repeatPenalty, 1.0f, 3.0f)),
-"--no-display-prompt"
+"--no-display-prompt",
+"--log-disable"
 };
 
 if (settings.simpleIo) {
@@ -652,7 +653,8 @@ m_embeddingExe,
 "-m", modelPath,
 "--file", promptPath,
 "--embd-output-format", "json",
-"--pooling", settings.pooling
+"--pooling", settings.pooling,
+"--log-disable"
 };
 if (settings.normalize) {
 args.push_back("--embd-normalize");
@@ -713,7 +715,8 @@ int ofxGgmlInference::countPromptTokens(
 		"--vocab-only",
 		"-n", "0",
 		"--verbose-prompt",
-		"--no-display-prompt"
+		"--no-display-prompt",
+		"--log-disable"
 	};
 
 	std::string raw;
