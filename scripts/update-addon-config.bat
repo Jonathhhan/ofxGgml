@@ -114,14 +114,18 @@ if "%CUDA_PRESENT%"=="1" (
         )
     )
 
-    if defined CUDA_LIB_DIR (
-        echo ==^> Using CUDA Toolkit libs from "!CUDA_LIB_DIR!"
-        set "CUDA_LIBS=\"!CUDA_LIB_DIR!\cublas.lib\" \"!CUDA_LIB_DIR!\cudart.lib\""
-    ) else (
-        echo Warning: Could not locate CUDA Toolkit lib directory - falling back to library names
-        echo Warning: Ensure your project links against the CUDA Toolkit lib path (e.g. %CUDA_PATH%\lib\x64)
-        set "CUDA_LIBS=cublas.lib cudart.lib"
+    if not defined CUDA_LIB_DIR (
+        echo Error: CUDA backend detected but could not locate CUDA Toolkit lib directory with cublas.lib
+        if defined CUDA_PATH echo   CUDA_PATH=%CUDA_PATH%
+        if defined CUDAToolkit_ROOT echo   CUDAToolkit_ROOT=%CUDAToolkit_ROOT%
+        echo   Expected example: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\lib\x64
+        echo   Set CUDA_PATH (or CUDAToolkit_ROOT) to your CUDA install root and rerun this script.
+        echo   If you meant to build CPU-only, rebuild ggml with --cpu-only to drop the CUDA dependency.
+        exit /b 1
     )
+
+    echo ==^> Using CUDA Toolkit libs from "!CUDA_LIB_DIR!"
+    set "CUDA_LIBS=\"!CUDA_LIB_DIR!\cublas.lib\" \"!CUDA_LIB_DIR!\cudart.lib\""
 )
 
 REM Create temporary file with new content
