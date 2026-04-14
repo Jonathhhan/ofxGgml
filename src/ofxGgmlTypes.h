@@ -64,6 +64,16 @@ enum class ofxGgmlState {
 	Error
 };
 
+/// Log message severity levels.
+enum class ofxGgmlLogLevel {
+	None = 0,     // No logging
+	Debug = 1,    // Debug information
+	Info = 2,     // Informational messages
+	Warn = 3,     // Warning messages
+	Error = 4,    // Error messages
+	Cont = 5      // Continuation of previous message
+};
+
 /// Configuration for ofxGgml::setup().
 struct ofxGgmlSettings {
 	/// Number of CPU threads for computation (0 = auto-detect).
@@ -110,4 +120,5 @@ struct ofxGgmlTimings {
 };
 
 /// Progress / log callback signature.
+/// For backward compatibility, also accepts int level parameter.
 using ofxGgmlLogCallback = std::function<void(int level, const std::string & message)>;

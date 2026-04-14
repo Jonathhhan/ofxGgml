@@ -37,10 +37,16 @@ bool ofxGgmlProjectMemory::addInteraction(const std::string & request, const std
 		safeResponse.resize(m_entryMaxChars);
 	}
 
+	// Pre-allocate before any appends to avoid reallocation
+	const size_t separator_size = m_memoryText.empty() ? 0 : 8; // "\n\n---\n\n"
+	const size_t total_needed = m_memoryText.size() + separator_size +
+	                             9 + safeRequest.size() +  // "Request:\n"
+	                             11 + safeResponse.size(); // "\n\nResponse:\n"
+	m_memoryText.reserve(total_needed);
+
 	if (!m_memoryText.empty()) {
 		m_memoryText += "\n\n---\n\n";
 	}
-	m_memoryText.reserve(m_memoryText.size() + safeRequest.size() + safeResponse.size() + 30);
 	m_memoryText += "Request:\n";
 	m_memoryText += safeRequest;
 	m_memoryText += "\n\nResponse:\n";
@@ -75,7 +81,8 @@ void ofxGgmlProjectMemory::clampMemory() {
 		return;
 	}
 	if (m_memoryText.size() > m_maxChars) {
-		m_memoryText = m_memoryText.substr(m_memoryText.size() - m_maxChars);
+		// Use erase() for in-place modification instead of substr which creates a copy
+		m_memoryText.erase(0, m_memoryText.size() - m_maxChars);
 	}
 }
 
