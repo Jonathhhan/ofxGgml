@@ -1,0 +1,16 @@
+# cppcheck suppressions for ofxGgml
+# Format: [error id]:[filename]:[line]
+# Use '*' as wildcard
+
+# Suppress missing include system headers (we don't control those)
+missingIncludeSystem
+
+# Suppress warnings from bundled ggml library
+*:libs/ggml/*
+
+# Suppress unusedFunction for openFrameworks callbacks (called by framework)
+unusedFunction:*/ofApp.cpp
+unusedFunction:*/main.cpp
+
+# Suppress style warnings for example code
+variableScope:*/ofxGgml*Example/*

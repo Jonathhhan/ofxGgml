@@ -28,3 +28,51 @@ jobs:
 
       - name: Build and run unit tests
         run: ./tests/run-tests.sh
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install static analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck clang-tidy
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=warning,style,performance,portability \
+                   --suppressions-list=.cppcheck-suppressions \
+                   --inline-suppr \
+                   --error-exitcode=0 \
+                   --quiet \
+                   src/ 2>&1 | tee cppcheck-report.txt
+          echo "==> cppcheck completed (warnings allowed for now)"
+
+      - name: Run clang-tidy on source files
+        run: |
+          # Build compile_commands.json for clang-tidy
+          cd tests
+          cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cd ..
+
+          # Run clang-tidy on addon source files (not examples)
+          find src -name "*.cpp" -type f | while read -r file; do
+            echo "Analyzing: $file"
+            clang-tidy "$file" -- \
+              -Ilibs/ggml/include \
+              -Isrc \
+              -std=c++17 \
+              -DGLM_FORCE_CTOR_INIT || echo "  (warnings ignored)"
+          done
+
+          echo "==> clang-tidy completed (warnings allowed for now)"
+
+      - name: Upload static analysis reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: static-analysis-reports
+          path: |
+            cppcheck-report.txt

@@ -431,7 +431,13 @@ See `tests/README.md` for detailed testing documentation.
 
 ### CI Integration
 
-Tests run automatically on every push and pull request via GitHub Actions.
+Tests run automatically on every push and pull request via GitHub Actions. The CI pipeline includes:
+
+- **Smoke tests**: Build ggml, validate scripts and configuration files
+- **Unit tests**: Comprehensive test suite using Catch2 (280+ test cases)
+- **Static analysis**: cppcheck and clang-tidy for code quality (warnings allowed, not enforced)
+
+Static analysis reports are uploaded as artifacts for each CI run and can be reviewed to improve code quality over time.
 
 ## Error Handling
 
