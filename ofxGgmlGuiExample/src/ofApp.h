@@ -174,7 +174,7 @@ private:
 	bool showDeviceInfo = false;
 	bool showLog = false;
 	bool showPerformance = false;
-	bool verbose = false;
+	ofLogLevel logLevel = OF_LOG_NOTICE;
 	std::deque<std::string> logMessages;
 	std::mutex logMutex;
 	bool chatAutoInternet = true;
@@ -238,6 +238,11 @@ private:
 	void detectModelLayers();
 	void applyPendingOutput();
 	void stopGeneration();
+	void applyLogLevel(ofLogLevel level);
+	bool shouldLog(ofLogLevel level) const;
+	void logWithLevel(ofLogLevel level, const std::string & message);
+	ofLogLevel mapGgmlLogLevel(int level) const;
+	void probeLlamaCli(const std::string & customPath = "");
 
 	// -- UI panels --
 	void drawMenuBar();

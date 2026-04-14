@@ -1,6 +1,7 @@
 #include "ofApp.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -38,6 +39,43 @@ const char * ofApp::modeLabels[kModeCount] = {
 };
 
 namespace {
+struct LogLevelOption {
+	const char * label;
+	ofLogLevel level;
+};
+
+static const std::array<LogLevelOption, 5> kLogLevelOptions = {{
+	{"Silent",   OF_LOG_SILENT},
+	{"Errors",   OF_LOG_ERROR},
+	{"Warnings", OF_LOG_WARNING},
+	{"Notices",  OF_LOG_NOTICE},
+	{"Verbose",  OF_LOG_VERBOSE}
+}};
+
+const char * logLevelLabel(ofLogLevel level) noexcept {
+	switch (level) {
+	case OF_LOG_VERBOSE:      return "verbose";
+	case OF_LOG_NOTICE:       return "notice";
+	case OF_LOG_WARNING:      return "warn";
+	case OF_LOG_ERROR:        return "error";
+	case OF_LOG_FATAL_ERROR:  return "fatal";
+	case OF_LOG_SILENT:       return "silent";
+	default:                  return "log";
+	}
+}
+
+int logLevelIndex(ofLogLevel level) noexcept {
+	if (level == OF_LOG_FATAL_ERROR) {
+		return 1; // treat fatal as errors for UI selection
+	}
+	for (size_t i = 0; i < kLogLevelOptions.size(); i++) {
+		if (kLogLevelOptions[i].level == level) {
+			return static_cast<int>(i);
+		}
+	}
+	// Default to "Notices" when the level isn't found.
+	return 3;
+}
 
 std::string stripAnsi(const std::string & text) {
 	std::string out;
@@ -626,9 +664,9 @@ static bool probeCandidate(const std::string & candidate,
 	return false;
 }
 
-static void probeLlamaCli(std::mutex & logMutex,
-                          std::deque<std::string> & logMessages,
-                          const std::string & customPath = "") {
+static void probeLlamaCliImpl(
+	const std::function<void(ofLogLevel, const std::string &)> & logger,
+	const std::string & customPath = "") {
 	std::string probeOut;
 	int probeExit = -1;
 	const std::vector<std::string> probeFlags = {"--version", "--help"};
@@ -643,9 +681,7 @@ static void probeLlamaCli(std::mutex & logMutex,
 				found = true;
 			}
 		} else {
-			std::lock_guard<std::mutex> lock(logMutex);
-			logMessages.push_back("[warn] custom CLI path not found: " + customPath);
-			if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+			if (logger) logger(OF_LOG_WARNING, "custom CLI path not found: " + customPath);
 		}
 	}
 
@@ -776,18 +812,50 @@ static void probeLlamaCli(std::mutex & logMutex,
 	if (!found) {
 		llamaCliState.store(0, std::memory_order_relaxed);
 		{
-			std::lock_guard<std::mutex> lock(logMutex);
-			logMessages.push_back("[info] llama-completion/llama-cli/llama not found in PATH or common directories.");
-			if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+			if (logger) logger(OF_LOG_NOTICE, "llama-completion/llama-cli/llama not found in PATH or common directories.");
 		}
 		return;
 	}
 	{
-		std::lock_guard<std::mutex> lock(logMutex);
-		logMessages.push_back("[info] detected CLI: " + llamaCliCommand);
-		if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+		if (logger) logger(OF_LOG_NOTICE, "detected CLI: " + llamaCliCommand);
 	}
 	llamaCliState.store(1, std::memory_order_relaxed);
+}
+
+void ofApp::applyLogLevel(ofLogLevel level) {
+	logLevel = level;
+	ofSetLogLevel(level);
+}
+
+bool ofApp::shouldLog(ofLogLevel level) const {
+	return logLevel != OF_LOG_SILENT && level >= logLevel;
+}
+
+void ofApp::logWithLevel(ofLogLevel level, const std::string & message) {
+	if (!shouldLog(level) || message.empty()) return;
+	ofLog(level, message);
+	std::lock_guard<std::mutex> lock(logMutex);
+	std::string entry = "[" + std::string(logLevelLabel(level)) + "] " + message;
+	logMessages.push_back(entry);
+	if (logMessages.size() > kMaxLogMessages) {
+		logMessages.pop_front();
+	}
+}
+
+ofLogLevel ofApp::mapGgmlLogLevel(int level) const {
+	switch (level) {
+	case 4: return OF_LOG_ERROR;
+	case 3: return OF_LOG_WARNING;
+	case 2: return OF_LOG_NOTICE;
+	case 1: return OF_LOG_VERBOSE;
+	default: return OF_LOG_SILENT;
+	}
+}
+
+void ofApp::probeLlamaCli(const std::string & customPath) {
+	probeLlamaCliImpl(
+		[this](ofLogLevel lvl, const std::string & msg) { logWithLevel(lvl, msg); },
+		customPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -879,6 +947,7 @@ ofSetBackgroundColor(ofColor(30, 30, 34));
 
 gui.setup(nullptr, true, ImGuiConfigFlags_None, true);
 ImGui::GetIO().IniFilename = "imgui_ggml_studio.ini";
+applyLogLevel(logLevel);
 
 // Initialize presets.
 initModelPresets();
@@ -931,18 +1000,17 @@ engineStatus = "Failed to initialize ggml engine";
 
 // Log callback.
 ggml.setLogCallback([this](int level, const std::string & msg) {
-std::lock_guard<std::mutex> lock(logMutex);
-logMessages.push_back("[" + ofToString(level) + "] " + msg);
-if (logMessages.size() > 500) {
-logMessages.pop_front();
-}
+	const ofLogLevel mapped = mapGgmlLogLevel(level);
+	if (mapped != OF_LOG_SILENT) {
+		logWithLevel(mapped, msg);
+	}
 });
 
 // Auto-load last session if available.
 autoLoadSession();
 
 // Detect llama-completion / llama-cli / llama at startup.
-probeLlamaCli(logMutex, logMessages);
+probeLlamaCli();
 
 // Detect model layer count for GPU layers slider.
 detectModelLayers();
@@ -1057,8 +1125,6 @@ if (ImGui::BeginMenu("View")) {
 ImGui::MenuItem("Device Info    (F1)", nullptr, &showDeviceInfo);
 ImGui::MenuItem("Engine Log     (F2)", nullptr, &showLog);
 ImGui::MenuItem("Performance    (F3)", nullptr, &showPerformance);
-ImGui::Separator();
-ImGui::MenuItem("Verbose Console Output", nullptr, &verbose);
 ImGui::EndMenu();
 }
 if (ImGui::BeginMenu("Options")) {
@@ -1131,6 +1197,32 @@ ImGui::SameLine();
 if (ImGui::SmallButton("None##settgpu")) gpuLayers = 0;
 ImGui::SameLine();
 if (ImGui::SmallButton("All##settgpu")) gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
+}
+
+ImGui::SeparatorText("Logging");
+int currentLogIdx = std::clamp(logLevelIndex(logLevel), 0,
+	static_cast<int>(kLogLevelOptions.size()) - 1);
+const char * currentLogLabel = kLogLevelOptions[static_cast<size_t>(currentLogIdx)].label;
+if (ImGui::BeginCombo("Log Level", currentLogLabel)) {
+	for (size_t i = 0; i < kLogLevelOptions.size(); i++) {
+		const bool isSelected = (currentLogIdx == static_cast<int>(i));
+		if (ImGui::Selectable(kLogLevelOptions[i].label, isSelected)) {
+			if (!isSelected) {
+				applyLogLevel(kLogLevelOptions[i].level);
+				logWithLevel(OF_LOG_NOTICE,
+					std::string("Log level set to ") + kLogLevelOptions[i].label);
+				currentLogIdx = static_cast<int>(i);
+			}
+		}
+		if (isSelected) {
+			ImGui::SetItemDefaultFocus();
+		}
+	}
+	ImGui::EndCombo();
+}
+ImGui::Checkbox("Show Engine Log", &showLog);
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("ofLog-style level applies to console and engine log window.");
 }
 
 ImGui::SeparatorText("Appearance");
@@ -2203,7 +2295,7 @@ out << "theme=" << themeIndex << "\n";
 out << "mirostatMode=" << mirostatMode << "\n";
 out << "mirostatTau=" << ofToString(mirostatTau, 4) << "\n";
 out << "mirostatEta=" << ofToString(mirostatEta, 4) << "\n";
-out << "verbose=" << (verbose ? 1 : 0) << "\n";
+out << "logLevel=" << static_cast<int>(logLevel) << "\n";
 
 // Script source.
 out << "scriptSourceType=" << static_cast<int>(scriptSource.getSourceType()) << "\n";
@@ -2271,6 +2363,9 @@ chatMessages.clear();
 int loadedScriptSourceType = static_cast<int>(ofxGgmlScriptSourceType::None);
 std::string loadedScriptSourcePath;
 std::string loadedScriptSourceInternetUrls;
+bool logLevelSpecified = false;
+bool legacyVerbose = false;
+bool legacyVerboseSeen = false;
 
 auto copyToBuf = [this](char * buf, size_t bufSize, const std::string & value) {
 std::string text = unescapeSessionText(value);
@@ -2343,7 +2438,18 @@ else if (key == "theme") {
 else if (key == "mirostatMode") mirostatMode = std::clamp(safeStoi(value), 0, 2);
 else if (key == "mirostatTau") mirostatTau = std::clamp(safeStof(value, 5.0f), 0.0f, 10.0f);
 else if (key == "mirostatEta") mirostatEta = std::clamp(safeStof(value, 0.1f), 0.0f, 1.0f);
-else if (key == "verbose") verbose = (safeStoi(value) != 0);
+else if (key == "logLevel") {
+	int lvl = std::clamp(
+		safeStoi(value, static_cast<int>(OF_LOG_NOTICE)),
+		static_cast<int>(OF_LOG_VERBOSE),
+		static_cast<int>(OF_LOG_SILENT));
+	logLevel = static_cast<ofLogLevel>(lvl);
+	logLevelSpecified = true;
+}
+else if (key == "verbose") {
+	legacyVerbose = (safeStoi(value) != 0);
+	legacyVerboseSeen = true;
+}
 else if (key == "customCliPath") { /* ignored — CLI path option removed */ }
 else if (key == "scriptSourceType") {
 	loadedScriptSourceType = std::clamp(safeStoi(value), 0, 3);
@@ -2386,6 +2492,11 @@ chatMessages.push_back(msg);
 }
 }
 }
+
+if (!logLevelSpecified && legacyVerboseSeen && legacyVerbose) {
+	logLevel = OF_LOG_VERBOSE;
+}
+applyLogLevel(logLevel);
 
 in.close();
 
@@ -2463,9 +2574,9 @@ void ofApp::detectModelLayers() {
 		int32_t layers = model.getMetadataInt32(arch + ".block_count", 0);
 		if (layers > 0) {
 			detectedModelLayers = layers;
-			if (verbose) {
-				fprintf(stderr, "[ofxGgml] Detected %d layers in model (%s)\n",
-					detectedModelLayers, arch.c_str());
+			if (shouldLog(OF_LOG_VERBOSE)) {
+				logWithLevel(OF_LOG_VERBOSE,
+					"Detected " + ofToString(detectedModelLayers) + " layers in model (" + arch + ")");
 			}
 		}
 	}
@@ -2482,9 +2593,9 @@ void ofApp::detectModelLayers() {
 			int32_t layers = model.getMetadataInt32(std::string(name) + ".block_count", 0);
 			if (layers > 0) {
 				detectedModelLayers = layers;
-				if (verbose) {
-					fprintf(stderr, "[ofxGgml] Detected %d layers in model (%s)\n",
-						detectedModelLayers, name);
+				if (shouldLog(OF_LOG_VERBOSE)) {
+					logWithLevel(OF_LOG_VERBOSE,
+						"Detected " + ofToString(detectedModelLayers) + " layers in model (" + name + ")");
 				}
 				break;
 			}
@@ -2996,7 +3107,7 @@ void ofApp::runHierarchicalReview() {
 
 		try {
 			if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-				probeLlamaCli(logMutex, logMessages);
+				probeLlamaCli();
 			}
 
 			const std::string modelPath = getSelectedModelPath();
@@ -3025,10 +3136,8 @@ void ofApp::runHierarchicalReview() {
 				generating.store(false);
 				return;
 			}
-			if (verbose && !status.empty()) {
-				std::lock_guard<std::mutex> lock(logMutex);
-				logMessages.push_back("[info] " + status);
-				if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+			if (!status.empty()) {
+				logWithLevel(OF_LOG_NOTICE, status);
 			}
 
 			const std::string baseFolder =
@@ -3050,9 +3159,7 @@ void ofApp::runHierarchicalReview() {
 			if (queryEmbed.success) {
 				queryEmbedding = queryEmbed.embedding;
 			} else {
-				std::lock_guard<std::mutex> lock(logMutex);
-				logMessages.push_back("[warn] embedding query failed: " + queryEmbed.error);
-				if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+				logWithLevel(OF_LOG_WARNING, "embedding query failed: " + queryEmbed.error);
 			}
 
 			// Build embeddings for all files (parallel, bounded).
@@ -3247,7 +3354,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	// restarting the app.
 
 	if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-		probeLlamaCli(logMutex, logMessages);
+		probeLlamaCli();
 		if (llamaCliState.load(std::memory_order_relaxed) != 1) {
 			error = "llama-completion/llama-cli/llama not found. Build with scripts/build-llama-cli.sh.";
 			return false;
@@ -3329,21 +3436,21 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	std::vector<std::string> args = makeArgs(false);
 
 	// Print the command line to console for debugging.
-	if (verbose) {
+	if (shouldLog(OF_LOG_VERBOSE)) {
 		std::string cmdLine;
 		for (size_t i = 0; i < args.size(); i++) {
 			if (i > 0) cmdLine += " ";
 			cmdLine += args[i];
 		}
-		fprintf(stderr, "[ofxGgml] Running: %s\n", cmdLine.c_str());
+		logWithLevel(OF_LOG_VERBOSE, "Running: " + cmdLine);
 	}
 
 	std::string raw;
 	int ret = -1;
 	const bool started = runProcessCapture(args, raw, ret, true, onStreamData, false);
-	if (verbose) {
-		fprintf(stderr, "[ofxGgml] Process %s, exit code: %d\n",
-			started ? "started" : "failed to start", ret);
+	if (shouldLog(OF_LOG_VERBOSE)) {
+		logWithLevel(OF_LOG_VERBOSE, std::string("Process ") +
+			(started ? "started" : "failed to start") + ", exit code: " + ofToString(ret));
 	}
 	if (started && ret != 0) {
 		// With stderr separated, error messages about unknown flags
@@ -3390,9 +3497,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	std::error_code ec;
 	std::filesystem::remove(promptPath, ec);
 	if (ec) {
-		std::lock_guard<std::mutex> lock(logMutex);
-		logMessages.push_back("[warn] failed to remove temp prompt file: " + promptPath);
-		if (logMessages.size() > kMaxLogMessages) logMessages.pop_front();
+		logWithLevel(OF_LOG_WARNING, "failed to remove temp prompt file: " + promptPath);
 	}
 
 	if (!started || ret == kExecNotFound) {
@@ -3486,11 +3591,7 @@ if (engineReady) {
 	devices.clear();
 }
 
-{
-	std::lock_guard<std::mutex> lock(logMutex);
-	logMessages.push_back("[info] Backend reinitialized: " + engineStatus);
-	if (logMessages.size() > 500) logMessages.pop_front();
-}
+	logWithLevel(OF_LOG_NOTICE, "Backend reinitialized: " + engineStatus);
 }
 
 void ofApp::syncSelectedBackendIndex() {
@@ -3577,10 +3678,10 @@ workerThread.join();
  std::string result;
  std::string error;
 
- if (verbose) {
- fprintf(stderr, "\n[ofxGgml] === Generation started ===\n");
- fprintf(stderr, "[ofxGgml] Mode: %s\n", modeLabels[static_cast<int>(mode)]);
- fprintf(stderr, "[ofxGgml] Prompt (%zu chars):\n%s\n", prompt.size(), prompt.c_str());
+ if (shouldLog(OF_LOG_VERBOSE)) {
+ logWithLevel(OF_LOG_VERBOSE, "=== Generation started ===");
+ logWithLevel(OF_LOG_VERBOSE, std::string("Mode: ") + modeLabels[static_cast<int>(mode)]);
+ logWithLevel(OF_LOG_VERBOSE, "Prompt (" + ofToString(prompt.size()) + " chars):\n" + prompt);
  }
 
  // Safety check: Estimate if prompt is too large for context window
@@ -3593,7 +3694,7 @@ workerThread.join();
  " estimated tokens) and may exceed context size (" + std::to_string(maxTokens) +
  " tokens). Consider reducing input size or increasing context size in settings.";
 
- fprintf(stderr, "[ofxGgml] %s\n", warningMsg.c_str());
+ logWithLevel(OF_LOG_WARNING, warningMsg);
 
  // Provide a helpful error message to the user
  result = warningMsg + "\n\nPrompt size: " + std::to_string(prompt.size()) + " characters";
@@ -3637,24 +3738,21 @@ workerThread.join();
  streamed = streamingOutput;
  }
  if (!streamed.empty()) {
- if (verbose) {
- fprintf(stderr, "[ofxGgml] Process failed but streamed output available (%zu chars), using it.\n", streamed.size());
- }
+ logWithLevel(OF_LOG_WARNING,
+ 	"Process failed but streamed output available (" + ofToString(streamed.size()) + " chars), using it.");
  result = streamed;
  } else {
- if (verbose) {
- fprintf(stderr, "[ofxGgml] Inference error: %s\n", error.c_str());
- }
+ logWithLevel(OF_LOG_ERROR, "Inference error: " + error);
  result = "[Error] " + error;
  }
  } else {
- if (verbose) {
- fprintf(stderr, "[ofxGgml] Output (%zu chars):\n%s\n", result.size(), result.c_str());
+ if (shouldLog(OF_LOG_VERBOSE)) {
+ 	logWithLevel(OF_LOG_VERBOSE, "Output (" + ofToString(result.size()) + " chars):\n" + result);
  }
  }
 
- if (verbose) {
- fprintf(stderr, "[ofxGgml] === Generation finished ===\n\n");
+ if (shouldLog(OF_LOG_VERBOSE)) {
+ logWithLevel(OF_LOG_VERBOSE, "=== Generation finished ===");
  }
 
 {
@@ -3668,21 +3766,17 @@ pendingMode = mode;
 
 {
 std::lock_guard<std::mutex> lock(streamMutex);
-streamingOutput.clear();
+ streamingOutput.clear();
 }
 
  } catch (const std::exception & e) {
- if (verbose) {
- fprintf(stderr, "[ofxGgml] Exception in worker thread: %s\n", e.what());
- }
+ logWithLevel(OF_LOG_ERROR, std::string("Exception in worker thread: ") + e.what());
  std::lock_guard<std::mutex> lock(outputMutex);
  pendingOutput = std::string("[Error] Internal exception: ") + e.what();
  pendingRole = "assistant";
  pendingMode = mode;
  } catch (...) {
- if (verbose) {
- fprintf(stderr, "[ofxGgml] Unknown exception in worker thread\n");
- }
+ logWithLevel(OF_LOG_ERROR, "Unknown exception in worker thread");
  std::lock_guard<std::mutex> lock(outputMutex);
  pendingOutput = "[Error] Unknown internal exception occurred.";
  pendingRole = "assistant";
