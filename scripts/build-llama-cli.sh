@@ -11,8 +11,7 @@
 #   ./scripts/build-llama-cli.sh [--prefix DIR] [--jobs 8] [--gpu]
 #
 # Options:
-#   --prefix DIR   Install prefix (default: /usr/local on Unix,
-#                  addon-local libs/llama on Windows-like shells)
+#   --prefix DIR   Install prefix (default: addon-local libs/llama)
 #   --jobs N       Parallel build jobs (default: number of CPU cores)
 #   --gpu, --cuda  Enable CUDA backend
 #   --vulkan       Enable Vulkan backend
@@ -28,7 +27,8 @@ LLAMA_BRANCH="master"
 TMP_ROOT="${TMPDIR:-/tmp}"
 BUILD_DIR="$TMP_ROOT/llama-cpp-build"
 SOURCE_DIR="$TMP_ROOT/llama-cpp-source"
-DEFAULT_INSTALL_PREFIX="/usr/local"
+ADDON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_INSTALL_PREFIX="$ADDON_ROOT/libs/llama"
 JOBS=""
 ENABLE_CUDA=0
 ENABLE_VULKAN=0
@@ -70,10 +70,6 @@ is_windows_like() {
 	esac
 }
 
-if is_windows_like; then
-	ADDON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-	DEFAULT_INSTALL_PREFIX="$ADDON_ROOT/libs/llama"
-fi
 INSTALL_PREFIX="$DEFAULT_INSTALL_PREFIX"
 
 detect_cuda() {
