@@ -149,10 +149,10 @@ std::string cleanChatOutput(const std::string & text) {
 	}
 	out = trim(out);
 
-	// Strip trailing CLI artifacts: "> EOF", "EOF", "interrupted by user".
+	// Strip trailing CLI artifacts: "> EOF", "EOF", "Interrupted by user".
 	{
 		const std::vector<std::string> trailingArtifacts = {
-			"> EOF", "EOF", "interrupted by user"
+			"> EOF by user", "> EOF", "EOF", "Interrupted by user"
 		};
 		bool stripped = true;
 		while (stripped) {
