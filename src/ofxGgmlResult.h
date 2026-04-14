@@ -51,12 +51,12 @@ struct ofxGgmlError {
 		: code(c), message(msg) {}
 
 	/// Returns true if this represents an error (not None).
-	bool hasError() const {
+	constexpr bool hasError() const noexcept {
 		return code != ofxGgmlErrorCode::None;
 	}
 
 	/// Returns a human-readable description of the error code.
-	std::string codeString() const {
+	const char * codeString() const noexcept {
 		switch (code) {
 			case ofxGgmlErrorCode::None: return "None";
 			case ofxGgmlErrorCode::BackendInitFailed: return "BackendInitFailed";
@@ -178,10 +178,10 @@ public:
 	}
 
 	/// Returns true if this contains a value (success).
-	bool isOk() const { return m_hasValue; }
+	constexpr bool isOk() const noexcept { return m_hasValue; }
 
 	/// Returns true if this contains an error.
-	bool isError() const { return !m_hasValue; }
+	constexpr bool isError() const noexcept { return !m_hasValue; }
 
 	/// Returns the success value. Throws if this contains an error.
 	T & value() {
@@ -246,10 +246,10 @@ public:
 		: m_error(code, msg) {}
 
 	/// Returns true if this represents success.
-	bool isOk() const { return !m_error.hasError(); }
+	constexpr bool isOk() const noexcept { return !m_error.hasError(); }
 
 	/// Returns true if this contains an error.
-	bool isError() const { return m_error.hasError(); }
+	constexpr bool isError() const noexcept { return m_error.hasError(); }
 
 	/// Returns the error.
 	const ofxGgmlError & error() const { return m_error; }

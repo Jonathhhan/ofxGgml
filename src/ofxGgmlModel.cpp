@@ -78,14 +78,14 @@ std::string ofxGgmlModel::getPath() const {
 
 int64_t ofxGgmlModel::getNumMetadataKeys() const {
 	if (!m_impl->ggufCtx) return 0;
-	return gguf_get_n_kv(m_impl->ggufCtx);
+	return static_cast<int64_t>(gguf_get_n_kv(m_impl->ggufCtx));
 }
 
 std::string ofxGgmlModel::getMetadataKey(int64_t index) const {
 	if (!m_impl->ggufCtx) return {};
-	const int64_t n = gguf_get_n_kv(m_impl->ggufCtx);
+	const int64_t n = static_cast<int64_t>(gguf_get_n_kv(m_impl->ggufCtx));
 	if (index < 0 || index >= n) return {};
-	const char * key = gguf_get_key(m_impl->ggufCtx, index);
+	const char * key = gguf_get_key(m_impl->ggufCtx, static_cast<int>(index));
 	return key ? key : "";
 }
 

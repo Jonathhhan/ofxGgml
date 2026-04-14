@@ -30,17 +30,21 @@ bool ofxGgmlProjectMemory::addInteraction(const std::string & request, const std
 
 	std::string safeRequest = request;
 	if (safeRequest.size() > m_entryMaxChars) {
-		safeRequest = safeRequest.substr(0, m_entryMaxChars);
+		safeRequest.resize(m_entryMaxChars);
 	}
 	std::string safeResponse = response;
 	if (safeResponse.size() > m_entryMaxChars) {
-		safeResponse = safeResponse.substr(0, m_entryMaxChars);
+		safeResponse.resize(m_entryMaxChars);
 	}
 
 	if (!m_memoryText.empty()) {
 		m_memoryText += "\n\n---\n\n";
 	}
-	m_memoryText += "Request:\n" + safeRequest + "\n\nResponse:\n" + safeResponse;
+	m_memoryText.reserve(m_memoryText.size() + safeRequest.size() + safeResponse.size() + 30);
+	m_memoryText += "Request:\n";
+	m_memoryText += safeRequest;
+	m_memoryText += "\n\nResponse:\n";
+	m_memoryText += safeResponse;
 	clampMemory();
 	return true;
 }
@@ -56,7 +60,13 @@ const std::string & ofxGgmlProjectMemory::getMemoryText() const {
 
 std::string ofxGgmlProjectMemory::buildPromptContext(const std::string & heading) const {
 	if (!m_enabled || m_memoryText.empty()) return {};
-	return heading + "\n" + m_memoryText + "\n\n";
+	std::string result;
+	result.reserve(heading.size() + m_memoryText.size() + 3);
+	result = heading;
+	result += '\n';
+	result += m_memoryText;
+	result += "\n\n";
+	return result;
 }
 
 void ofxGgmlProjectMemory::clampMemory() {
