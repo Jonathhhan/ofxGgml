@@ -17,7 +17,7 @@
 // --------------------------------------------------------------------------
 
 /// Maps a ggml log level integer to a short label.
-static const char * logLevelLabel(int level) {
+static const char * logLevelLabel(int level) noexcept {
 	switch (level) {
 		case 1:  return "[DEBUG] ";
 		case 2:  return "[INFO]  ";
@@ -82,9 +82,9 @@ struct ofxGgml::Impl {
 /// free > 0).  CPU devices always pass — this check is only meaningful
 /// for GPU / accelerator devices where the driver may enumerate the
 /// device even though it cannot allocate memory.
-static bool isDeviceMemoryAvailable(ggml_backend_dev_t dev) {
+static bool isDeviceMemoryAvailable(ggml_backend_dev_t dev) noexcept {
 	if (!dev) return false;
-	enum ggml_backend_dev_type dt = ggml_backend_dev_type(dev);
+	const enum ggml_backend_dev_type dt = ggml_backend_dev_type(dev);
 	if (dt == GGML_BACKEND_DEVICE_TYPE_CPU) return true;
 	size_t free = 0, total = 0;
 	ggml_backend_dev_memory(dev, &free, &total);
@@ -169,7 +169,7 @@ static ggml_backend_t tryInitBackendDev(ggml_backend_dev_t dev) {
 	return result;
 }
 
-static bool hasPrefixIgnoreCase(const char * value, const char * prefix) {
+static bool hasPrefixIgnoreCase(const char * value, const char * prefix) noexcept {
 	if (!value || !prefix) return false;
 	while (*prefix) {
 		if (*value == '\0') return false;
@@ -282,14 +282,14 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	// Log discovered devices so the user can see what is available.
 	{
 		const size_t devCount = ggml_backend_dev_count();
-		m_impl->log(GGML_LOG_LEVEL_INFO,
-			"ofxGgml: discovered " + std::to_string(devCount) + " backend device(s):\n");
+		std::string msg = "ofxGgml: discovered " + std::to_string(devCount) + " backend device(s):\n";
+		m_impl->log(GGML_LOG_LEVEL_INFO, msg);
 		bool hasGpu = false;
 		for (size_t i = 0; i < devCount; i++) {
 			ggml_backend_dev_t dev = ggml_backend_dev_get(i);
 			const char * devName = ggml_backend_dev_name(dev);
 			const char * devDesc = ggml_backend_dev_description(dev);
-			enum ggml_backend_dev_type devType = ggml_backend_dev_type(dev);
+			const enum ggml_backend_dev_type devType = ggml_backend_dev_type(dev);
 			const char * typeLabel = "CPU";
 			if (devType == GGML_BACKEND_DEVICE_TYPE_GPU) {
 				typeLabel = "GPU";
@@ -298,10 +298,14 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 				typeLabel = "Accelerator";
 				hasGpu = true;
 			}
-			m_impl->log(GGML_LOG_LEVEL_INFO,
-				"ofxGgml:   [" + std::to_string(i) + "] " +
-				(devName ? devName : "?") + " — " +
-				(devDesc ? devDesc : "") + " (" + typeLabel + ")\n");
+			std::string devMsg = "ofxGgml:   [" + std::to_string(i) + "] ";
+			devMsg += (devName ? devName : "?");
+			devMsg += " — ";
+			devMsg += (devDesc ? devDesc : "");
+			devMsg += " (";
+			devMsg += typeLabel;
+			devMsg += ")\n";
+			m_impl->log(GGML_LOG_LEVEL_INFO, devMsg);
 		}
 		if (!hasGpu && settings.preferredBackendName.empty() &&
 			settings.preferredBackend != ofxGgmlBackendType::Cpu) {
@@ -433,8 +437,10 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	m_impl->state = ofxGgmlState::Ready;
 	auto tSetup1 = std::chrono::steady_clock::now();
 	m_impl->timings.setupMs = std::chrono::duration<float, std::milli>(tSetup1 - tSetup0).count();
-	m_impl->log(GGML_LOG_LEVEL_INFO, std::string("ofxGgml: ready (backend: ") +
-		ggml_backend_name(m_impl->backend) + ")\n");
+	std::string readyMsg = "ofxGgml: ready (backend: ";
+	readyMsg += ggml_backend_name(m_impl->backend);
+	readyMsg += ")\n";
+	m_impl->log(GGML_LOG_LEVEL_INFO, readyMsg);
 	return true;
 }
 
@@ -509,7 +515,7 @@ std::string ofxGgml::getBackendName() const {
 //  Tensor data helpers
 // --------------------------------------------------------------------------
 
-static size_t clampedTensorTransferSize(const struct ggml_tensor * tensor, size_t bytes) {
+static size_t clampedTensorTransferSize(const struct ggml_tensor * tensor, size_t bytes) noexcept {
 	if (!tensor) return 0;
 	const size_t tensorBytes = ggml_nbytes(tensor);
 	return bytes < tensorBytes ? bytes : tensorBytes;
@@ -757,9 +763,12 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	auto t1 = std::chrono::steady_clock::now();
 	m_impl->timings.weightUploadMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
-	m_impl->log(GGML_LOG_LEVEL_INFO, std::string("ofxGgml: model weights loaded (") +
-		std::to_string(snapshots.size()) + " tensors on backend: " +
-		ggml_backend_name(m_impl->backend) + ")\n");
+	std::string loadMsg = "ofxGgml: model weights loaded (";
+	loadMsg += std::to_string(snapshots.size());
+	loadMsg += " tensors on backend: ";
+	loadMsg += ggml_backend_name(m_impl->backend);
+	loadMsg += ")\n";
+	m_impl->log(GGML_LOG_LEVEL_INFO, loadMsg);
 	return true;
 }
 
