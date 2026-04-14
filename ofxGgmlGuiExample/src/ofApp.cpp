@@ -2673,6 +2673,31 @@ workerThread.join();
  fprintf(stderr, "[ofxGgml] Prompt (%zu chars):\n%s\n", prompt.size(), prompt.c_str());
  }
 
+ // Safety check: Estimate if prompt is too large for context window
+ // Use conservative estimate of ~3 chars per token
+ const size_t estimatedTokens = prompt.size() / 3;
+ const size_t maxTokens = static_cast<size_t>(contextSize);
+ if (estimatedTokens > maxTokens) {
+ const std::string warningMsg =
+ "[Warning] Prompt is very large (~" + std::to_string(estimatedTokens) +
+ " estimated tokens) and may exceed context size (" + std::to_string(maxTokens) +
+ " tokens). Consider reducing input size or increasing context size in settings.";
+
+ fprintf(stderr, "[ofxGgml] %s\n", warningMsg.c_str());
+
+ // Provide a helpful error message to the user
+ result = warningMsg + "\n\nPrompt size: " + std::to_string(prompt.size()) + " characters";
+
+ std::lock_guard<std::mutex> lock(outputMutex);
+ if (!cancelRequested.load()) {
+ pendingOutput = result;
+ pendingRole = "assistant";
+ pendingMode = mode;
+ }
+ generating.store(false);
+ return;
+ }
+
  const std::string trimmedPrompt = trim(prompt);
  auto streamCb = [this, trimmedPrompt](const std::string & partial) {
  std::string cleaned = stripAnsi(partial);
