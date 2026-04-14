@@ -127,11 +127,14 @@ if "%CUDA_PRESENT%"=="1" (
     )
     if not defined CUDA_LIB_DIR (
         echo ==^>   Checking Program Files for CUDA Toolkit installation...
-        for /f "delims=" %%D in ('dir /b /ad "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA" 2^>nul ^| sort /R') do (
-            if not defined CUDA_LIB_DIR (
-                for %%P in ("%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\%%D") do (
-                    if exist "%%~fP\lib\x64\cublas.lib" (
-                        set "CUDA_LIB_DIR=%%~fP\lib\x64"
+        set "CUDA_BASE_DIR=%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA"
+        if exist "!CUDA_BASE_DIR!" (
+            for /f "delims=" %%D in ('dir /b /ad "!CUDA_BASE_DIR!" 2^>nul ^| sort /R') do (
+                if not defined CUDA_LIB_DIR (
+                    for %%P in ("!CUDA_BASE_DIR!\%%D") do (
+                        if exist "%%~fP\lib\x64\cublas.lib" (
+                            set "CUDA_LIB_DIR=%%~fP\lib\x64"
+                        )
                     )
                 )
             )
