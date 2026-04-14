@@ -530,6 +530,7 @@ The script will:
 **Requirements:**
 - The CUDA Toolkit must be installed and in your system PATH
 - Visual Studio must be able to find the CUDA libraries (usually automatic if CUDA Toolkit is installed correctly)
+- If you installed CUDA in a custom versioned folder (for example `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2`), set `CUDA_PATH` (or `CUDAToolkit_ROOT`) to that root and rerun `scripts\update-addon-config.bat`. This writes the absolute `cublas.lib`/`cudart.lib` paths into `addon_config.mk`.
 
 **Note:** This fix was added to resolve CUBLAS linker errors. If you built ggml with CUDA before this fix, run the update script above.
 
