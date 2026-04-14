@@ -135,14 +135,16 @@ void ofxGgmlScriptSource::setInternetUrls(const std::vector<std::string> & urls)
 	m_gitHubOwnerRepo.clear();
 	m_gitHubBranch.clear();
 	m_internetUrls.clear();
+	m_internetUrls.reserve(urls.size()); // Pre-allocate capacity
 	for (const auto & url : urls) {
-		const std::string trimmed = trim(url);
+		std::string trimmed = trim(url);
 		if (isValidUrl(trimmed)) {
-			m_internetUrls.push_back(trimmed);
+			m_internetUrls.push_back(std::move(trimmed)); // Use move semantics
 		}
 	}
 
 	m_files.clear();
+	m_files.reserve(m_internetUrls.size()); // Pre-allocate capacity
 	for (const auto & url : m_internetUrls) {
 		ofxGgmlScriptSourceFileEntry fe;
 		fe.name = url.size() > 96 ? url.substr(0, 96) + "..." : url;
@@ -156,7 +158,7 @@ void ofxGgmlScriptSource::setInternetUrls(const std::vector<std::string> & urls)
 }
 
 bool ofxGgmlScriptSource::addInternetUrl(const std::string & url) {
-	const std::string trimmed = trim(url);
+	std::string trimmed = trim(url);
 	if (!isValidUrl(trimmed)) {
 		std::lock_guard<std::mutex> lock(m_mutex);
 		m_sourceType = ofxGgmlScriptSourceType::Internet;
@@ -172,11 +174,12 @@ bool ofxGgmlScriptSource::addInternetUrl(const std::string & url) {
 
 	auto it = std::find(m_internetUrls.begin(), m_internetUrls.end(), trimmed);
 	if (it == m_internetUrls.end()) {
-		m_internetUrls.push_back(trimmed);
+		m_internetUrls.push_back(std::move(trimmed)); // Use move semantics
 	}
 
 	// Rebuild file list to reflect latest URLs.
 	m_files.clear();
+	m_files.reserve(m_internetUrls.size()); // Pre-allocate capacity
 	for (const auto & entryUrl : m_internetUrls) {
 		ofxGgmlScriptSourceFileEntry fe;
 		fe.name = entryUrl.size() > 96 ? entryUrl.substr(0, 96) + "..." : entryUrl;
@@ -466,22 +469,22 @@ bool ofxGgmlScriptSource::saveToLocalSource(const std::string & filename, const 
 	return rescan();
 }
 
-ofxGgmlScriptSourceType ofxGgmlScriptSource::getSourceType() const {
+ofxGgmlScriptSourceType ofxGgmlScriptSource::getSourceType() const noexcept {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	return m_sourceType;
 }
 
-std::string ofxGgmlScriptSource::getLocalFolderPath() const {
+std::string ofxGgmlScriptSource::getLocalFolderPath() const noexcept {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	return m_localFolderPath;
 }
 
-std::string ofxGgmlScriptSource::getGitHubOwnerRepo() const {
+std::string ofxGgmlScriptSource::getGitHubOwnerRepo() const noexcept {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	return m_gitHubOwnerRepo;
 }
 
-std::string ofxGgmlScriptSource::getGitHubBranch() const {
+std::string ofxGgmlScriptSource::getGitHubBranch() const noexcept {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	return m_gitHubBranch;
 }
@@ -501,8 +504,8 @@ std::string ofxGgmlScriptSource::getStatus() const {
 	return m_status;
 }
 
-bool ofxGgmlScriptSource::isFetching() const {
-	return m_fetching.load();
+bool ofxGgmlScriptSource::isFetching() const noexcept {
+	return m_fetching.load(std::memory_order_acquire);
 }
 
 std::vector<ofxGgmlScriptSourceFetchDiagnostic> ofxGgmlScriptSource::getFetchDiagnostics() const {

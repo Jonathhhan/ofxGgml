@@ -429,14 +429,36 @@ static int parseVerbosePromptTokenCount(const std::string & raw) {
 	int explicitCount = -1;
 	int bracketMax = -1;
 	int bracketLines = 0;
+
+	// Single-pass parsing with case-insensitive comparison inline
 	std::istringstream iss(raw);
 	std::string line;
+	line.reserve(256); // Pre-allocate typical line size
+
 	while (std::getline(iss, line)) {
-		std::string lower = line;
-		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
-			return static_cast<char>(std::tolower(c));
-		});
-		if (lower.find("token") != std::string::npos) {
+		if (line.empty()) continue;
+
+		// Check for "token" keyword (case-insensitive, inline comparison)
+		// More efficient than creating a lowercase copy of entire line
+		const char* tokenKeyword = "token";
+		size_t pos = 0;
+		bool foundToken = false;
+		while (pos + 5 <= line.size()) {
+			bool match = true;
+			for (size_t i = 0; i < 5 && match; ++i) {
+				const char c = line[pos + i];
+				const char k = tokenKeyword[i];
+				match = (c == k || std::tolower(static_cast<unsigned char>(c)) == k);
+			}
+			if (match) {
+				foundToken = true;
+				break;
+			}
+			++pos;
+		}
+
+		if (foundToken) {
+			// Extract numbers from this line
 			std::istringstream ls(line);
 			long value = 0;
 			while (ls >> value) {
@@ -445,7 +467,9 @@ static int parseVerbosePromptTokenCount(const std::string & raw) {
 				}
 			}
 		}
-		if (!line.empty() && line.front() == '[') {
+
+		// Check for bracket notation
+		if (line.front() == '[') {
 			const size_t end = line.find(']');
 			if (end != std::string::npos && end > 1) {
 				try {

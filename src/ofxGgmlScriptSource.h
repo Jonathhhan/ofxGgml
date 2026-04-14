@@ -51,14 +51,14 @@ public:
 	bool loadFileContent(int index, std::string & outContent);
 	bool saveToLocalSource(const std::string & filename, const std::string & content);
 
-	ofxGgmlScriptSourceType getSourceType() const;
-	std::string getLocalFolderPath() const;
-	std::string getGitHubOwnerRepo() const;
-	std::string getGitHubBranch() const;
+	ofxGgmlScriptSourceType getSourceType() const noexcept;
+	std::string getLocalFolderPath() const noexcept;
+	std::string getGitHubOwnerRepo() const noexcept;
+	std::string getGitHubBranch() const noexcept;
 	std::vector<std::string> getInternetUrls() const;
 	std::vector<ofxGgmlScriptSourceFileEntry> getFiles() const;
 	std::string getStatus() const;
-	bool isFetching() const;
+	bool isFetching() const noexcept;
 	std::vector<ofxGgmlScriptSourceFetchDiagnostic> getFetchDiagnostics() const;
 
 private:
