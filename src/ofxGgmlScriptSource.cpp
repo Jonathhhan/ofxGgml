@@ -517,7 +517,6 @@ void ofxGgmlScriptSource::cancelFetchWorker(const std::string & reason) {
 	std::thread worker;
 	bool wasFetching = false;
 	bool hadWorker = false;
-	uint64_t generation = 0;
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		wasFetching = m_fetching.load();
@@ -525,7 +524,7 @@ void ofxGgmlScriptSource::cancelFetchWorker(const std::string & reason) {
 		if (!wasFetching && !hadWorker) {
 			return;
 		}
-		generation = m_fetchGeneration.fetch_add(1) + 1;
+		const uint64_t generation = m_fetchGeneration.fetch_add(1) + 1;
 		m_cancelFetch.store(true);
 		m_fetching.store(false);
 		if (wasFetching) {
@@ -541,6 +540,8 @@ void ofxGgmlScriptSource::cancelFetchWorker(const std::string & reason) {
 	}
 }
 
+/// Creates a fetch diagnostic entry with timestamp. Maintains maximum of 64 entries.
+/// Must be called with m_mutex locked.
 void ofxGgmlScriptSource::pushFetchDiagnosticLocked(
 	const std::string & state,
 	const std::string & message,
@@ -617,6 +618,8 @@ std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::scanLocalFolderEn
 	return files;
 }
 
+/// Validates GitHub owner/repo format (e.g., "owner/repo").
+/// Rejects path traversal, multiple slashes, and non-alphanumeric characters (except -_.).
 bool ofxGgmlScriptSource::isValidOwnerRepo(const std::string & ownerRepo) {
 	if (ownerRepo.empty() || ownerRepo.find("..") != std::string::npos) return false;
 	const size_t slashPos = ownerRepo.find('/');
@@ -632,6 +635,8 @@ bool ofxGgmlScriptSource::isValidOwnerRepo(const std::string & ownerRepo) {
 	return true;
 }
 
+/// Validates GitHub branch name.
+/// Rejects path traversal (..), leading/trailing/double slashes, and control characters.
 bool ofxGgmlScriptSource::isValidBranch(const std::string & branch) {
 	if (branch.empty()) return false;
 	// Reject any path traversal patterns
@@ -650,6 +655,9 @@ bool ofxGgmlScriptSource::isValidBranch(const std::string & branch) {
 	return true;
 }
 
+/// Validates repository file path for safety.
+/// Rejects path traversal (..), absolute paths, backslashes, double slashes,
+/// control characters, and null bytes to prevent injection attacks.
 bool ofxGgmlScriptSource::isSafeRepoPath(const std::string & path) {
 	if (path.empty()) return false;
 	// Reject any path traversal patterns
@@ -668,6 +676,7 @@ bool ofxGgmlScriptSource::isSafeRepoPath(const std::string & path) {
 	return true;
 }
 
+/// Trims leading and trailing whitespace from a string.
 std::string ofxGgmlScriptSource::trim(const std::string & s) {
 	size_t start = 0;
 	while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start]))) start++;
@@ -676,6 +685,9 @@ std::string ofxGgmlScriptSource::trim(const std::string & s) {
 	return s.substr(start, end - start);
 }
 
+/// Validates URL for internet script sources.
+/// Only allows http/https schemes. Rejects control characters, null bytes, whitespace,
+/// and shell metacharacters in query strings to prevent injection attacks.
 bool ofxGgmlScriptSource::isValidUrl(const std::string & url) {
 	if (url.empty()) return false;
 	// Reject whitespace characters

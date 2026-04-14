@@ -348,6 +348,8 @@ outPath = slot.path;
 return true;
 }
 
+/// Extracts float values from a JSON array into the output vector.
+/// Only finite values are included. Returns true if at least one value was extracted.
 static bool extractEmbeddingArray(const ofJson & value, std::vector<float> & out) {
 	out.clear();
 	if (!value.is_array()) return false;
@@ -359,6 +361,9 @@ static bool extractEmbeddingArray(const ofJson & value, std::vector<float> & out
 	return !out.empty();
 }
 
+/// Recursively searches JSON object for embedding data in common field names.
+/// Checks: "embedding", "embeddings", "result", and "data" array.
+/// Returns true if valid embedding array was found and extracted.
 static bool parseEmbeddingJson(const ofJson & json, std::vector<float> & out) {
 	if (json.is_array()) {
 		return extractEmbeddingArray(json, out);
@@ -382,39 +387,27 @@ static bool parseEmbeddingJson(const ofJson & json, std::vector<float> & out) {
 	return false;
 }
 
-static bool parseEmbeddingVector(const std::string & raw, std::vector<float> & out) {
-	out.clear();
+/// Helper: Attempts to parse a single string as JSON embedding.
+static bool tryParseJsonString(const std::string & str, std::vector<float> & out) {
+	ofJson parsed = ofJson::parse(str, nullptr, false);
+	return !parsed.is_discarded() && parseEmbeddingJson(parsed, out);
+}
 
-	const std::string normalized = trim(raw);
-	if (!normalized.empty()) {
-		ofJson parsed = ofJson::parse(normalized, nullptr, false);
-		if (!parsed.is_discarded() && parseEmbeddingJson(parsed, out)) {
-			return true;
-		}
-	}
-
-	std::istringstream lines(raw);
-	std::vector<std::string> candidates;
-	std::string line;
-	while (std::getline(lines, line)) {
-		line = trim(line);
-		if (!line.empty()) candidates.push_back(std::move(line));
-	}
-	for (auto it = candidates.rbegin(); it != candidates.rend(); ++it) {
-		ofJson parsed = ofJson::parse(*it, nullptr, false);
-		if (!parsed.is_discarded() && parseEmbeddingJson(parsed, out)) {
-			return true;
-		}
-	}
-
+/// Helper: Extracts bracketed float array from raw text (fallback parser).
+/// Expects format like "[1.0, 2.0, 3.0]" and converts commas to spaces for parsing.
+static bool tryParseBracketedArray(const std::string & raw, std::vector<float> & out) {
 	const size_t begin = raw.find('[');
 	const size_t end = raw.find(']', begin == std::string::npos ? 0 : begin + 1);
 	// Validate that brackets exist and are properly positioned to avoid underflow
-	if (begin == std::string::npos || end == std::string::npos || end <= begin || (end - begin) < 2) return false;
+	if (begin == std::string::npos || end == std::string::npos || end <= begin || (end - begin) < 2) {
+		return false;
+	}
+
 	std::string body = raw.substr(begin + 1, end - begin - 1);
 	for (char & c : body) {
 		if (c == ',') c = ' ';
 	}
+
 	std::istringstream iss(body);
 	float v = 0.0f;
 	while (iss >> v) {
@@ -423,6 +416,40 @@ static bool parseEmbeddingVector(const std::string & raw, std::vector<float> & o
 	return !out.empty();
 }
 
+/// Parses embedding vector from llama-cli output text.
+/// Tries multiple strategies: (1) JSON parse whole text, (2) JSON parse per line (reverse order),
+/// (3) Fallback to bracketed array format. Returns true if parsing succeeded.
+static bool parseEmbeddingVector(const std::string & raw, std::vector<float> & out) {
+	out.clear();
+
+	// Strategy 1: Try parsing entire normalized text as JSON
+	const std::string normalized = trim(raw);
+	if (!normalized.empty() && tryParseJsonString(normalized, out)) {
+		return true;
+	}
+
+	// Strategy 2: Try parsing each line as JSON (reverse order - last line likely has result)
+	std::istringstream lines(raw);
+	std::vector<std::string> candidates;
+	std::string line;
+	while (std::getline(lines, line)) {
+		line = trim(line);
+		if (!line.empty()) candidates.push_back(std::move(line));
+	}
+	for (auto it = candidates.rbegin(); it != candidates.rend(); ++it) {
+		if (tryParseJsonString(*it, out)) {
+			return true;
+		}
+	}
+
+	// Strategy 3: Fallback to bracketed array format
+	return tryParseBracketedArray(raw, out);
+}
+
+/// Parses token count from verbose llama-cli output.
+/// Uses three strategies: (1) Extract count from lines containing "token" keyword,
+/// (2) Parse bracket notation like "[42]" and return max+1, (3) Count bracket lines.
+/// Returns -1 if no token count found. Performs single-pass parsing for efficiency.
 static int parseVerbosePromptTokenCount(const std::string & raw) {
 	if (raw.empty()) return -1;
 
