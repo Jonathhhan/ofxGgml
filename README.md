@@ -534,6 +534,46 @@ The script will:
 
 **Note:** This fix was added to resolve CUBLAS linker errors. If you built ggml with CUDA before this fix, run the update script above.
 
+## Security
+
+ofxGgml implements several security best practices to protect against common vulnerabilities:
+
+### Input Validation
+
+- **Path validation**: Model paths and executable paths are validated to ensure they exist and are regular files
+- **Path traversal protection**: Executable paths are checked for suspicious patterns like `..`
+- **Null byte filtering**: All file paths are checked for null bytes to prevent path injection attacks
+- **Canonical path resolution**: Paths are normalized to resolve symlinks and detect malicious redirects
+
+### Input Sanitization
+
+- **Prompt sanitization**: User prompts are sanitized to remove null bytes and dangerous control characters
+- **Argument sanitization**: Command-line arguments passed to external processes are sanitized
+- **JSON schema validation**: JSON schemas for structured output are sanitized before use
+
+### Secure Temporary Files
+
+- **Atomic file creation**: Temporary files are created with exclusive access flags to prevent race conditions
+- **Random filenames**: Cryptographically random filenames using `std::random_device` prevent predictable temp file attacks
+- **Automatic cleanup**: Thread-local RAII wrappers ensure temp files are cleaned up on thread exit
+
+### Model Integrity
+
+- **SHA256 checksums**: Model catalog includes SHA256 checksums for verification (when available)
+- **Checksum verification**: Download script automatically verifies checksums when provided
+- **Integrity warnings**: Clear warnings when checksums are missing or verification fails
+
+### Best Practices for Users
+
+When using ofxGgml in production:
+
+1. **Validate model sources**: Only download models from trusted sources
+2. **Verify checksums**: Always check SHA256 checksums for downloaded models
+3. **Restrict file paths**: Use absolute paths and avoid user-controlled path construction
+4. **Sandbox external executables**: Consider running llama-cli in a restricted environment
+5. **Limit prompt size**: Implement application-level limits on prompt lengths to prevent DoS
+6. **Monitor resource usage**: Track memory and compute usage when processing user inputs
+
 ## Extending the Addon
 
 The addon is structured for easy extension:
