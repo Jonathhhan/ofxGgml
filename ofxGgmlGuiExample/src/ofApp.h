@@ -195,6 +195,7 @@ private:
 	bool cliSupportsTopK = true;
 	bool cliSupportsMinP = true;
 	bool cliSupportsMirostat = true;
+	bool cliSupportsSingleTurn = true;
 	std::unordered_map<std::string, int> tokenCountCache;
 	std::mutex tokenCountCacheMutex;
 

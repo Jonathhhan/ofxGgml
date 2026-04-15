@@ -94,7 +94,37 @@ static constexpr TokenLiteral kTrailingArtifacts[] = {
 	{"> EOF", 5},
 	{"EOF", 3},
 	{"Interrupted by user", 19},
+	{"[end of text]", 13},
+	{"<|endoftext|>", 13},
 };
+
+void setVulkanRuntimeDisabled(bool disabled) {
+#ifdef _WIN32
+	_putenv_s("GGML_DISABLE_VULKAN", disabled ? "1" : "");
+#else
+	if (disabled) {
+		setenv("GGML_DISABLE_VULKAN", "1", 1);
+	} else {
+		unsetenv("GGML_DISABLE_VULKAN");
+	}
+#endif
+}
+
+bool shouldDisableVulkanForCurrentSelection(
+	const std::vector<std::string> & names,
+	int selectedIndex) {
+	const char * forceDisable = std::getenv("OFXGGML_DISABLE_VULKAN");
+	if (forceDisable && std::string(forceDisable) == "1") {
+		return true;
+	}
+	if (selectedIndex >= 0 && selectedIndex < static_cast<int>(names.size())) {
+		const std::string & sel = names[static_cast<size_t>(selectedIndex)];
+	if (sel.rfind("CUDA", 0) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
 
 const char * logLevelLabel(ofLogLevel level) noexcept {
 	switch (level) {
@@ -850,7 +880,44 @@ static void probeLlamaCliImpl(
 		}
 	}
 
-	// 2. Try bare names via PATH (execvp search).
+	// 2. Prefer addon-local installs first (libs/llama/bin), then PATH.
+	// This avoids accidentally picking an older CPU-only llama executable
+	// from PATH when a GPU-enabled bundled build is available.
+	if (!found) {
+		const std::vector<std::string> exeNames = {"llama-completion", "llama-cli", "llama"};
+		std::vector<std::string> preferredDirs;
+
+		// Addon-local libs/llama/bin (default install target for build script).
+		{
+			std::error_code srcEc;
+			auto srcPath = std::filesystem::path(__FILE__).parent_path();
+			auto addonRoot = std::filesystem::weakly_canonical(srcPath / ".." / "..", srcEc);
+			if (!srcEc) {
+				preferredDirs.push_back((addonRoot / "libs" / "llama" / "bin").string());
+			}
+		}
+
+		for (const auto & dir : preferredDirs) {
+			for (const auto & exe : exeNames) {
+				std::string fullPath = dir +
+#ifdef _WIN32
+					"\\" + exe + ".exe";
+#else
+					"/" + exe;
+#endif
+				std::error_code ec;
+				if (!std::filesystem::exists(fullPath, ec) || ec) continue;
+				if (probeCandidate(fullPath, probeFlags, probeOut, probeExit)) {
+					llamaCliCommand = fullPath;
+					found = true;
+					break;
+				}
+			}
+			if (found) break;
+		}
+	}
+
+	// 3. Try bare names via PATH (execvp search).
 	// Prefer llama-completion (one-shot text completion) over llama-cli
 	// (interactive chat, server-based since llama.cpp PR #17824).
 	if (!found) {
@@ -864,7 +931,7 @@ static void probeLlamaCliImpl(
 		}
 	}
 
-	// 3. Try common installation directories.
+	// 4. Try common installation directories.
 	if (!found) {
 		std::vector<std::string> searchDirs;
 
@@ -1030,6 +1097,7 @@ void ofApp::probeCliCapabilities() {
 	cliSupportsTopK = true;
 	cliSupportsMinP = true;
 	cliSupportsMirostat = true;
+	cliSupportsSingleTurn = true;
 
 	std::string helpText;
 	int exitCode = -1;
@@ -1043,10 +1111,13 @@ void ofApp::probeCliCapabilities() {
 		helpText.find("--mirostat") != std::string::npos &&
 		helpText.find("--mirostat-lr") != std::string::npos &&
 		helpText.find("--mirostat-ent") != std::string::npos;
+	const bool hasSingleTurn =
+		helpText.find("--single-turn") != std::string::npos;
 
 	cliSupportsTopK = hasTopK;
 	cliSupportsMinP = hasMinP;
 	cliSupportsMirostat = hasMirostat;
+	cliSupportsSingleTurn = hasSingleTurn;
 
 	if (!cliSupportsTopK) {
 		logWithLevel(OF_LOG_WARNING, "Detected CLI does not support --top-k; Top-K will be ignored.");
@@ -1056,6 +1127,9 @@ void ofApp::probeCliCapabilities() {
 	}
 	if (!cliSupportsMirostat) {
 		logWithLevel(OF_LOG_WARNING, "Detected CLI does not support Mirostat flags; Mirostat settings will be ignored.");
+	}
+	if (!cliSupportsSingleTurn) {
+		logWithLevel(OF_LOG_WARNING, "Detected CLI does not support --single-turn; EOF shutdown path may be less stable.");
 	}
 }
 
@@ -1255,6 +1329,8 @@ if (selectedBackendIndex >= 0 &&
 	selectedBackendIndex < static_cast<int>(backendNames.size())) {
 	settings.preferredBackendName = backendNames[selectedBackendIndex];
 }
+setVulkanRuntimeDisabled(
+	shouldDisableVulkanForCurrentSelection(backendNames, selectedBackendIndex));
 settings.graphSize = static_cast<size_t>(contextSize);
 engineReady = ggml.setup(settings);
 if (engineReady) {
@@ -3656,9 +3732,30 @@ void ofApp::runHierarchicalReview() {
 				return;
 			}
 
-			// Keep inference helpers aligned with detected CLI paths.
+		// Keep inference helpers aligned with detected CLI paths.
 			scriptReviewInference.setCompletionExecutable(llamaCliCommand);
-			scriptReviewInference.setEmbeddingExecutable("llama-embedding");
+			{
+				// Derive embedding executable from the same directory as the
+				// detected completion CLI so it is found even when it is not
+				// on PATH (e.g. installed next to the application binary).
+				std::filesystem::path cliPath(llamaCliCommand);
+				std::string embeddingExe;
+				if (cliPath.has_parent_path()) {
+					auto dir = cliPath.parent_path();
+#ifdef _WIN32
+					embeddingExe = (dir / "llama-embedding.exe").string();
+#else
+					embeddingExe = (dir / "llama-embedding").string();
+#endif
+					std::error_code ec;
+					if (!std::filesystem::exists(embeddingExe, ec) || ec) {
+						embeddingExe = "llama-embedding";
+					}
+				} else {
+					embeddingExe = "llama-embedding";
+				}
+				scriptReviewInference.setEmbeddingExecutable(embeddingExe);
+			}
 
 			std::string reviewQuery = std::strlen(scriptInput) > 0
 				? std::string(scriptInput)
@@ -3965,12 +4062,53 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 	const float safeRepeatPenalty = (std::isfinite(repeatPenalty) ? std::clamp(repeatPenalty, 1.0f, 2.0f) : kDefaultRepeatPenalty);
 	const int safeThreads = std::clamp(numThreads, 1, 128);
 	const int safeContext = std::clamp(contextSize, 256, 16384);
-	const int safeBatch = std::clamp(batchSize, 32, 4096);
-	const int safeGpuLayers = std::clamp(gpuLayers, 0, 128);
+	int effectiveBatch = std::clamp(batchSize, 32, 4096);
+	const int maxGpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
+	const int safeGpuLayers = std::clamp(gpuLayers, 0, maxGpuLayers);
+	std::string cliDevice;
+	if (!backendNames.empty() &&
+		selectedBackendIndex >= 0 &&
+		selectedBackendIndex < static_cast<int>(backendNames.size())) {
+		const std::string & selected = backendNames[static_cast<size_t>(selectedBackendIndex)];
+		if (selected != "CPU") {
+			cliDevice = selected;
+		}
+	}
+	if (cliDevice.empty()) {
+		const std::string backend = ggml.getBackendName();
+		if (!backend.empty() && backend != "CPU" && backend != "none") {
+			cliDevice = backend;
+		}
+	}
+	if (!cliDevice.empty() && effectiveBatch > 256) {
+		if (shouldLog(OF_LOG_NOTICE)) {
+			logWithLevel(OF_LOG_NOTICE,
+				"Reducing batch size from " + ofToString(effectiveBatch) +
+				" to 256 for CUDA/Vulkan stability.");
+		}
+		effectiveBatch = 256;
+	}
 	// GPU layers control the llama-completion CLI process, which has
 	// its own GPU support independent of the addon's ggml engine.
-	// Do not force layers to zero based on the engine backend.
 	int effectiveGpuLayers = safeGpuLayers;
+	if (effectiveGpuLayers == 0) {
+		bool cpuBackendSelected = false;
+		if (!backendNames.empty() &&
+			selectedBackendIndex >= 0 &&
+			selectedBackendIndex < static_cast<int>(backendNames.size())) {
+			cpuBackendSelected = (backendNames[static_cast<size_t>(selectedBackendIndex)] == "CPU");
+		}
+		if (!cpuBackendSelected) {
+			effectiveGpuLayers = (detectedModelLayers > 0) ? detectedModelLayers : 999;
+			if (shouldLog(OF_LOG_NOTICE)) {
+				logWithLevel(OF_LOG_NOTICE,
+					(detectedModelLayers > 0)
+						? ("GPU layers was 0; using detected model layer count (" +
+							ofToString(detectedModelLayers) + ") for llama CLI offload.")
+						: "GPU layers was 0 and model layer metadata is unavailable; using -ngl 999 for llama CLI offload.");
+			}
+		}
+	}
 
 	std::ostringstream tempStr, topPStr, repeatPenaltyStr;
 	tempStr << std::fixed << std::setprecision(3) << safeTemp;
@@ -3990,9 +4128,15 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 		out.emplace_back("-c");
 		out.emplace_back(ofToString(safeContext));
 		out.emplace_back("-b");
-		out.emplace_back(ofToString(safeBatch));
+		out.emplace_back(ofToString(effectiveBatch));
 		out.emplace_back("-ngl");
 		out.emplace_back(ofToString(effectiveGpuLayers));
+		if (!cliDevice.empty()) {
+			out.emplace_back("--device");
+			out.emplace_back(cliDevice);
+			out.emplace_back("--split-mode");
+			out.emplace_back("none");
+		}
 		out.emplace_back("--temp");
 		out.emplace_back(tempStr.str());
 		out.emplace_back("--top-p");
@@ -4011,16 +4155,12 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 		out.emplace_back(repeatPenaltyStr.str());
 		out.emplace_back(shortFlags ? "-t" : "--threads");
 		out.emplace_back(ofToString(safeThreads));
-		if (usePromptCache) {
-			const std::string cachePath = promptCachePathFor(modelPath, activeGenerationMode);
-			if (!cachePath.empty()) {
-				out.emplace_back("--prompt-cache");
-				out.emplace_back(cachePath);
-				out.emplace_back("--prompt-cache-all");
-			}
-		}
+		(void)usePromptCache;
 		out.emplace_back("--no-display-prompt");
 		out.emplace_back("--simple-io");
+		if (cliSupportsSingleTurn) {
+			out.emplace_back("--single-turn");
+		}
 		if (seed >= 0) {
 			out.emplace_back("--seed");
 			out.emplace_back(ofToString(seed));
@@ -4052,12 +4192,29 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 
 	std::string raw;
 	int ret = -1;
+	const auto tCliStart = std::chrono::steady_clock::now();
 	const bool started = runProcessCapture(args, raw, ret, true, onStreamData, false);
+	const auto tCliEnd = std::chrono::steady_clock::now();
+	const float cliElapsedMs = std::chrono::duration<float, std::milli>(tCliEnd - tCliStart).count();
 	if (shouldLog(OF_LOG_VERBOSE)) {
 		logWithLevel(OF_LOG_VERBOSE, std::string("Process ") +
 			(started ? "started" : "failed to start") + ", exit code: " + ofToString(ret));
 	}
 	if (started && ret != 0) {
+		const bool crashLikeExit =
+			ret == -1073740791 || // Windows STATUS_STACK_BUFFER_OVERRUN
+			ret == -1073741819;   // Windows STATUS_ACCESS_VIOLATION
+		if (crashLikeExit) {
+			if (shouldLog(OF_LOG_WARNING)) {
+				logWithLevel(OF_LOG_WARNING,
+					"llama-completion crashed; retrying once with lower batch size.");
+			}
+			effectiveBatch = std::min(effectiveBatch, 128);
+			raw.clear();
+			ret = -1;
+			runProcessCapture(makeArgs(false), raw, ret, true, onStreamData, false);
+		}
+
 		// With stderr separated, error messages about unknown flags
 		// are no longer in `raw`.  If the process failed quickly and
 		// produced no usable stdout, retry with short-style flags as
@@ -4088,8 +4245,6 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 	if (started && ret != 0 && !trim(stripAnsi(raw)).empty()) {
 		const bool benignExit =
 			ret == 130                   // SIGINT (EOF on stdin)
-			|| ret == -1073740791        // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
-			|| ret == -1073741819        // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
 			|| ret == 1                  // generic error (may occur during cleanup)
 			|| ret == -1                 // signal-killed on POSIX
 			|| (ret >= 128 && ret < 160) // POSIX signal exits (128+signal)
@@ -4128,6 +4283,12 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 			}
 		}
 		return false;
+	}
+
+	if (shouldLog(OF_LOG_NOTICE)) {
+		logWithLevel(OF_LOG_NOTICE,
+			"llama-completion run: " + ofToString(cliElapsedMs, 1) +
+			" ms, output " + ofToString(trim(stripAnsi(raw)).size()) + " chars");
 	}
 
 	output = trim(stripAnsi(raw));
@@ -4182,6 +4343,8 @@ if (selectedBackendIndex >= 0 &&
 	selectedBackendIndex < static_cast<int>(backendNames.size())) {
 	settings.preferredBackendName = backendNames[selectedBackendIndex];
 }
+setVulkanRuntimeDisabled(
+	shouldDisableVulkanForCurrentSelection(backendNames, selectedBackendIndex));
 settings.graphSize = static_cast<size_t>(contextSize);
 
 engineReady = ggml.setup(settings);
@@ -4347,7 +4510,8 @@ workerThread.join();
  if (streamed.empty() && !latestRawPartial.empty()) {
 	streamed = cleanPartialForDisplay(latestRawPartial);
  }
- if (!streamed.empty()) {
+	const bool hardCrash = error.find("crashed:") != std::string::npos;
+	if (!streamed.empty() && !hardCrash) {
  logWithLevel(OF_LOG_WARNING,
  	"Process failed but streamed output available (" + ofToString(streamed.size()) + " chars), using it.");
  result = streamed;
