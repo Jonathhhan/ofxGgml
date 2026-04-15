@@ -46,6 +46,7 @@ endif()
 
 option(ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
 option(OFXGGML_ENABLE_BENCHMARK_TESTS "Build benchmark tests (slower)" OFF)
+option(OFXGGML_ENABLE_RUNTIME_SOURCES "Build inference/script-source with stubs in headless mode" ON)
 
 if(ENABLE_COVERAGE)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -113,7 +114,7 @@ set(ADDON_SOURCES
     ../src/ofxGgmlProjectMemory.cpp
 )
 
-if(OFXGGML_WITH_OPENFRAMEWORKS)
+if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND ADDON_SOURCES
         ../src/ofxGgmlInference.cpp
         ../src/ofxGgmlScriptSource.cpp)
@@ -130,7 +131,7 @@ set(TEST_SOURCES
     test_integration.cpp
 )
 
-if(OFXGGML_WITH_OPENFRAMEWORKS)
+if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND TEST_SOURCES test_inference.cpp)
 endif()
 

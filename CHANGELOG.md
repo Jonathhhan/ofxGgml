@@ -13,6 +13,9 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ### Changed
 - Inference generation now uses prompt-cache flags with an auto-derived stable path when enabled.
+- Inference executable validation now aligns with process execution semantics: explicit file paths must point to regular files, and command names are accepted when resolvable via `PATH`.
+- Nonzero exit handling is now shared across `generate()` and `embed()`: exit `130` is treated as benign, while other nonzero exits only pass when valid output is produced.
+- Runtime output cleaning now uses a shared noise-line filter for both warning stripping and leading-noise trimming to reduce drift.
 - `ofxGgmlGuiExample` chat internet controls simplified:
   - removed redundant "Use internet context" toggle
   - removed "All modes" toggle from chat panel

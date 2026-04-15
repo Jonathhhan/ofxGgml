@@ -20,7 +20,7 @@ The `scripts/model-catalog.json` file contains SHA256 checksums for model verifi
 
 ### Current Status
 
-Both model presets currently have placeholder checksums with a "note" field indicating they need verification. These should be updated with actual checksums from the model publishers (Hugging Face).
+Model presets currently require maintainer-supplied SHA256 values from model publishers. Use `./scripts/update-model-checksums.sh` to populate them and `python3 scripts/validate-model-catalog.py` to validate catalog checksum formatting and completeness.
 
 ## Security Features Implemented
 

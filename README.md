@@ -496,6 +496,11 @@ The build output should be in `libs/ggml/build/src/` (e.g. `libggml.a`, `libggml
 
 ### llama-completion not found
 
+The addon accepts either:
+
+1. an absolute/relative executable file path, or
+2. a command name resolvable from `PATH`.
+
 The GUI example searches for `llama-completion`, `llama-cli`, or `llama` in:
 
 1. Custom path from GUI settings
@@ -561,6 +566,7 @@ ofxGgml implements several security best practices to protect against common vul
 ### Input Validation
 
 - **Path validation**: Model paths and executable paths are validated to ensure they exist and are regular files
+- **Executable resolution validation**: command names are validated against `PATH`, while explicit paths must resolve to regular files
 - **Path traversal protection**: Executable paths are checked for suspicious patterns like `..`
 - **Null byte filtering**: All file paths are checked for null bytes to prevent path injection attacks
 - **Canonical path resolution**: Paths are normalized to resolve symlinks and detect malicious redirects
