@@ -194,6 +194,7 @@ private:
 	ofxGgmlScriptSource scriptSource;
 	char scriptSourceGitHub[512] = {};               // "owner/repo" input
 	char scriptSourceBranch[128] = {};               // branch name, default "main"
+	char scriptSourceGitHubToken[512] = {};          // optional token override (not persisted)
 	char scriptSourceInternetUrl[1024] = {};         // internet URL input
 	int selectedScriptFileIndex = -1;
 	ofxGgmlChatAssistant chatAssistant;
@@ -204,6 +205,9 @@ private:
 	ofxGgmlCodeReview scriptCodeReview;
 	ofxGgmlProjectMemory scriptProjectMemory;
 	std::string lastScriptRequest;
+	std::vector<ofxGgmlCodeAssistantCommandSuggestion> cachedScriptVerificationCommands;
+	uint64_t cachedScriptVerificationGeneration = 0;
+	std::string cachedScriptVerificationRoot;
 
 	std::string buildScriptFilename() const;
 

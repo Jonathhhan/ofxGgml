@@ -6,6 +6,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <set>
@@ -172,7 +173,190 @@ std::string resolveWindowsLaunchPath(const std::string & executable) {
 
 	return executable;
 }
+
+std::string runWindowsProcessCaptureFirstLine(
+	const std::string & executable,
+	const std::vector<std::string> & arguments) {
+	if (trimCopy(executable).empty()) {
+		return {};
+	}
+
+	SECURITY_ATTRIBUTES sa {};
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = TRUE;
+
+	HANDLE readPipe = nullptr;
+	HANDLE writePipe = nullptr;
+	if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) {
+		return {};
+	}
+	SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
+
+	STARTUPINFOA si {};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESTDHANDLES;
+	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+	si.hStdOutput = writePipe;
+	si.hStdError = writePipe;
+
+	std::string commandLine = quoteWindowsArg(executable);
+	for (const auto & arg : arguments) {
+		commandLine.push_back(' ');
+		commandLine += quoteWindowsArg(arg);
+	}
+
+	std::vector<char> mutableCommandLine(commandLine.begin(), commandLine.end());
+	mutableCommandLine.push_back('\0');
+
+	PROCESS_INFORMATION pi {};
+	const BOOL ok = CreateProcessA(
+		nullptr,
+		mutableCommandLine.data(),
+		nullptr,
+		nullptr,
+		TRUE,
+		CREATE_NO_WINDOW,
+		nullptr,
+		nullptr,
+		&si,
+		&pi);
+	CloseHandle(writePipe);
+	if (!ok) {
+		CloseHandle(readPipe);
+		return {};
+	}
+
+	std::string output;
+	char buffer[512];
+	DWORD bytesRead = 0;
+	while (ReadFile(readPipe, buffer, sizeof(buffer) - 1, &bytesRead, nullptr) &&
+		bytesRead > 0) {
+		buffer[bytesRead] = '\0';
+		output += buffer;
+	}
+
+	WaitForSingleObject(pi.hProcess, INFINITE);
+	CloseHandle(pi.hThread);
+	CloseHandle(pi.hProcess);
+	CloseHandle(readPipe);
+
+	std::istringstream stream(output);
+	std::string line;
+	while (std::getline(stream, line)) {
+		line = trimCopy(line);
+		if (!line.empty()) {
+			return line;
+		}
+	}
+	return {};
+}
+
+std::string resolveWindowsMsbuildPath() {
+	static std::once_flag once;
+	static std::string cached;
+	std::call_once(once, []() {
+		const std::string programFilesX86 = getEnvVarString("ProgramFiles(x86)");
+		if (!programFilesX86.empty()) {
+			const std::filesystem::path vswherePath =
+				std::filesystem::path(programFilesX86) /
+				"Microsoft Visual Studio" / "Installer" / "vswhere.exe";
+			std::error_code ec;
+			if (std::filesystem::exists(vswherePath, ec) && !ec) {
+				cached = runWindowsProcessCaptureFirstLine(
+					vswherePath.string(),
+					{
+						"-latest",
+						"-products",
+						"*",
+						"-requires",
+						"Microsoft.Component.MSBuild",
+						"-find",
+						"MSBuild\\**\\Bin\\MSBuild.exe"
+					});
+			}
+		}
+
+		if (!cached.empty()) {
+			return;
+		}
+
+		const std::vector<std::filesystem::path> candidates = {
+			std::filesystem::path(getEnvVarString("ProgramFiles")) /
+				"Microsoft Visual Studio/18/Professional/MSBuild/Current/Bin/MSBuild.exe",
+			std::filesystem::path(getEnvVarString("ProgramFiles")) /
+				"Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe",
+			std::filesystem::path(getEnvVarString("ProgramFiles(x86)")) /
+				"Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe",
+			std::filesystem::path(getEnvVarString("ProgramFiles(x86)")) /
+				"Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe"
+		};
+		for (const auto & candidate : candidates) {
+			std::error_code ec;
+			if (!candidate.empty() && std::filesystem::exists(candidate, ec) && !ec) {
+				cached = candidate.string();
+				return;
+			}
+		}
+		cached = "MSBuild.exe";
+	});
+	return cached;
+}
 #endif
+
+std::string chooseBestVisualStudioProjectPath(
+	const std::vector<std::string> & changedFiles,
+	const ofxGgmlScriptSourceWorkspaceInfo * workspaceInfo) {
+	if (workspaceInfo == nullptr || workspaceInfo->visualStudioProjectPaths.empty()) {
+		return {};
+	}
+
+	const auto & projects = workspaceInfo->visualStudioProjectPaths;
+	const std::string activePath = toLowerCopy(workspaceInfo->activeVisualStudioPath);
+	if (!activePath.empty() &&
+		std::filesystem::path(activePath).extension().string() == ".vcxproj") {
+		for (const auto & project : projects) {
+			if (toLowerCopy(project) == activePath) {
+				return project;
+			}
+		}
+	}
+
+	if (workspaceInfo->hasExplicitVisualStudioProjectSelection &&
+		!trimCopy(workspaceInfo->selectedVisualStudioProjectPath).empty()) {
+		return workspaceInfo->selectedVisualStudioProjectPath;
+	}
+
+	if (changedFiles.empty()) {
+		return projects.front();
+	}
+
+	auto normalizePathForMatch = [](std::string value) {
+		std::replace(value.begin(), value.end(), '\\', '/');
+		return toLowerCopy(value);
+	};
+
+	size_t bestScore = 0;
+	std::string bestProject = projects.front();
+	for (const auto & project : projects) {
+		const std::string projectDir = normalizePathForMatch(
+			std::filesystem::path(project).parent_path().generic_string());
+		size_t score = 0;
+		for (const auto & changedFile : changedFiles) {
+			const std::string changedLower = normalizePathForMatch(changedFile);
+			if (!projectDir.empty() &&
+				(changedLower.rfind(projectDir + "/", 0) == 0 ||
+				 changedLower.find("/" + projectDir + "/") != std::string::npos ||
+				 changedLower == projectDir)) {
+				score = (std::max)(score, projectDir.size());
+			}
+		}
+		if (score > bestScore) {
+			bestScore = score;
+			bestProject = project;
+		}
+	}
+	return bestProject;
+}
 
 bool isValidExecutablePath(const std::string & path) {
 	if (path.empty()) return false;
@@ -812,6 +996,90 @@ bool writeWorkspaceFile(const std::filesystem::path & path, const std::string & 
 	return true;
 }
 
+std::filesystem::path makeShadowWorkspacePath(
+	const std::string & workspaceRoot,
+	const std::string & preferredRoot) {
+	if (!trimCopy(preferredRoot).empty()) {
+		return std::filesystem::path(preferredRoot);
+	}
+	const std::string stem = std::filesystem::path(workspaceRoot).filename().string();
+	const auto now = std::chrono::system_clock::now().time_since_epoch();
+	const auto stamp =
+		std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+	return std::filesystem::temp_directory_path() /
+		("ofxggml-shadow-" + stem + "-" + std::to_string(stamp));
+}
+
+bool copyWorkspaceTree(
+	const std::filesystem::path & sourceRoot,
+	const std::filesystem::path & destRoot,
+	std::vector<std::string> * messages) {
+	std::error_code ec;
+	std::filesystem::create_directories(destRoot, ec);
+	if (ec) {
+		if (messages != nullptr) {
+			messages->push_back("Failed to create shadow workspace root: " + destRoot.string());
+		}
+		return false;
+	}
+
+	auto it = std::filesystem::recursive_directory_iterator(
+		sourceRoot,
+		std::filesystem::directory_options::skip_permission_denied,
+		ec);
+	const auto end = std::filesystem::recursive_directory_iterator();
+	for (; it != end; it.increment(ec)) {
+		if (ec) {
+			if (messages != nullptr) {
+				messages->push_back("Shadow copy skipped entry after filesystem error.");
+			}
+			ec.clear();
+			continue;
+		}
+
+		const auto & entry = *it;
+		const auto relative = std::filesystem::relative(entry.path(), sourceRoot, ec);
+		if (ec) {
+			ec.clear();
+			continue;
+		}
+		const auto target = destRoot / relative;
+		if (entry.is_directory(ec)) {
+			std::filesystem::create_directories(target, ec);
+			ec.clear();
+			continue;
+		}
+
+		std::filesystem::create_directories(target.parent_path(), ec);
+		ec.clear();
+		std::filesystem::copy_file(
+			entry.path(),
+			target,
+			std::filesystem::copy_options::overwrite_existing,
+			ec);
+		if (ec && messages != nullptr) {
+			messages->push_back("Failed to copy into shadow workspace: " + entry.path().string());
+		}
+		ec.clear();
+	}
+	return true;
+}
+
+std::string normalizeTouchedPathRelativeToRoot(
+	const std::string & filePath,
+	const std::filesystem::path & root) {
+	std::error_code ec;
+	const std::filesystem::path input(filePath);
+	if (!input.is_absolute()) {
+		return input.generic_string();
+	}
+	const auto relative = std::filesystem::relative(input, root, ec);
+	if (ec) {
+		return {};
+	}
+	return relative.generic_string();
+}
+
 std::vector<std::string> collectUnifiedDiffChangedFiles(
 	const std::vector<ofxGgmlWorkspaceUnifiedDiffFile> & files) {
 	std::vector<std::string> changedFiles;
@@ -1444,46 +1712,92 @@ ofxGgmlWorkspaceApplyResult ofxGgmlWorkspaceAssistant::applyUnifiedDiff(
 std::vector<ofxGgmlCodeAssistantCommandSuggestion>
 ofxGgmlWorkspaceAssistant::suggestVerificationCommands(
 	const std::vector<std::string> & changedFiles,
-	const std::string & workspaceRoot) const {
+	const std::string & workspaceRoot,
+	const ofxGgmlScriptSourceWorkspaceInfo * workspaceInfo) const {
 	std::vector<ofxGgmlCodeAssistantCommandSuggestion> commands;
 	const auto normalized = normalizeChangedFiles(changedFiles);
 	if (trimCopy(workspaceRoot).empty()) {
 		return commands;
 	}
 
-#ifdef _WIN32
+	const std::string selectedProjectPath =
+		workspaceInfo != nullptr
+			? chooseBestVisualStudioProjectPath(normalized, workspaceInfo)
+			: std::string();
 	const std::string solutionPath =
-		findFirstWorkspaceFileByExtension(workspaceRoot, ".sln");
+		workspaceInfo != nullptr
+			? (workspaceInfo->hasVisualStudioSolution
+				? workspaceInfo->visualStudioSolutionPath
+				: std::string())
+			: findFirstWorkspaceFileByExtension(workspaceRoot, ".sln");
 	const std::string projectPath =
-		findFirstWorkspaceFileByExtension(workspaceRoot, ".vcxproj");
+		workspaceInfo != nullptr
+			? selectedProjectPath
+			: findFirstWorkspaceFileByExtension(workspaceRoot, ".vcxproj");
+	const std::string visualStudioConfiguration =
+		workspaceInfo != nullptr && !trimCopy(workspaceInfo->selectedVisualStudioConfiguration).empty()
+			? workspaceInfo->selectedVisualStudioConfiguration
+			: std::string("Release");
+	const std::string visualStudioPlatform =
+		workspaceInfo != nullptr && !trimCopy(workspaceInfo->selectedVisualStudioPlatform).empty()
+			? workspaceInfo->selectedVisualStudioPlatform
+			: std::string("x64");
+	const std::string defaultBuildDirectory =
+		workspaceInfo != nullptr
+			? workspaceInfo->defaultBuildDirectory
+			: std::string();
+
+#ifdef _WIN32
 	if (!solutionPath.empty() || !projectPath.empty()) {
 		ofxGgmlCodeAssistantCommandSuggestion vsBuild;
-		vsBuild.label = !solutionPath.empty()
-			? "build-visual-studio-solution"
-			: "build-visual-studio-project";
+		const bool preferProject = !projectPath.empty() &&
+			(workspaceInfo == nullptr ||
+			 !normalized.empty() ||
+			 (workspaceInfo != nullptr &&
+			  (workspaceInfo->hasExplicitVisualStudioProjectSelection ||
+			   (!trimCopy(workspaceInfo->activeVisualStudioPath).empty() &&
+				std::filesystem::path(workspaceInfo->activeVisualStudioPath).extension().string() == ".vcxproj"))));
+		vsBuild.label = preferProject
+			? "build-visual-studio-project"
+			: "build-visual-studio-solution";
 		vsBuild.workingDirectory = workspaceRoot;
-		vsBuild.executable = "MSBuild.exe";
+		vsBuild.executable =
+			workspaceInfo != nullptr && !trimCopy(workspaceInfo->msbuildPath).empty()
+				? workspaceInfo->msbuildPath
+				: resolveWindowsMsbuildPath();
 		vsBuild.arguments = {
-			!solutionPath.empty() ? solutionPath : projectPath,
+			preferProject ? projectPath : solutionPath,
 			"/t:Build",
-			"/p:Configuration=Release",
-			"/p:Platform=x64",
+			"/p:Configuration=" + visualStudioConfiguration,
+			"/p:Platform=" + visualStudioPlatform,
 			"/m"
 		};
-		vsBuild.expectedOutcome = !solutionPath.empty()
+		vsBuild.expectedOutcome = !preferProject
 			? "Visual Studio solution builds successfully"
 			: "Visual Studio project builds successfully";
 		commands.push_back(std::move(vsBuild));
 	}
 #endif
 
+	std::string testsBuildDir = "tests/build";
+	if (!trimCopy(defaultBuildDirectory).empty() &&
+		fileExistsWithinWorkspace(
+			workspaceRoot,
+			(std::filesystem::path(defaultBuildDirectory) / "Release").generic_string())) {
+		testsBuildDir = defaultBuildDirectory;
+	}
+
 	const bool testsBuildExists =
-		fileExistsWithinWorkspace(workspaceRoot, "tests/build");
+		fileExistsWithinWorkspace(workspaceRoot, testsBuildDir);
 	const bool testExeExists =
 #ifdef _WIN32
-		fileExistsWithinWorkspace(workspaceRoot, "tests/build/Release/ofxGgml-tests.exe");
+		fileExistsWithinWorkspace(
+			workspaceRoot,
+			(std::filesystem::path(testsBuildDir) / "Release" / "ofxGgml-tests.exe").generic_string());
 #else
-		fileExistsWithinWorkspace(workspaceRoot, "tests/build/ofxGgml-tests");
+		fileExistsWithinWorkspace(
+			workspaceRoot,
+			(std::filesystem::path(testsBuildDir) / "ofxGgml-tests").generic_string());
 #endif
 
 	const bool touchesCode = std::any_of(
@@ -1496,7 +1810,14 @@ ofxGgmlWorkspaceAssistant::suggestVerificationCommands(
 		build.label = "build-tests";
 		build.workingDirectory = workspaceRoot;
 		build.executable = "cmake";
-		build.arguments = {"--build", "tests/build", "--config", "Release", "--target", "ofxGgml-tests"};
+		build.arguments = {
+			"--build",
+			testsBuildDir,
+			"--config",
+			"Release",
+			"--target",
+			"ofxGgml-tests"
+		};
 		build.expectedOutcome = "test executable builds successfully";
 		commands.push_back(std::move(build));
 	}
@@ -1514,9 +1835,13 @@ ofxGgmlWorkspaceAssistant::suggestVerificationCommands(
 		test.label = "run-targeted-tests";
 		test.workingDirectory = workspaceRoot;
 #ifdef _WIN32
-		test.executable = "tests/build/Release/ofxGgml-tests.exe";
+		test.executable = (
+			std::filesystem::path(testsBuildDir) / "Release" / "ofxGgml-tests.exe")
+			.generic_string();
 #else
-		test.executable = "./tests/build/ofxGgml-tests";
+		test.executable = (
+			std::filesystem::path(".") / testsBuildDir / "ofxGgml-tests")
+			.generic_string();
 #endif
 		if (!tags.empty()) {
 			for (const auto & tag : tags) {
@@ -1530,6 +1855,103 @@ ofxGgmlWorkspaceAssistant::suggestVerificationCommands(
 	}
 
 	return commands;
+}
+
+std::string ofxGgmlWorkspaceAssistant::createShadowWorkspace(
+	const std::string & workspaceRoot,
+	const std::string & preferredRoot) const {
+	if (trimCopy(workspaceRoot).empty()) {
+		return {};
+	}
+	std::error_code ec;
+	const auto sourceRoot =
+		std::filesystem::weakly_canonical(std::filesystem::path(workspaceRoot), ec);
+	if (ec || sourceRoot.empty()) {
+		return {};
+	}
+
+	const auto shadowRoot = makeShadowWorkspacePath(
+		sourceRoot.string(),
+		preferredRoot);
+	std::filesystem::remove_all(shadowRoot, ec);
+	ec.clear();
+	std::vector<std::string> messages;
+	if (!copyWorkspaceTree(sourceRoot, shadowRoot, &messages)) {
+		return {};
+	}
+	return shadowRoot.string();
+}
+
+bool ofxGgmlWorkspaceAssistant::synchronizeShadowWorkspace(
+	const std::string & shadowWorkspaceRoot,
+	const std::string & workspaceRoot,
+	const std::vector<std::string> & touchedFiles,
+	std::vector<std::string> * messages) const {
+	if (trimCopy(shadowWorkspaceRoot).empty() || trimCopy(workspaceRoot).empty()) {
+		return false;
+	}
+	std::error_code ec;
+	const auto shadowRoot = std::filesystem::weakly_canonical(
+		std::filesystem::path(shadowWorkspaceRoot), ec);
+	if (ec || shadowRoot.empty()) {
+		return false;
+	}
+	ec.clear();
+	const auto destRoot = std::filesystem::weakly_canonical(
+		std::filesystem::path(workspaceRoot), ec);
+	if (ec || destRoot.empty()) {
+		return false;
+	}
+
+	bool success = true;
+	std::set<std::string> uniqueFiles;
+	for (const auto & touched : touchedFiles) {
+		const std::string relative =
+			normalizeTouchedPathRelativeToRoot(touched, shadowRoot);
+		if (!trimCopy(relative).empty()) {
+			uniqueFiles.insert(relative);
+		}
+	}
+
+	for (const auto & relative : uniqueFiles) {
+		const auto source = shadowRoot / std::filesystem::path(relative);
+		const auto target = destRoot / std::filesystem::path(relative);
+		if (std::filesystem::exists(source, ec) && !ec) {
+			std::filesystem::create_directories(target.parent_path(), ec);
+			ec.clear();
+			std::filesystem::copy_file(
+				source,
+				target,
+				std::filesystem::copy_options::overwrite_existing,
+				ec);
+			if (ec) {
+				success = false;
+				if (messages != nullptr) {
+					messages->push_back("Failed to sync file from shadow workspace: " + relative);
+				}
+				ec.clear();
+				continue;
+			}
+			if (messages != nullptr) {
+				messages->push_back("Synchronized from shadow workspace: " + relative);
+			}
+		} else {
+			ec.clear();
+			std::filesystem::remove(target, ec);
+			if (ec) {
+				success = false;
+				if (messages != nullptr) {
+					messages->push_back("Failed to delete original file after shadow verification: " + relative);
+				}
+				ec.clear();
+				continue;
+			}
+			if (messages != nullptr) {
+				messages->push_back("Deleted original file from shadow workspace result: " + relative);
+			}
+		}
+	}
+	return success;
 }
 
 ofxGgmlWorkspaceVerificationResult ofxGgmlWorkspaceAssistant::runVerification(
@@ -1574,6 +1996,28 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 	const std::string workspaceRoot = resolveWorkspaceRoot(
 		context,
 		workspaceSettings);
+	result.originalWorkspaceRoot = workspaceRoot;
+	result.executionWorkspaceRoot = workspaceRoot;
+
+	if (workspaceSettings.useShadowWorkspace &&
+		!trimCopy(workspaceRoot).empty() &&
+		!workspaceSettings.dryRun) {
+		result.shadowWorkspaceRoot = createShadowWorkspace(
+			workspaceRoot,
+			workspaceSettings.shadowWorkspaceRoot);
+		if (trimCopy(result.shadowWorkspaceRoot).empty()) {
+			result.applyResult.success = false;
+			result.applyResult.messages.push_back(
+				"Failed to create shadow workspace.");
+			result.verificationResult.success = false;
+			result.verificationResult.summary =
+				"Shadow workspace setup failed before apply.";
+			result.success = false;
+			return result;
+		}
+		result.usedShadowWorkspace = true;
+		result.executionWorkspaceRoot = result.shadowWorkspaceRoot;
+	}
 
 	ofxGgmlCodeAssistantRequest initialRequest = request;
 	if (initialRequest.action == ofxGgmlCodeAssistantAction::FixBuild &&
@@ -1598,6 +2042,10 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 
 	if (result.assistantAttempts.back().inference.success == false) {
 		result.success = false;
+		if (result.usedShadowWorkspace && !workspaceSettings.keepShadowWorkspace) {
+			std::error_code cleanupEc;
+			std::filesystem::remove_all(result.shadowWorkspaceRoot, cleanupEc);
+		}
 		return result;
 	}
 
@@ -1619,11 +2067,11 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 			transaction = hasUnifiedDiff
 				? beginUnifiedDiffTransaction(
 					currentStructured.unifiedDiff,
-					workspaceRoot,
+					result.executionWorkspaceRoot,
 					effectiveAllowedFiles)
 				: beginTransaction(
 					currentStructured.patchOperations,
-					workspaceRoot,
+					result.executionWorkspaceRoot,
 					effectiveAllowedFiles);
 			hadTransaction = true;
 			if (!transaction.validationResult.success &&
@@ -1677,9 +2125,19 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 					changedFiles.push_back(operation.filePath);
 				}
 			}
+			const ofxGgmlScriptSourceWorkspaceInfo * workspaceInfo = nullptr;
+			ofxGgmlScriptSourceWorkspaceInfo workspaceInfoSnapshot;
+			if (context.scriptSource != nullptr) {
+				const auto sourceType = context.scriptSource->getSourceType();
+				if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
+					workspaceInfoSnapshot = context.scriptSource->getWorkspaceInfo();
+					workspaceInfo = &workspaceInfoSnapshot;
+				}
+			}
 			verificationCommands = suggestVerificationCommands(
 				changedFiles,
-				workspaceRoot);
+				result.executionWorkspaceRoot,
+				workspaceInfo);
 		}
 
 		if (!workspaceSettings.runVerification ||
@@ -1691,6 +2149,29 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 				? "No verification commands were provided."
 				: "Verification skipped by settings.";
 			result.success = result.applyResult.success;
+			if (result.success &&
+				result.usedShadowWorkspace &&
+				workspaceSettings.syncShadowChangesOnSuccess &&
+				!workspaceSettings.dryRun) {
+				std::vector<std::string> syncMessages;
+				if (!synchronizeShadowWorkspace(
+						result.shadowWorkspaceRoot,
+						workspaceRoot,
+						result.applyResult.touchedFiles,
+						&syncMessages)) {
+					result.success = false;
+					result.applyResult.success = false;
+				}
+				result.synchronizedFiles = result.applyResult.touchedFiles;
+				result.applyResult.messages.insert(
+					result.applyResult.messages.end(),
+					syncMessages.begin(),
+					syncMessages.end());
+			}
+			if (result.usedShadowWorkspace && !workspaceSettings.keepShadowWorkspace) {
+				std::error_code cleanupEc;
+				std::filesystem::remove_all(result.shadowWorkspaceRoot, cleanupEc);
+			}
 			return result;
 		}
 
@@ -1700,8 +2181,32 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 			commandRunner);
 		result.verificationResult.attempts = attempt;
 		if (result.verificationResult.success) {
+			if (result.usedShadowWorkspace &&
+				workspaceSettings.syncShadowChangesOnSuccess &&
+				!workspaceSettings.dryRun) {
+				std::vector<std::string> syncMessages;
+				if (!synchronizeShadowWorkspace(
+						result.shadowWorkspaceRoot,
+						workspaceRoot,
+						result.applyResult.touchedFiles,
+						&syncMessages)) {
+					result.applyResult.success = false;
+					result.verificationResult.success = false;
+					result.verificationResult.summary +=
+						"\nShadow workspace synchronization failed.";
+				}
+				result.synchronizedFiles = result.applyResult.touchedFiles;
+				result.applyResult.messages.insert(
+					result.applyResult.messages.end(),
+					syncMessages.begin(),
+					syncMessages.end());
+			}
 			result.success = result.applyResult.success &&
 				result.verificationResult.success;
+			if (result.usedShadowWorkspace && !workspaceSettings.keepShadowWorkspace) {
+				std::error_code cleanupEc;
+				std::filesystem::remove_all(result.shadowWorkspaceRoot, cleanupEc);
+			}
 			return result;
 		}
 		if (workspaceSettings.rollbackOnVerificationFailure && hadTransaction) {
@@ -1761,5 +2266,9 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 	}
 
 	result.success = false;
+	if (result.usedShadowWorkspace && !workspaceSettings.keepShadowWorkspace) {
+		std::error_code cleanupEc;
+		std::filesystem::remove_all(result.shadowWorkspaceRoot, cleanupEc);
+	}
 	return result;
 }

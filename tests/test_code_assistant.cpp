@@ -180,6 +180,12 @@ TEST_CASE("Code assistant prompt preparation includes coding and symbol context"
 				!reference.targetSymbol.empty();
 		});
 	REQUIRE(preciseCaller != qualifiedSymbol->references.end());
+
+	const auto codeMap = assistant.buildCodeMap(context);
+	REQUIRE(codeMap.totalFiles >= 4);
+	REQUIRE(codeMap.totalSymbols >= 3);
+	REQUIRE_FALSE(codeMap.entries.empty());
+	REQUIRE(codeMap.entries.front().role.size() > 0);
 }
 
 TEST_CASE("Code assistant parser and run path expose structured task results", "[code_assistant]") {
@@ -188,6 +194,7 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 			"GOAL: Stabilize the helper implementation\n"
 			"APPROACH: Replace the old greeting and verify the file\n"
 			"STEP: Update the output string\n"
+			"ACCEPT: the UI shows the new greeting\n"
 			"FILE: src/main.txt | user-facing text | greet\n"
 			"PATCH: replace | src/main.txt | update greeting\n"
 			"SEARCH: hello\n"
@@ -196,15 +203,21 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 			"COMMAND: test | . | verify-tool | --fast\n"
 			"EXPECT: output contains ready\n"
 			"RETRY: true\n"
+			"TEST: greeting regression | tests/test_ui.cpp | covers the new greeting | ui-tests | [ui]\n"
+			"REVIEWER: correctness\n"
 			"FINDING: 1 | 0.95 | src/main.txt | 7 | Greeting is stale\n"
 			"DETAIL: The old text leaks into the UI path.\n"
 			"FIX: Replace the greeting before rendering.\n"
+			"CATEGORY: regression-risk\n"
+			"RISK-SCORE: 0.72\n"
+			"RISK-LEVEL: high\n"
 			"RISK: callers may rely on the old text\n"
 			"QUESTION: should we update docs too?\n";
 
 		const auto structured = ofxGgmlCodeAssistant::parseStructuredResult(text);
 		REQUIRE(structured.detectedStructuredOutput);
 		REQUIRE(structured.goalSummary == "Stabilize the helper implementation");
+		REQUIRE(structured.acceptanceCriteria.size() == 1);
 		REQUIRE(structured.filesToTouch.size() == 1);
 		REQUIRE(structured.patchOperations.size() == 1);
 		REQUIRE(structured.patchOperations.front().kind ==
@@ -213,15 +226,31 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		REQUIRE(structured.unifiedDiff.find("--- a/src/main.txt") != std::string::npos);
 		REQUIRE(structured.verificationCommands.size() == 1);
 		REQUIRE(structured.verificationCommands.front().retryOnFailure);
+		REQUIRE(structured.testSuggestions.size() == 1);
+		REQUIRE(structured.testSuggestions.front().commandTag == "[ui]");
 		REQUIRE(structured.reviewFindings.size() == 1);
 		REQUIRE(structured.reviewFindings.front().priority == 1);
 		REQUIRE(structured.reviewFindings.front().confidence > 0.9f);
+		REQUIRE(structured.reviewFindings.front().category == "regression-risk");
+		REQUIRE(structured.reviewFindings.front().reviewerPersona == "correctness");
 		REQUIRE(structured.reviewFindings.front().fixSuggestion.find("Replace") != std::string::npos);
+		REQUIRE(structured.reviewerSimulations.size() == 1);
+		REQUIRE(structured.riskAssessment.score > 0.7f);
+		REQUIRE(structured.riskAssessment.level == "high");
 		REQUIRE(structured.risks.size() == 1);
 		REQUIRE(structured.questions.size() == 1);
 	}
 
 	SECTION("Run returns structured metadata alongside inference output") {
+		const auto sourceDir = makeAssistantTestDir("run_with_codemap");
+		std::filesystem::create_directories(sourceDir / "src");
+		{
+			std::ofstream out(sourceDir / "src" / "path_helper.cpp");
+			out << "std::string normalizePath() { return \"old\"; }\n";
+		}
+		ofxGgmlScriptSource scriptSource;
+		REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
 		const std::string modelPath = createAssistantDummyModel();
 		const std::string exePath = createAssistantExecutable({
 			"GOAL: Normalize paths in the workspace",
@@ -243,10 +272,19 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		request.action = ofxGgmlCodeAssistantAction::Generate;
 		request.userInput = "Write a helper to normalize paths.";
 		request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+		request.specToCodeMode = true;
+		request.includeCodeMap = true;
+		request.synthesizeTests = true;
+		request.simulateReviewers = true;
+		request.acceptanceCriteria = {"normalize separators without changing callers"};
+		request.constraints = {"do not add dependencies"};
 		request.requestStructuredResult = true;
 		request.requestUnifiedDiff = true;
 
-		const auto result = assistant.run(modelPath, request);
+		ofxGgmlCodeAssistantContext context;
+		context.scriptSource = &scriptSource;
+
+		const auto result = assistant.run(modelPath, request, context);
 		REQUIRE(result.inference.success);
 		REQUIRE(result.prepared.requestsStructuredResult);
 		REQUIRE(result.structured.detectedStructuredOutput);
@@ -255,7 +293,60 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		REQUIRE(result.structured.unifiedDiff.find("+++ b/src/path_helper.cpp") != std::string::npos);
 		REQUIRE(result.structured.verificationCommands.size() == 1);
 		REQUIRE(result.structured.verificationCommands.front().executable == "runner");
+		REQUIRE_FALSE(result.structured.testSuggestions.empty());
+		REQUIRE_FALSE(result.structured.reviewerSimulations.empty());
+		REQUIRE(result.structured.riskAssessment.level.size() > 0);
+		REQUIRE(result.prepared.includedCodeMap);
 		REQUIRE(result.prepared.prompt.find("Generate high-quality code and short explanation") != std::string::npos);
+		REQUIRE(result.prepared.prompt.find("Semantic code map:") != std::string::npos);
+		REQUIRE(result.prepared.prompt.find("Acceptance criteria:") != std::string::npos);
+	}
+
+	SECTION("Spec-to-code mode prepares implementation, tests, and review metadata") {
+		const auto sourceDir = makeAssistantTestDir("spec_to_code");
+		{
+			std::ofstream out(sourceDir / "src.cpp");
+			out << "int answer() { return 41; }\n";
+		}
+		ofxGgmlScriptSource scriptSource;
+		REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+		const std::string modelPath = createAssistantDummyModel();
+		const std::string exePath = createAssistantExecutable({
+			"GOAL: Add a stable answer helper",
+			"APPROACH: Update the implementation and add verification",
+			"STEP: Write the helper",
+			"ACCEPT: answer() returns 42",
+			"FILE: src.cpp | update implementation | answer",
+			"PATCH: replace | src.cpp | fix return value",
+			"SEARCH: return 41;",
+			"REPLACE: return 42;",
+			"COMMAND: build | . | cmake | --build | tests/build",
+			"EXPECT: build passes"
+		});
+
+		ofxGgmlCodeAssistant assistant;
+		assistant.setCompletionExecutable(exePath);
+
+		ofxGgmlCodeAssistantSpecToCodeRequest request;
+		request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+		request.specification = "Implement a stable answer helper.";
+		request.acceptanceCriteria = {"answer() returns 42", "existing call sites still compile"};
+		request.constraints = {"keep the public API stable"};
+		request.allowedFiles = {"src.cpp"};
+		request.preservePublicApi = true;
+
+		ofxGgmlCodeAssistantContext context;
+		context.scriptSource = &scriptSource;
+
+		const auto result = assistant.runSpecToCode(modelPath, request, context);
+		REQUIRE(result.inference.success);
+		REQUIRE(result.prepared.includedCodeMap);
+		REQUIRE(result.structured.detectedStructuredOutput);
+		REQUIRE(result.structured.acceptanceCriteria.size() == 1);
+		REQUIRE_FALSE(result.structured.testSuggestions.empty());
+		REQUIRE_FALSE(result.structured.reviewerSimulations.empty());
+		REQUIRE(result.structured.riskAssessment.level.size() > 0);
 	}
 
 	SECTION("Specialized modes inject edit, fix-build, and grounded-doc constraints") {
@@ -326,5 +417,41 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		const auto result = assistant.runInlineCompletion(modelPath, request);
 		REQUIRE(result.inference.success);
 		REQUIRE(result.completion.find("cachedValue") != std::string::npos);
+	}
+
+	SECTION("Risk scoring and reviewer simulation react to broad risky changes") {
+		ofxGgmlCodeAssistant assistant;
+		ofxGgmlCodeAssistantRequest request;
+		request.action = ofxGgmlCodeAssistantAction::Refactor;
+		request.updateTests = true;
+		request.preservePublicApi = false;
+		request.forbidNewDependencies = false;
+
+		ofxGgmlCodeAssistantStructuredResult structured;
+		structured.detectedStructuredOutput = true;
+		structured.verificationCommands.clear();
+
+		ofxGgmlCodeAssistantPatchOperation patchA;
+		patchA.kind = ofxGgmlCodeAssistantPatchKind::ReplaceTextOp;
+		patchA.filePath = "src/core/api.h";
+		patchA.searchText = "old";
+		patchA.replacementText = "new";
+		structured.patchOperations.push_back(patchA);
+
+		ofxGgmlCodeAssistantPatchOperation patchB;
+		patchB.kind = ofxGgmlCodeAssistantPatchKind::DeleteFileOp;
+		patchB.filePath = "src/legacy.cpp";
+		structured.patchOperations.push_back(patchB);
+
+		const auto tests = assistant.synthesizeTests(request, structured, {});
+		REQUIRE_FALSE(tests.empty());
+
+		const auto reviewerPasses = assistant.simulateReviewerPasses(request, structured, {});
+		REQUIRE_FALSE(reviewerPasses.empty());
+
+		const auto risk = assistant.assessRisk(request, structured, {});
+		REQUIRE(risk.score > 0.6f);
+		REQUIRE((risk.level == "high" || risk.level == "critical"));
+		REQUIRE_FALSE(risk.reasons.empty());
 	}
 }

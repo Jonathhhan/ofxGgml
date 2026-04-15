@@ -158,6 +158,10 @@ endif()
 
 add_executable(ofxGgml-tests ${TEST_SOURCES} ${ADDON_SOURCES})
 
+if(NOT OFXGGML_WITH_OPENFRAMEWORKS)
+    target_compile_definitions(ofxGgml-tests PRIVATE OFXGGML_HEADLESS_STUBS=1)
+endif()
+
 set(GGML_OPTIONAL_LIBS)
 set(VULKAN_RUNTIME_LIBS)
 if(WIN32)

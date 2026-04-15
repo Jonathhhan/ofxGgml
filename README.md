@@ -30,7 +30,7 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, CLI capability probing, cutoff continuation, and source-grounded prompt building
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
 - `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
-- `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
+- `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, shadow-workspace safe apply, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
 - `ofxGgmlTextAssistant` for translation, summarization, rewriting, and reusable text-task prompts
 - `ofxGgmlCodeReview`, `ofxGgmlProjectMemory`, and `ofxGgmlScriptSource` helpers for local coding and multi-pass review workflows
 - `ofxGgmlScriptSource` now accepts local folders, Visual Studio `.sln` / `.vcxproj` workspaces, GitHub `owner/repo` values, full GitHub URLs, and branch-aware repo URLs
@@ -249,17 +249,17 @@ Use it when an app wants local chat behavior without duplicating prompt assembly
 
 `ofxGgmlCodeAssistant` lifts the scripting workflow out of the `GuiExample`. It builds coding prompts with language presets, project memory, repo/file context, focused-file snippets, semantic symbol retrieval, and reusable actions such as `Generate`, `Edit`, `Refactor`, `Review`, `FixBuild`, `GroundedDocs`, `ContinueTask`, and `ContinueCutoff`.
 
-It can also request structured task output so apps receive a machine-readable plan instead of only free-form prose. Structured responses can include file intents, patch operations, unified diffs, verification commands, review findings with severity/confidence, risks, open questions, and parsed build-error context.
+It can also request structured task output so apps receive a machine-readable plan instead of only free-form prose. Structured responses can include acceptance criteria, file intents, patch operations, unified diffs, synthesized test ideas, verification commands, review findings with severity/confidence, reviewer-simulation passes, risk scoring, open questions, and parsed build-error context.
 
 Use it when an app wants Copilot-style local coding assistance without duplicating prompt assembly, retrieval, and follow-up logic in UI code.
 
-Symbol context is no longer limited to file snippets. Apps can build a semantic index, query relevant definitions of `runInference` and likely callers, and feed that directly into coding or review prompts. When a local workspace exposes `compile_commands.json`, the assistant upgrades retrieval with compile-database-aware file coverage and range-based caller tracking.
+Symbol context is no longer limited to file snippets. Apps can build a semantic index, query relevant definitions of `runInference` and likely callers, and feed that directly into coding or review prompts. When a local workspace exposes `compile_commands.json`, the assistant upgrades retrieval with compile-database-aware file coverage and range-based caller tracking. For planning-heavy flows, `buildCodeMap(...)` exposes a compact semantic code map, while `runSpecToCode(...)` turns a feature specification into a structured implementation plan with tests, review passes, and risk metadata.
 
 For editor-style integrations, `prepareInlineCompletion(...)` and `runInlineCompletion(...)` provide cursor-aware completion prompts built from the text before and after the insertion point.
 
 ## Workspace Assistant Helpers
 
-`ofxGgmlWorkspaceAssistant` wraps `ofxGgmlCodeAssistant` with a workspace execution loop. It can validate structured patch operations inside a workspace root, validate and apply unified diffs with hunk matching, enforce an allow-list for edit mode, preview unified diffs, apply transactions with rollback data, auto-select verification commands from changed files, and request an updated remediation plan when verification fails.
+`ofxGgmlWorkspaceAssistant` wraps `ofxGgmlCodeAssistant` with a workspace execution loop. It can validate structured patch operations inside a workspace root, validate and apply unified diffs with hunk matching, enforce an allow-list for edit mode, preview unified diffs, apply transactions with rollback data, run edits inside a shadow workspace before syncing them back, auto-select verification commands from changed files, and request an updated remediation plan when verification fails.
 
 Use it when an app wants a local coding assistant that can move beyond "suggest code" into "plan, edit, verify, retry" without hardcoding file operations or command orchestration in UI code.
 

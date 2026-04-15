@@ -5,6 +5,7 @@
 #include "support/ofxGgmlScriptSource.h"
 
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -95,6 +96,28 @@ struct ofxGgmlCodeAssistantReviewFinding {
 	std::string title;
 	std::string description;
 	std::string fixSuggestion;
+	std::string category;
+	std::string reviewerPersona;
+};
+
+struct ofxGgmlCodeAssistantTestSuggestion {
+	std::string name;
+	std::string filePath;
+	std::string rationale;
+	std::string commandLabel;
+	std::string commandTag;
+	int priority = 2;
+};
+
+struct ofxGgmlCodeAssistantRiskAssessment {
+	float score = 0.0f;
+	std::string level;
+	std::vector<std::string> reasons;
+};
+
+struct ofxGgmlCodeAssistantReviewerSimulation {
+	std::string persona;
+	std::vector<ofxGgmlCodeAssistantReviewFinding> findings;
 };
 
 struct ofxGgmlCodeAssistantSymbolQuery {
@@ -122,6 +145,23 @@ struct ofxGgmlCodeAssistantSemanticIndex {
 	std::vector<ofxGgmlCodeAssistantSymbolReference> callers;
 };
 
+struct ofxGgmlCodeAssistantCodeMapEntry {
+	std::string scope;
+	std::string role;
+	std::vector<std::string> files;
+	std::vector<std::string> topSymbols;
+	int symbolCount = 0;
+};
+
+struct ofxGgmlCodeAssistantCodeMap {
+	std::string workspaceRoot;
+	std::string backendName;
+	uint64_t workspaceGeneration = 0;
+	int totalFiles = 0;
+	int totalSymbols = 0;
+	std::vector<ofxGgmlCodeAssistantCodeMapEntry> entries;
+};
+
 struct ofxGgmlCodeAssistantBuildError {
 	std::string filePath;
 	int line = 0;
@@ -145,11 +185,15 @@ struct ofxGgmlCodeAssistantStructuredResult {
 	std::string goalSummary;
 	std::string approachSummary;
 	std::vector<std::string> steps;
+	std::vector<std::string> acceptanceCriteria;
 	std::vector<ofxGgmlCodeAssistantFileIntent> filesToTouch;
 	std::vector<ofxGgmlCodeAssistantPatchOperation> patchOperations;
 	std::string unifiedDiff;
 	std::vector<ofxGgmlCodeAssistantCommandSuggestion> verificationCommands;
 	std::vector<ofxGgmlCodeAssistantReviewFinding> reviewFindings;
+	std::vector<ofxGgmlCodeAssistantTestSuggestion> testSuggestions;
+	std::vector<ofxGgmlCodeAssistantReviewerSimulation> reviewerSimulations;
+	ofxGgmlCodeAssistantRiskAssessment riskAssessment;
 	std::vector<std::string> risks;
 	std::vector<std::string> questions;
 };
@@ -179,13 +223,31 @@ struct ofxGgmlCodeAssistantRequest {
 	std::string labelOverride;
 	std::vector<std::string> allowedFiles;
 	std::vector<std::string> webUrls;
+	std::vector<std::string> acceptanceCriteria;
+	std::vector<std::string> constraints;
 	std::string buildErrors;
 	bool preservePublicApi = false;
 	bool updateTests = false;
 	bool forbidNewDependencies = false;
+	bool specToCodeMode = false;
+	bool synthesizeTests = false;
+	bool simulateReviewers = false;
+	bool includeCodeMap = false;
 	bool requestStructuredResult = false;
 	bool requestUnifiedDiff = false;
 	ofxGgmlCodeAssistantSymbolQuery symbolQuery;
+};
+
+struct ofxGgmlCodeAssistantSpecToCodeRequest {
+	ofxGgmlCodeLanguagePreset language;
+	std::string specification;
+	std::vector<std::string> acceptanceCriteria;
+	std::vector<std::string> constraints;
+	std::vector<std::string> allowedFiles;
+	bool preservePublicApi = false;
+	bool updateTests = true;
+	bool forbidNewDependencies = true;
+	bool requestUnifiedDiff = true;
 };
 
 struct ofxGgmlCodeAssistantInlineCompletionRequest {
@@ -218,10 +280,12 @@ struct ofxGgmlCodeAssistantPreparedPrompt {
 	bool includedRepoContext = false;
 	bool includedFocusedFile = false;
 	bool includedSymbolContext = false;
+	bool includedCodeMap = false;
 	bool requestsStructuredResult = false;
 	bool requestedUnifiedDiff = false;
 	std::vector<ofxGgmlCodeAssistantSymbol> retrievedSymbols;
 	ofxGgmlCodeAssistantSymbolContext retrievedSymbolContext;
+	ofxGgmlCodeAssistantCodeMap codeMap;
 };
 
 struct ofxGgmlCodeAssistantResult {
@@ -250,14 +314,35 @@ public:
 		const ofxGgmlInferenceSettings & inferenceSettings = {},
 		const ofxGgmlPromptSourceSettings & sourceSettings = {},
 		std::function<bool(const std::string &)> onChunk = nullptr) const;
+	ofxGgmlCodeAssistantResult runSpecToCode(
+		const std::string & modelPath,
+		const ofxGgmlCodeAssistantSpecToCodeRequest & request,
+		const ofxGgmlCodeAssistantContext & context = {},
+		const ofxGgmlInferenceSettings & inferenceSettings = {},
+		const ofxGgmlPromptSourceSettings & sourceSettings = {},
+		std::function<bool(const std::string &)> onChunk = nullptr) const;
 
 	std::vector<ofxGgmlCodeAssistantSymbol> retrieveSymbols(
 		const std::string & query,
 		const ofxGgmlCodeAssistantContext & context) const;
 	ofxGgmlCodeAssistantSemanticIndex buildSemanticIndex(
 		const ofxGgmlCodeAssistantContext & context) const;
+	ofxGgmlCodeAssistantCodeMap buildCodeMap(
+		const ofxGgmlCodeAssistantContext & context) const;
 	ofxGgmlCodeAssistantSymbolContext buildSymbolContext(
 		const ofxGgmlCodeAssistantSymbolQuery & query,
+		const ofxGgmlCodeAssistantContext & context) const;
+	std::vector<ofxGgmlCodeAssistantTestSuggestion> synthesizeTests(
+		const ofxGgmlCodeAssistantRequest & request,
+		const ofxGgmlCodeAssistantStructuredResult & structured,
+		const ofxGgmlCodeAssistantContext & context) const;
+	std::vector<ofxGgmlCodeAssistantReviewerSimulation> simulateReviewerPasses(
+		const ofxGgmlCodeAssistantRequest & request,
+		const ofxGgmlCodeAssistantStructuredResult & structured,
+		const ofxGgmlCodeAssistantContext & context) const;
+	ofxGgmlCodeAssistantRiskAssessment assessRisk(
+		const ofxGgmlCodeAssistantRequest & request,
+		const ofxGgmlCodeAssistantStructuredResult & structured,
 		const ofxGgmlCodeAssistantContext & context) const;
 	ofxGgmlCodeAssistantInlineCompletionPreparedPrompt prepareInlineCompletion(
 		const ofxGgmlCodeAssistantInlineCompletionRequest & request) const;
@@ -291,4 +376,8 @@ public:
 
 private:
 	ofxGgmlInference m_inference;
+	mutable std::mutex m_semanticCacheMutex;
+	mutable std::string m_cachedWorkspaceRoot;
+	mutable uint64_t m_cachedWorkspaceGeneration = 0;
+	mutable ofxGgmlCodeAssistantSemanticIndex m_cachedSemanticIndex;
 };

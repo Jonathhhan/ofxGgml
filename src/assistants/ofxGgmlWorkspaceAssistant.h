@@ -14,6 +14,10 @@ struct ofxGgmlWorkspaceSettings {
 	bool validatePatchesBeforeApply = true;
 	bool rollbackOnVerificationFailure = false;
 	bool autoSelectVerificationCommands = true;
+	bool useShadowWorkspace = false;
+	bool keepShadowWorkspace = false;
+	bool syncShadowChangesOnSuccess = true;
+	std::string shadowWorkspaceRoot;
 	bool dryRun = false;
 	int maxVerificationAttempts = 2;
 	bool autoRetryWithAssistant = true;
@@ -94,6 +98,11 @@ struct ofxGgmlWorkspaceResult {
 	std::vector<ofxGgmlCodeAssistantResult> assistantAttempts;
 	ofxGgmlWorkspaceApplyResult applyResult;
 	ofxGgmlWorkspaceVerificationResult verificationResult;
+	std::string originalWorkspaceRoot;
+	std::string executionWorkspaceRoot;
+	std::string shadowWorkspaceRoot;
+	std::vector<std::string> synchronizedFiles;
+	bool usedShadowWorkspace = false;
 	bool success = false;
 };
 
@@ -156,7 +165,16 @@ public:
 		ofxGgmlWorkspaceCommandRunner commandRunner = nullptr) const;
 	std::vector<ofxGgmlCodeAssistantCommandSuggestion> suggestVerificationCommands(
 		const std::vector<std::string> & changedFiles,
-		const std::string & workspaceRoot) const;
+		const std::string & workspaceRoot,
+		const ofxGgmlScriptSourceWorkspaceInfo * workspaceInfo = nullptr) const;
+	std::string createShadowWorkspace(
+		const std::string & workspaceRoot,
+		const std::string & preferredRoot = {}) const;
+	bool synchronizeShadowWorkspace(
+		const std::string & shadowWorkspaceRoot,
+		const std::string & workspaceRoot,
+		const std::vector<std::string> & touchedFiles,
+		std::vector<std::string> * messages = nullptr) const;
 
 	ofxGgmlWorkspaceResult runTask(
 		const std::string & modelPath,

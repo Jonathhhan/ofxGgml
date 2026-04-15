@@ -3,15 +3,32 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <regex>
+#include <set>
 #include <sstream>
 #include <thread>
+#include <unordered_set>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace {
 
 constexpr size_t kMaxCachedContentBytes = 16 * 1024 * 1024;
 constexpr size_t kMaxCachedEntryBytes = 2 * 1024 * 1024;
+constexpr auto kLocalMonitorPollInterval = std::chrono::milliseconds(1200);
+
+void hashCombine(uint64_t * seed, uint64_t value) {
+	if (seed == nullptr) {
+		return;
+	}
+	*seed ^= value + 0x9e3779b97f4a7c15ULL + (*seed << 6) + (*seed >> 2);
+}
 
 static size_t totalCachedBytes(const std::vector<ofxGgmlScriptSourceFileEntry> & files) {
 	size_t total = 0;
@@ -70,14 +87,425 @@ bool isWorkspaceMetadataPath(const std::filesystem::path & path) {
 		ext == ".rc";
 }
 
+uint64_t currentTimestampMs() {
+	return static_cast<uint64_t>(
+		std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch())
+			.count());
+}
+
+std::string normalizeRelativePath(
+	const std::filesystem::path & path,
+	const std::filesystem::path & basePath) {
+	std::error_code ec;
+	const auto relative = std::filesystem::relative(path, basePath, ec);
+	if (!ec && !relative.empty()) {
+		return relative.generic_string();
+	}
+	return path.lexically_normal().generic_string();
+}
+
+std::string readTextFile(const std::filesystem::path & path) {
+	std::ifstream in(path, std::ios::binary);
+	if (!in.is_open()) {
+		return {};
+	}
+	return std::string(
+		(std::istreambuf_iterator<char>(in)),
+		std::istreambuf_iterator<char>());
+}
+
+std::string trimCopy(const std::string & text) {
+	size_t start = 0;
+	while (start < text.size() &&
+		std::isspace(static_cast<unsigned char>(text[start]))) {
+		++start;
+	}
+	size_t end = text.size();
+	while (end > start &&
+		std::isspace(static_cast<unsigned char>(text[end - 1]))) {
+		--end;
+	}
+	return text.substr(start, end - start);
+}
+
+std::vector<std::string> splitLines(const std::string & text) {
+	std::vector<std::string> lines;
+	std::istringstream stream(text);
+	std::string line;
+	while (std::getline(stream, line)) {
+		if (!line.empty() && line.back() == '\r') {
+			line.pop_back();
+		}
+		lines.push_back(line);
+	}
+	return lines;
+}
+
+std::string getEnvVarString(const char * name) {
+	if (name == nullptr || *name == '\0') {
+		return {};
+	}
+#ifdef _WIN32
+	char * value = nullptr;
+	size_t len = 0;
+	const errno_t err = _dupenv_s(&value, &len, name);
+	if (err != 0 || value == nullptr || len == 0) {
+		if (value != nullptr) {
+			free(value);
+		}
+		return {};
+	}
+	std::string result(value);
+	free(value);
+	return result;
+#else
+	const char * value = std::getenv(name);
+	return value ? std::string(value) : std::string();
+#endif
+}
+
+bool pathExists(const std::filesystem::path & path) {
+	std::error_code ec;
+	return std::filesystem::exists(path, ec) && !ec;
+}
+
+#ifdef _WIN32
+std::string quoteWindowsArg(const std::string & arg) {
+	if (arg.empty()) {
+		return "\"\"";
+	}
+	const bool needsQuotes =
+		arg.find_first_of(" \t\"") != std::string::npos;
+	if (!needsQuotes) {
+		return arg;
+	}
+
+	std::string quoted = "\"";
+	size_t backslashes = 0;
+	for (char c : arg) {
+		if (c == '\\') {
+			++backslashes;
+			continue;
+		}
+		if (c == '"') {
+			quoted.append(backslashes * 2 + 1, '\\');
+			quoted.push_back('"');
+			backslashes = 0;
+			continue;
+		}
+		if (backslashes > 0) {
+			quoted.append(backslashes, '\\');
+			backslashes = 0;
+		}
+		quoted.push_back(c);
+	}
+	if (backslashes > 0) {
+		quoted.append(backslashes * 2, '\\');
+	}
+	quoted.push_back('"');
+	return quoted;
+}
+
+std::string runExecutableAndCaptureLine(
+	const std::string & executable,
+	const std::vector<std::string> & arguments) {
+	if (trimCopy(executable).empty()) {
+		return {};
+	}
+
+	std::string output;
+	SECURITY_ATTRIBUTES sa {};
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = TRUE;
+
+	HANDLE readPipe = nullptr;
+	HANDLE writePipe = nullptr;
+	if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) {
+		return {};
+	}
+	SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
+
+	STARTUPINFOA si {};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESTDHANDLES;
+	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+	si.hStdOutput = writePipe;
+	si.hStdError = writePipe;
+
+	std::string commandLine = quoteWindowsArg(executable);
+	for (const auto & arg : arguments) {
+		commandLine.push_back(' ');
+		commandLine += quoteWindowsArg(arg);
+	}
+
+	std::vector<char> mutableCommandLine(commandLine.begin(), commandLine.end());
+	mutableCommandLine.push_back('\0');
+
+	PROCESS_INFORMATION pi {};
+	const BOOL created = CreateProcessA(
+		nullptr,
+		mutableCommandLine.data(),
+		nullptr,
+		nullptr,
+		TRUE,
+		CREATE_NO_WINDOW,
+		nullptr,
+		nullptr,
+		&si,
+		&pi);
+	CloseHandle(writePipe);
+	if (!created) {
+		CloseHandle(readPipe);
+		return {};
+	}
+
+	char buffer[512];
+	DWORD bytesRead = 0;
+	while (ReadFile(readPipe, buffer, sizeof(buffer) - 1, &bytesRead, nullptr) &&
+		bytesRead > 0) {
+		buffer[bytesRead] = '\0';
+		output += buffer;
+	}
+
+	WaitForSingleObject(pi.hProcess, INFINITE);
+	CloseHandle(pi.hThread);
+	CloseHandle(pi.hProcess);
+	CloseHandle(readPipe);
+
+	for (const auto & line : splitLines(output)) {
+		const std::string trimmed = trimCopy(line);
+		if (!trimmed.empty()) {
+			return trimmed;
+		}
+	}
+	return {};
+}
+
+std::string resolveMsbuildPathViaVswhere() {
+	const std::string installerDir = getEnvVarString("ProgramFiles(x86)");
+	if (installerDir.empty()) {
+		return {};
+	}
+
+	const std::filesystem::path vswherePath =
+		std::filesystem::path(installerDir) /
+		"Microsoft Visual Studio" / "Installer" / "vswhere.exe";
+	if (!pathExists(vswherePath)) {
+		return {};
+	}
+
+	return runExecutableAndCaptureLine(
+		vswherePath.string(),
+		{
+			"-latest",
+			"-products",
+			"*",
+			"-requires",
+			"Microsoft.Component.MSBuild",
+			"-find",
+			"MSBuild\\**\\Bin\\MSBuild.exe"
+		});
+}
+
+std::string fallbackMsbuildPath() {
+	const std::vector<std::filesystem::path> candidates = {
+		std::filesystem::path(getEnvVarString("ProgramFiles")) /
+			"Microsoft Visual Studio/18/Professional/MSBuild/Current/Bin/MSBuild.exe",
+		std::filesystem::path(getEnvVarString("ProgramFiles")) /
+			"Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe",
+		std::filesystem::path(getEnvVarString("ProgramFiles(x86)")) /
+			"Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe",
+		std::filesystem::path(getEnvVarString("ProgramFiles(x86)")) /
+			"Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe"
+	};
+	for (const auto & candidate : candidates) {
+		if (pathExists(candidate)) {
+			return candidate.string();
+		}
+	}
+	return "MSBuild.exe";
+}
+#endif
+
+struct VisualStudioParseResult {
+	std::vector<ofxGgmlScriptSourceVisualStudioProjectInfo> projects;
+	std::vector<std::string> configurations;
+	std::vector<std::string> platforms;
+};
+
+VisualStudioParseResult parseVisualStudioSolution(
+	const std::filesystem::path & solutionPath,
+	const std::filesystem::path & rootPath) {
+	VisualStudioParseResult result;
+	const std::string text = readTextFile(solutionPath);
+	if (text.empty()) {
+		return result;
+	}
+
+	static const std::regex projectPattern(
+		R"(^Project\(\"[^\"]+\"\)\s*=\s*\"([^\"]+)\",\s*\"([^\"]+)\",\s*\"([^\"]+)\"\s*$)");
+	static const std::regex configPattern(
+		R"(^\s*([^\s=]+)\s*=\s*([^\s=]+)\s*$)");
+	bool insideConfigSection = false;
+	std::set<std::string> configs;
+	std::set<std::string> platforms;
+
+	for (const auto & rawLine : splitLines(text)) {
+		const std::string line = trimCopy(rawLine);
+		if (line.empty()) {
+			continue;
+		}
+
+		std::smatch projectMatch;
+		if (std::regex_match(line, projectMatch, projectPattern) &&
+			projectMatch.size() >= 4) {
+			const std::string projectPath =
+				std::filesystem::path(projectMatch[2].str()).generic_string();
+			if (normalizeLower(std::filesystem::path(projectPath).extension().string()) ==
+				".vcxproj") {
+				ofxGgmlScriptSourceVisualStudioProjectInfo projectInfo;
+				projectInfo.name = projectMatch[1].str();
+				projectInfo.relativePath = projectPath;
+				projectInfo.projectGuid = projectMatch[3].str();
+				result.projects.push_back(std::move(projectInfo));
+			}
+			continue;
+		}
+
+		if (line.find("GlobalSection(SolutionConfigurationPlatforms)") !=
+			std::string::npos) {
+			insideConfigSection = true;
+			continue;
+		}
+		if (insideConfigSection && line.find("EndGlobalSection") != std::string::npos) {
+			insideConfigSection = false;
+			continue;
+		}
+		if (!insideConfigSection) {
+			continue;
+		}
+
+		std::smatch configMatch;
+		if (!std::regex_match(line, configMatch, configPattern) ||
+			configMatch.size() < 2) {
+			continue;
+		}
+		const std::string configPlatform = configMatch[1].str();
+		const size_t sep = configPlatform.find('|');
+		if (sep == std::string::npos) {
+			continue;
+		}
+		configs.insert(configPlatform.substr(0, sep));
+		platforms.insert(configPlatform.substr(sep + 1));
+	}
+
+	result.configurations.assign(configs.begin(), configs.end());
+	result.platforms.assign(platforms.begin(), platforms.end());
+	std::sort(result.projects.begin(), result.projects.end(),
+		[](const ofxGgmlScriptSourceVisualStudioProjectInfo & a,
+			const ofxGgmlScriptSourceVisualStudioProjectInfo & b) {
+			return a.relativePath < b.relativePath;
+		});
+	return result;
+}
+
+ofHttpResponse performHttpRequest(
+	const std::string & url,
+	const std::string & authToken,
+	const std::map<std::string, std::string> & extraHeaders = {}) {
+#ifdef OFXGGML_HEADLESS_STUBS
+	(void) authToken;
+	(void) extraHeaders;
+	return ofLoadURL(url);
+#else
+	ofHttpRequest request(url, url, false, true, false);
+	request.method = ofHttpRequest::GET;
+	request.headers["Accept"] = "application/vnd.github+json";
+	request.headers["User-Agent"] = "ofxGgml/1.0.0";
+	for (const auto & pair : extraHeaders) {
+		request.headers[pair.first] = pair.second;
+	}
+	if (!authToken.empty()) {
+		request.headers["Authorization"] = "Bearer " + authToken;
+	}
+	ofURLFileLoader loader;
+	return loader.handleRequest(request);
+#endif
+}
+
+std::string parseGitHubMessage(const std::string & bodyText) {
+	const ofJson json = ofJson::parse(bodyText, nullptr, false);
+	if (!json.is_discarded() && json.is_object()) {
+		if (json.contains("message")) {
+			return json.value("message", "");
+		}
+	}
+	return {};
+}
+
+std::string buildGitHubDiagnostic(
+	int status,
+	const std::string & bodyText,
+	bool hasToken) {
+	const std::string apiMessage = parseGitHubMessage(bodyText);
+	if (status == 401 || status == 403) {
+		const bool looksLikeRateLimit =
+			normalizeLower(apiMessage).find("rate limit") != std::string::npos;
+		if (looksLikeRateLimit) {
+			return hasToken
+				? "GitHub API rate limit reached. Wait or use a higher-limit token."
+				: "GitHub API rate limit reached. Set GITHUB_TOKEN or GH_TOKEN for higher limits.";
+		}
+		return hasToken
+			? "GitHub API request was rejected. Check the configured token permissions."
+			: "GitHub API request was rejected. Configure GITHUB_TOKEN or GH_TOKEN if the repo needs authentication.";
+	}
+	if (status == 404) {
+		return "GitHub repository or branch was not found.";
+	}
+	if (status <= 0) {
+		return "GitHub request failed before receiving a response.";
+	}
+	if (!apiMessage.empty()) {
+		return "GitHub API error: " + apiMessage;
+	}
+	return "GitHub API error: HTTP " + ofToString(status);
+}
+
+std::string chooseDefaultBuildDirectory(
+	const std::filesystem::path & rootPath,
+	const std::string & compilationDatabasePath) {
+	if (!compilationDatabasePath.empty()) {
+		const std::filesystem::path dbPath = rootPath / compilationDatabasePath;
+		if (pathExists(dbPath.parent_path())) {
+			return normalizeRelativePath(dbPath.parent_path(), rootPath);
+		}
+	}
+
+	const std::vector<std::filesystem::path> candidates = {
+		rootPath / "build",
+		rootPath / "out/build",
+		rootPath / "tests/build"
+	};
+	for (const auto & candidate : candidates) {
+		if (pathExists(candidate)) {
+			return normalizeRelativePath(candidate, rootPath);
+		}
+	}
+	return {};
+}
+
 }
 
 ofxGgmlScriptSource::~ofxGgmlScriptSource() {
 	cancelFetchWorker("Fetch canceled: source destroyed");
+	stopLocalMonitor();
 }
 
 void ofxGgmlScriptSource::clear() {
 	cancelFetchWorker("Fetch canceled: source cleared");
+	stopLocalMonitor();
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_sourceType = ofxGgmlScriptSourceType::None;
 	m_localFolderPath.clear();
@@ -92,6 +520,7 @@ void ofxGgmlScriptSource::clear() {
 
 void ofxGgmlScriptSource::setGitHubMode() {
 	cancelFetchWorker("Fetch canceled: switched to GitHub mode");
+	stopLocalMonitor();
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_sourceType = ofxGgmlScriptSourceType::GitHubRepo;
 	m_localFolderPath.clear();
@@ -103,6 +532,7 @@ void ofxGgmlScriptSource::setGitHubMode() {
 
 void ofxGgmlScriptSource::setInternetMode() {
 	cancelFetchWorker("Fetch canceled: switched to Internet mode");
+	stopLocalMonitor();
 	std::lock_guard<std::mutex> lock(m_mutex);
 	if (m_sourceType != ofxGgmlScriptSourceType::Internet) {
 		m_internetUrls.clear();
@@ -136,13 +566,21 @@ std::string ofxGgmlScriptSource::getPreferredExtension() const {
 
 bool ofxGgmlScriptSource::setLocalFolder(const std::string & path) {
 	cancelFetchWorker("Fetch canceled: switched to local folder");
-	std::lock_guard<std::mutex> lock(m_mutex);
-	m_sourceType = ofxGgmlScriptSourceType::LocalFolder;
-	m_localFolderPath = path;
-	m_gitHubOwnerRepo.clear();
-	m_gitHubBranch.clear();
-	m_internetUrls.clear();
-	return scanLocalFolderLocked();
+	stopLocalMonitor();
+	bool success = false;
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_sourceType = ofxGgmlScriptSourceType::LocalFolder;
+		m_localFolderPath = path;
+		m_gitHubOwnerRepo.clear();
+		m_gitHubBranch.clear();
+		m_internetUrls.clear();
+		success = scanLocalFolderLocked();
+	}
+	if (success) {
+		startLocalMonitor();
+	}
+	return success;
 }
 
 bool ofxGgmlScriptSource::setVisualStudioWorkspace(const std::string & path) {
@@ -176,35 +614,59 @@ bool ofxGgmlScriptSource::setVisualStudioWorkspace(const std::string & path) {
 	}
 
 	std::lock_guard<std::mutex> lock(m_mutex);
+	m_workspaceInfo.activeVisualStudioPath =
+		normalizeRelativePath(workspacePath, root);
 	if (!isDirectory) {
 		const std::string ext = normalizeLower(workspacePath.extension().string());
 		if (ext == ".sln") {
 			m_workspaceInfo.hasVisualStudioSolution = true;
 			m_workspaceInfo.visualStudioSolutionPath =
-				std::filesystem::relative(workspacePath, root, ec).generic_string();
-			if (ec) {
-				m_workspaceInfo.visualStudioSolutionPath = workspacePath.filename().string();
-			}
+				normalizeRelativePath(workspacePath, root);
 		} else if (ext == ".vcxproj") {
-			const std::string projectRel =
-				std::filesystem::relative(workspacePath, root, ec).generic_string();
 			const std::string normalizedProject =
-				ec ? workspacePath.filename().string() : projectRel;
+				normalizeRelativePath(workspacePath, root);
 			if (std::find(
 					m_workspaceInfo.visualStudioProjectPaths.begin(),
 					m_workspaceInfo.visualStudioProjectPaths.end(),
 					normalizedProject) ==
 				m_workspaceInfo.visualStudioProjectPaths.end()) {
 				m_workspaceInfo.visualStudioProjectPaths.insert(
-					m_workspaceInfo.visualStudioProjectPaths.begin(),
-					normalizedProject);
+						m_workspaceInfo.visualStudioProjectPaths.begin(),
+						normalizedProject);
 			}
+			m_workspaceInfo.selectedVisualStudioProjectPath = normalizedProject;
+			m_workspaceInfo.hasExplicitVisualStudioProjectSelection = true;
 		}
 	}
 	if (m_workspaceInfo.hasVisualStudioSolution ||
 		!m_workspaceInfo.visualStudioProjectPaths.empty()) {
 		m_status = "Loaded Visual Studio workspace";
 	}
+	return true;
+}
+
+bool ofxGgmlScriptSource::configureVisualStudioWorkspace(
+	const std::string & projectPath,
+	const std::string & configuration,
+	const std::string & platform) {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	if (m_sourceType != ofxGgmlScriptSourceType::LocalFolder) {
+		return false;
+	}
+
+	if (!trim(projectPath).empty()) {
+		m_workspaceInfo.selectedVisualStudioProjectPath =
+			std::filesystem::path(projectPath).generic_string();
+		m_workspaceInfo.hasExplicitVisualStudioProjectSelection = true;
+	}
+	if (!trim(configuration).empty()) {
+		m_workspaceInfo.selectedVisualStudioConfiguration = trim(configuration);
+	}
+	if (!trim(platform).empty()) {
+		m_workspaceInfo.selectedVisualStudioPlatform = trim(platform);
+	}
+	m_workspaceInfo.lastScanTimestampMs = currentTimestampMs();
+	++m_workspaceInfo.workspaceGeneration;
 	return true;
 }
 
@@ -252,7 +714,13 @@ bool ofxGgmlScriptSource::setGitHubRepoFromInput(
 	const std::string & branchHint) {
 	std::string ownerRepo;
 	std::string branch;
-	if (!parseGitHubInput(ownerRepoOrUrl, branchHint, &ownerRepo, &branch)) {
+	std::string focusedPath;
+	if (!parseGitHubInput(
+			ownerRepoOrUrl,
+			branchHint,
+			&ownerRepo,
+			&branch,
+			&focusedPath)) {
 		std::lock_guard<std::mutex> lock(m_mutex);
 		m_sourceType = ofxGgmlScriptSourceType::GitHubRepo;
 		m_gitHubOwnerRepo = trim(ownerRepoOrUrl);
@@ -262,7 +730,19 @@ bool ofxGgmlScriptSource::setGitHubRepoFromInput(
 		clearWorkspaceInfoLocked();
 		return false;
 	}
-	return setGitHubRepo(ownerRepo, branch);
+	if (!setGitHubRepo(ownerRepo, branch)) {
+		return false;
+	}
+
+	std::lock_guard<std::mutex> lock(m_mutex);
+	m_workspaceInfo.gitHubFocusedPath =
+		std::filesystem::path(focusedPath).generic_string();
+	return true;
+}
+
+void ofxGgmlScriptSource::setGitHubAuthToken(const std::string & token) {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	m_gitHubAuthToken = trim(token);
 }
 
 void ofxGgmlScriptSource::setInternetUrls(const std::vector<std::string> & urls) {
@@ -360,6 +840,8 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 	std::string ownerRepo;
 	std::string branch;
 	std::string preferredExt;
+	std::string focusedPath;
+	std::string authToken;
 	ofxGgmlScriptSourceType sourceType;
 	uint64_t generation = 0;
 	{
@@ -372,11 +854,18 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 		ownerRepo = m_gitHubOwnerRepo;
 		branch = m_gitHubBranch;
 		preferredExt = m_preferredExtension;
+		focusedPath = m_workspaceInfo.gitHubFocusedPath;
+		authToken = m_gitHubAuthToken.empty()
+			? getEnvVarString("GITHUB_TOKEN")
+			: m_gitHubAuthToken;
+		if (authToken.empty()) {
+			authToken = getEnvVarString("GH_TOKEN");
+		}
 		if (!isValidOwnerRepo(ownerRepo)) {
 			m_status = "Invalid repo format (use owner/repo)";
 			return false;
 		}
-		if (!isValidBranch(branch)) {
+		if (!branch.empty() && !isValidBranch(branch)) {
 			m_status = "Invalid branch name";
 			return false;
 		}
@@ -388,84 +877,188 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 	}
 	m_fetching.store(true, std::memory_order_release);
 
-	const std::string apiUrl = "https://api.github.com/repos/" + ownerRepo +
-		(branch.empty() ? "" : "/git/trees/" + branch + "?recursive=1");
-
-	std::thread worker([this, generation, apiUrl, ownerRepo, branch, preferredExt, sourceType]() {
+	std::thread worker([this,
+			generation,
+			ownerRepo,
+			branch,
+			preferredExt,
+			focusedPath,
+			authToken,
+			sourceType]() {
 		std::vector<ofxGgmlScriptSourceFileEntry> entries;
 		std::string status;
-		bool hadError = false;
 		std::string resolvedBranch = branch;
-		if (resolvedBranch.empty()) {
-			ofHttpResponse repoResponse = ofLoadURL("https://api.github.com/repos/" + ownerRepo);
-			if (repoResponse.status >= 200 && repoResponse.status < 300) {
-				ofJson repoJson = ofJson::parse(repoResponse.data.getText(), nullptr, false);
-				if (!repoJson.is_discarded()) {
-					resolvedBranch = repoJson.value("default_branch", "");
-				}
+		std::string defaultBranch;
+		std::string resolvedCommitSha;
+		std::string diagnostic;
+		bool hadError = false;
+
+		const auto repoResponse = performHttpRequest(
+			"https://api.github.com/repos/" + ownerRepo,
+			authToken);
+		if (repoResponse.status >= 200 && repoResponse.status < 300) {
+			const ofJson repoJson =
+				ofJson::parse(repoResponse.data.getText(), nullptr, false);
+			if (!repoJson.is_discarded()) {
+				defaultBranch = repoJson.value("default_branch", "");
 			}
-			if (resolvedBranch.empty()) {
-				resolvedBranch = "main";
+		} else if (repoResponse.status != 0) {
+			diagnostic = buildGitHubDiagnostic(
+				repoResponse.status,
+				repoResponse.data.getText(),
+				!authToken.empty());
+		}
+
+		if (resolvedBranch.empty()) {
+			resolvedBranch = defaultBranch;
+		}
+		if (resolvedBranch.empty()) {
+			status = diagnostic.empty()
+				? "Failed to resolve default GitHub branch"
+				: diagnostic;
+			hadError = true;
+		}
+
+		if (!hadError) {
+			const auto branchResponse = performHttpRequest(
+				"https://api.github.com/repos/" + ownerRepo + "/branches/" + resolvedBranch,
+				authToken);
+			if (branchResponse.status >= 200 && branchResponse.status < 300) {
+				const ofJson branchJson =
+					ofJson::parse(branchResponse.data.getText(), nullptr, false);
+				if (!branchJson.is_discarded() &&
+					branchJson.contains("commit") &&
+					branchJson["commit"].is_object()) {
+					resolvedCommitSha =
+						branchJson["commit"].value("sha", "");
+				}
+			} else {
+				diagnostic = buildGitHubDiagnostic(
+					branchResponse.status,
+					branchResponse.data.getText(),
+					!authToken.empty());
 			}
 		}
-		const std::string treeApiUrl = "https://api.github.com/repos/" + ownerRepo +
-			"/git/trees/" + resolvedBranch + "?recursive=1";
-		const std::string rawPrefix = "https://raw.githubusercontent.com/" +
-			ownerRepo + "/" + resolvedBranch + "/";
 
-		ofHttpResponse response = ofLoadURL(treeApiUrl);
-		if (m_cancelFetch.load(std::memory_order_acquire) || m_fetchGeneration.load(std::memory_order_acquire) != generation) {
+		if (!hadError && resolvedCommitSha.empty()) {
+			status = diagnostic.empty()
+				? "Failed to resolve GitHub branch commit"
+				: diagnostic;
+			hadError = true;
+		}
+
+		const std::string cacheKey =
+			ownerRepo + "|" + resolvedBranch + "|" + resolvedCommitSha + "|" +
+			std::filesystem::path(focusedPath).generic_string() + "|" + preferredExt;
+		if (!hadError) {
+			std::lock_guard<std::mutex> lock(m_mutex);
+			const auto cacheIt = m_gitHubTreeCache.find(cacheKey);
+			if (cacheIt != m_gitHubTreeCache.end()) {
+				entries = cacheIt->second.entries;
+				status = ofToString(entries.size()) +
+					" files from GitHub (" + resolvedBranch + " @ " +
+					resolvedCommitSha.substr(0, (std::min<size_t>)(resolvedCommitSha.size(), 12)) +
+					", cached)";
+			}
+		}
+
+		if (m_cancelFetch.load(std::memory_order_acquire) ||
+			m_fetchGeneration.load(std::memory_order_acquire) != generation) {
 			m_fetching.store(false, std::memory_order_release);
 			return;
 		}
-		if (response.status < 200 || response.status >= 300) {
-			if (response.status == 404) {
-				status = "Repo not found";
-			} else {
-				status = "GitHub API error: " + ofToString(response.status);
-			}
-			hadError = true;
-		} else {
-			const std::string body = response.data.getText();
-			ofJson json = ofJson::parse(body, nullptr, false);
-			if (json.is_discarded() || !json.contains("tree") || !json["tree"].is_array()) {
-				status = "Failed to parse GitHub response";
+
+		if (!hadError && entries.empty()) {
+			const auto treeResponse = performHttpRequest(
+				"https://api.github.com/repos/" + ownerRepo +
+					"/git/trees/" + resolvedCommitSha + "?recursive=1",
+				authToken);
+			if (treeResponse.status < 200 || treeResponse.status >= 300) {
+				status = buildGitHubDiagnostic(
+					treeResponse.status,
+					treeResponse.data.getText(),
+					!authToken.empty());
 				hadError = true;
 			} else {
-				for (const auto & item : json["tree"]) {
-					if (m_cancelFetch.load(std::memory_order_acquire) || m_fetchGeneration.load(std::memory_order_acquire) != generation) {
-						m_fetching.store(false, std::memory_order_release);
-						return;
+				const ofJson json =
+					ofJson::parse(treeResponse.data.getText(), nullptr, false);
+				if (json.is_discarded() || !json.contains("tree") ||
+					!json["tree"].is_array()) {
+					status = "Failed to parse GitHub tree response";
+					hadError = true;
+				} else {
+					const std::string normalizedFocusedPath =
+						std::filesystem::path(focusedPath).generic_string();
+					const std::string rawPrefix =
+						"https://raw.githubusercontent.com/" +
+						ownerRepo + "/" + resolvedCommitSha + "/";
+					for (const auto & item : json["tree"]) {
+						if (m_cancelFetch.load(std::memory_order_acquire) ||
+							m_fetchGeneration.load(std::memory_order_acquire) != generation) {
+							m_fetching.store(false, std::memory_order_release);
+							return;
+						}
+						if (!item.is_object() || item.value("type", "") != "blob") {
+							continue;
+						}
+
+						const std::string path = item.value("path", "");
+						if (!isSafeRepoPath(path)) {
+							continue;
+						}
+						if (!normalizedFocusedPath.empty()) {
+							const bool exactMatch = path == normalizedFocusedPath;
+							const bool prefixMatch =
+								path.rfind(normalizedFocusedPath + "/", 0) == 0;
+							if (!exactMatch && !prefixMatch) {
+								continue;
+							}
+						}
+
+						const std::filesystem::path filePath(path);
+						const std::string ext =
+							normalizeLower(filePath.extension().string());
+						bool include =
+							hasSourceExtension(ext, true) ||
+							isWorkspaceMetadataPath(filePath);
+						if (!preferredExt.empty() && !isWorkspaceMetadataPath(filePath)) {
+							include = (ext == preferredExt);
+						}
+						if (!include) {
+							continue;
+						}
+
+						ofxGgmlScriptSourceFileEntry entry;
+						entry.name = path;
+						entry.fullPath = rawPrefix + path;
+						entry.isDirectory = false;
+						entries.push_back(std::move(entry));
 					}
-					if (!item.is_object()) continue;
-					const std::string type = item.value("type", "");
-					if (type != "blob") continue;
 
-					const std::string path = item.value("path", "");
-					if (!isSafeRepoPath(path)) continue;
-
-					const std::filesystem::path p(path);
-					const std::string ext = normalizeLower(p.extension().string());
-					bool include = hasSourceExtension(ext, true) || isWorkspaceMetadataPath(p);
-					if (!preferredExt.empty() && !isWorkspaceMetadataPath(p)) {
-						include = (ext == preferredExt);
-					}
-					if (!include) continue;
-
-					ofxGgmlScriptSourceFileEntry fe;
-					fe.name = path;
-					fe.fullPath = rawPrefix + path;
-					fe.isDirectory = false;
-					entries.push_back(std::move(fe));
+					std::sort(entries.begin(), entries.end(),
+						[](const ofxGgmlScriptSourceFileEntry & a,
+							const ofxGgmlScriptSourceFileEntry & b) {
+							return a.name < b.name;
+						});
+					status = ofToString(entries.size()) + " files from GitHub (" +
+						resolvedBranch + " @ " +
+						resolvedCommitSha.substr(0, (std::min<size_t>)(resolvedCommitSha.size(), 12)) +
+						")";
 				}
-
-				std::sort(entries.begin(), entries.end(),
-					[](const ofxGgmlScriptSourceFileEntry & a,
-						const ofxGgmlScriptSourceFileEntry & b) {
-						return a.name < b.name;
-					});
-				status = ofToString(entries.size()) + " files from GitHub (" + resolvedBranch + ")";
 			}
+		}
+
+		if (!hadError && !entries.empty()) {
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_gitHubTreeCache[cacheKey] = GitHubTreeCacheEntry{
+				ownerRepo,
+				resolvedBranch,
+				resolvedCommitSha,
+				std::filesystem::path(focusedPath).generic_string(),
+				preferredExt,
+				entries,
+				currentTimestampMs()
+			};
 		}
 
 		if (m_cancelFetch.load(std::memory_order_acquire) || m_fetchGeneration.load(std::memory_order_acquire) != generation) {
@@ -479,6 +1072,17 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 				m_fetchGeneration.load(std::memory_order_acquire) == generation) {
 				m_files = std::move(entries);
 				m_gitHubBranch = resolvedBranch;
+				m_workspaceInfo.workspaceRoot = ownerRepo;
+				m_workspaceInfo.workspaceLabel = ownerRepo;
+				m_workspaceInfo.gitHubDefaultBranch = defaultBranch;
+				m_workspaceInfo.gitHubResolvedCommitSha = resolvedCommitSha;
+				m_workspaceInfo.gitHubFocusedPath =
+					std::filesystem::path(focusedPath).generic_string();
+				m_workspaceInfo.gitHubDiagnostic = diagnostic;
+				m_workspaceInfo.gitHubTreeCached =
+					status.find("cached") != std::string::npos;
+				m_workspaceInfo.lastScanTimestampMs = currentTimestampMs();
+				++m_workspaceInfo.workspaceGeneration;
 				m_status = status;
 				pushFetchDiagnosticLocked(
 					hadError ? "error" : "complete",
@@ -716,6 +1320,88 @@ void ofxGgmlScriptSource::clearWorkspaceInfoLocked() {
 	m_workspaceInfo = {};
 }
 
+void ofxGgmlScriptSource::refreshWorkspaceInfoLocked(
+	const std::string & requestedVisualStudioPath) {
+	if (trim(m_localFolderPath).empty()) {
+		clearWorkspaceInfoLocked();
+		return;
+	}
+	m_workspaceInfo = buildWorkspaceInfoForFolder(
+		m_localFolderPath,
+		m_workspaceInfo,
+		requestedVisualStudioPath);
+	m_workspaceInfo.localBackgroundMonitoringEnabled =
+		!m_stopLocalMonitor.load(std::memory_order_acquire);
+}
+
+void ofxGgmlScriptSource::startLocalMonitor() {
+	stopLocalMonitor();
+
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		if (m_sourceType != ofxGgmlScriptSourceType::LocalFolder ||
+			trim(m_localFolderPath).empty()) {
+			return;
+		}
+		m_stopLocalMonitor.store(false, std::memory_order_release);
+		m_workspaceInfo.localBackgroundMonitoringEnabled = true;
+	}
+
+	m_localMonitorThread = std::thread([this]() {
+		uint64_t lastFingerprint = 0;
+		bool fingerprintInitialized = false;
+
+		for (;;) {
+			std::string localFolderPath;
+			std::string preferredExt;
+			{
+				std::lock_guard<std::mutex> lock(m_mutex);
+				if (m_stopLocalMonitor.load(std::memory_order_acquire) ||
+					m_sourceType != ofxGgmlScriptSourceType::LocalFolder ||
+					trim(m_localFolderPath).empty()) {
+					break;
+				}
+				localFolderPath = m_localFolderPath;
+				preferredExt = m_preferredExtension;
+			}
+
+			const uint64_t fingerprint =
+				computeLocalWorkspaceFingerprint(localFolderPath, preferredExt);
+			if (!fingerprintInitialized) {
+				lastFingerprint = fingerprint;
+				fingerprintInitialized = true;
+			} else if (fingerprint != 0 && fingerprint != lastFingerprint) {
+				std::lock_guard<std::mutex> lock(m_mutex);
+				if (m_stopLocalMonitor.load(std::memory_order_acquire) ||
+					m_sourceType != ofxGgmlScriptSourceType::LocalFolder ||
+					m_localFolderPath != localFolderPath) {
+					break;
+				}
+				if (scanLocalFolderLocked()) {
+					m_workspaceInfo.lastObservedChangeTimestampMs = currentTimestampMs();
+					m_workspaceInfo.localBackgroundMonitoringEnabled = true;
+					m_status = ofToString(m_files.size()) + " items (auto-refreshed)";
+				}
+				lastFingerprint = fingerprint;
+			}
+
+			std::this_thread::sleep_for(kLocalMonitorPollInterval);
+		}
+
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_workspaceInfo.localBackgroundMonitoringEnabled = false;
+	});
+}
+
+void ofxGgmlScriptSource::stopLocalMonitor() {
+	m_stopLocalMonitor.store(true, std::memory_order_release);
+	if (m_localMonitorThread.joinable()) {
+		m_localMonitorThread.join();
+	}
+	std::lock_guard<std::mutex> lock(m_mutex);
+	m_workspaceInfo.localBackgroundMonitoringEnabled = false;
+}
+
 /// Creates a fetch diagnostic entry with timestamp. Maintains maximum of 64 entries.
 /// Must be called with m_mutex locked.
 void ofxGgmlScriptSource::pushFetchDiagnosticLocked(
@@ -747,7 +1433,7 @@ bool ofxGgmlScriptSource::scanLocalFolderLocked() {
 		return false;
 	}
 	m_files = scanLocalFolderEntries(m_localFolderPath);
-	m_workspaceInfo = buildWorkspaceInfoForFolder(m_localFolderPath);
+	refreshWorkspaceInfoLocked(m_workspaceInfo.activeVisualStudioPath);
 	m_status = ofToString(m_files.size()) + " items";
 	return true;
 }
@@ -816,16 +1502,92 @@ std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::scanLocalFolderEn
 	return files;
 }
 
+uint64_t ofxGgmlScriptSource::computeLocalWorkspaceFingerprint(
+	const std::string & path,
+	const std::string & preferredExt) const {
+	if (trim(path).empty()) {
+		return 0;
+	}
+
+	uint64_t fingerprint = 1469598103934665603ULL;
+	std::error_code ec;
+	const std::filesystem::path basePath(path);
+	auto it = std::filesystem::recursive_directory_iterator(
+		path,
+		std::filesystem::directory_options::skip_permission_denied,
+		ec);
+	const auto end = std::filesystem::recursive_directory_iterator();
+	for (; it != end; it.increment(ec)) {
+		if (ec) {
+			ec.clear();
+			continue;
+		}
+
+		const auto & entry = *it;
+		const std::string filename = entry.path().filename().string();
+		if (entry.is_directory(ec)) {
+			if (!filename.empty() && filename[0] == '.') {
+				it.disable_recursion_pending();
+			}
+			ec.clear();
+			continue;
+		}
+
+		const auto entryPath = entry.path();
+		const std::string ext = normalizeLower(entryPath.extension().string());
+		const bool metadata = isWorkspaceMetadataPath(entryPath);
+		bool include = metadata || hasSourceExtension(ext, true);
+		if (!preferredExt.empty() && !metadata) {
+			include = (ext == preferredExt);
+		}
+		if (!include) {
+			continue;
+		}
+
+		hashCombine(&fingerprint, std::hash<std::string>{}(
+			normalizeRelativePath(entryPath, basePath)));
+		hashCombine(&fingerprint, static_cast<uint64_t>(entry.file_size(ec)));
+		ec.clear();
+		const auto writeTime = std::filesystem::last_write_time(entryPath, ec);
+		if (!ec) {
+			hashCombine(&fingerprint, static_cast<uint64_t>(writeTime.time_since_epoch().count()));
+		} else {
+			ec.clear();
+		}
+	}
+
+	return fingerprint;
+}
+
 ofxGgmlScriptSourceWorkspaceInfo ofxGgmlScriptSource::buildWorkspaceInfoForFolder(
-	const std::string & path) const {
+	const std::string & path,
+	const ofxGgmlScriptSourceWorkspaceInfo & previousInfo,
+	const std::string & requestedVisualStudioPath) const {
 	ofxGgmlScriptSourceWorkspaceInfo info;
 	info.workspaceRoot = path;
 	info.workspaceLabel = std::filesystem::path(path).filename().string();
 	if (info.workspaceLabel.empty()) {
 		info.workspaceLabel = path;
 	}
+	info.activeVisualStudioPath = requestedVisualStudioPath.empty()
+		? previousInfo.activeVisualStudioPath
+		: std::filesystem::path(requestedVisualStudioPath).generic_string();
+	info.selectedVisualStudioProjectPath = previousInfo.selectedVisualStudioProjectPath;
+	info.hasExplicitVisualStudioProjectSelection =
+		previousInfo.hasExplicitVisualStudioProjectSelection;
+	info.selectedVisualStudioConfiguration =
+		previousInfo.selectedVisualStudioConfiguration.empty()
+		? std::string("Release")
+		: previousInfo.selectedVisualStudioConfiguration;
+	info.selectedVisualStudioPlatform =
+		previousInfo.selectedVisualStudioPlatform.empty()
+		? std::string("x64")
+		: previousInfo.selectedVisualStudioPlatform;
+	info.workspaceGeneration = previousInfo.workspaceGeneration + 1;
+	info.lastScanTimestampMs = currentTimestampMs();
 
 	std::error_code ec;
+	const std::filesystem::path rootPath(path);
 	auto it = std::filesystem::recursive_directory_iterator(
 		path,
 		std::filesystem::directory_options::skip_permission_denied,
@@ -848,12 +1610,7 @@ ofxGgmlScriptSourceWorkspaceInfo ofxGgmlScriptSource::buildWorkspaceInfoForFolde
 		}
 
 		const std::string ext = normalizeLower(entryPath.extension().string());
-		const std::string relPath =
-			std::filesystem::relative(entryPath, std::filesystem::path(path), ec).generic_string();
-		if (ec) {
-			ec.clear();
-			continue;
-		}
+		const std::string relPath = normalizeRelativePath(entryPath, rootPath);
 
 		if (ext == ".sln" && !info.hasVisualStudioSolution) {
 			info.hasVisualStudioSolution = true;
@@ -872,9 +1629,77 @@ ofxGgmlScriptSourceWorkspaceInfo ofxGgmlScriptSource::buildWorkspaceInfoForFolde
 		}
 	}
 
+	if (info.hasVisualStudioSolution) {
+		const auto solutionInfo = parseVisualStudioSolution(
+			rootPath / info.visualStudioSolutionPath,
+			rootPath);
+		info.visualStudioProjects = solutionInfo.projects;
+		if (!solutionInfo.projects.empty()) {
+			info.visualStudioProjectPaths.clear();
+			for (const auto & project : solutionInfo.projects) {
+				info.visualStudioProjectPaths.push_back(project.relativePath);
+			}
+		}
+		info.visualStudioConfigurations = solutionInfo.configurations;
+		info.visualStudioPlatforms = solutionInfo.platforms;
+	}
+
 	std::sort(
 		info.visualStudioProjectPaths.begin(),
 		info.visualStudioProjectPaths.end());
+	if (info.visualStudioConfigurations.empty()) {
+		info.visualStudioConfigurations = {"Debug", "Release"};
+	}
+	if (info.visualStudioPlatforms.empty()) {
+		info.visualStudioPlatforms = {"x64", "Win32"};
+	}
+
+	if (info.selectedVisualStudioProjectPath.empty() &&
+		!info.visualStudioProjectPaths.empty()) {
+		info.selectedVisualStudioProjectPath = info.visualStudioProjectPaths.front();
+		info.hasExplicitVisualStudioProjectSelection = false;
+	}
+	if (!info.selectedVisualStudioProjectPath.empty()) {
+		const auto found = std::find(
+			info.visualStudioProjectPaths.begin(),
+			info.visualStudioProjectPaths.end(),
+			info.selectedVisualStudioProjectPath);
+		if (found == info.visualStudioProjectPaths.end()) {
+			info.selectedVisualStudioProjectPath.clear();
+			info.hasExplicitVisualStudioProjectSelection = false;
+		}
+	}
+	if (info.selectedVisualStudioProjectPath.empty() &&
+		!info.visualStudioProjectPaths.empty()) {
+		info.selectedVisualStudioProjectPath = info.visualStudioProjectPaths.front();
+		info.hasExplicitVisualStudioProjectSelection = false;
+	}
+
+	if (std::find(
+			info.visualStudioConfigurations.begin(),
+			info.visualStudioConfigurations.end(),
+			info.selectedVisualStudioConfiguration) ==
+		info.visualStudioConfigurations.end()) {
+		info.selectedVisualStudioConfiguration =
+			info.visualStudioConfigurations.front();
+	}
+	if (std::find(
+			info.visualStudioPlatforms.begin(),
+			info.visualStudioPlatforms.end(),
+			info.selectedVisualStudioPlatform) ==
+		info.visualStudioPlatforms.end()) {
+		info.selectedVisualStudioPlatform = info.visualStudioPlatforms.front();
+	}
+
+	info.defaultBuildDirectory = chooseDefaultBuildDirectory(
+		rootPath,
+		info.compilationDatabasePath);
+#ifdef _WIN32
+	info.msbuildPath = resolveMsbuildPathViaVswhere();
+	if (info.msbuildPath.empty()) {
+		info.msbuildPath = fallbackMsbuildPath();
+	}
+#endif
 	return info;
 }
 
@@ -882,7 +1707,8 @@ bool ofxGgmlScriptSource::parseGitHubInput(
 	const std::string & ownerRepoOrUrl,
 	const std::string & branchHint,
 	std::string * outOwnerRepo,
-	std::string * outBranch) {
+	std::string * outBranch,
+	std::string * outFocusedPath) {
 	const std::string input = trim(ownerRepoOrUrl);
 	if (input.empty()) {
 		return false;
@@ -890,6 +1716,7 @@ bool ofxGgmlScriptSource::parseGitHubInput(
 
 	std::string ownerRepo = input;
 	std::string branch = sanitizeGitHubBranch(branchHint);
+	std::string focusedPath;
 
 	const auto isHttpUrl =
 		input.rfind("https://", 0) == 0 || input.rfind("http://", 0) == 0;
@@ -910,11 +1737,19 @@ bool ofxGgmlScriptSource::parseGitHubInput(
 			std::vector<std::string> parts = splitNonEmpty(normalized, '/');
 			if (parts.size() >= 2) {
 				ownerRepo = parts[0] + "/" + parts[1];
-				if (branch.empty() && parts.size() >= 4 && parts[2] == "tree") {
-					branch = parts[3];
-					for (size_t i = 4; i < parts.size(); ++i) {
-						branch += "/" + parts[i];
+				if (parts.size() >= 5 &&
+					(parts[2] == "tree" || parts[2] == "blob")) {
+					if (branch.empty()) {
+						branch = parts[3];
 					}
+					for (size_t i = 4; i < parts.size(); ++i) {
+						if (!focusedPath.empty()) {
+							focusedPath += "/";
+						}
+						focusedPath += parts[i];
+					}
+				} else if (branch.empty() && parts.size() >= 4 && parts[2] == "tree") {
+					branch = parts[3];
 				}
 			}
 		} else if (normalized.rfind("raw.githubusercontent.com/", 0) == 0) {
@@ -928,6 +1763,12 @@ bool ofxGgmlScriptSource::parseGitHubInput(
 				ownerRepo = parts[0] + "/" + parts[1];
 				if (branch.empty()) {
 					branch = parts[2];
+				}
+				for (size_t i = 3; i < parts.size(); ++i) {
+					if (!focusedPath.empty()) {
+						focusedPath += "/";
+					}
+					focusedPath += parts[i];
 				}
 			}
 		}
@@ -944,6 +1785,9 @@ bool ofxGgmlScriptSource::parseGitHubInput(
 	}
 	if (outBranch != nullptr) {
 		*outBranch = branch;
+	}
+	if (outFocusedPath != nullptr) {
+		*outFocusedPath = std::filesystem::path(focusedPath).generic_string();
 	}
 	return true;
 }

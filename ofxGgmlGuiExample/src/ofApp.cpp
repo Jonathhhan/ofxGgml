@@ -515,6 +515,43 @@ std::string cleanChatOutput(const std::string & text) {
 	return out;
 }
 
+std::string stripPromptEcho(const std::string & text, const std::string & prompt) {
+	const std::string trimmedText = trim(text);
+	const std::string trimmedPrompt = trim(prompt);
+	if (trimmedText.empty() || trimmedPrompt.empty()) {
+		return trimmedText;
+	}
+
+	auto hasPromptPrefix = [&](const std::string & candidate) {
+		if (candidate.size() < trimmedPrompt.size()) {
+			return false;
+		}
+		if (candidate.compare(0, trimmedPrompt.size(), trimmedPrompt) != 0) {
+			return false;
+		}
+		if (candidate.size() == trimmedPrompt.size()) {
+			return true;
+		}
+		const char next = candidate[trimmedPrompt.size()];
+		return next == '\n' || next == '\r' || next == ':' ||
+			std::isspace(static_cast<unsigned char>(next)) != 0;
+	};
+
+	if (hasPromptPrefix(trimmedText)) {
+		return trim(trimmedText.substr(trimmedPrompt.size()));
+	}
+
+	const size_t firstLineEnd = trimmedText.find('\n');
+	if (firstLineEnd != std::string::npos) {
+		const std::string firstLine = trim(trimmedText.substr(0, firstLineEnd));
+		if (firstLine == trimmedPrompt) {
+			return trim(trimmedText.substr(firstLineEnd + 1));
+		}
+	}
+
+	return trimmedText;
+}
+
 // Translate well-known process crash/error exit codes into a short
 // human-readable description.  Returns an empty string for codes that
 // are not recognised so the caller can fall back to the numeric value.
@@ -1332,7 +1369,7 @@ if (!scriptLanguages.empty()) {
 }
 
 // Default branch for GitHub.
-copyStringToBuffer(scriptSourceBranch, sizeof(scriptSourceBranch), "main");
+scriptSourceBranch[0] = '\0';
 
 // Session directory.
 sessionDir = ofToDataPath("sessions", true);
@@ -2127,7 +2164,7 @@ ImGui::EndChild();
 			ImGui::TextWrapped("%s", preview.c_str());
 		}
 	}
-	
+
 	if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 40.0f) {
 		ImGui::SetScrollHereY(1.0f);
 	}
@@ -2267,10 +2304,12 @@ auto previewWorkspacePlan = [&](const std::string & label) {
 			}
 		}
 	}
+	const auto workspaceInfoSnapshot = scriptSource.getWorkspaceInfo();
 	const auto verificationCommands = structured.verificationCommands.empty()
 		? scriptWorkspaceAssistant.suggestVerificationCommands(
 			changedFiles,
-			workspaceRoot)
+			workspaceRoot,
+			&workspaceInfoSnapshot)
 		: structured.verificationCommands;
 
 	std::ostringstream out;
@@ -2524,7 +2563,7 @@ if (ImGui::CollapsingHeader("Tools & Memory")) {
 	ImGui::SameLine();
 	ImGui::Checkbox("Include repo context", &scriptIncludeRepoContext);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Include loaded file list and selected file snippet in script prompts");
-	
+
 	ImGui::BeginDisabled(generating.load() || (!hasScriptOutput && !hasLastTask));
 	if (ImGui::Button("Continue Task", ImVec2(120, 0))) {
 		submitScriptRequest(ofxGgmlCodeAssistantAction::ContinueTask);
@@ -2548,7 +2587,7 @@ if (ImGui::CollapsingHeader("Tools & Memory")) {
 		minP = std::max(minP, 0.05f);
 		repeatPenalty = 1.05f;
 	}
-	
+
 	if (ImGui::Button("Reuse Last Task", ImVec2(120, 0))) {
 		if (hasLastTask) {
 			copyStringToBuffer(scriptInput, sizeof(scriptInput), lastScriptRequest);
@@ -2601,6 +2640,71 @@ if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 			"Visual Studio projects: %d",
 			static_cast<int>(workspaceInfo.visualStudioProjectPaths.size()));
 	}
+	if (!workspaceInfo.visualStudioProjects.empty()) {
+		if (ImGui::BeginCombo(
+				"VS Project",
+				workspaceInfo.selectedVisualStudioProjectPath.empty()
+					? workspaceInfo.visualStudioProjects.front().relativePath.c_str()
+					: workspaceInfo.selectedVisualStudioProjectPath.c_str())) {
+			for (const auto & project : workspaceInfo.visualStudioProjects) {
+				const bool isSelected =
+					project.relativePath == workspaceInfo.selectedVisualStudioProjectPath;
+				const std::string label = project.name.empty()
+					? project.relativePath
+					: (project.name + " (" + project.relativePath + ")");
+				if (ImGui::Selectable(label.c_str(), isSelected)) {
+					scriptSource.configureVisualStudioWorkspace(
+						project.relativePath,
+						workspaceInfo.selectedVisualStudioConfiguration,
+						workspaceInfo.selectedVisualStudioPlatform);
+				}
+				if (isSelected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
+	if (!workspaceInfo.visualStudioConfigurations.empty()) {
+		if (ImGui::BeginCombo(
+				"Configuration",
+				workspaceInfo.selectedVisualStudioConfiguration.c_str())) {
+			for (const auto & configuration : workspaceInfo.visualStudioConfigurations) {
+				const bool isSelected =
+					configuration == workspaceInfo.selectedVisualStudioConfiguration;
+				if (ImGui::Selectable(configuration.c_str(), isSelected)) {
+					scriptSource.configureVisualStudioWorkspace(
+						workspaceInfo.selectedVisualStudioProjectPath,
+						configuration,
+						workspaceInfo.selectedVisualStudioPlatform);
+				}
+				if (isSelected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
+	if (!workspaceInfo.visualStudioPlatforms.empty()) {
+		if (ImGui::BeginCombo(
+				"Platform",
+				workspaceInfo.selectedVisualStudioPlatform.c_str())) {
+			for (const auto & platform : workspaceInfo.visualStudioPlatforms) {
+				const bool isSelected =
+					platform == workspaceInfo.selectedVisualStudioPlatform;
+				if (ImGui::Selectable(platform.c_str(), isSelected)) {
+					scriptSource.configureVisualStudioWorkspace(
+						workspaceInfo.selectedVisualStudioProjectPath,
+						workspaceInfo.selectedVisualStudioConfiguration,
+						platform);
+				}
+				if (isSelected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
 	if (workspaceInfo.hasCompilationDatabase) {
 		ImGui::TextWrapped("compile_commands.json: %s", workspaceInfo.compilationDatabasePath.c_str());
 	}
@@ -2610,14 +2714,30 @@ if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 	if (workspaceInfo.hasOpenFrameworksProject) {
 		ImGui::TextWrapped("addons.make: %s", workspaceInfo.addonsMakePath.c_str());
 	}
+	if (!workspaceInfo.defaultBuildDirectory.empty()) {
+		ImGui::TextWrapped("Preferred build dir: %s", workspaceInfo.defaultBuildDirectory.c_str());
+	}
+	if (!workspaceInfo.msbuildPath.empty()) {
+		ImGui::TextWrapped("MSBuild: %s", workspaceInfo.msbuildPath.c_str());
+	}
+	ImGui::TextDisabled(
+		"Auto-rescan: %s",
+		workspaceInfo.localBackgroundMonitoringEnabled ? "active" : "off");
 
-	const auto commands = scriptWorkspaceAssistant.suggestVerificationCommands(
-		{},
-		localRoot);
-	if (!commands.empty()) {
+	if (cachedScriptVerificationRoot != localRoot ||
+		cachedScriptVerificationGeneration != workspaceInfo.workspaceGeneration) {
+		cachedScriptVerificationCommands =
+			scriptWorkspaceAssistant.suggestVerificationCommands(
+				{},
+				localRoot,
+				&workspaceInfo);
+		cachedScriptVerificationRoot = localRoot;
+		cachedScriptVerificationGeneration = workspaceInfo.workspaceGeneration;
+	}
+	if (!cachedScriptVerificationCommands.empty()) {
 		ImGui::Spacing();
 		ImGui::TextDisabled("Suggested verification:");
-		for (const auto & command : commands) {
+		for (const auto & command : cachedScriptVerificationCommands) {
 			std::string line = command.executable;
 			for (const auto & arg : command.arguments) {
 				line += " " + arg;
@@ -2634,6 +2754,15 @@ if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(100);
 	ImGui::InputText("##GHBranch", scriptSourceBranch, sizeof(scriptSourceBranch));
+	ImGui::SetNextItemWidth(240);
+	ImGui::InputText(
+		"Token (optional)##GHToken",
+		scriptSourceGitHubToken,
+		sizeof(scriptSourceGitHubToken),
+		ImGuiInputTextFlags_Password);
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		scriptSource.setGitHubAuthToken(scriptSourceGitHubToken);
+	}
 	ImGui::SameLine();
 	if (ImGui::Button("Fetch", ImVec2(60, 0))) {
 		if (std::strlen(scriptSourceGitHub) > 0) {
@@ -2642,6 +2771,7 @@ if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 				scriptSource.setPreferredExtension(
 					scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
 			}
+			scriptSource.setGitHubAuthToken(scriptSourceGitHubToken);
 			if (scriptSource.setGitHubRepoFromInput(
 				scriptSourceGitHub,
 				scriptSourceBranch)) {
@@ -2649,7 +2779,22 @@ if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 			}
 		}
 	}
-	ImGui::TextDisabled("Accepts owner/repo, GitHub repo URLs, and /tree/<branch> URLs. Leave branch empty for auto.");
+	ImGui::TextDisabled("Accepts owner/repo, GitHub repo URLs, /tree/<branch> URLs, and file URLs. Leave branch empty for auto-detect.");
+	if (!workspaceInfo.gitHubDefaultBranch.empty()) {
+		ImGui::TextWrapped("Default branch: %s", workspaceInfo.gitHubDefaultBranch.c_str());
+	}
+	if (!workspaceInfo.gitHubResolvedCommitSha.empty()) {
+		ImGui::TextWrapped("Pinned commit: %s", workspaceInfo.gitHubResolvedCommitSha.c_str());
+	}
+	if (!workspaceInfo.gitHubFocusedPath.empty()) {
+		ImGui::TextWrapped("Focused path: %s", workspaceInfo.gitHubFocusedPath.c_str());
+	}
+	if (!workspaceInfo.gitHubDiagnostic.empty()) {
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.7f, 0.35f, 1.0f),
+			"%s",
+			workspaceInfo.gitHubDiagnostic.c_str());
+	}
 } else if (sourceType == ofxGgmlScriptSourceType::Internet) {
 	ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.9f, 1.0f), "Internet Sources (URLs):");
 	ImGui::SetNextItemWidth(360);
@@ -3519,9 +3664,9 @@ if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::LocalFol
 	scriptSource.setGitHubMode();
 	std::string ownerRepo = scriptSourceGitHub;
 	std::string branch = std::strlen(scriptSourceBranch) > 0
-		? std::string(scriptSourceBranch) : "main";
+		? std::string(scriptSourceBranch) : std::string();
 	if (!ownerRepo.empty()) {
-		scriptSource.setGitHubRepo(ownerRepo, branch);
+		scriptSource.setGitHubRepoFromInput(ownerRepo, branch);
 	}
 	selectedScriptFileIndex = -1;
 } else if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::Internet)) {
@@ -3843,7 +3988,7 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 		chunkBridge);
 	if (!inferenceResult.success) {
 		if (!streamedText.empty() && !preserveLlamaInstructions) {
-			output = cleanChatOutput(streamedText);
+			output = cleanChatOutput(stripPromptEcho(streamedText, prompt));
 			if (!output.empty()) {
 				logWithLevel(OF_LOG_WARNING,
 					"Generation ended with an error, but streamed output is available; using streamed text.");
@@ -3858,7 +4003,9 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 
 	output = preserveLlamaInstructions
 		? trim(stripAnsi(streamedText.empty() ? inferenceResult.text : streamedText))
-		: inferenceResult.text;
+		: cleanChatOutput(stripPromptEcho(
+			streamedText.empty() ? inferenceResult.text : streamedText,
+			prompt));
 	if (output.empty()) {
 		error = "llama-completion returned empty output.";
 		return false;
@@ -4384,13 +4531,13 @@ workerThread.join();
  const size_t estimatedTokens = prompt.size() / 3;
  const size_t maxCtxTokens = static_cast<size_t>(contextSize);
  if (estimatedTokens > maxCtxTokens) {
- 	prompt = clampPromptToContext(prompt, maxCtxTokens, promptTrimmed);
- 	if (promptTrimmed) {
- 		logWithLevel(OF_LOG_WARNING,
- 			"Prompt exceeded context budget (~" + std::to_string(estimatedTokens) +
- 			" tokens > " + std::to_string(maxCtxTokens) +
- 			"); trimmed automatically to fit.");
- 	}
+	prompt = clampPromptToContext(prompt, maxCtxTokens, promptTrimmed);
+	if (promptTrimmed) {
+		logWithLevel(OF_LOG_WARNING,
+			"Prompt exceeded context budget (~" + std::to_string(estimatedTokens) +
+			" tokens > " + std::to_string(maxCtxTokens) +
+			"); trimmed automatically to fit.");
+	}
  }
 
  const std::string trimmedPrompt = trim(prompt);
@@ -4400,14 +4547,9 @@ workerThread.join();
 	if (preserveLlamaInstructions) {
 		return trim(stripAnsi(rawPartial));
 	}
-	std::string cleaned = stripAnsi(rawPartial);
-	if (!trimmedPrompt.empty()) {
-		const size_t pos = cleaned.find(trimmedPrompt);
-		if (pos != std::string::npos) {
-			cleaned = cleaned.substr(pos + trimmedPrompt.size());
-		} else if (cleaned.size() < trimmedPrompt.size()) {
-			cleaned.clear();
-		}
+	std::string cleaned = stripPromptEcho(stripAnsi(rawPartial), trimmedPrompt);
+	if (cleaned.empty() && stripAnsi(rawPartial).size() < trimmedPrompt.size()) {
+		cleaned.clear();
 	}
 	return cleanChatOutput(cleaned);
  };
@@ -4448,17 +4590,21 @@ workerThread.join();
  }
 	const bool hardCrash = error.find("crashed:") != std::string::npos;
 	if (!streamed.empty() && !hardCrash) {
- logWithLevel(OF_LOG_WARNING,
- 	"Process failed but streamed output available (" + ofToString(streamed.size()) + " chars), using it.");
- result = streamed;
+		logWithLevel(
+			OF_LOG_WARNING,
+			"Process failed but streamed output available (" +
+				ofToString(streamed.size()) + " chars), using it.");
+		result = streamed;
+	} else {
+		logWithLevel(OF_LOG_ERROR, "Inference error: " + error);
+		result = "[Error] " + error;
+	}
  } else {
- logWithLevel(OF_LOG_ERROR, "Inference error: " + error);
- result = "[Error] " + error;
- }
- } else {
- if (shouldLog(OF_LOG_VERBOSE)) {
- 	logWithLevel(OF_LOG_VERBOSE, "Output (" + ofToString(result.size()) + " chars):\n" + result);
- }
+	if (shouldLog(OF_LOG_VERBOSE)) {
+		logWithLevel(
+			OF_LOG_VERBOSE,
+			"Output (" + ofToString(result.size()) + " chars):\n" + result);
+	}
  }
 
  if (shouldLog(OF_LOG_VERBOSE)) {

@@ -258,7 +258,16 @@ TEST_CASE("Script source parses GitHub URLs and detects Visual Studio workspaces
 	std::filesystem::create_directories(root / "example");
 	{
 		std::ofstream out(root / "ofxGgml.sln");
-		out << "Microsoft Visual Studio Solution File";
+		out
+			<< "Microsoft Visual Studio Solution File, Format Version 12.00\n"
+			<< "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"ExampleApp\", \"example\\example.vcxproj\", \"{11111111-1111-1111-1111-111111111111}\"\n"
+			<< "EndProject\n"
+			<< "Global\n"
+			<< "\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n"
+			<< "\t\tDebug|x64 = Debug|x64\n"
+			<< "\t\tRelease|x64 = Release|x64\n"
+			<< "\tEndGlobalSection\n"
+			<< "EndGlobal\n";
 	}
 	{
 		std::ofstream out(root / "example" / "example.vcxproj");
@@ -280,6 +289,11 @@ TEST_CASE("Script source parses GitHub URLs and detects Visual Studio workspaces
 	REQUIRE(info.visualStudioSolutionPath == "ofxGgml.sln");
 	REQUIRE(info.visualStudioProjectPaths.size() == 1);
 	REQUIRE(info.visualStudioProjectPaths.front() == "example/example.vcxproj");
+	REQUIRE(info.visualStudioProjects.size() == 1);
+	REQUIRE(info.visualStudioProjects.front().name == "ExampleApp");
+	REQUIRE(info.selectedVisualStudioProjectPath == "example/example.vcxproj");
+	REQUIRE_FALSE(info.visualStudioConfigurations.empty());
+	REQUIRE_FALSE(info.visualStudioPlatforms.empty());
 	REQUIRE(info.hasCompilationDatabase);
 	REQUIRE(info.hasOpenFrameworksProject);
 }
@@ -288,16 +302,83 @@ TEST_CASE("Workspace assistant suggests Visual Studio verification commands", "[
 	const auto root = makeWorkspaceTestDir("vs_suggest");
 	{
 		std::ofstream out(root / "workspace.sln");
-		out << "Microsoft Visual Studio Solution File";
+		out
+			<< "Microsoft Visual Studio Solution File, Format Version 12.00\n"
+			<< "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"ExampleApp\", \"example\\example.vcxproj\", \"{11111111-1111-1111-1111-111111111111}\"\n"
+			<< "EndProject\n"
+			<< "Global\n"
+			<< "\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n"
+			<< "\t\tDebug|x64 = Debug|x64\n"
+			<< "\t\tRelease|x64 = Release|x64\n"
+			<< "\tEndGlobalSection\n"
+			<< "EndGlobal\n";
+	}
+	std::filesystem::create_directories(root / "example");
+	{
+		std::ofstream out(root / "example" / "example.vcxproj");
+		out << "<Project DefaultTargets=\"Build\"></Project>";
 	}
 
 	ofxGgmlWorkspaceAssistant assistant;
-	const auto commands = assistant.suggestVerificationCommands({}, root.string());
+	ofxGgmlScriptSource source;
+	REQUIRE(source.setVisualStudioWorkspace((root / "workspace.sln").string()));
+	source.configureVisualStudioWorkspace("example/example.vcxproj", "Debug", "x64");
+	const auto workspaceInfo = source.getWorkspaceInfo();
+	const auto commands = assistant.suggestVerificationCommands(
+		{},
+		root.string(),
+		&workspaceInfo);
 #ifdef _WIN32
 	REQUIRE_FALSE(commands.empty());
-	REQUIRE(commands.front().label == "build-visual-studio-solution");
-	REQUIRE(commands.front().executable == "MSBuild.exe");
-	REQUIRE(commands.front().arguments.front() == "workspace.sln");
+	REQUIRE(commands.front().label == "build-visual-studio-project");
+	REQUIRE(commands.front().executable == workspaceInfo.msbuildPath);
+	REQUIRE(commands.front().arguments.front() == "example/example.vcxproj");
+	REQUIRE(commands.front().arguments[2] == "/p:Configuration=Debug");
+	REQUIRE(commands.front().arguments[3] == "/p:Platform=x64");
+#else
+	REQUIRE(commands.empty());
+#endif
+}
+
+TEST_CASE("Workspace assistant prefers the Visual Studio project closest to changed files", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("vs_project_ranking");
+	std::filesystem::create_directories(root / "examples" / "basic" / "src");
+	std::filesystem::create_directories(root / "examples" / "gui" / "src");
+	{
+		std::ofstream out(root / "workspace.sln");
+		out
+			<< "Microsoft Visual Studio Solution File, Format Version 12.00\n"
+			<< "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"BasicApp\", \"examples\\basic\\basic.vcxproj\", \"{11111111-1111-1111-1111-111111111111}\"\n"
+			<< "EndProject\n"
+			<< "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"GuiApp\", \"examples\\gui\\gui.vcxproj\", \"{22222222-2222-2222-2222-222222222222}\"\n"
+			<< "EndProject\n"
+			<< "Global\n"
+			<< "\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n"
+			<< "\t\tRelease|x64 = Release|x64\n"
+			<< "\tEndGlobalSection\n"
+			<< "EndGlobal\n";
+	}
+	{
+		std::ofstream out(root / "examples" / "basic" / "basic.vcxproj");
+		out << "<Project DefaultTargets=\"Build\"></Project>";
+	}
+	{
+		std::ofstream out(root / "examples" / "gui" / "gui.vcxproj");
+		out << "<Project DefaultTargets=\"Build\"></Project>";
+	}
+
+	ofxGgmlScriptSource source;
+	REQUIRE(source.setVisualStudioWorkspace((root / "workspace.sln").string()));
+	const auto workspaceInfo = source.getWorkspaceInfo();
+
+	ofxGgmlWorkspaceAssistant assistant;
+	const auto commands = assistant.suggestVerificationCommands(
+		{"examples/gui/src/ofApp.cpp"},
+		root.string(),
+		&workspaceInfo);
+#ifdef _WIN32
+	REQUIRE_FALSE(commands.empty());
+	REQUIRE(commands.front().arguments.front() == "examples/gui/gui.vcxproj");
 #else
 	REQUIRE(commands.empty());
 #endif
@@ -447,4 +528,134 @@ TEST_CASE("Workspace assistant auto-selects verification commands and can roll b
 	REQUIRE_FALSE(result.success);
 	REQUIRE(result.applyResult.unifiedDiffPreview.find("+++ b/src/app.txt") != std::string::npos);
 	REQUIRE_FALSE(std::filesystem::exists(root / "src" / "app.txt"));
+}
+
+TEST_CASE("Workspace assistant can verify in a shadow workspace before syncing changes back", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("shadow_sync");
+	std::filesystem::create_directories(root / "src");
+	{
+		std::ofstream out(root / "src" / "app.txt");
+		out << "before";
+	}
+
+	const std::string modelPath = createWorkspaceDummyModel();
+	const std::string exePath = createWorkspaceExecutable({
+		"GOAL: Update app text safely",
+		"PATCH: replace | src/app.txt | update content",
+		"SEARCH: before",
+		"REPLACE: after",
+		"COMMAND: verify | . | verify-tool | --shadow",
+		"EXPECT: file contains after"
+	});
+
+	ofxGgmlWorkspaceAssistant assistant;
+	assistant.setCompletionExecutable(exePath);
+
+	ofxGgmlCodeAssistantRequest request;
+	request.action = ofxGgmlCodeAssistantAction::Edit;
+	request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+	request.userInput = "Update the app text.";
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(root.string()));
+
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+
+	ofxGgmlWorkspaceSettings settings;
+	settings.workspaceRoot = root.string();
+	settings.useShadowWorkspace = true;
+	settings.syncShadowChangesOnSuccess = true;
+	settings.keepShadowWorkspace = false;
+	settings.maxVerificationAttempts = 1;
+
+	auto runner = [](const ofxGgmlCodeAssistantCommandSuggestion & command) {
+		ofxGgmlWorkspaceCommandResult result;
+		result.command = command;
+		result.success = true;
+		result.exitCode = 0;
+		result.output = "verified";
+		return result;
+	};
+
+	const auto result = assistant.runTask(
+		modelPath,
+		request,
+		context,
+		settings,
+		{},
+		{},
+		runner);
+
+	REQUIRE(result.usedShadowWorkspace);
+	REQUIRE(result.success);
+	REQUIRE_FALSE(result.shadowWorkspaceRoot.empty());
+	REQUIRE(readFile(root / "src" / "app.txt") == "after");
+	REQUIRE_FALSE(result.synchronizedFiles.empty());
+	REQUIRE_FALSE(std::filesystem::exists(result.shadowWorkspaceRoot));
+}
+
+TEST_CASE("Workspace assistant keeps the original workspace untouched when shadow verification fails", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("shadow_fail");
+	std::filesystem::create_directories(root / "src");
+	{
+		std::ofstream out(root / "src" / "app.txt");
+		out << "before";
+	}
+
+	const std::string modelPath = createWorkspaceDummyModel();
+	const std::string exePath = createWorkspaceExecutable({
+		"GOAL: Update app text safely",
+		"PATCH: replace | src/app.txt | update content",
+		"SEARCH: before",
+		"REPLACE: after",
+		"COMMAND: verify | . | verify-tool | --shadow",
+		"EXPECT: file contains after"
+	});
+
+	ofxGgmlWorkspaceAssistant assistant;
+	assistant.setCompletionExecutable(exePath);
+
+	ofxGgmlCodeAssistantRequest request;
+	request.action = ofxGgmlCodeAssistantAction::Edit;
+	request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+	request.userInput = "Update the app text.";
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(root.string()));
+
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+
+	ofxGgmlWorkspaceSettings settings;
+	settings.workspaceRoot = root.string();
+	settings.useShadowWorkspace = true;
+	settings.syncShadowChangesOnSuccess = true;
+	settings.keepShadowWorkspace = true;
+	settings.rollbackOnVerificationFailure = true;
+	settings.maxVerificationAttempts = 1;
+
+	auto runner = [](const ofxGgmlCodeAssistantCommandSuggestion & command) {
+		ofxGgmlWorkspaceCommandResult result;
+		result.command = command;
+		result.success = false;
+		result.exitCode = 1;
+		result.output = "verification failed";
+		return result;
+	};
+
+	const auto result = assistant.runTask(
+		modelPath,
+		request,
+		context,
+		settings,
+		{},
+		{},
+		runner);
+
+	REQUIRE(result.usedShadowWorkspace);
+	REQUIRE_FALSE(result.success);
+	REQUIRE(readFile(root / "src" / "app.txt") == "before");
+	REQUIRE(result.verificationResult.summary.find("failed") != std::string::npos);
+	REQUIRE(std::filesystem::exists(result.shadowWorkspaceRoot));
 }

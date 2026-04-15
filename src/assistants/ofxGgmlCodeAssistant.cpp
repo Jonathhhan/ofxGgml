@@ -151,6 +151,64 @@ std::string joinStrings(
 	return stream.str();
 }
 
+std::string normalizePathForMatch(const std::string & value) {
+	std::string normalized = std::filesystem::path(value).generic_string();
+	std::replace(normalized.begin(), normalized.end(), '\\', '/');
+	return toLowerCopy(normalized);
+}
+
+void addUniqueString(std::vector<std::string> * values, const std::string & value) {
+	if (values == nullptr || trimCopy(value).empty()) {
+		return;
+	}
+	if (std::find(values->begin(), values->end(), value) == values->end()) {
+		values->push_back(value);
+	}
+}
+
+std::string inferCodeMapRole(const std::string & scope) {
+	const std::string lowered = toLowerCopy(scope);
+	if (lowered.find("assistants") != std::string::npos) {
+		return "assistant workflow";
+	}
+	if (lowered.find("support") != std::string::npos) {
+		return "integration support";
+	}
+	if (lowered.find("core") != std::string::npos) {
+		return "runtime core";
+	}
+	if (lowered.find("compute") != std::string::npos) {
+		return "tensor and graph compute";
+	}
+	if (lowered.find("inference") != std::string::npos) {
+		return "model inference";
+	}
+	if (lowered.find("model") != std::string::npos) {
+		return "model loading";
+	}
+	if (lowered.find("test") != std::string::npos) {
+		return "test coverage";
+	}
+	if (lowered.find("example") != std::string::npos ||
+		lowered.find("gui") != std::string::npos) {
+		return "application surface";
+	}
+	return "module";
+}
+
+std::string riskLevelForScore(float score) {
+	if (score >= 0.85f) {
+		return "critical";
+	}
+	if (score >= 0.65f) {
+		return "high";
+	}
+	if (score >= 0.35f) {
+		return "medium";
+	}
+	return "low";
+}
+
 std::string unescapeTaggedValue(const std::string & text) {
 	std::string out;
 	out.reserve(text.size());
@@ -614,6 +672,16 @@ void appendRepoContext(
 			prompt << "Visual Studio solution: "
 				<< workspaceInfo.visualStudioSolutionPath << "\n";
 		}
+		if (!workspaceInfo.selectedVisualStudioProjectPath.empty()) {
+			prompt << "Selected Visual Studio project: "
+				<< workspaceInfo.selectedVisualStudioProjectPath << "\n";
+		}
+		if (!workspaceInfo.selectedVisualStudioConfiguration.empty() &&
+			!workspaceInfo.selectedVisualStudioPlatform.empty()) {
+			prompt << "Visual Studio target: "
+				<< workspaceInfo.selectedVisualStudioConfiguration
+				<< "|" << workspaceInfo.selectedVisualStudioPlatform << "\n";
+		}
 		if (!workspaceInfo.visualStudioProjectPaths.empty()) {
 			prompt << "Visual Studio projects: "
 				<< workspaceInfo.visualStudioProjectPaths.size() << "\n";
@@ -630,12 +698,28 @@ void appendRepoContext(
 			prompt << "openFrameworks project marker: "
 				<< workspaceInfo.addonsMakePath << "\n";
 		}
+		if (!workspaceInfo.msbuildPath.empty()) {
+			prompt << "MSBuild path: "
+				<< workspaceInfo.msbuildPath << "\n";
+		}
+		if (!workspaceInfo.defaultBuildDirectory.empty()) {
+			prompt << "Preferred build directory: "
+				<< workspaceInfo.defaultBuildDirectory << "\n";
+		}
 		prompt << "Available files in this folder:\n";
 		break;
 	case ofxGgmlScriptSourceType::GitHubRepo:
 		prompt << "Context: Loaded GitHub repository: "
 			<< context.scriptSource->getGitHubOwnerRepo()
 			<< " (branch: " << context.scriptSource->getGitHubBranch() << ")\n";
+		if (!workspaceInfo.gitHubResolvedCommitSha.empty()) {
+			prompt << "Pinned commit: "
+				<< workspaceInfo.gitHubResolvedCommitSha << "\n";
+		}
+		if (!workspaceInfo.gitHubFocusedPath.empty()) {
+			prompt << "Focused GitHub path: "
+				<< workspaceInfo.gitHubFocusedPath << "\n";
+		}
 		prompt << "Available files in this repository:\n";
 		break;
 	case ofxGgmlScriptSourceType::Internet:
@@ -698,6 +782,27 @@ void appendRequestConstraints(
 	const ofxGgmlCodeAssistantRequest & request) {
 	appendAllowedFiles(prompt, request.allowedFiles);
 
+	if (request.specToCodeMode) {
+		prompt << "Treat this request as a feature specification to implement professionally.\n";
+		prompt << "Work in the order: plan, files, edits, tests, verification, risks.\n\n";
+	}
+
+	if (!request.acceptanceCriteria.empty()) {
+		prompt << "Acceptance criteria:\n";
+		for (const auto & criterion : request.acceptanceCriteria) {
+			prompt << "- " << criterion << "\n";
+		}
+		prompt << "\n";
+	}
+
+	if (!request.constraints.empty()) {
+		prompt << "Additional constraints:\n";
+		for (const auto & constraint : request.constraints) {
+			prompt << "- " << constraint << "\n";
+		}
+		prompt << "\n";
+	}
+
 	if (!trimCopy(request.buildErrors).empty()) {
 		prompt << "Build or test failure details:\n"
 			<< request.buildErrors << "\n\n";
@@ -745,6 +850,15 @@ void appendRequestConstraints(
 
 	if (request.action == ofxGgmlCodeAssistantAction::GroundedDocs) {
 		prompt << "Use grounded sources only. If sources are missing, say what additional docs are needed.\n\n";
+	}
+
+	if (request.synthesizeTests) {
+		prompt << "Also propose focused tests or assertions for the change.\n\n";
+	}
+
+	if (request.simulateReviewers) {
+		prompt << "Simulate review passes for correctness, safety, and maintainability.\n";
+		prompt << "If you emit findings, include explicit priority, confidence, category, and fix direction.\n\n";
 	}
 }
 
@@ -1268,6 +1382,19 @@ ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
 		return index;
 	}
 
+	const auto workspaceInfo = context.scriptSource->getWorkspaceInfo();
+	const std::string workspaceRoot =
+		context.scriptSource->getSourceType() == ofxGgmlScriptSourceType::LocalFolder
+			? workspaceInfo.workspaceRoot
+			: std::string();
+	if (!workspaceRoot.empty() && workspaceInfo.workspaceGeneration > 0) {
+		std::lock_guard<std::mutex> cacheLock(m_semanticCacheMutex);
+		if (m_cachedWorkspaceRoot == workspaceRoot &&
+			m_cachedWorkspaceGeneration == workspaceInfo.workspaceGeneration) {
+			return m_cachedSemanticIndex;
+		}
+	}
+
 	const auto files = context.scriptSource->getFiles();
 	if (files.empty()) {
 		return index;
@@ -1275,8 +1402,15 @@ ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
 
 	CompileCommandsIndex compileCommands;
 	if (context.scriptSource->getSourceType() == ofxGgmlScriptSourceType::LocalFolder) {
-		if (const auto dbPath = findCompilationDatabasePath(
-				context.scriptSource->getLocalFolderPath())) {
+		std::optional<std::filesystem::path> dbPath;
+		if (!workspaceInfo.compilationDatabasePath.empty()) {
+			dbPath = std::filesystem::path(workspaceRoot) /
+				std::filesystem::path(workspaceInfo.compilationDatabasePath);
+		} else {
+			dbPath = findCompilationDatabasePath(
+				context.scriptSource->getLocalFolderPath());
+		}
+		if (dbPath && std::filesystem::exists(*dbPath)) {
 			compileCommands = parseCompilationDatabase(
 				context.scriptSource->getLocalFolderPath(),
 				*dbPath);
@@ -1421,7 +1555,343 @@ ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
 		}
 	}
 
+	if (!workspaceRoot.empty() && workspaceInfo.workspaceGeneration > 0) {
+		std::lock_guard<std::mutex> cacheLock(m_semanticCacheMutex);
+		m_cachedWorkspaceRoot = workspaceRoot;
+		m_cachedWorkspaceGeneration = workspaceInfo.workspaceGeneration;
+		m_cachedSemanticIndex = index;
+	}
+
 	return index;
+}
+
+ofxGgmlCodeAssistantCodeMap ofxGgmlCodeAssistant::buildCodeMap(
+	const ofxGgmlCodeAssistantContext & context) const {
+	ofxGgmlCodeAssistantCodeMap codeMap;
+	if (context.scriptSource == nullptr) {
+		return codeMap;
+	}
+
+	const auto workspaceInfo = context.scriptSource->getWorkspaceInfo();
+	codeMap.workspaceRoot = workspaceInfo.workspaceRoot;
+	codeMap.workspaceGeneration = workspaceInfo.workspaceGeneration;
+
+	const auto files = context.scriptSource->getFiles();
+	for (const auto & file : files) {
+		if (!file.isDirectory) {
+			++codeMap.totalFiles;
+		}
+	}
+
+	const auto semanticIndex = buildSemanticIndex(context);
+	codeMap.backendName = semanticIndex.backendName;
+	codeMap.totalSymbols = static_cast<int>(semanticIndex.symbols.size());
+
+	std::map<std::string, ofxGgmlCodeAssistantCodeMapEntry> entriesByScope;
+	for (const auto & symbol : semanticIndex.symbols) {
+		const std::string scope = [&]() {
+			const std::string parent =
+				std::filesystem::path(symbol.filePath).parent_path().generic_string();
+			return parent.empty() ? std::string("(root)") : parent;
+		}();
+		auto & entry = entriesByScope[scope];
+		entry.scope = scope;
+		entry.role = inferCodeMapRole(scope);
+		++entry.symbolCount;
+		addUniqueString(&entry.files, symbol.filePath);
+		if (entry.topSymbols.size() < 6) {
+			addUniqueString(&entry.topSymbols, symbol.name);
+		}
+	}
+
+	for (auto & pair : entriesByScope) {
+		codeMap.entries.push_back(std::move(pair.second));
+	}
+	std::sort(
+		codeMap.entries.begin(),
+		codeMap.entries.end(),
+		[](const ofxGgmlCodeAssistantCodeMapEntry & a,
+			const ofxGgmlCodeAssistantCodeMapEntry & b) {
+			if (a.symbolCount != b.symbolCount) {
+				return a.symbolCount > b.symbolCount;
+			}
+			return a.scope < b.scope;
+		});
+	return codeMap;
+}
+
+std::vector<ofxGgmlCodeAssistantTestSuggestion>
+ofxGgmlCodeAssistant::synthesizeTests(
+	const ofxGgmlCodeAssistantRequest & request,
+	const ofxGgmlCodeAssistantStructuredResult & structured,
+	const ofxGgmlCodeAssistantContext & context) const {
+	std::vector<ofxGgmlCodeAssistantTestSuggestion> suggestions;
+	std::vector<std::string> touchedFiles;
+	for (const auto & file : structured.filesToTouch) {
+		addUniqueString(&touchedFiles, file.filePath);
+	}
+	for (const auto & patch : structured.patchOperations) {
+		addUniqueString(&touchedFiles, patch.filePath);
+	}
+	for (const auto & file : request.allowedFiles) {
+		addUniqueString(&touchedFiles, file);
+	}
+	if (touchedFiles.empty() && context.scriptSource != nullptr && context.focusedFileIndex >= 0) {
+		const auto files = context.scriptSource->getFiles();
+		if (context.focusedFileIndex < static_cast<int>(files.size())) {
+			addUniqueString(&touchedFiles, files[static_cast<size_t>(context.focusedFileIndex)].name);
+		}
+	}
+
+	for (const auto & file : touchedFiles) {
+		const std::string normalized = normalizePathForMatch(file);
+		ofxGgmlCodeAssistantTestSuggestion suggestion;
+		suggestion.priority = 2;
+		suggestion.name = "Cover " + std::filesystem::path(file).stem().string();
+		suggestion.rationale = "Validate the behavioral change in " + file + ".";
+
+		if (normalized.find("codeassistant") != std::string::npos) {
+			suggestion.filePath = "tests/test_code_assistant.cpp";
+			suggestion.commandLabel = "assistant-eval";
+			suggestion.commandTag = "[code_assistant],[eval]";
+			suggestion.priority = 1;
+		} else if (normalized.find("workspaceassistant") != std::string::npos) {
+			suggestion.filePath = "tests/test_workspace_assistant.cpp";
+			suggestion.commandLabel = "workspace-assistant";
+			suggestion.commandTag = "[workspace_assistant]";
+			suggestion.priority = 1;
+		} else if (normalized.find("chatassistant") != std::string::npos) {
+			suggestion.filePath = "tests/test_chat_assistant.cpp";
+			suggestion.commandLabel = "chat-assistant";
+			suggestion.commandTag = "[chat_assistant]";
+		} else if (normalized.find("textassistant") != std::string::npos) {
+			suggestion.filePath = "tests/test_text_assistant.cpp";
+			suggestion.commandLabel = "text-assistant";
+			suggestion.commandTag = "[text_assistant]";
+		} else if (normalized.find("codereview") != std::string::npos) {
+			suggestion.filePath = "tests/test_code_review.cpp";
+			suggestion.commandLabel = "code-review";
+			suggestion.commandTag = "[code_review]";
+		} else if (normalized.find("inference") != std::string::npos) {
+			suggestion.filePath = "tests/test_inference.cpp";
+			suggestion.commandLabel = "inference";
+			suggestion.commandTag = "[inference]";
+		} else if (normalized.rfind("tests/", 0) == 0) {
+			suggestion.filePath = file;
+			suggestion.commandLabel = "existing-test";
+			suggestion.commandTag = "";
+		} else {
+			suggestion.filePath = "tests/test_integration.cpp";
+			suggestion.commandLabel = "integration";
+			suggestion.commandTag = "";
+		}
+
+		if (!request.acceptanceCriteria.empty()) {
+			suggestion.rationale += " Acceptance: " +
+				request.acceptanceCriteria.front();
+		}
+		suggestions.push_back(std::move(suggestion));
+		if (suggestions.size() >= 6) {
+			break;
+		}
+	}
+	return suggestions;
+}
+
+std::vector<ofxGgmlCodeAssistantReviewerSimulation>
+ofxGgmlCodeAssistant::simulateReviewerPasses(
+	const ofxGgmlCodeAssistantRequest & request,
+	const ofxGgmlCodeAssistantStructuredResult & structured,
+	const ofxGgmlCodeAssistantContext &) const {
+	std::vector<ofxGgmlCodeAssistantReviewerSimulation> simulations;
+
+	std::vector<std::string> touchedFiles;
+	bool touchesHeader = false;
+	bool deletesFiles = false;
+	for (const auto & file : structured.filesToTouch) {
+		addUniqueString(&touchedFiles, file.filePath);
+	}
+	for (const auto & patch : structured.patchOperations) {
+		addUniqueString(&touchedFiles, patch.filePath);
+		touchesHeader = touchesHeader ||
+			std::filesystem::path(patch.filePath).extension().string() == ".h";
+		deletesFiles = deletesFiles ||
+			patch.kind == ofxGgmlCodeAssistantPatchKind::DeleteFileOp;
+	}
+	const bool hasVerification = !structured.verificationCommands.empty();
+	const bool hasTests = !structured.testSuggestions.empty();
+
+	auto addFinding = [](ofxGgmlCodeAssistantReviewerSimulation * simulation,
+		int priority,
+		float confidence,
+		const std::string & category,
+		const std::string & filePath,
+		int line,
+		const std::string & title,
+		const std::string & description,
+		const std::string & fixSuggestion) {
+		if (simulation == nullptr) {
+			return;
+		}
+		ofxGgmlCodeAssistantReviewFinding finding;
+		finding.priority = priority;
+		finding.confidence = confidence;
+		finding.category = category;
+		finding.filePath = filePath;
+		finding.line = line;
+		finding.title = title;
+		finding.description = description;
+		finding.fixSuggestion = fixSuggestion;
+		finding.reviewerPersona = simulation->persona;
+		simulation->findings.push_back(std::move(finding));
+	};
+
+	ofxGgmlCodeAssistantReviewerSimulation correctness;
+	correctness.persona = "correctness";
+	if (!hasVerification && !touchedFiles.empty()) {
+		addFinding(
+			&correctness,
+			1,
+			0.92f,
+			"regression-risk",
+			touchedFiles.front(),
+			0,
+			"Verification coverage is missing",
+			"The change touches implementation files but does not include a concrete verification command.",
+			"Add at least one focused build or test command for the touched module.");
+	}
+	if (!hasTests && (request.updateTests || request.specToCodeMode) && !touchedFiles.empty()) {
+		addFinding(
+			&correctness,
+			2,
+			0.84f,
+			"tests",
+			touchedFiles.front(),
+			0,
+			"Test coverage should be extended",
+			"The request expects behavior changes, but no targeted test was proposed.",
+			"Add or update a focused test that exercises the changed path.");
+	}
+	simulations.push_back(std::move(correctness));
+
+	ofxGgmlCodeAssistantReviewerSimulation safety;
+	safety.persona = "safety";
+	if (deletesFiles && !touchedFiles.empty()) {
+		addFinding(
+			&safety,
+			1,
+			0.88f,
+			"destructive-change",
+			touchedFiles.front(),
+			0,
+			"Deletion needs extra validation",
+			"The plan deletes files, which raises rollback and data-loss risk if verification is incomplete.",
+			"Prefer a staged migration or add stronger rollback and verification steps.");
+	}
+	if (!request.forbidNewDependencies) {
+		addFinding(
+			&safety,
+			3,
+			0.62f,
+			"dependencies",
+			touchedFiles.empty() ? std::string() : touchedFiles.front(),
+			0,
+			"Dependency policy is open-ended",
+			"The request currently allows new dependencies, which can expand supply-chain and build risk.",
+			"Keep third-party dependencies unchanged unless there is a strong, explicit reason.");
+	}
+	simulations.push_back(std::move(safety));
+
+	ofxGgmlCodeAssistantReviewerSimulation maintainability;
+	maintainability.persona = "maintainability";
+	if (touchesHeader && !request.preservePublicApi) {
+		addFinding(
+			&maintainability,
+			2,
+			0.82f,
+			"api-stability",
+			touchedFiles.front(),
+			0,
+			"Public API drift is possible",
+			"The change touches header files without an explicit public-API preservation guard.",
+			"Document the API impact or preserve the external interface.");
+	}
+	if (touchedFiles.size() > 4) {
+		addFinding(
+			&maintainability,
+			2,
+			0.77f,
+			"scope",
+			touchedFiles.front(),
+			0,
+			"Patch scope is broad",
+			"The plan spans many files, which can make the change harder to review and stabilize.",
+			"Split the change into smaller commits or narrow the edit set.");
+	}
+	simulations.push_back(std::move(maintainability));
+
+	return simulations;
+}
+
+ofxGgmlCodeAssistantRiskAssessment ofxGgmlCodeAssistant::assessRisk(
+	const ofxGgmlCodeAssistantRequest & request,
+	const ofxGgmlCodeAssistantStructuredResult & structured,
+	const ofxGgmlCodeAssistantContext &) const {
+	ofxGgmlCodeAssistantRiskAssessment assessment = structured.riskAssessment;
+
+	std::vector<std::string> touchedFiles;
+	bool touchesHeader = false;
+	bool deletesFiles = false;
+	for (const auto & file : structured.filesToTouch) {
+		addUniqueString(&touchedFiles, file.filePath);
+	}
+	for (const auto & patch : structured.patchOperations) {
+		addUniqueString(&touchedFiles, patch.filePath);
+		touchesHeader = touchesHeader ||
+			std::filesystem::path(patch.filePath).extension().string() == ".h";
+		deletesFiles = deletesFiles ||
+			patch.kind == ofxGgmlCodeAssistantPatchKind::DeleteFileOp;
+	}
+
+	float score = assessment.score;
+	if (!structured.patchOperations.empty() || !trimCopy(structured.unifiedDiff).empty()) {
+		score += 0.10f;
+	}
+	if (touchedFiles.size() > 1) {
+		score += 0.10f;
+	}
+	if (touchedFiles.size() > 4) {
+		score += 0.15f;
+		addUniqueString(&assessment.reasons, "The plan touches many files.");
+	}
+	if (touchesHeader) {
+		score += 0.18f;
+		addUniqueString(&assessment.reasons, "Header changes can affect public interfaces.");
+	}
+	if (deletesFiles) {
+		score += 0.22f;
+		addUniqueString(&assessment.reasons, "The plan deletes files.");
+	}
+	if (structured.verificationCommands.empty()) {
+		score += 0.15f;
+		addUniqueString(&assessment.reasons, "No explicit verification command was proposed.");
+	}
+	if (structured.testSuggestions.empty() &&
+		(request.updateTests || request.specToCodeMode)) {
+		score += 0.10f;
+		addUniqueString(&assessment.reasons, "Test coverage has not been extended yet.");
+	}
+	if (!trimCopy(request.buildErrors).empty()) {
+		score += 0.15f;
+		addUniqueString(&assessment.reasons, "The task starts from an active build or test failure.");
+	}
+	for (const auto & risk : structured.risks) {
+		addUniqueString(&assessment.reasons, risk);
+	}
+
+	assessment.score = (std::min)(1.0f, score);
+	assessment.level = riskLevelForScore(assessment.score);
+	return assessment;
 }
 
 std::string ofxGgmlCodeAssistant::buildStructuredResponseInstructions() {
@@ -1430,6 +1900,7 @@ std::string ofxGgmlCodeAssistant::buildStructuredResponseInstructions() {
 		"GOAL: short summary\n"
 		"APPROACH: short summary\n"
 		"STEP: concrete next step\n"
+		"ACCEPT: acceptance criterion or invariant\n"
 		"FILE: relative/path | why it matters | comma,separated,symbols\n"
 		"PATCH: write|replace|append|delete | relative/path | short summary\n"
 		"SEARCH: escaped single-line search text for the previous PATCH when using replace\n"
@@ -1439,9 +1910,14 @@ std::string ofxGgmlCodeAssistant::buildStructuredResponseInstructions() {
 		"COMMAND: label | cwd | executable | arg1 | arg2 ...\n"
 		"EXPECT: expected verification outcome for the previous COMMAND\n"
 		"RETRY: true|false for the previous COMMAND\n"
+		"TEST: name | relative/test/file | rationale | command-label | command-tag\n"
+		"REVIEWER: reviewer persona for following FINDING lines\n"
 		"FINDING: priority | confidence | relative/path | line | title\n"
 		"DETAIL: description for the previous FINDING\n"
 		"FIX: concrete fix suggestion for the previous FINDING\n"
+		"CATEGORY: category for the previous FINDING\n"
+		"RISK-SCORE: 0.0 to 1.0 overall patch risk\n"
+		"RISK-LEVEL: low|medium|high|critical\n"
 		"RISK: possible risk or regression\n"
 		"QUESTION: unresolved question\n"
 		"Only use escaped single-line values for SEARCH, REPLACE, CONTENT, and DIFF.";
@@ -1567,6 +2043,7 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 	ofxGgmlCodeAssistantPatchOperation * currentPatch = nullptr;
 	ofxGgmlCodeAssistantCommandSuggestion * currentCommand = nullptr;
 	ofxGgmlCodeAssistantReviewFinding * currentFinding = nullptr;
+	std::string currentReviewerPersona;
 
 	for (const auto & rawLine : splitLines(text)) {
 		const std::string line = trimCopy(rawLine);
@@ -1592,6 +2069,12 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 		if (line.rfind("STEP:", 0) == 0) {
 			structured.steps.push_back(unescapeTaggedValue(
 				consumeValue("STEP:")));
+			structured.detectedStructuredOutput = true;
+			continue;
+		}
+		if (line.rfind("ACCEPT:", 0) == 0) {
+			structured.acceptanceCriteria.push_back(unescapeTaggedValue(
+				consumeValue("ACCEPT:")));
 			structured.detectedStructuredOutput = true;
 			continue;
 		}
@@ -1697,6 +2180,30 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 			structured.detectedStructuredOutput = true;
 			continue;
 		}
+		if (line.rfind("TEST:", 0) == 0) {
+			const auto fields = splitPipeFields(consumeValue("TEST:"));
+			if (fields.size() >= 3) {
+				ofxGgmlCodeAssistantTestSuggestion test;
+				test.name = unescapeTaggedValue(fields[0]);
+				test.filePath = fields[1];
+				test.rationale = unescapeTaggedValue(fields[2]);
+				if (fields.size() >= 4) {
+					test.commandLabel = unescapeTaggedValue(fields[3]);
+				}
+				if (fields.size() >= 5) {
+					test.commandTag = unescapeTaggedValue(fields[4]);
+				}
+				structured.testSuggestions.push_back(std::move(test));
+				structured.detectedStructuredOutput = true;
+			}
+			continue;
+		}
+		if (line.rfind("REVIEWER:", 0) == 0) {
+			currentReviewerPersona = unescapeTaggedValue(
+				consumeValue("REVIEWER:"));
+			structured.detectedStructuredOutput = true;
+			continue;
+		}
 		if (line.rfind("FINDING:", 0) == 0) {
 			const auto fields = splitPipeFields(consumeValue("FINDING:"));
 			if (fields.size() >= 5) {
@@ -1718,6 +2225,7 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 					finding.line = 0;
 				}
 				finding.title = unescapeTaggedValue(fields[4]);
+				finding.reviewerPersona = currentReviewerPersona;
 				structured.reviewFindings.push_back(std::move(finding));
 				currentFinding = &structured.reviewFindings.back();
 				currentPatch = nullptr;
@@ -1738,9 +2246,32 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 			structured.detectedStructuredOutput = true;
 			continue;
 		}
+		if (line.rfind("CATEGORY:", 0) == 0 && currentFinding != nullptr) {
+			currentFinding->category = unescapeTaggedValue(
+				consumeValue("CATEGORY:"));
+			structured.detectedStructuredOutput = true;
+			continue;
+		}
+		if (line.rfind("RISK-SCORE:", 0) == 0) {
+			try {
+				structured.riskAssessment.score = std::stof(
+					consumeValue("RISK-SCORE:"));
+			} catch (...) {
+				structured.riskAssessment.score = 0.0f;
+			}
+			structured.detectedStructuredOutput = true;
+			continue;
+		}
+		if (line.rfind("RISK-LEVEL:", 0) == 0) {
+			structured.riskAssessment.level = toLowerCopy(
+				consumeValue("RISK-LEVEL:"));
+			structured.detectedStructuredOutput = true;
+			continue;
+		}
 		if (line.rfind("RISK:", 0) == 0) {
-			structured.risks.push_back(unescapeTaggedValue(
-				consumeValue("RISK:")));
+			const std::string risk = unescapeTaggedValue(consumeValue("RISK:"));
+			structured.risks.push_back(risk);
+			addUniqueString(&structured.riskAssessment.reasons, risk);
 			structured.detectedStructuredOutput = true;
 			continue;
 		}
@@ -1750,6 +2281,29 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 			structured.detectedStructuredOutput = true;
 			continue;
 		}
+	}
+
+	if (!structured.reviewFindings.empty()) {
+		std::map<std::string, size_t> reviewerIndices;
+		for (const auto & finding : structured.reviewFindings) {
+			if (trimCopy(finding.reviewerPersona).empty()) {
+				continue;
+			}
+			auto it = reviewerIndices.find(finding.reviewerPersona);
+			if (it == reviewerIndices.end()) {
+				ofxGgmlCodeAssistantReviewerSimulation simulation;
+				simulation.persona = finding.reviewerPersona;
+				structured.reviewerSimulations.push_back(std::move(simulation));
+				it = reviewerIndices.emplace(
+					finding.reviewerPersona,
+					structured.reviewerSimulations.size() - 1).first;
+			}
+			structured.reviewerSimulations[it->second].findings.push_back(finding);
+		}
+	}
+	if (trimCopy(structured.riskAssessment.level).empty()) {
+		structured.riskAssessment.level =
+			riskLevelForScore(structured.riskAssessment.score);
 	}
 
 	return structured;
@@ -1801,6 +2355,10 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 	prepared.includedSymbolContext =
 		!prepared.retrievedSymbolContext.definitions.empty() ||
 		!prepared.retrievedSymbolContext.relatedReferences.empty();
+	if (request.includeCodeMap || request.specToCodeMode) {
+		prepared.codeMap = buildCodeMap(context);
+		prepared.includedCodeMap = !prepared.codeMap.entries.empty();
+	}
 
 	std::ostringstream prompt;
 	if (!trimCopy(request.language.systemPrompt).empty()) {
@@ -1819,6 +2377,22 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 		&prepared.focusedFileName);
 
 	appendRequestConstraints(prompt, request);
+
+	if (prepared.includedCodeMap) {
+		prompt << "Semantic code map:\n";
+		prompt << "- backend: " << prepared.codeMap.backendName
+			<< ", files: " << prepared.codeMap.totalFiles
+			<< ", symbols: " << prepared.codeMap.totalSymbols << "\n";
+		for (const auto & entry : prepared.codeMap.entries) {
+			prompt << "- " << entry.scope << " [" << entry.role << "] "
+				<< "symbols=" << entry.symbolCount;
+			if (!entry.topSymbols.empty()) {
+				prompt << " top=" << joinStrings(entry.topSymbols, ", ");
+			}
+			prompt << "\n";
+		}
+		prompt << "\n";
+	}
 
 	if (!prepared.retrievedSymbolContext.definitions.empty() ||
 		!prepared.retrievedSymbolContext.relatedReferences.empty()) {
@@ -1929,7 +2503,62 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::run(
 		result.structured.unifiedDiff =
 			buildUnifiedDiffFromStructuredResult(result.structured);
 	}
+	if ((request.synthesizeTests || request.specToCodeMode) &&
+		result.structured.testSuggestions.empty()) {
+		result.structured.testSuggestions =
+			synthesizeTests(request, result.structured, context);
+	}
+	result.structured.riskAssessment =
+		assessRisk(request, result.structured, context);
+	if ((request.simulateReviewers || request.specToCodeMode) &&
+		result.structured.reviewerSimulations.empty()) {
+		result.structured.reviewerSimulations =
+			simulateReviewerPasses(request, result.structured, context);
+		if (result.structured.reviewFindings.empty()) {
+			for (const auto & simulation : result.structured.reviewerSimulations) {
+				result.structured.reviewFindings.insert(
+					result.structured.reviewFindings.end(),
+					simulation.findings.begin(),
+					simulation.findings.end());
+			}
+		}
+	}
+	for (const auto & reason : result.structured.riskAssessment.reasons) {
+		addUniqueString(&result.structured.risks, reason);
+	}
 	return result;
+}
+
+ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runSpecToCode(
+	const std::string & modelPath,
+	const ofxGgmlCodeAssistantSpecToCodeRequest & request,
+	const ofxGgmlCodeAssistantContext & context,
+	const ofxGgmlInferenceSettings & inferenceSettings,
+	const ofxGgmlPromptSourceSettings & sourceSettings,
+	std::function<bool(const std::string &)> onChunk) const {
+	ofxGgmlCodeAssistantRequest codeRequest;
+	codeRequest.action = ofxGgmlCodeAssistantAction::Generate;
+	codeRequest.language = request.language;
+	codeRequest.userInput = request.specification;
+	codeRequest.allowedFiles = request.allowedFiles;
+	codeRequest.acceptanceCriteria = request.acceptanceCriteria;
+	codeRequest.constraints = request.constraints;
+	codeRequest.preservePublicApi = request.preservePublicApi;
+	codeRequest.updateTests = request.updateTests;
+	codeRequest.forbidNewDependencies = request.forbidNewDependencies;
+	codeRequest.specToCodeMode = true;
+	codeRequest.synthesizeTests = true;
+	codeRequest.simulateReviewers = true;
+	codeRequest.includeCodeMap = true;
+	codeRequest.requestStructuredResult = true;
+	codeRequest.requestUnifiedDiff = request.requestUnifiedDiff;
+	return run(
+		modelPath,
+		codeRequest,
+		context,
+		inferenceSettings,
+		sourceSettings,
+		onChunk);
 }
 
 ofxGgmlCodeAssistantInlineCompletionPreparedPrompt

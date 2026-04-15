@@ -19,6 +19,9 @@ All notable changes to `ofxGgml` are documented in this file.
 - Automatic verification command suggestion in `ofxGgmlWorkspaceAssistant` based on changed files and available test targets.
 - Compile-database-aware semantic retrieval in `ofxGgmlCodeAssistant`, including symbol ranges, qualified names, and caller metadata for local workspaces that expose `compile_commands.json`.
 - Unified-diff parsing and hunk-based apply support in `ofxGgmlWorkspaceAssistant`, with drift-aware validation before edits are written.
+- Spec-to-code workflow helpers in `ofxGgmlCodeAssistant`, including acceptance criteria, synthesized test suggestions, reviewer-simulation passes, and patch risk scoring.
+- Semantic code-map generation in `ofxGgmlCodeAssistant` for plan-first coding flows and repo-aware prompt assembly.
+- Shadow-workspace execution in `ofxGgmlWorkspaceAssistant` so edits can be verified safely before syncing back to the original workspace.
 
 ### Changed
 - Structured command parsing is now more tolerant of partially degraded assistant output, which makes Windows-based scripted test and tooling flows more robust.
@@ -28,9 +31,11 @@ All notable changes to `ofxGgml` are documented in this file.
 - Build-fix execution can now derive editable files from compiler output and reuse the same verification/retry loop as other workspace tasks.
 - Workspace patch application now validates replacement operations before apply and can roll back automatically after failed verification.
 - Inline completion prompting now supports a fill-in-the-middle style cursor format for editor integrations.
+- Structured coding flows now surface test ideas, reviewer-simulation findings, and risk metadata as first-class addon result types instead of leaving that logic to the GUI layer.
 
 ### Documentation
 - `README.md` now documents semantic symbol retrieval, inline completion, transaction-based workspace editing, and the expanded assistant eval suite as public addon features.
+- `README.md` now also documents spec-to-code planning, semantic code maps, and shadow-workspace safe apply as public addon features.
 
 ## [1.0.0] - 2026-04-15
 
