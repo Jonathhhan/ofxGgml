@@ -228,6 +228,8 @@
 	<ItemGroup>
 		<ClCompile Include="src\main.cpp" />
 		<ClCompile Include="src\ofApp.cpp" />
+		<ClCompile Include="..\src\ofxGgmlChatAssistant.cpp" />
+		<ClCompile Include="..\src\ofxGgmlCodeAssistant.cpp" />
 		<ClCompile Include="..\src\ofxGgmlCore.cpp" />
 		<ClCompile Include="..\src\ofxGgmlCodeReview.cpp" />
 		<ClCompile Include="..\src\ofxGgmlGraph.cpp" />
@@ -236,6 +238,7 @@
 		<ClCompile Include="..\src\ofxGgmlProjectMemory.cpp" />
 		<ClCompile Include="..\src\ofxGgmlScriptSource.cpp" />
 		<ClCompile Include="..\src\ofxGgmlTensor.cpp" />
+		<ClCompile Include="..\src\ofxGgmlTextAssistant.cpp" />
 		<ClCompile Include="..\..\ofxImGui\src\BaseEngine.cpp" />
 		<ClCompile Include="..\..\ofxImGui\src\DefaultTheme.cpp" />
 		<ClCompile Include="..\..\ofxImGui\src\EngineGLFW.cpp" />
@@ -259,6 +262,8 @@
 	<ItemGroup>
 		<ClInclude Include="src\ofApp.h" />
 		<ClInclude Include="..\src\ofxGgml.h" />
+		<ClInclude Include="..\src\ofxGgmlChatAssistant.h" />
+		<ClInclude Include="..\src\ofxGgmlCodeAssistant.h" />
 		<ClInclude Include="..\src\ofxGgmlCore.h" />
 		<ClInclude Include="..\src\ofxGgmlCodeReview.h" />
 		<ClInclude Include="..\src\ofxGgmlGraph.h" />
@@ -269,6 +274,7 @@
 		<ClInclude Include="..\src\ofxGgmlResult.h" />
 		<ClInclude Include="..\src\ofxGgmlScriptSource.h" />
 		<ClInclude Include="..\src\ofxGgmlTensor.h" />
+		<ClInclude Include="..\src\ofxGgmlTextAssistant.h" />
 		<ClInclude Include="..\src\ofxGgmlTypes.h" />
 		<ClInclude Include="..\src\ofxGgmlVersion.h" />
 		<ClInclude Include="..\libs\ggml\include\ggml-alloc.h" />

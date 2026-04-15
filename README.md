@@ -28,10 +28,15 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlGraph` fluent graph builder for common ggml operations
 - `ofxGgmlModel` GGUF inspection and backend weight upload
 - `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, CLI capability probing, cutoff continuation, and source-grounded prompt building
+- `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
+- `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, symbol-aware retrieval, repo context, focused-file assistance, and follow-up scripting actions
+- `ofxGgmlWorkspaceAssistant` for patch application, verification commands, and retry-oriented coding loops on top of structured assistant output
+- `ofxGgmlTextAssistant` for translation, summarization, rewriting, and reusable text-task prompts
 - `ofxGgmlCodeReview`, `ofxGgmlProjectMemory`, and `ofxGgmlScriptSource` helpers for local coding and multi-pass review workflows
+- assistant eval coverage for retrieval quality, dry-run safety, and structured workspace execution
 - async graph submission and explicit synchronization for frame-friendly compute
 - Windows build scripts that refresh Visual Studio linking automatically
-- GUI example for local chat, review, and script-assisted workflows
+- GUI example for local chat, review, and script-assisted workflows built mostly on addon helpers
 
 ## Source layout
 
@@ -44,6 +49,10 @@ Core implementation is split by concern:
 - `src/ofxGgmlCore.*`
 - `src/ofxGgmlGraph.*`
 - `src/ofxGgmlInference.*`
+- `src/ofxGgmlChatAssistant.*`
+- `src/ofxGgmlCodeAssistant.*`
+- `src/ofxGgmlWorkspaceAssistant.*`
+- `src/ofxGgmlTextAssistant.*`
 - `src/ofxGgmlCodeReview.*`
 - `src/ofxGgmlModel.*`
 - `src/ofxGgmlTensor.*`
@@ -183,14 +192,14 @@ Common options:
 ## Examples
 
 - `ofxGgmlBasicExample`: interactive matrix demo plus steady-state matmul benchmark
-- `ofxGgmlGuiExample`: local chat, review, and script workflow UI
+- `ofxGgmlGuiExample`: local chat, review, and script workflow UI backed by addon assistants
 - `ofxGgmlNeuralExample`: reusable inference graph with live class bars and latency view
 
 Both lightweight examples are now keyboard-driven so you can rerun compute and benchmark paths without restarting the app.
 
 ## Tests
 
-The test suite lives in `tests/` and covers core runtime behavior, model loading, inference helpers, and project memory support. When you change backend setup, Windows linking, or inference command assembly, it is worth rerunning the tests or at least rebuilding one example project.
+The test suite lives in `tests/` and covers core runtime behavior, model loading, inference helpers, chat/code/text assistants, and project memory support. When you change backend setup, Windows linking, or inference command assembly, it is worth rerunning the tests or at least rebuilding one example project.
 
 ## Performance
 
@@ -238,6 +247,50 @@ The helper normalizes HTML-heavy pages into cleaner text, clips oversized source
 
 Use it when an app wants a reusable local code-review pipeline instead of wiring `ofxGgmlScriptSource`, embedding calls, and prompt choreography by hand.
 
+## Chat Assistant Helpers
+
+`ofxGgmlChatAssistant` lifts the generic chat prompt path out of the `GuiExample`. It prepares reusable conversation prompts with optional system instructions and response-language hints, so apps can keep chat UIs thin and consistent.
+
+Use it when an app wants local chat behavior without duplicating prompt assembly or keeping a second language-preset list in UI code.
+
+## Code Assistant Helpers
+
+`ofxGgmlCodeAssistant` lifts the scripting workflow out of the `GuiExample`. It builds coding prompts with language presets, project memory, repo/file context, focused-file snippets, symbol-aware retrieval, and reusable actions such as `Generate`, `Refactor`, `Review`, `ContinueTask`, and `ContinueCutoff`.
+
+It can also request structured task output so apps receive a machine-readable plan instead of only free-form prose. Structured responses can include file intents, patch operations, verification commands, risks, and open questions.
+
+Use it when an app wants Copilot-style local coding assistance without duplicating prompt assembly, retrieval, and follow-up logic in UI code.
+
+## Workspace Assistant Helpers
+
+`ofxGgmlWorkspaceAssistant` wraps `ofxGgmlCodeAssistant` with a workspace execution loop. It can apply structured patch operations inside a workspace root, run verification commands, and request an updated remediation plan when verification fails.
+
+Use it when an app wants a local coding assistant that can move beyond "suggest code" into "plan, edit, verify, retry" without hardcoding file operations or command orchestration in UI code.
+
+The public result types make that loop inspectable:
+
+- `ofxGgmlCodeAssistantStructuredResult` for plans, patches, and verification commands
+- `ofxGgmlWorkspaceApplyResult` for touched files and apply messages
+- `ofxGgmlWorkspaceVerificationResult` for command-by-command outcomes
+- `ofxGgmlWorkspaceResult` for end-to-end attempts across build/test/retry cycles
+
+## Text Assistant Helpers
+
+`ofxGgmlTextAssistant` lifts translation and general text-workflow prompting out of the `GuiExample`. It prepares reusable prompts for `Summarize`, `KeyPoints`, `TlDr`, `Rewrite`, `Expand`, `Translate`, `DetectLanguage`, and `Custom` tasks.
+
+Use it when an app wants translation or writing-assistant features without hardcoding task prompts in its UI layer.
+
 ## Versioning
 
 Version macros live in `src/ofxGgmlVersion.h`. Runtime-facing version metadata is available through `ofxGgml::getAddonVersionInfo()`.
+
+## Eval Coverage
+
+The addon test suite now includes assistant-focused eval coverage for:
+
+- symbol-aware retrieval quality
+- structured code-task parsing
+- workspace dry-run safety
+- verification retry loops
+
+That keeps the scripting assistant features regression-tested as first-class addon APIs instead of GUI-only behavior.

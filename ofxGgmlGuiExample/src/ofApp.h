@@ -52,41 +52,6 @@ struct ModelPreset {
 };
 
 // ---------------------------------------------------------------------------
-// ScriptLanguage — language presets for the scripting panel.
-// ---------------------------------------------------------------------------
-
-struct ScriptLanguage {
-	std::string name;          // e.g. "C++"
-	std::string fileExt;       // e.g. ".cpp"
-	std::string systemPrompt;  // language-specific system prompt prefix
-};
-
-// ---------------------------------------------------------------------------
-// ScriptFileReviewInfo — precomputed data for hierarchical review.
-// ---------------------------------------------------------------------------
-
-struct ScriptFileReviewInfo {
-	std::string name;
-	std::string fullPath;
-	std::string content;
-	std::string truncatedContent;
-	std::vector<std::string> dependencies;
-	size_t loc = 0;
-	size_t complexity = 0;
-	size_t dependencyFanOut = 0;
-	size_t dependencyFanIn = 0;
-	float recencyScore = 0.0f;
-	float importanceScore = 0.0f;
-	float similarityScore = 0.0f;
-	float priorityScore = 0.0f;
-	int tokenCount = 0;
-	bool truncated = false;
-	bool selected = false;
-	std::vector<float> embedding;
-	std::string summary;
-};
-
-// ---------------------------------------------------------------------------
 // PromptTemplate — predefined system prompt for the Custom panel.
 // ---------------------------------------------------------------------------
 
@@ -128,8 +93,8 @@ private:
 	char summarizeInput[8192] = {};
 	char writeInput[4096] = {};
 	char translateInput[4096] = {};
-	int translateSourceLang = 0;        // index into kTranslateLanguages
-	int translateTargetLang = 1;        // index into kTranslateLanguages
+	int translateSourceLang = 0;
+	int translateTargetLang = 1;
 	char customInput[4096] = {};
 	char customSystemPrompt[2048] = {};
 
@@ -213,11 +178,13 @@ private:
 	void initModelPresets();
 
 	// -- script language presets --
-	std::vector<ScriptLanguage> scriptLanguages;
+	std::vector<ofxGgmlCodeLanguagePreset> scriptLanguages;
 	int selectedLanguageIndex = 0;
 	void initScriptLanguages();
 
 	// -- prompt templates (Custom panel) --
+	std::vector<ofxGgmlChatLanguageOption> chatLanguages;
+	std::vector<ofxGgmlTextLanguageOption> translateLanguages;
 	std::vector<PromptTemplate> promptTemplates;
 	int selectedPromptTemplateIndex = -1;
 	void initPromptTemplates();
@@ -228,14 +195,13 @@ private:
 	char scriptSourceBranch[128] = {};               // branch name, default "main"
 	char scriptSourceInternetUrl[1024] = {};         // internet URL input
 	int selectedScriptFileIndex = -1;
+	ofxGgmlChatAssistant chatAssistant;
+	ofxGgmlCodeAssistant scriptAssistant;
+	ofxGgmlTextAssistant textAssistant;
 	ofxGgmlInference llmInference;
 	ofxGgmlCodeReview scriptCodeReview;
 	ofxGgmlProjectMemory scriptProjectMemory;
 	std::string lastScriptRequest;
-	ofxGgmlInference scriptReviewInference;
-	ofxGgmlEmbeddingIndex scriptEmbeddingIndex;
-	std::vector<ScriptFileReviewInfo> lastScriptReviewFiles;
-	std::string lastScriptReviewStatus;
 
 	std::string buildScriptFilename() const;
 
@@ -253,13 +219,12 @@ private:
 	void reinitBackend();
 	void syncSelectedBackendIndex();
 	void runInference(AiMode mode, const std::string & userText,
-		const std::string & systemPrompt = "");
+		const std::string & systemPrompt = "",
+		const std::string & overridePrompt = "");
 	void runHierarchicalReview();
 	bool runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,
 		std::function<void(const std::string &)> onStreamData = nullptr,
 		bool preserveLlamaInstructions = false);
-	std::string buildPromptForMode(AiMode mode, const std::string & userText,
-		const std::string & systemPrompt) const;
 	std::string getSelectedModelPath() const;
 	void detectModelLayers();
 	void applyPendingOutput();
@@ -290,33 +255,4 @@ private:
 	void copyToClipboard(const std::string & text);
 	void exportChatHistory(const std::string & path);
 
-	// -- hierarchical review helpers --
-	std::vector<ScriptFileReviewInfo> collectScriptFilesForReview(std::string & status);
-	void computeFileHeuristics(std::vector<ScriptFileReviewInfo> & files,
-		const std::string & baseFolder);
-	void computeDependencyFanIn(std::vector<ScriptFileReviewInfo> & files);
-	int countTokensAccurate(const std::string & text, int fallback = -1);
-	ofxGgmlInferenceSettings makeReviewInferenceSettings(int tokenBudget) const;
-	std::string buildRepoTableOfContents(const std::vector<ScriptFileReviewInfo> & files,
-		size_t maxFiles) const;
-	std::string buildRepoTree(const std::vector<ScriptFileReviewInfo> & files) const;
-	std::vector<ScriptFileReviewInfo *> selectFilesForReview(
-		std::vector<ScriptFileReviewInfo> & files,
-		const std::string & reviewQuery,
-		int availableTokens,
-		int responseReserveTokens);
-	std::string runFileSummary(const ScriptFileReviewInfo & info,
-		const std::string & reviewQuery,
-		int perFileBudget,
-		const std::string & modelPath);
-	std::string runArchitectureReview(
-		const std::vector<ScriptFileReviewInfo *> & files,
-		const std::string & repoTree,
-		const std::string & reviewQuery,
-		const std::string & modelPath);
-	std::string runIntegrationReview(
-		const std::vector<ScriptFileReviewInfo *> & files,
-		const std::string & repoTree,
-		const std::string & reviewQuery,
-		const std::string & modelPath);
 };

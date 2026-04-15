@@ -560,13 +560,6 @@ std::string clampPromptToContext(const std::string & prompt, size_t contextToken
 		+ prompt.substr(prompt.size() - tail);
 }
 
-std::string buildCutoffContinuationRequest(const std::string & tailText) {
-	return
-		"Continue exactly from where the previous answer stopped. "
-		"Do not restart. Finish the incomplete thought/code naturally.\n\n"
-		"Tail of previous output:\n" + tailText;
-}
-
 std::string promptCachePathFor(const std::string & modelPath, AiMode mode) {
 	const std::string cacheDir = ofToDataPath("cache", true);
 	std::error_code ec;
@@ -588,31 +581,12 @@ constexpr float kSpinnerInterval = 0.15f;       // seconds per spinner frame
 constexpr float kDotsAnimationSpeed = 3.0f;     // dots cycle speed multiplier
 constexpr size_t kMaxScriptContextFiles = 50;
 constexpr size_t kMaxFocusedFileSnippetChars = 2000;
-constexpr size_t kMaxReviewTocFiles = 50;
-constexpr size_t kMaxEmbeddingSnippetChars = 4000;
-constexpr size_t kMaxEmbeddingParallelTasks = 4;
-constexpr size_t kMaxSummaryParallelTasks = 3;
 constexpr size_t kMaxInternetSourceUrls = 3;
 constexpr size_t kMaxInternetCharsPerSourceUrl = 1500;
 constexpr size_t kMaxInternetCharsFromSourceUrls = 4500;
 constexpr auto kStreamUiUpdateInterval = std::chrono::milliseconds(50);
 constexpr size_t kStreamUiMinGrowth = 256;
 const char * const kWaitingLabels[] = {"generating", "generating.", "generating..", "generating..."};
-const char * const kChatLanguages[] = {
-	"Auto",
-	"English",
-	"German",
-	"Spanish",
-	"French",
-	"Italian",
-	"Portuguese",
-	"Dutch",
-	"Polish",
-	"Russian",
-	"Japanese",
-	"Chinese"
-};
-constexpr int kChatLanguageCount = static_cast<int>(sizeof(kChatLanguages) / sizeof(kChatLanguages[0]));
 
 // Llama CLI detection state shared between probe and UI.
 // -1 = unknown / needs probe, 0 = probed but not found, 1 = available.
@@ -1261,16 +1235,7 @@ void ofApp::initModelPresets() {
 // ---------------------------------------------------------------------------
 
 void ofApp::initScriptLanguages() {
-scriptLanguages = {
-{"C++",        ".cpp",  "You are a C++ expert. Generate modern C++17 code."},
-{"Python",     ".py",   "You are a Python expert. Generate clean, idiomatic Python 3 code."},
-{"JavaScript", ".js",   "You are a JavaScript expert. Generate modern ES6+ code."},
-{"Rust",       ".rs",   "You are a Rust expert. Generate safe, idiomatic Rust code."},
-{"GLSL",       ".glsl", "You are a GLSL shader expert. Generate efficient GPU shader code."},
-{"Go",         ".go",   "You are a Go expert. Generate idiomatic Go code."},
-{"Bash",       ".sh",   "You are a Bash scripting expert. Generate portable shell scripts."},
-{"TypeScript", ".ts",   "You are a TypeScript expert. Generate type-safe TypeScript code."}
-};
+scriptLanguages = ofxGgmlCodeAssistant::defaultLanguagePresets();
 }
 
 // ---------------------------------------------------------------------------
@@ -1278,37 +1243,46 @@ scriptLanguages = {
 // ---------------------------------------------------------------------------
 
 void ofApp::initPromptTemplates() {
-promptTemplates = {
-{"Code Reviewer",
-"You are an expert code reviewer. Analyze the provided code for bugs, "
-"security issues, performance problems, and style improvements. "
-"Provide specific, actionable feedback with line references."},
-{"Technical Writer",
-"You are a technical documentation writer. Generate clear, well-structured "
-"documentation with examples, parameters, return values, and usage notes."},
-{"Data Analyst",
-"You are a data analysis expert. Help interpret data, suggest statistical "
-"methods, write queries, and explain results in plain language."},
-{"System Architect",
-"You are a software architect. Design systems with clear component "
-"boundaries, data flows, and technology choices. Consider scalability, "
-"reliability, and maintainability."},
-{"Debugger",
-"You are an expert debugger. Analyze error messages, stack traces, and "
-"code to identify root causes. Suggest specific fixes and explain why "
-"the bug occurs."},
-{"Test Engineer",
-"You are a test engineering expert. Generate comprehensive test cases "
-"including unit tests, edge cases, error paths, and integration scenarios. "
-"Use the appropriate testing framework for the language."},
-{"Translator",
-"You are a code translator. Convert code between programming languages "
-"while preserving logic, idioms, and best practices of the target language."},
-{"Optimizer",
-"You are a performance optimization expert. Analyze code for bottlenecks, "
-"memory issues, and algorithmic improvements. Suggest concrete optimizations "
-"with expected impact."},
-};
+chatLanguages = ofxGgmlChatAssistant::defaultResponseLanguages();
+translateLanguages = ofxGgmlTextAssistant::defaultTranslateLanguages();
+promptTemplates.clear();
+for (const auto & preset : ofxGgmlTextAssistant::defaultPromptTemplates()) {
+	promptTemplates.push_back({preset.name, preset.systemPrompt});
+}
+promptTemplates.push_back({
+	"Data Analyst",
+	"You are a data analysis expert. Help interpret data, suggest statistical "
+	"methods, write queries, and explain results in plain language."
+});
+promptTemplates.push_back({
+	"System Architect",
+	"You are a software architect. Design systems with clear component "
+	"boundaries, data flows, and technology choices. Consider scalability, "
+	"reliability, and maintainability."
+});
+promptTemplates.push_back({
+	"Debugger",
+	"You are an expert debugger. Analyze error messages, stack traces, and "
+	"code to identify root causes. Suggest specific fixes and explain why "
+	"the bug occurs."
+});
+promptTemplates.push_back({
+	"Test Engineer",
+	"You are a test engineering expert. Generate comprehensive test cases "
+	"including unit tests, edge cases, error paths, and integration scenarios. "
+	"Use the appropriate testing framework for the language."
+});
+promptTemplates.push_back({
+	"Translator",
+	"You are a code translator. Convert code between programming languages "
+	"while preserving logic, idioms, and best practices of the target language."
+});
+promptTemplates.push_back({
+	"Optimizer",
+	"You are a performance optimization expert. Analyze code for bottlenecks, "
+	"memory issues, and algorithmic improvements. Suggest concrete optimizations "
+	"with expected impact."
+});
 }
 
 // ---------------------------------------------------------------------------
@@ -1330,7 +1304,7 @@ initScriptLanguages();
 initPromptTemplates();
 if (!scriptLanguages.empty()) {
 	scriptSource.setPreferredExtension(
-		scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+		scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
 }
 
 // Default branch for GitHub.
@@ -1818,10 +1792,31 @@ ImGui::End();
 void ofApp::drawChatPanel() {
 drawPanelHeader("Chat", "conversation with the ggml engine");
 
+if (chatLanguages.empty()) {
+	chatLanguages = ofxGgmlChatAssistant::defaultResponseLanguages();
+}
+chatLanguageIndex = std::clamp(
+	chatLanguageIndex,
+	0,
+	std::max(0, static_cast<int>(chatLanguages.size()) - 1));
+
 ImGui::Text("Response language:");
 ImGui::SameLine();
 ImGui::SetNextItemWidth(170);
-ImGui::Combo("##ChatLang", &chatLanguageIndex, kChatLanguages, kChatLanguageCount);
+const std::string selectedChatLanguage =
+	chatLanguages[static_cast<size_t>(chatLanguageIndex)].name;
+if (ImGui::BeginCombo("##ChatLang", selectedChatLanguage.c_str())) {
+	for (int i = 0; i < static_cast<int>(chatLanguages.size()); i++) {
+		const bool selected = (chatLanguageIndex == i);
+		if (ImGui::Selectable(
+			chatLanguages[static_cast<size_t>(i)].name.c_str(),
+			selected)) {
+			chatLanguageIndex = i;
+		}
+		if (selected) ImGui::SetItemDefaultFocus();
+	}
+	ImGui::EndCombo();
+}
 if (ImGui::IsItemHovered()) {
 	ImGui::SetTooltip("Auto lets the model decide. Choose a language to force chat replies.");
 }
@@ -1929,7 +1924,7 @@ ImGui::SetNextItemWidth(140);
 	selectedLanguageIndex = i;
 	if (!scriptLanguages.empty()) {
 		scriptSource.setPreferredExtension(
-			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
 	}
 	if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder &&
 		!scriptSource.getLocalFolderPath().empty()) {
@@ -1970,7 +1965,7 @@ if (result.bSuccess) {
 	selectedScriptFileIndex = -1;
 	if (!scriptLanguages.empty()) {
 		scriptSource.setPreferredExtension(
-			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+			scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
 	}
 	scriptSource.setLocalFolder(result.getPath());
 }
@@ -2070,96 +2065,71 @@ ImGui::EndChild();
 		"##ScriptIn", scriptInput, sizeof(scriptInput), ImVec2(-1, 50),
 		ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine);
 
-auto buildScriptPrompt = [this, sourceType, &scriptSourceFiles](const std::string & body) {
-std::string prompt;
-if (!scriptLanguages.empty()) {
-prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPrompt + "\n";
-}
-
-// If a folder or GitHub repo is loaded, provide context about available files
-if (scriptIncludeRepoContext && sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
-	if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
-		const std::string folderPath = scriptSource.getLocalFolderPath();
-		prompt += "\nContext: Loaded folder: " + folderPath + "\n";
-		prompt += "Available files in this folder:\n";
-	} else if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
-		const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
-		const std::string branch = scriptSource.getGitHubBranch();
-		prompt += "\nContext: Loaded GitHub repository: " + ownerRepo + " (branch: " + branch + ")\n";
-		prompt += "Available files in this repository:\n";
-	} else {
-		prompt += "\nContext: Loaded internet sources (URLs):\n";
-	}
-	// List up to a bounded number of files to avoid overly long prompts
-	const size_t maxFilesToList = kMaxScriptContextFiles;
-	size_t fileCount = 0;
-	for (const auto & entry : scriptSourceFiles) {
-		if (!entry.isDirectory) {
-			prompt += "  - " + entry.name + "\n";
-			fileCount++;
-			if (fileCount >= maxFilesToList) {
-				if (scriptSourceFiles.size() > maxFilesToList) {
-					prompt += "  ... and " + std::to_string(scriptSourceFiles.size() - maxFilesToList) + " more files\n";
-				}
-				break;
-			}
-		}
-	}
-	prompt += "\n";
-
-	if (selectedScriptFileIndex >= 0 &&
-		selectedScriptFileIndex < static_cast<int>(scriptSourceFiles.size())) {
-		const auto & selected = scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)];
-		if (!selected.isDirectory) {
-			std::string selectedContent;
-			if (scriptSource.loadFileContent(selectedScriptFileIndex, selectedContent)) {
-				const size_t maxSelectedSnippet = kMaxFocusedFileSnippetChars;
-				if (selectedContent.size() > maxSelectedSnippet) {
-					selectedContent = selectedContent.substr(0, maxSelectedSnippet) + "\n...[truncated]";
-				}
-				prompt += "Focused file: " + selected.name + "\n";
-				prompt += "Focused file snippet:\n" + selectedContent + "\n\n";
-			}
-		}
-	}
-}
-
-prompt += body;
-return prompt;
-};
-
 const bool hasSelectedFile =
 	selectedScriptFileIndex >= 0 &&
 	selectedScriptFileIndex < static_cast<int>(scriptSourceFiles.size()) &&
 	!scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].isDirectory;
 const bool hasUserInput = std::strlen(scriptInput) > 0;
 
-auto buildScriptActionBody = [&](const std::string & defaultForFile,
-	const std::string & prefixForInput) {
-	if (hasSelectedFile) {
-		if (hasUserInput) {
-			return defaultForFile + "\n\nExtra instructions:\n" + std::string(scriptInput);
-		}
-		return defaultForFile;
+auto buildScriptAssistantContext = [this]() {
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+	context.projectMemory = &scriptProjectMemory;
+	context.focusedFileIndex = selectedScriptFileIndex;
+	context.includeRepoContext = scriptIncludeRepoContext;
+	context.maxRepoFiles = kMaxScriptContextFiles;
+	context.maxFocusedFileChars = kMaxFocusedFileSnippetChars;
+	return context;
+};
+
+auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
+	const std::string & userInput = std::string(),
+	const std::string & bodyOverride = std::string(),
+	const std::string & labelOverride = std::string(),
+	bool clearInputAfter = false) {
+	ofxGgmlCodeAssistantRequest request;
+	request.action = action;
+	request.userInput = userInput;
+	request.lastTask = lastScriptRequest;
+	request.lastOutput = scriptOutput;
+	request.bodyOverride = bodyOverride;
+	request.labelOverride = labelOverride;
+	if (!scriptLanguages.empty() &&
+		selectedLanguageIndex >= 0 &&
+		selectedLanguageIndex < static_cast<int>(scriptLanguages.size())) {
+		request.language = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)];
 	}
-	return prefixForInput + std::string(scriptInput);
+
+	const auto prepared = scriptAssistant.preparePrompt(
+		request,
+		buildScriptAssistantContext());
+	const std::string taskText = prepared.body.empty()
+		? userInput
+		: prepared.body;
+	const std::string requestLabel = prepared.requestLabel.empty()
+		? taskText
+		: prepared.requestLabel;
+
+	scriptMessages.push_back({"user", requestLabel, ofGetElapsedTimef()});
+	runInference(AiMode::Script, taskText, "", prepared.prompt);
+	if (clearInputAfter) {
+		std::memset(scriptInput, 0, sizeof(scriptInput));
+	}
 };
 
 struct ScriptActionSpec {
 	const char * label;
 	ImVec2 size;
-	const char * defaultForFile;
-	const char * prefixForInput;
-	bool plainInput;
+	ofxGgmlCodeAssistantAction action;
 };
 
 const ScriptActionSpec actionSpecs[] = {
-	{ "Generate",    ImVec2(100, 0), "Generate improved code for the focused file.", "", true },
-	{ "Explain",     ImVec2(100, 0), "Explain the focused file code.", "Explain the following code:\n", false },
-	{ "Debug",       ImVec2(100, 0), "Find bugs in the focused file code.", "Find bugs in the following code:\n", false },
-	{ "Optimize",    ImVec2(100, 0), "Optimize the focused file code for performance. Show the improved version and explain what changed.", "Optimize the following code for performance. Show the improved version and explain what changed:\n", false },
-	{ "Refactor",    ImVec2(100, 0), "Refactor the focused file code to improve readability, maintainability, and structure. Show the refactored version.", "Refactor the following code to improve readability, maintainability, and structure. Show the refactored version:\n", false },
-	{ "Review Mode", ImVec2(100, 0), "Review the focused file code for bugs, security issues, and style. Provide specific feedback.", "Review the following code for bugs, security issues, and style. Provide specific feedback:\n", false },
+	{ "Generate", ImVec2(100, 0), ofxGgmlCodeAssistantAction::Generate },
+	{ "Explain", ImVec2(100, 0), ofxGgmlCodeAssistantAction::Explain },
+	{ "Debug", ImVec2(100, 0), ofxGgmlCodeAssistantAction::Debug },
+	{ "Optimize", ImVec2(100, 0), ofxGgmlCodeAssistantAction::Optimize },
+	{ "Refactor", ImVec2(100, 0), ofxGgmlCodeAssistantAction::Refactor },
+	{ "Review Mode", ImVec2(100, 0), ofxGgmlCodeAssistantAction::Review },
 };
 
 bool canSendScriptChat = !generating.load() && hasUserInput;
@@ -2167,10 +2137,12 @@ bool canSendScriptChat = !generating.load() && hasUserInput;
 ImGui::BeginDisabled(generating.load());
 if (canSendScriptChat) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.3f, 1.0f));
 if ((ImGui::Button("Send to Chat", ImVec2(110, 0)) || scriptChatSubmitted) && canSendScriptChat) {
-	const std::string message(scriptInput);
-	scriptMessages.push_back({"user", message, ofGetElapsedTimef()});
-	runInference(AiMode::Script, buildScriptPrompt(message));
-	std::memset(scriptInput, 0, sizeof(scriptInput));
+	submitScriptRequest(
+		ofxGgmlCodeAssistantAction::Ask,
+		scriptInput,
+		"",
+		"",
+		true);
 }
 if (canSendScriptChat) ImGui::PopStyleColor();
 ImGui::SameLine();
@@ -2184,9 +2156,11 @@ ImGui::SameLine();
 
 ImGui::BeginDisabled(generating.load() || !lastScriptOutputLikelyCutoff || lastScriptOutputTail.empty());
 if (ImGui::Button("Continue cutoff", ImVec2(120, 0))) {
-	const std::string continuation = buildCutoffContinuationRequest(lastScriptOutputTail);
-	scriptMessages.push_back({"user", "Continue from cutoff.", ofGetElapsedTimef()});
-	runInference(AiMode::Script, buildScriptPrompt(continuation));
+	submitScriptRequest(
+		ofxGgmlCodeAssistantAction::ContinueCutoff,
+		"",
+		ofxGgmlInference::buildCutoffContinuationRequest(lastScriptOutputTail),
+		"Continue from cutoff.");
 }
 ImGui::EndDisabled();
 ImGui::SameLine();
@@ -2222,19 +2196,12 @@ ImGui::BeginDisabled(generating.load() || (!hasUserInput && !hasSelectedFile));
 for (size_t i = 0; i < std::size(actionSpecs); i++) {
 	const auto & spec = actionSpecs[i];
 	if (ImGui::Button(spec.label, spec.size)) {
-		std::string body;
-		if (spec.plainInput) {
-			body = hasUserInput ? std::string(scriptInput) : std::string(spec.defaultForFile);
-		} else {
-			body = buildScriptActionBody(spec.defaultForFile, spec.prefixForInput);
-		}
-		
-		std::string chatActionLabel = std::string(spec.label) + (hasSelectedFile ? " focused file." : "");
-		if (hasUserInput) chatActionLabel += " Instructions: " + std::string(scriptInput);
-		
-		scriptMessages.push_back({"user", chatActionLabel, ofGetElapsedTimef()});
-		runInference(AiMode::Script, buildScriptPrompt(body));
-		std::memset(scriptInput, 0, sizeof(scriptInput));
+		submitScriptRequest(
+			spec.action,
+			scriptInput,
+			"",
+			"",
+			true);
 	}
 	if (i + 1 < std::size(actionSpecs)) {
 		ImGui::SameLine();
@@ -2253,25 +2220,16 @@ if (ImGui::CollapsingHeader("Tools & Memory")) {
 	
 	ImGui::BeginDisabled(generating.load() || (!hasScriptOutput && !hasLastTask));
 	if (ImGui::Button("Continue Task", ImVec2(120, 0))) {
-		std::string followup = "Continue the task from the previous response. Keep the same intent and provide next concrete steps.\n\n";
-		if (hasScriptOutput) followup += "Previous response:\n" + scriptOutput;
-		scriptMessages.push_back({"user", "Continue the previous task.", ofGetElapsedTimef()});
-		runInference(AiMode::Script, buildScriptPrompt(followup));
+		submitScriptRequest(ofxGgmlCodeAssistantAction::ContinueTask);
 	}
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Continue from the latest coding response without rewriting your full prompt.");
 	ImGui::SameLine();
 	if (ImGui::Button("Shorter", ImVec2(80, 0))) {
-		std::string req = hasLastTask ? lastScriptRequest : std::string("Rewrite the previous response");
-		req += "\n\nProvide a shorter answer. Keep only essential code and brief explanation.";
-		scriptMessages.push_back({"user", "Provide a shorter answer for the previous task.", ofGetElapsedTimef()});
-		runInference(AiMode::Script, buildScriptPrompt(req));
+		submitScriptRequest(ofxGgmlCodeAssistantAction::Shorter);
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("More Detail", ImVec2(90, 0))) {
-		std::string req = hasLastTask ? lastScriptRequest : std::string("Expand the previous response");
-		req += "\n\nProvide a more detailed answer with reasoning, edge cases, and step-by-step implementation notes.";
-		scriptMessages.push_back({"user", "Provide more detail for the previous task.", ofGetElapsedTimef()});
-		runInference(AiMode::Script, buildScriptPrompt(req));
+		submitScriptRequest(ofxGgmlCodeAssistantAction::MoreDetail);
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Long Code Preset", ImVec2(120, 0))) {
@@ -2325,7 +2283,7 @@ if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
 			selectedScriptFileIndex = -1;
 			if (!scriptLanguages.empty()) {
 				scriptSource.setPreferredExtension(
-					scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+					scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
 			}
 			if (scriptSource.setGitHubRepo(scriptSourceGitHub, branch)) {
 				scriptSource.fetchGitHubRepo();
@@ -2374,7 +2332,7 @@ ImGui::Spacing();
 std::string ofApp::buildScriptFilename() const {
 std::string ext = ".txt";
 if (!scriptLanguages.empty()) {
-ext = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt;
+ext = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension;
 }
 auto now = std::chrono::system_clock::now();
 auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -2393,19 +2351,25 @@ ImGui::Text("Paste text to summarize:");
 ImGui::InputTextMultiline("##SumIn", summarizeInput, sizeof(summarizeInput),
 ImVec2(-1, 150));
 
+auto submitTextTask = [&](ofxGgmlTextTask task) {
+	ofxGgmlTextAssistantRequest request;
+	request.task = task;
+	request.inputText = summarizeInput;
+	const auto prepared = textAssistant.preparePrompt(request);
+	runInference(AiMode::Summarize, request.inputText, "", prepared.prompt);
+};
+
 ImGui::BeginDisabled(generating.load() || std::strlen(summarizeInput) == 0);
 if (ImGui::Button("Summarize", ImVec2(140, 0))) {
-runInference(AiMode::Summarize, summarizeInput);
+submitTextTask(ofxGgmlTextTask::Summarize);
 }
 ImGui::SameLine();
 if (ImGui::Button("Key Points", ImVec2(140, 0))) {
-std::string prompt = std::string("Extract key points from:\n") + summarizeInput;
-runInference(AiMode::Summarize, prompt);
+submitTextTask(ofxGgmlTextTask::KeyPoints);
 }
 ImGui::SameLine();
 if (ImGui::Button("TL;DR", ImVec2(140, 0))) {
-std::string prompt = std::string("Give a one-sentence TL;DR of:\n") + summarizeInput;
-runInference(AiMode::Summarize, prompt);
+submitTextTask(ofxGgmlTextTask::TlDr);
 }
 ImGui::EndDisabled();
 
@@ -2451,30 +2415,33 @@ ImGui::Text("Enter your text:");
 ImGui::InputTextMultiline("##WriteIn", writeInput, sizeof(writeInput),
 ImVec2(-1, 120));
 
+auto submitTextTask = [&](ofxGgmlTextTask task) {
+	ofxGgmlTextAssistantRequest request;
+	request.task = task;
+	request.inputText = writeInput;
+	const auto prepared = textAssistant.preparePrompt(request);
+	runInference(AiMode::Write, request.inputText, "", prepared.prompt);
+};
+
 ImGui::BeginDisabled(generating.load() || std::strlen(writeInput) == 0);
 if (ImGui::Button("Rewrite", ImVec2(110, 0))) {
-std::string prompt = std::string("Rewrite the following more clearly:\n") + writeInput;
-runInference(AiMode::Write, prompt);
+submitTextTask(ofxGgmlTextTask::Rewrite);
 }
 ImGui::SameLine();
 if (ImGui::Button("Expand", ImVec2(110, 0))) {
-std::string prompt = std::string("Expand on the following:\n") + writeInput;
-runInference(AiMode::Write, prompt);
+submitTextTask(ofxGgmlTextTask::Expand);
 }
 ImGui::SameLine();
 if (ImGui::Button("Make Formal", ImVec2(110, 0))) {
-std::string prompt = std::string("Make this text more formal:\n") + writeInput;
-runInference(AiMode::Write, prompt);
+submitTextTask(ofxGgmlTextTask::MakeFormal);
 }
 ImGui::SameLine();
 if (ImGui::Button("Make Casual", ImVec2(110, 0))) {
-std::string prompt = std::string("Make this text more casual:\n") + writeInput;
-runInference(AiMode::Write, prompt);
+submitTextTask(ofxGgmlTextTask::MakeCasual);
 }
 ImGui::SameLine();
 if (ImGui::Button("Fix Grammar", ImVec2(110, 0))) {
-std::string prompt = std::string("Fix grammar and spelling in:\n") + writeInput;
-runInference(AiMode::Write, prompt);
+submitTextTask(ofxGgmlTextTask::FixGrammar);
 }
 ImGui::EndDisabled();
 
@@ -2509,30 +2476,48 @@ ImGui::EndChild();
 }
 }
 
-// ---------------------------------------------------------------------------
-// Translate panel
-// ---------------------------------------------------------------------------
-
-static const char * kTranslateLanguages[] = {
-"English", "Spanish", "French", "German", "Italian",
-"Portuguese", "Chinese", "Japanese", "Korean", "Russian",
-"Arabic", "Hindi", "Dutch", "Swedish", "Polish"
-};
-static constexpr int kTranslateLangCount = static_cast<int>(
-sizeof(kTranslateLanguages) / sizeof(kTranslateLanguages[0]));
-
 void ofApp::drawTranslatePanel() {
 drawPanelHeader("Translate", "translate text between languages");
+
+if (translateLanguages.empty()) {
+	translateLanguages = ofxGgmlTextAssistant::defaultTranslateLanguages();
+}
+translateSourceLang = std::clamp(
+	translateSourceLang,
+	0,
+	std::max(0, static_cast<int>(translateLanguages.size()) - 1));
+translateTargetLang = std::clamp(
+	translateTargetLang,
+	0,
+	std::max(0, static_cast<int>(translateLanguages.size()) - 1));
 
 ImGui::Text("Source language:");
 ImGui::SameLine();
 ImGui::SetNextItemWidth(160);
-ImGui::Combo("##SrcLang", &translateSourceLang, kTranslateLanguages, kTranslateLangCount);
+if (ImGui::BeginCombo("##SrcLang", translateLanguages[static_cast<size_t>(translateSourceLang)].name.c_str())) {
+	for (int i = 0; i < static_cast<int>(translateLanguages.size()); i++) {
+		const bool selected = (translateSourceLang == i);
+		if (ImGui::Selectable(translateLanguages[static_cast<size_t>(i)].name.c_str(), selected)) {
+			translateSourceLang = i;
+		}
+		if (selected) ImGui::SetItemDefaultFocus();
+	}
+	ImGui::EndCombo();
+}
 ImGui::SameLine();
 ImGui::Text("  Target language:");
 ImGui::SameLine();
 ImGui::SetNextItemWidth(160);
-ImGui::Combo("##TgtLang", &translateTargetLang, kTranslateLanguages, kTranslateLangCount);
+if (ImGui::BeginCombo("##TgtLang", translateLanguages[static_cast<size_t>(translateTargetLang)].name.c_str())) {
+	for (int i = 0; i < static_cast<int>(translateLanguages.size()); i++) {
+		const bool selected = (translateTargetLang == i);
+		if (ImGui::Selectable(translateLanguages[static_cast<size_t>(i)].name.c_str(), selected)) {
+			translateTargetLang = i;
+		}
+		if (selected) ImGui::SetItemDefaultFocus();
+	}
+	ImGui::EndCombo();
+}
 ImGui::SameLine();
 if (ImGui::Button("Swap", ImVec2(60, 0))) {
 std::swap(translateSourceLang, translateTargetLang);
@@ -2545,15 +2530,21 @@ ImVec2(-1, 120));
 bool hasInput = std::strlen(translateInput) > 0;
 ImGui::BeginDisabled(generating.load() || !hasInput);
 if (ImGui::Button("Translate", ImVec2(110, 0))) {
-std::string prompt = std::string("Translate the following from ")
-+ kTranslateLanguages[translateSourceLang] + " to "
-+ kTranslateLanguages[translateTargetLang] + ":\n" + translateInput;
-runInference(AiMode::Translate, prompt);
+	ofxGgmlTextAssistantRequest request;
+	request.task = ofxGgmlTextTask::Translate;
+	request.inputText = translateInput;
+	request.sourceLanguage = translateLanguages[static_cast<size_t>(translateSourceLang)].name;
+	request.targetLanguage = translateLanguages[static_cast<size_t>(translateTargetLang)].name;
+	const auto prepared = textAssistant.preparePrompt(request);
+	runInference(AiMode::Translate, request.inputText, "", prepared.prompt);
 }
 ImGui::SameLine();
 if (ImGui::Button("Detect Language", ImVec2(140, 0))) {
-std::string prompt = std::string("Detect the language of the following text and explain:\n") + translateInput;
-runInference(AiMode::Translate, prompt);
+	ofxGgmlTextAssistantRequest request;
+	request.task = ofxGgmlTextTask::DetectLanguage;
+	request.inputText = translateInput;
+	const auto prepared = textAssistant.preparePrompt(request);
+	runInference(AiMode::Translate, request.inputText, "", prepared.prompt);
 }
 ImGui::EndDisabled();
 
@@ -2628,7 +2619,12 @@ ImVec2(-1, 100));
 
 ImGui::BeginDisabled(generating.load() || std::strlen(customInput) == 0);
 if (ImGui::Button("Run", ImVec2(100, 0))) {
-runInference(AiMode::Custom, customInput, customSystemPrompt);
+	ofxGgmlTextAssistantRequest request;
+	request.task = ofxGgmlTextTask::Custom;
+	request.inputText = customInput;
+	request.systemPrompt = customSystemPrompt;
+	const auto prepared = textAssistant.preparePrompt(request);
+	runInference(AiMode::Custom, request.inputText, customSystemPrompt, prepared.prompt);
 }
 ImGui::EndDisabled();
 
@@ -2680,9 +2676,12 @@ ImGui::Text(" | Model: %s", modelPresets[static_cast<size_t>(selectedModelIndex)
 ImGui::SameLine();
 }
 ImGui::Text(" | Mode: %s", modeLabels[static_cast<int>(activeMode)]);
-if (activeMode == AiMode::Chat && chatLanguageIndex > 0 && chatLanguageIndex < kChatLanguageCount) {
+if (activeMode == AiMode::Chat &&
+	chatLanguageIndex > 0 &&
+	chatLanguageIndex < static_cast<int>(chatLanguages.size())) {
 	ImGui::SameLine();
-	ImGui::Text(" | Chat Lang: %s", kChatLanguages[chatLanguageIndex]);
+	ImGui::Text(" | Chat Lang: %s",
+		chatLanguages[static_cast<size_t>(chatLanguageIndex)].name.c_str());
 }
 if (activeMode == AiMode::Script && !scriptLanguages.empty()) {
 ImGui::SameLine();
@@ -2838,7 +2837,10 @@ out << "[session_v1]\n";
 
 // Settings.
 out << "mode=" << static_cast<int>(activeMode) << "\n";
-out << "chatLanguage=" << std::clamp(chatLanguageIndex, 0, kChatLanguageCount - 1) << "\n";
+out << "chatLanguage="
+	<< std::clamp(chatLanguageIndex, 0,
+		std::max(0, static_cast<int>(chatLanguages.size()) - 1))
+	<< "\n";
 out << "model=" << selectedModelIndex << "\n";
 out << "language=" << selectedLanguageIndex << "\n";
 out << "maxTokens=" << maxTokens << "\n";
@@ -2972,7 +2974,10 @@ if (key == "mode") {
 	activeMode = static_cast<AiMode>(m);
 }
 else if (key == "chatLanguage") {
-	chatLanguageIndex = std::clamp(safeStoi(value), 0, kChatLanguageCount - 1);
+	chatLanguageIndex = std::clamp(
+		safeStoi(value),
+		0,
+		std::max(0, static_cast<int>(chatLanguages.size()) - 1));
 }
 else if (key == "model") {
 	int maxIdx = std::max(0, static_cast<int>(modelPresets.size()) - 1);
@@ -3063,8 +3068,14 @@ else if (key == "scriptInput") copyToBuf(scriptInput, sizeof(scriptInput), value
 else if (key == "summarizeInput") copyToBuf(summarizeInput, sizeof(summarizeInput), value);
 else if (key == "writeInput") copyToBuf(writeInput, sizeof(writeInput), value);
 else if (key == "translateInput") copyToBuf(translateInput, sizeof(translateInput), value);
-else if (key == "translateSourceLang") translateSourceLang = std::clamp(safeStoi(value), 0, kTranslateLangCount - 1);
-else if (key == "translateTargetLang") translateTargetLang = std::clamp(safeStoi(value, 1), 0, kTranslateLangCount - 1);
+else if (key == "translateSourceLang") {
+	int maxIdx = std::max(0, static_cast<int>(translateLanguages.size()) - 1);
+	translateSourceLang = std::clamp(safeStoi(value), 0, maxIdx);
+}
+else if (key == "translateTargetLang") {
+	int maxIdx = std::max(0, static_cast<int>(translateLanguages.size()) - 1);
+	translateTargetLang = std::clamp(safeStoi(value, 1), 0, maxIdx);
+}
 else if (key == "customInput") copyToBuf(customInput, sizeof(customInput), value);
 else if (key == "customSystemPrompt") copyToBuf(customSystemPrompt, sizeof(customSystemPrompt), value);
 else if (key == "scriptOutput") scriptOutput = unescapeSessionText(value);
@@ -3099,7 +3110,7 @@ in.close();
 
 if (!scriptLanguages.empty()) {
 	scriptSource.setPreferredExtension(
-		scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExt);
+		scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
 }
 if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::LocalFolder) &&
 	!loadedScriptSourcePath.empty()) {
@@ -3213,506 +3224,6 @@ void ofApp::detectModelLayers() {
 	model.close();
 }
 
-// Hierarchical review helpers (shared across passes)
-namespace {
-
-size_t countLines(const std::string & text) {
-	if (text.empty()) return 0;
-	return static_cast<size_t>(std::count(text.begin(), text.end(), '\n') + 1);
-}
-
-size_t estimateCyclomaticComplexity(const std::string & text) {
-	static constexpr const char * tokens[] = {
-		" if ", " for ", " while ", " case ", "&&", "||", "?", " catch ", " else if ",
-		" switch ", " foreach ", " guard ", " when ", " except ", " elif ", " goto "
-	};
-	size_t score = 1; // baseline path
-	std::string lower = text;
-	std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
-		return static_cast<char>(std::tolower(c));
-	});
-	for (const auto & tok : tokens) {
-		const std::string token(tok);
-		size_t pos = 0;
-		while ((pos = lower.find(token, pos)) != std::string::npos) {
-			++score;
-			pos += token.size();
-		}
-	}
-	return score;
-}
-
-std::vector<std::string> extractDependencies(const std::string & text) {
-	std::vector<std::string> deps;
-	std::istringstream iss(text);
-	std::string line;
-	while (std::getline(iss, line)) {
-		std::string trimmed = trim(line);
-		if (trimmed.empty()) continue;
-		auto addDep = [&](const std::string & dep) {
-			if (!dep.empty()) deps.push_back(dep);
-		};
-		if (trimmed.rfind("#include", 0) == 0) {
-			size_t quote = trimmed.find('"');
-			if (quote != std::string::npos) {
-				size_t end = trimmed.find('"', quote + 1);
-				if (end != std::string::npos && end > quote + 1) {
-					addDep(trimmed.substr(quote + 1, end - quote - 1));
-					continue;
-				}
-			}
-			size_t lt = trimmed.find('<');
-			if (lt != std::string::npos) {
-				size_t gt = trimmed.find('>', lt + 1);
-				if (gt != std::string::npos && gt > lt + 1) {
-					addDep(trimmed.substr(lt + 1, gt - lt - 1));
-					continue;
-				}
-			}
-		}
-		// import / require / from statements
-		auto lower = trimmed;
-		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
-			return static_cast<char>(std::tolower(c));
-		});
-		static constexpr const char * prefixes[] = {"import ", "from ", "require("};
-		for (const auto & p : prefixes) {
-			const std::string prefix(p);
-			if (lower.rfind(prefix, 0) == 0) {
-				size_t quote = trimmed.find('"');
-				if (quote == std::string::npos) quote = trimmed.find('\'');
-				if (quote != std::string::npos) {
-					size_t end = trimmed.find(trimmed[quote], quote + 1);
-					if (end != std::string::npos && end > quote + 1) {
-						addDep(trimmed.substr(quote + 1, end - quote - 1));
-					}
-				} else {
-					// fallback: grab next token
-					std::istringstream ls(trimmed.substr(prefix.size()));
-					std::string dep;
-					if (ls >> dep) addDep(dep);
-				}
-				break;
-			}
-		}
-	}
-	return deps;
-}
-
-float importanceFromExtension(const std::string & name) {
-	std::string lower = name;
-	std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
-		return static_cast<char>(std::tolower(c));
-	});
-	static constexpr const char * coreExt[] = {
-		".cpp", ".c", ".h", ".hpp", ".cc", ".hh", ".cxx", ".hxx",
-		".py", ".js", ".ts", ".go", ".rs", ".java", ".kt", ".swift",
-		".cs", ".m", ".mm"
-	};
-	static constexpr const char * testExt[] = {
-		".spec", ".test", ".tests", ".stories", ".snap"
-	};
-	static constexpr const char * docExt[] = {
-		".md", ".rst", ".txt"
-	};
-	static constexpr const char * configExt[] = {
-		".json", ".yaml", ".yml", ".toml", ".ini"
-	};
-
-	for (const auto & ext : testExt) {
-		if (lower.rfind(ext) != std::string::npos) return 0.7f;
-	}
-	for (const auto & ext : docExt) {
-		const size_t len = std::char_traits<char>::length(ext);
-		if (lower.size() >= len &&
-			lower.compare(lower.size() - len, len, ext) == 0) {
-			return 0.3f;
-		}
-	}
-	for (const auto & ext : configExt) {
-		const size_t len = std::char_traits<char>::length(ext);
-		if (lower.size() >= len &&
-			lower.compare(lower.size() - len, len, ext) == 0) {
-			return 0.5f;
-		}
-	}
-	for (const auto & ext : coreExt) {
-		const size_t len = std::char_traits<char>::length(ext);
-		if (lower.size() >= len &&
-			lower.compare(lower.size() - len, len, ext) == 0) {
-			return 1.2f;
-		}
-	}
-	return 0.6f; // default importance for miscellaneous files
-}
-
-std::string slidingWindowText(const std::string & content, size_t maxChars) {
-	if (content.size() <= maxChars) return content;
-	const size_t half = maxChars / 2;
-	return content.substr(0, half) + "\n...\n" + content.substr(content.size() - half);
-}
-
-} // namespace
-
-
-int ofApp::countTokensAccurate(const std::string & text, int fallback) {
-	const std::string modelPath = getSelectedModelPath();
-	if (!text.empty()) {
-		const size_t textHash = std::hash<std::string>{}(text);
-		const std::string key = modelPath + "|" + std::to_string(text.size()) + "|" + std::to_string(textHash);
-		{
-			std::lock_guard<std::mutex> lock(tokenCountCacheMutex);
-			auto it = tokenCountCache.find(key);
-			if (it != tokenCountCache.end()) {
-				return it->second;
-			}
-		}
-
-		int tokens = -1;
-		if (!modelPath.empty()) {
-			tokens = scriptReviewInference.countPromptTokens(modelPath, text);
-		}
-		if (tokens < 0) {
-			tokens = (fallback >= 0) ? fallback : static_cast<int>(text.size() / 4 + 1);
-		}
-
-		{
-			std::lock_guard<std::mutex> lock(tokenCountCacheMutex);
-			if (tokenCountCache.size() > 2000) {
-				tokenCountCache.clear();
-			}
-			tokenCountCache[key] = tokens;
-		}
-		return tokens;
-	}
-
-	if (!modelPath.empty()) {
-		int tokens = scriptReviewInference.countPromptTokens(modelPath, text);
-		if (tokens >= 0) return tokens;
-	}
-	if (fallback >= 0) return fallback;
-	if (text.empty()) return 0;
-	return static_cast<int>(text.size() / 4 + 1); // conservative char->token fallback
-}
-
-std::vector<ScriptFileReviewInfo> ofApp::collectScriptFilesForReview(std::string & status) {
-	std::vector<ScriptFileReviewInfo> files;
-	const auto entries = scriptSource.getFiles();
-	if (entries.empty()) {
-		status = "No files loaded";
-		return files;
-	}
-	files.reserve(entries.size());
-	for (int i = 0; i < static_cast<int>(entries.size()); i++) {
-		if (cancelRequested.load()) break;
-		const auto & entry = entries[static_cast<size_t>(i)];
-		if (entry.isDirectory) continue;
-
-		std::string content;
-		if (!scriptSource.loadFileContent(i, content)) {
-			continue;
-		}
-
-		ScriptFileReviewInfo info;
-		info.name = entry.name;
-		info.fullPath = entry.fullPath;
-		info.content = std::move(content);
-		info.truncatedContent = info.content;
-		files.push_back(std::move(info));
-	}
-	status = "Loaded " + ofToString(files.size()) + " files";
-	return files;
-}
-
-void ofApp::computeFileHeuristics(std::vector<ScriptFileReviewInfo> & files,
-	const std::string & baseFolder) {
-	const bool hasGit = !baseFolder.empty();
-	const auto now = std::chrono::system_clock::now();
-
-	for (auto & f : files) {
-		f.loc = countLines(f.content);
-		f.complexity = estimateCyclomaticComplexity(f.content);
-		f.dependencies = extractDependencies(f.content);
-		f.dependencyFanOut = f.dependencies.size();
-		f.importanceScore = importanceFromExtension(f.name);
-
-		if (hasGit) {
-			std::string rel = f.name;
-			std::string out;
-			int exitCode = -1;
-			if (runProcessCapture({"git", "-C", baseFolder, "log", "-1", "--format=%ct", "--", rel},
-				out, exitCode, false, nullptr, true) && exitCode == 0) {
-				try {
-					long ts = std::stol(trim(out));
-					auto fileTime = std::chrono::system_clock::from_time_t(static_cast<time_t>(ts));
-					auto age = now - fileTime;
-					float days = std::chrono::duration_cast<std::chrono::hours>(age).count() / 24.0f;
-					f.recencyScore = 1.0f / (1.0f + (days / 30.0f));
-				} catch (...) {
-					f.recencyScore = 0.2f;
-				}
-			} else {
-				f.recencyScore = 0.2f; // unknown recency still modestly relevant
-			}
-		} else {
-			f.recencyScore = 0.2f;
-		}
-
-		f.tokenCount = countTokensAccurate(f.truncatedContent,
-			static_cast<int>(f.truncatedContent.size() / 4 + 1));
-	}
-
-	computeDependencyFanIn(files);
-}
-
-void ofApp::computeDependencyFanIn(std::vector<ScriptFileReviewInfo> & files) {
-	std::unordered_map<std::string, size_t> fanIn;
-	for (const auto & f : files) {
-		for (const auto & dep : f.dependencies) {
-			fanIn[dep]++;
-			std::filesystem::path p(dep);
-			fanIn[p.filename().string()]++;
-		}
-	}
-	for (auto & f : files) {
-		auto it = fanIn.find(f.name);
-		if (it != fanIn.end()) f.dependencyFanIn = std::max(f.dependencyFanIn, it->second);
-		const std::string base = std::filesystem::path(f.name).filename().string();
-		auto itBase = fanIn.find(base);
-		if (itBase != fanIn.end()) f.dependencyFanIn = std::max(f.dependencyFanIn, itBase->second);
-	}
-}
-
-std::string ofApp::buildRepoTableOfContents(const std::vector<ScriptFileReviewInfo> & files,
-	size_t maxFiles) const {
-	if (files.empty()) return {};
-	std::vector<std::string> names;
-	names.reserve(files.size());
-	for (const auto & f : files) names.push_back(f.name);
-	std::sort(names.begin(), names.end());
-	std::string toc = "Repository files (table of contents):\n";
-	size_t listed = 0;
-	for (const auto & n : names) {
-		toc += "  - " + n + "\n";
-		listed++;
-		if (listed >= maxFiles) break;
-	}
-	if (names.size() > maxFiles) {
-		toc += "  ... and " + ofToString(names.size() - maxFiles) + " more\n";
-	}
-	return toc;
-}
-
-std::string ofApp::buildRepoTree(const std::vector<ScriptFileReviewInfo> & files) const {
-	if (files.empty()) return {};
-	std::vector<std::string> names;
-	names.reserve(files.size());
-	for (const auto & f : files) names.push_back(f.name);
-	std::sort(names.begin(), names.end());
-
-	std::string tree = "Repository tree:\n";
-	for (const auto & n : names) {
-		size_t depth = std::count(n.begin(), n.end(), '/');
-		tree += std::string(depth * 2, ' ');
-		tree += "- ";
-		tree += n;
-		tree += "\n";
-	}
-	return tree;
-}
-
-std::vector<ScriptFileReviewInfo *> ofApp::selectFilesForReview(
-	std::vector<ScriptFileReviewInfo> & files,
-	const std::string & reviewQuery,
-	int availableTokens,
-	int responseReserveTokens) {
-	(void)reviewQuery;
-	std::vector<ScriptFileReviewInfo *> ordered;
-	if (files.empty()) return ordered;
-
-	size_t maxLoc = 0;
-	size_t maxComplexity = 0;
-	size_t maxFanIn = 0;
-	size_t maxFanOut = 0;
-	float maxSimilarity = 0.0f;
-	for (const auto & f : files) {
-		maxLoc = std::max(maxLoc, f.loc);
-		maxComplexity = std::max(maxComplexity, f.complexity);
-		maxFanIn = std::max(maxFanIn, f.dependencyFanIn);
-		maxFanOut = std::max(maxFanOut, f.dependencyFanOut);
-		maxSimilarity = std::max(maxSimilarity, f.similarityScore);
-	}
-
-	for (auto & f : files) {
-		const float normComplexity = maxComplexity > 0
-			? static_cast<float>(f.complexity) / static_cast<float>(maxComplexity) : 0.0f;
-		const float normLoc = maxLoc > 0
-			? static_cast<float>(f.loc) / static_cast<float>(maxLoc) : 0.0f;
-		const float normFan = (maxFanIn + maxFanOut) > 0
-			? static_cast<float>(f.dependencyFanIn + f.dependencyFanOut) /
-				static_cast<float>(maxFanIn + maxFanOut) : 0.0f;
-		const float normSim = maxSimilarity > 0.0f
-			? f.similarityScore / maxSimilarity : f.similarityScore;
-
-		f.priorityScore =
-			0.30f * f.importanceScore +
-			0.20f * normComplexity +
-			0.15f * normLoc +
-			0.15f * normFan +
-			0.20f * std::clamp(normSim, 0.0f, 1.0f) +
-			0.10f * std::clamp(f.recencyScore, 0.0f, 1.5f);
-		ordered.push_back(&f);
-	}
-
-	std::sort(ordered.begin(), ordered.end(),
-		[](const ScriptFileReviewInfo * a, const ScriptFileReviewInfo * b) {
-			return a->priorityScore > b->priorityScore;
-		});
-
-	const int safetyReserve = std::max(responseReserveTokens, contextSize / 4);
-	int remaining = std::max(128, availableTokens - safetyReserve);
-	std::vector<ScriptFileReviewInfo *> chosen;
-
-	for (auto * f : ordered) {
-		if (remaining <= 0) break;
-		int tokens = f->tokenCount > 0 ? f->tokenCount
-			: countTokensAccurate(f->truncatedContent,
-				static_cast<int>(f->truncatedContent.size() / 4 + 1));
-		const int maxPerFile = std::max(96, contextSize / 6);
-		if (tokens > maxPerFile) {
-			f->truncatedContent = slidingWindowText(f->content,
-				static_cast<size_t>(maxPerFile * 4));
-			f->truncated = true;
-			tokens = countTokensAccurate(f->truncatedContent,
-				static_cast<int>(f->truncatedContent.size() / 4 + 1));
-		}
-		if (tokens <= remaining) {
-			f->selected = true;
-			f->tokenCount = tokens;
-			chosen.push_back(f);
-			remaining -= tokens;
-		}
-	}
-
-	if (chosen.empty() && !ordered.empty()) {
-		// Always pick at least one file even if it exceeds budget.
-		auto * f = ordered.front();
-		f->selected = true;
-		f->truncatedContent = slidingWindowText(f->content, static_cast<size_t>(std::max(256, responseReserveTokens * 2)));
-		f->truncated = true;
-		f->tokenCount = countTokensAccurate(f->truncatedContent,
-			static_cast<int>(f->truncatedContent.size() / 4 + 1));
-		chosen.push_back(f);
-	}
-	return chosen;
-}
-
-ofxGgmlInferenceSettings ofApp::makeReviewInferenceSettings(int tokenBudget) const {
-	ofxGgmlInferenceSettings settings;
-	settings.maxTokens = std::clamp(tokenBudget, 96, maxTokens);
-	settings.temperature = temperature;
-	settings.topP = topP;
-	settings.repeatPenalty = repeatPenalty;
-	settings.contextSize = contextSize;
-	settings.batchSize = batchSize;
-	settings.gpuLayers = gpuLayers;
-	settings.threads = numThreads;
-	settings.simpleIo = true;
-	return settings;
-}
-
-std::string ofApp::runFileSummary(const ScriptFileReviewInfo & info,
-	const std::string & reviewQuery,
-	int perFileBudget,
-	const std::string & modelPath) {
-	auto settings = makeReviewInferenceSettings(perFileBudget);
-
-	std::ostringstream prompt;
-	prompt << "First pass: Review this single file in isolation. "
-		"Return a concise summary plus concrete issues (bugs, security, tests, readability)."
-		"\nRequested focus: " << reviewQuery << "\n";
-	prompt << "\nFile: " << info.name << "\n";
-	prompt << "Metrics: LOC=" << info.loc
-		<< "  complexity~" << info.complexity
-		<< "  fan-in=" << info.dependencyFanIn
-		<< "  fan-out=" << info.dependencyFanOut
-		<< "  recencyScore=" << ofToString(info.recencyScore, 2)
-		<< "  importance=" << ofToString(info.importanceScore, 2) << "\n";
-	if (info.truncated) {
-		prompt << "Note: content truncated with a sliding window to fit context.\n";
-	}
-	prompt << "\nContent:\n" << info.truncatedContent << "\n";
-	prompt << "\nFormat:\n- Summary\n- Risks\n- Tests to add\n";
-
-	auto result = scriptReviewInference.generate(modelPath, prompt.str(), settings);
-	if (!result.success) {
-		return "[error] " + result.error;
-	}
-	return trim(result.text);
-}
-
-std::string ofApp::runArchitectureReview(
-	const std::vector<ScriptFileReviewInfo *> & files,
-	const std::string & repoTree,
-	const std::string & reviewQuery,
-	const std::string & modelPath) {
-	auto settings = makeReviewInferenceSettings(maxTokens);
-
-	std::string prompt;
-	prompt.reserve(repoTree.size() + reviewQuery.size() + 8192);
-	prompt += "Second pass: Architectural review using only the summaries below.\n";
-	prompt += "Request: " + reviewQuery + "\n\n";
-	prompt += repoTree + "\n";
-	prompt += "File summaries:\n";
-	int listed = 0;
-	for (const auto & f : files) {
-		if (f->summary.empty()) continue;
-		prompt += "- " + f->name + ": " + f->summary + "\n";
-		if (++listed >= 24) break; // guard context
-	}
-	prompt += "\nIdentify architecture, layering, and dependency issues. "
-		"Highlight risky boundaries, missing invariants, and testing gaps. "
-		"Keep output concise and actionable.\n";
-
-	auto result = scriptReviewInference.generate(modelPath, prompt, settings);
-	if (!result.success) {
-		return "[error] " + result.error;
-	}
-	return trim(result.text);
-}
-
-std::string ofApp::runIntegrationReview(
-	const std::vector<ScriptFileReviewInfo *> & files,
-	const std::string & repoTree,
-	const std::string & reviewQuery,
-	const std::string & modelPath) {
-	auto settings = makeReviewInferenceSettings(maxTokens);
-
-	std::string prompt;
-	prompt.reserve(repoTree.size() + reviewQuery.size() + 8192);
-	prompt += "Third pass: Cross-file dependency and integration analysis.\n";
-	prompt += "Request: " + reviewQuery + "\n\n";
-	prompt += repoTree + "\n";
-	prompt += "Per-file findings:\n";
-	int listed = 0;
-	for (const auto & f : files) {
-		if (f->summary.empty()) continue;
-		prompt += "- " + f->name + " (fan-in " + std::to_string(f->dependencyFanIn)
-			+ ", fan-out " + std::to_string(f->dependencyFanOut) + "): "
-			+ f->summary + "\n";
-		if (++listed >= 24) break;
-	}
-	prompt += "\nFocus on contract mismatches, API misuse, inconsistent assumptions, "
-		"shared state, and missing integration tests. "
-		"Propose cross-file actions and dependency trims.\n";
-
-	auto result = scriptReviewInference.generate(modelPath, prompt, settings);
-	if (!result.success) {
-		return "[error] " + result.error;
-	}
-	return trim(result.text);
-}
-
 void ofApp::runHierarchicalReview() {
 	if (generating.load() || !engineReady) return;
 
@@ -3811,7 +3322,6 @@ void ofApp::runHierarchicalReview() {
 				return;
 			}
 
-			lastScriptReviewStatus = reviewResult.status;
 			lastScriptRequest = effectiveReviewQuery;
 			{
 				std::lock_guard<std::mutex> lock(outputMutex);
@@ -3825,224 +3335,6 @@ void ofApp::runHierarchicalReview() {
 			}
 			generating.store(false);
 			return;
-
-		// Keep inference helpers aligned with detected CLI paths.
-			scriptReviewInference.setCompletionExecutable(llamaCliCommand);
-			{
-				// Derive embedding executable from the same directory as the
-				// detected completion CLI so it is found even when it is not
-				// on PATH (e.g. installed next to the application binary).
-				std::filesystem::path cliPath(llamaCliCommand);
-				std::string embeddingExe;
-				if (cliPath.has_parent_path()) {
-					auto dir = cliPath.parent_path();
-#ifdef _WIN32
-					embeddingExe = (dir / "llama-embedding.exe").string();
-#else
-					embeddingExe = (dir / "llama-embedding").string();
-#endif
-					std::error_code ec;
-					if (!std::filesystem::exists(embeddingExe, ec) || ec) {
-						embeddingExe = "llama-embedding";
-					}
-				} else {
-					embeddingExe = "llama-embedding";
-				}
-				scriptReviewInference.setEmbeddingExecutable(embeddingExe);
-			}
-
-			std::string reviewQuery = std::strlen(scriptInput) > 0
-				? std::string(scriptInput)
-				: std::string("Comprehensive repository code review. Focus on bugs, security, architecture, and missing tests.");
-
-			{
-				std::lock_guard<std::mutex> lock(streamMutex);
-				streamingOutput = "Loading files...";
-			}
-			std::string status;
-			auto files = collectScriptFilesForReview(status);
-			if (files.empty()) {
-				setError("[Error] No source files available for review.");
-				generating.store(false);
-				return;
-			}
-			if (!status.empty()) {
-				logWithLevel(OF_LOG_NOTICE, status);
-			}
-
-			const std::string baseFolder =
-				(scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder)
-					? scriptSource.getLocalFolderPath() : "";
-			computeFileHeuristics(files, baseFolder);
-			if (cancelRequested.load()) {
-				setError("[Cancelled] Review cancelled.");
-				generating.store(false);
-				return;
-			}
-
-			const std::string toc = buildRepoTableOfContents(files, kMaxReviewTocFiles);
-			const std::string repoTree = buildRepoTree(files);
-
-			{
-				std::lock_guard<std::mutex> lock(streamMutex);
-				streamingOutput = "Computing embeddings...";
-			}
-
-			// Query embedding for semantic selection.
-			std::vector<float> queryEmbedding;
-			auto queryEmbed = scriptReviewInference.embed(modelPath, reviewQuery);
-			if (queryEmbed.success) {
-				queryEmbedding = queryEmbed.embedding;
-			} else {
-				logWithLevel(OF_LOG_WARNING, "embedding query failed: " + queryEmbed.error);
-			}
-			if (cancelRequested.load()) {
-				setError("[Cancelled] Review cancelled.");
-				generating.store(false);
-				return;
-			}
-
-			// Build embeddings for all files (parallel, bounded).
-			scriptEmbeddingIndex.clear();
-			const size_t maxEmbedParallel = std::max<size_t>(1, std::min<size_t>(kMaxEmbeddingParallelTasks, std::thread::hardware_concurrency()));
-			std::mutex embedMutex;
-			std::vector<std::future<void>> embedTasks;
-			for (auto & f : files) {
-				auto task = std::async(std::launch::async, [this, &f, &modelPath, &embedMutex]() {
-					std::string snippet = f.truncatedContent;
-					if (snippet.size() > kMaxEmbeddingSnippetChars) {
-						snippet = slidingWindowText(snippet, kMaxEmbeddingSnippetChars);
-					}
-					auto er = scriptReviewInference.embed(modelPath, snippet);
-					if (er.success) {
-						f.embedding = er.embedding;
-						// Avoid data races when multiple threads update the index.
-						std::lock_guard<std::mutex> lock(embedMutex);
-						scriptEmbeddingIndex.add(f.name, snippet, er.embedding);
-					}
-				});
-				embedTasks.push_back(std::move(task));
-				if (embedTasks.size() >= maxEmbedParallel) {
-					embedTasks.front().get();
-					embedTasks.erase(embedTasks.begin());
-				}
-				if (cancelRequested.load()) break;
-			}
-			for (auto & t : embedTasks) t.get();
-			if (cancelRequested.load()) {
-				setError("[Cancelled] Review cancelled.");
-				generating.store(false);
-				return;
-			}
-
-			if (!queryEmbedding.empty()) {
-				for (auto & f : files) {
-					if (!f.embedding.empty()) {
-						f.similarityScore = ofxGgmlEmbeddingIndex::cosineSimilarity(queryEmbedding, f.embedding);
-					}
-				}
-			}
-
-			const int responseReserve = std::max(maxTokens, contextSize / 3);
-			auto selected = selectFilesForReview(files, reviewQuery, contextSize, responseReserve);
-			if (selected.empty()) {
-				setError("[Error] Unable to select files for review within token budget.");
-				generating.store(false);
-				return;
-			}
-
-			{
-				std::lock_guard<std::mutex> lock(streamMutex);
-				streamingOutput = "Running first-pass summaries...";
-			}
-
-			const size_t maxSummaryParallel = std::max<size_t>(1, std::min<size_t>(kMaxSummaryParallelTasks, std::thread::hardware_concurrency()));
-			std::vector<std::future<void>> summaryTasks;
-			for (auto * f : selected) {
-				auto task = std::async(std::launch::async, [this, f, &reviewQuery, &modelPath, responseReserve]() {
-					const int perFileBudget = std::max(96, std::min(responseReserve, maxTokens));
-					f->summary = runFileSummary(*f, reviewQuery, perFileBudget, modelPath);
-				});
-				summaryTasks.push_back(std::move(task));
-				if (summaryTasks.size() >= maxSummaryParallel) {
-					summaryTasks.front().get();
-					summaryTasks.erase(summaryTasks.begin());
-				}
-				if (cancelRequested.load()) break;
-			}
-			for (auto & t : summaryTasks) t.get();
-			if (cancelRequested.load()) {
-				setError("[Cancelled] Review cancelled.");
-				generating.store(false);
-				return;
-			}
-
-			{
-				std::lock_guard<std::mutex> lock(streamMutex);
-				streamingOutput = "Aggregating architecture review...";
-			}
-			const std::string archReview = runArchitectureReview(selected, repoTree, reviewQuery, modelPath);
-			if (cancelRequested.load()) {
-				setError("[Cancelled] Review cancelled.");
-				generating.store(false);
-				return;
-			}
-
-			{
-				std::lock_guard<std::mutex> lock(streamMutex);
-				streamingOutput = "Running integration analysis...";
-			}
-			const std::string integrationReview = runIntegrationReview(selected, repoTree, reviewQuery, modelPath);
-			if (cancelRequested.load()) {
-				setError("[Cancelled] Review cancelled.");
-				generating.store(false);
-				return;
-			}
-
-			std::ostringstream summaries;
-			for (auto * f : selected) {
-				summaries << "### " << f->name << "\n";
-				summaries << f->summary << "\n\n";
-			}
-
-			std::ostringstream final;
-			final << "Hierarchical code review (embeddings + multi-pass)\n\n";
-			final << toc << "\n";
-			final << "Selected files (priority + similarity):\n";
-			for (auto * f : selected) {
-				final << "- " << f->name
-					<< " | priority " << ofToString(f->priorityScore, 2)
-					<< " | sim " << ofToString(f->similarityScore, 2)
-					<< " | loc " << f->loc
-					<< (f->truncated ? " (truncated)" : "")
-					<< "\n";
-			}
-			final << "\nFirst pass - per-file summaries and issues:\n" << summaries.str();
-			final << "Second pass - architecture issues:\n" << archReview << "\n\n";
-			final << "Third pass - cross-file integration:\n" << integrationReview << "\n\n";
-			final << "Context management: reserved " << responseReserve
-				<< " tokens for responses; counted via tokenizer when available. "
-				<< "Sliding windows applied to oversized files.\n";
-
-			lastScriptReviewFiles = files;
-			lastScriptReviewStatus = "reviewed " + ofToString(selected.size()) + " files";
-			lastScriptRequest = reviewQuery;
-
-			scriptProjectMemory.addInteraction("First-pass summaries", summaries.str());
-			scriptProjectMemory.addInteraction("Architecture review", archReview);
-			scriptProjectMemory.addInteraction("Integration review", integrationReview);
-
-			{
-				std::lock_guard<std::mutex> lock(outputMutex);
-				pendingOutput = final.str();
-				pendingRole = "assistant";
-				pendingMode = AiMode::Script;
-			}
-
-			{
-				std::lock_guard<std::mutex> lock(streamMutex);
-				streamingOutput.clear();
-			}
 		} catch (const std::exception & e) {
 			setError(std::string("[Error] Hierarchical review failed: ") + e.what());
 		} catch (...) {
@@ -4053,48 +3345,6 @@ void ofApp::runHierarchicalReview() {
 	});
 }
 
-
-std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
-	const std::string & systemPrompt) const {
-	std::ostringstream oss;
-
-	if (!systemPrompt.empty()) {
-		oss << "System:\n" << systemPrompt << "\n\n";
-	}
-	if (mode == AiMode::Script) {
-		oss << scriptProjectMemory.buildPromptContext();
-	}
-
-	switch (mode) {
-	case AiMode::Chat:
-		if (chatLanguageIndex > 0 && chatLanguageIndex < kChatLanguageCount) {
-			oss << "System: Respond in " << kChatLanguages[chatLanguageIndex]
-				<< ". Keep terminology natural for that language.\n\n";
-		}
-		oss << "User:\n" << userText << "\n\nAssistant:\n";
-		break;
-	case AiMode::Script:
-		oss << "Generate high-quality code and short explanation for this request:\n"
-			<< userText << "\n\nAnswer:\n";
-		break;
-	case AiMode::Summarize:
-		oss << "Summarize this text concisely with key points:\n"
-			<< userText << "\n\nSummary:\n";
-		break;
-	case AiMode::Write:
-		oss << "Rewrite and improve this text:\n"
-			<< userText << "\n\nImproved text:\n";
-		break;
-	case AiMode::Translate:
-		oss << userText << "\n\nTranslation:\n";
-		break;
-	case AiMode::Custom:
-		oss << "User:\n" << userText << "\n\nAssistant:\n";
-		break;
-	}
-
-	return oss.str();
-}
 
 bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,
 	std::function<void(const std::string &)> onStreamData,
@@ -4583,11 +3833,22 @@ void ofApp::syncSelectedBackendIndex() {
 }
 
 void ofApp::runInference(AiMode mode, const std::string & userText,
-const std::string & systemPrompt) {
+	const std::string & systemPrompt,
+	const std::string & overridePrompt) {
 if (generating.load() || !engineReady) return;
 if (mode == AiMode::Script) {
 lastScriptRequest = userText;
 }
+
+const int chatLanguageIndexSnapshot = chatLanguageIndex;
+const int selectedLanguageIndexSnapshot = selectedLanguageIndex;
+const int translateSourceLangSnapshot = translateSourceLang;
+const int translateTargetLangSnapshot = translateTargetLang;
+const int selectedScriptFileIndexSnapshot = selectedScriptFileIndex;
+const bool scriptIncludeRepoContextSnapshot = scriptIncludeRepoContext;
+const auto chatLanguagesSnapshot = chatLanguages;
+const auto scriptLanguagesSnapshot = scriptLanguages;
+const auto translateLanguagesSnapshot = translateLanguages;
 
 generating.store(true);
 cancelRequested.store(false);
@@ -4604,7 +3865,11 @@ if (workerThread.joinable()) {
 workerThread.join();
 }
 
- workerThread = std::thread([this, mode, userText, systemPrompt]() {
+	workerThread = std::thread([this, mode, userText, systemPrompt, overridePrompt,
+		chatLanguageIndexSnapshot, selectedLanguageIndexSnapshot,
+		translateSourceLangSnapshot, translateTargetLangSnapshot,
+		selectedScriptFileIndexSnapshot, scriptIncludeRepoContextSnapshot,
+		chatLanguagesSnapshot, scriptLanguagesSnapshot, translateLanguagesSnapshot]() {
  try {
  std::string userTextWithInternet = userText;
  const bool preserveLlamaInstructions = (mode == AiMode::Script);
@@ -4631,7 +3896,82 @@ workerThread.join();
 	}
  }
 
- std::string prompt = buildPromptForMode(mode, userTextWithInternet, systemPrompt);
+ auto buildPromptForCurrentMode = [&](const std::string & text) {
+	switch (mode) {
+	case AiMode::Chat: {
+		ofxGgmlChatAssistantRequest request;
+		request.userText = text;
+		request.systemPrompt = systemPrompt;
+		if (chatLanguageIndexSnapshot > 0 &&
+			chatLanguageIndexSnapshot < static_cast<int>(chatLanguagesSnapshot.size())) {
+			request.responseLanguage =
+				chatLanguagesSnapshot[static_cast<size_t>(chatLanguageIndexSnapshot)].name;
+		}
+		return chatAssistant.preparePrompt(request).prompt;
+	}
+	case AiMode::Script: {
+		ofxGgmlCodeAssistantRequest request;
+		request.action = ofxGgmlCodeAssistantAction::Ask;
+		request.userInput = text;
+		request.lastTask = lastScriptRequest;
+		request.lastOutput = scriptOutput;
+		if (selectedLanguageIndexSnapshot >= 0 &&
+			selectedLanguageIndexSnapshot < static_cast<int>(scriptLanguagesSnapshot.size())) {
+			request.language =
+				scriptLanguagesSnapshot[static_cast<size_t>(selectedLanguageIndexSnapshot)];
+		}
+
+		ofxGgmlCodeAssistantContext context;
+		context.scriptSource = &scriptSource;
+		context.projectMemory = &scriptProjectMemory;
+		context.focusedFileIndex = selectedScriptFileIndexSnapshot;
+		context.includeRepoContext = scriptIncludeRepoContextSnapshot;
+		context.maxRepoFiles = kMaxScriptContextFiles;
+		context.maxFocusedFileChars = kMaxFocusedFileSnippetChars;
+		return scriptAssistant.preparePrompt(request, context).prompt;
+	}
+	case AiMode::Summarize: {
+		ofxGgmlTextAssistantRequest request;
+		request.task = ofxGgmlTextTask::Summarize;
+		request.inputText = text;
+		return textAssistant.preparePrompt(request).prompt;
+	}
+	case AiMode::Write: {
+		ofxGgmlTextAssistantRequest request;
+		request.task = ofxGgmlTextTask::Rewrite;
+		request.inputText = text;
+		return textAssistant.preparePrompt(request).prompt;
+	}
+	case AiMode::Translate: {
+		ofxGgmlTextAssistantRequest request;
+		request.task = ofxGgmlTextTask::Translate;
+		request.inputText = text;
+		if (translateSourceLangSnapshot >= 0 &&
+			translateSourceLangSnapshot < static_cast<int>(translateLanguagesSnapshot.size())) {
+			request.sourceLanguage =
+				translateLanguagesSnapshot[static_cast<size_t>(translateSourceLangSnapshot)].name;
+		}
+		if (translateTargetLangSnapshot >= 0 &&
+			translateTargetLangSnapshot < static_cast<int>(translateLanguagesSnapshot.size())) {
+			request.targetLanguage =
+				translateLanguagesSnapshot[static_cast<size_t>(translateTargetLangSnapshot)].name;
+		}
+		return textAssistant.preparePrompt(request).prompt;
+	}
+	case AiMode::Custom: {
+		ofxGgmlTextAssistantRequest request;
+		request.task = ofxGgmlTextTask::Custom;
+		request.inputText = text;
+		request.systemPrompt = systemPrompt;
+		return textAssistant.preparePrompt(request).prompt;
+	}
+	}
+	return text;
+ };
+
+ std::string prompt = overridePrompt.empty()
+	? buildPromptForCurrentMode(userTextWithInternet)
+	: overridePrompt;
  std::string result;
  std::string error;
 
@@ -4757,8 +4097,17 @@ workerThread.join();
 		result.rfind("[Error]", 0) != 0 && !cancelRequested.load()) {
 		const size_t tailChars = std::min<size_t>(result.size(), 600);
 		const std::string tail = result.substr(result.size() - tailChars);
-		const std::string continuationRequest = buildCutoffContinuationRequest(tail);
-		std::string continuationPrompt = buildPromptForMode(mode, continuationRequest, systemPrompt);
+		ofxGgmlCodeAssistantRequest continuationRequest;
+		continuationRequest.action = ofxGgmlCodeAssistantAction::ContinueCutoff;
+		continuationRequest.userInput = tail;
+		continuationRequest.lastOutput = tail;
+		if (selectedLanguageIndexSnapshot >= 0 &&
+			selectedLanguageIndexSnapshot < static_cast<int>(scriptLanguagesSnapshot.size())) {
+			continuationRequest.language =
+				scriptLanguagesSnapshot[static_cast<size_t>(selectedLanguageIndexSnapshot)];
+		}
+		std::string continuationPrompt =
+			scriptAssistant.preparePrompt(continuationRequest, {}).prompt;
 		bool contTrimmed = false;
 		const size_t contEstimatedTokens = continuationPrompt.size() / 3;
 		const size_t contMaxCtxTokens = static_cast<size_t>(contextSize);

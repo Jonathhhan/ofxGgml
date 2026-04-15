@@ -1,8 +1,11 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
 #include <cstdlib>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <vector>
 
 #ifndef _WIN32
 	#include <sys/stat.h>
@@ -12,6 +15,97 @@
 // Tests marked [inference][requires-executable] need llama CLI tools installed
 
 namespace {
+
+std::string trimCopy(const std::string & text) {
+	size_t start = 0;
+	while (start < text.size() &&
+		std::isspace(static_cast<unsigned char>(text[start]))) {
+		++start;
+	}
+	size_t end = text.size();
+	while (end > start &&
+		std::isspace(static_cast<unsigned char>(text[end - 1]))) {
+		--end;
+	}
+	return text.substr(start, end - start);
+}
+
+std::vector<std::string> splitLines(const std::string & text) {
+	std::vector<std::string> lines;
+	std::istringstream stream(text);
+	std::string line;
+	while (std::getline(stream, line)) {
+		const std::string trimmed = trimCopy(line);
+		if (!trimmed.empty()) {
+			lines.push_back(trimmed);
+		}
+	}
+	return lines;
+}
+
+std::string escapeBatchEcho(const std::string & line) {
+	std::string escaped;
+	for (char c : line) {
+		switch (c) {
+		case '^':
+		case '&':
+		case '|':
+		case '<':
+		case '>':
+			escaped.push_back('^');
+			escaped.push_back(c);
+			break;
+		case '%':
+			escaped += "%%";
+			break;
+		default:
+			escaped.push_back(c);
+			break;
+		}
+	}
+	return escaped;
+}
+
+std::string translateWindowsTestScript(const std::string & body) {
+	const std::string trimmedBody = trimCopy(body);
+	if (trimmedBody.find("OFXGGML_EXIT_TEST_MODE") != std::string::npos) {
+		const bool embeddingMode =
+			trimmedBody.find("[0.25, 0.50, 0.75]") != std::string::npos;
+		std::ostringstream out;
+		out << "@echo off\r\n";
+		out << "set \"mode=%OFXGGML_EXIT_TEST_MODE%\"\r\n";
+		out << "if /I \"%mode%\"==\"nonempty\" (\r\n";
+		out << "  echo " << (embeddingMode ? "[0.25, 0.50, 0.75]" : "generated-output") << "\r\n";
+		out << "  exit /b 1\r\n";
+		out << ")\r\n";
+		if (!embeddingMode) {
+			out << "if /I \"%mode%\"==\"sigint-empty\" exit /b 130\r\n";
+		}
+		out << "exit /b 1\r\n";
+		return out.str();
+	}
+
+	std::ostringstream out;
+	out << "@echo off\r\n";
+	for (const auto & line : splitLines(body)) {
+		if (line.rfind("exit ", 0) == 0) {
+			out << "exit /b " << trimCopy(line.substr(5)) << "\r\n";
+			continue;
+		}
+		if (line.rfind("echo ", 0) == 0) {
+			std::string payload = trimCopy(line.substr(5));
+			if (payload.size() >= 2 &&
+				payload.front() == '"' &&
+				payload.back() == '"') {
+				payload = payload.substr(1, payload.size() - 2);
+			}
+			out << "echo " << escapeBatchEcho(payload) << "\r\n";
+			continue;
+		}
+		out << line << "\r\n";
+	}
+	return out.str();
+}
 
 std::filesystem::path makeUniqueTestDir(const std::string & name) {
 	const auto base = std::filesystem::temp_directory_path() / "ofxggml_tests";
@@ -35,7 +129,7 @@ std::string createExecutableScript(const std::string & body) {
 #ifdef _WIN32
 	const auto exe = dir / "fake_llama.bat";
 	std::ofstream out(exe);
-	out << "@echo off\r\n" << body << "\r\n";
+	out << translateWindowsTestScript(body);
 	out.close();
 #else
 	const auto exe = dir / "fake_llama.sh";

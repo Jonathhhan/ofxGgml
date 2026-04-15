@@ -4,6 +4,19 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `ofxGgmlCodeAssistant` structured task results with file intents, patch operations, verification commands, risks, and follow-up questions.
+- `ofxGgmlWorkspaceAssistant` as a public addon module for patch application, verification loops, and retry-driven coding workflows.
+- Symbol-aware retrieval in `ofxGgmlCodeAssistant` so coding prompts can surface relevant definitions and references from `ofxGgmlScriptSource`.
+- Assistant eval coverage for retrieval ranking, dry-run safety, structured workspace execution, and verification retries.
+
+### Changed
+- Structured command parsing is now more tolerant of partially degraded assistant output, which makes Windows-based scripted test and tooling flows more robust.
+- C++ symbol extraction now recognizes scoped definitions such as `Type::method()` more reliably, improving retrieval quality for real codebases.
+
+### Documentation
+- `README.md` now documents the structured code-assistant workflow, the new workspace helper, and the assistant eval suite as public addon features.
+
 ## [1.0.0] - 2026-04-15
 
 ### Added

@@ -735,6 +735,77 @@ static std::string quoteWindowsArg(const std::string & arg) {
 	out.push_back('"');
 	return out;
 }
+
+static bool isWindowsBatchScript(const std::string & path) {
+	const std::string ext = trim(path).empty()
+		? std::string()
+		: std::filesystem::path(path).extension().string();
+	std::string lowered = ext;
+	std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+		[](unsigned char c) {
+			return static_cast<char>(std::tolower(c));
+		});
+	return lowered == ".bat" || lowered == ".cmd";
+}
+
+static std::string resolveWindowsLaunchPath(const std::string & executable) {
+	if (executable.empty()) {
+		return {};
+	}
+
+	auto hasPathSeparator = [](const std::string & value) {
+		return value.find('\\') != std::string::npos ||
+			value.find('/') != std::string::npos;
+	};
+
+	const std::filesystem::path inputPath(executable);
+	if (inputPath.is_absolute() || inputPath.has_parent_path() ||
+		hasPathSeparator(executable)) {
+		return executable;
+	}
+
+	std::vector<std::string> exts;
+	const std::string pathext = getEnvVarString("PATHEXT");
+	if (!pathext.empty()) {
+		std::istringstream stream(pathext);
+		std::string ext;
+		while (std::getline(stream, ext, ';')) {
+			if (!ext.empty()) {
+				exts.push_back(ext);
+			}
+		}
+	}
+	if (exts.empty()) {
+		exts = {".exe", ".bat", ".cmd", ".com"};
+	}
+
+	const std::string envPath = getEnvVarString("PATH");
+	std::istringstream pathStream(envPath);
+	std::string dir;
+	while (std::getline(pathStream, dir, ';')) {
+		if (dir.empty()) {
+			continue;
+		}
+		const std::filesystem::path base(dir);
+		std::error_code ec;
+		if (!std::filesystem::is_directory(base, ec) || ec) {
+			continue;
+		}
+
+		const std::filesystem::path direct = base / executable;
+		if (std::filesystem::exists(direct, ec) && !ec) {
+			return direct.string();
+		}
+		for (const auto & ext : exts) {
+			const std::filesystem::path candidate = base / (executable + ext);
+			if (std::filesystem::exists(candidate, ec) && !ec) {
+				return candidate.string();
+			}
+		}
+	}
+
+	return executable;
+}
 #endif
 
 static bool runCommandCapture(
@@ -784,13 +855,35 @@ if (args.empty() || args.front().empty()) return false;
 	PROCESS_INFORMATION pi {};
 	std::string cmdLine;
 	size_t cmdReserve = 0;
+	const std::string resolvedExecutable = resolveWindowsLaunchPath(args.front());
+	const bool useCmdWrapper = isWindowsBatchScript(resolvedExecutable);
+	const std::string comspec = [&]() {
+		const std::string envComspec = getEnvVarString("COMSPEC");
+		return envComspec.empty()
+			? std::string("C:\\Windows\\System32\\cmd.exe")
+			: envComspec;
+	}();
 	for (const auto & arg : args) {
 		cmdReserve += arg.size() + 3;
 	}
+	if (useCmdWrapper) {
+		cmdReserve += resolvedExecutable.size() + comspec.size() + 32;
+	}
 	cmdLine.reserve(cmdReserve);
-	for (size_t i = 0; i < args.size(); ++i) {
-		if (i > 0) cmdLine.push_back(' ');
-		cmdLine += quoteWindowsArg(args[i]);
+	if (useCmdWrapper) {
+		cmdLine += quoteWindowsArg(comspec);
+		cmdLine += " /d /s /c \"";
+		cmdLine += quoteWindowsArg(resolvedExecutable);
+		for (size_t i = 1; i < args.size(); ++i) {
+			cmdLine.push_back(' ');
+			cmdLine += quoteWindowsArg(args[i]);
+		}
+		cmdLine += "\"";
+	} else {
+		for (size_t i = 0; i < args.size(); ++i) {
+			if (i > 0) cmdLine.push_back(' ');
+			cmdLine += quoteWindowsArg(i == 0 ? resolvedExecutable : args[i]);
+		}
 	}
 	std::vector<char> mutableCmd(cmdLine.begin(), cmdLine.end());
 	mutableCmd.push_back('\0');
