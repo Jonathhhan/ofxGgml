@@ -2027,6 +2027,26 @@ if (result.bSuccess) {
 if (isLocal) ImGui::PopStyleColor();
 ImGui::SameLine();
 
+const auto localWorkspaceInfo = scriptSource.getWorkspaceInfo();
+const bool isVisualStudioWorkspace =
+	isLocal &&
+	(localWorkspaceInfo.hasVisualStudioSolution ||
+	 !localWorkspaceInfo.visualStudioProjectPaths.empty());
+if (isVisualStudioWorkspace) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.45f, 0.35f, 0.7f, 1.0f));
+if (ImGui::SmallButton("Visual Studio")) {
+	ofFileDialogResult result = ofSystemLoadDialog("Select Visual Studio .sln or .vcxproj", false);
+	if (result.bSuccess) {
+		selectedScriptFileIndex = -1;
+		if (!scriptLanguages.empty()) {
+			scriptSource.setPreferredExtension(
+				scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
+		}
+		scriptSource.setVisualStudioWorkspace(result.getPath());
+	}
+}
+if (isVisualStudioWorkspace) ImGui::PopStyleColor();
+ImGui::SameLine();
+
 if (isGitHub) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.6f, 1.0f));
 if (ImGui::SmallButton("GitHub")) {
 	selectedScriptFileIndex = -1;
@@ -2069,8 +2089,7 @@ ImGui::PopID();
 ImGui::EndChild();
 }
 
-	if (sourceType == ofxGgmlScriptSourceType::GitHubRepo ||
-		sourceType == ofxGgmlScriptSourceType::Internet) {
+	if (sourceType != ofxGgmlScriptSourceType::None) {
 		drawScriptSourcePanel();
 	}
 
@@ -2553,8 +2572,60 @@ if (ImGui::CollapsingHeader("Tools & Memory")) {
 void ofApp::drawScriptSourcePanel() {
 ImGui::Spacing();
 const ofxGgmlScriptSourceType sourceType = scriptSource.getSourceType();
+const auto workspaceInfo = scriptSource.getWorkspaceInfo();
 
-if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
+if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
+	ImGui::TextColored(ImVec4(0.6f, 0.85f, 0.6f, 1.0f), "Local Workspace:");
+	ImGui::SameLine();
+	if (ImGui::Button("Rescan", ImVec2(70, 0))) {
+		scriptSource.rescan();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Load VS Workspace", ImVec2(140, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select Visual Studio .sln or .vcxproj", false);
+		if (result.bSuccess) {
+			selectedScriptFileIndex = -1;
+			scriptSource.setVisualStudioWorkspace(result.getPath());
+		}
+	}
+
+	const std::string localRoot = scriptSource.getLocalFolderPath();
+	if (!localRoot.empty()) {
+		ImGui::TextWrapped("Root: %s", localRoot.c_str());
+	}
+	if (workspaceInfo.hasVisualStudioSolution) {
+		ImGui::TextWrapped("Solution: %s", workspaceInfo.visualStudioSolutionPath.c_str());
+	}
+	if (!workspaceInfo.visualStudioProjectPaths.empty()) {
+		ImGui::TextWrapped(
+			"Visual Studio projects: %d",
+			static_cast<int>(workspaceInfo.visualStudioProjectPaths.size()));
+	}
+	if (workspaceInfo.hasCompilationDatabase) {
+		ImGui::TextWrapped("compile_commands.json: %s", workspaceInfo.compilationDatabasePath.c_str());
+	}
+	if (workspaceInfo.hasCMakeProject) {
+		ImGui::TextWrapped("CMakeLists.txt: %s", workspaceInfo.cmakeListsPath.c_str());
+	}
+	if (workspaceInfo.hasOpenFrameworksProject) {
+		ImGui::TextWrapped("addons.make: %s", workspaceInfo.addonsMakePath.c_str());
+	}
+
+	const auto commands = scriptWorkspaceAssistant.suggestVerificationCommands(
+		{},
+		localRoot);
+	if (!commands.empty()) {
+		ImGui::Spacing();
+		ImGui::TextDisabled("Suggested verification:");
+		for (const auto & command : commands) {
+			std::string line = command.executable;
+			for (const auto & arg : command.arguments) {
+				line += " " + arg;
+			}
+			ImGui::BulletText("%s", line.c_str());
+		}
+	}
+} else if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
 	ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "GitHub Repository:");
 	ImGui::SetNextItemWidth(250);
 	ImGui::InputText("##GHRepo", scriptSourceGitHub, sizeof(scriptSourceGitHub));
@@ -2566,18 +2637,19 @@ if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
 	ImGui::SameLine();
 	if (ImGui::Button("Fetch", ImVec2(60, 0))) {
 		if (std::strlen(scriptSourceGitHub) > 0) {
-			std::string branch = std::strlen(scriptSourceBranch) > 0
-				? std::string(scriptSourceBranch) : "main";
 			selectedScriptFileIndex = -1;
 			if (!scriptLanguages.empty()) {
 				scriptSource.setPreferredExtension(
 					scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
 			}
-			if (scriptSource.setGitHubRepo(scriptSourceGitHub, branch)) {
+			if (scriptSource.setGitHubRepoFromInput(
+				scriptSourceGitHub,
+				scriptSourceBranch)) {
 				scriptSource.fetchGitHubRepo();
 			}
 		}
 	}
+	ImGui::TextDisabled("Accepts owner/repo, GitHub repo URLs, and /tree/<branch> URLs. Leave branch empty for auto.");
 } else if (sourceType == ofxGgmlScriptSourceType::Internet) {
 	ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.9f, 1.0f), "Internet Sources (URLs):");
 	ImGui::SetNextItemWidth(360);

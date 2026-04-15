@@ -246,6 +246,63 @@ TEST_CASE("Workspace assistant suggests verification commands from changed files
 	REQUIRE(hasExpectedAssistantOutcome);
 }
 
+TEST_CASE("Script source parses GitHub URLs and detects Visual Studio workspaces", "[workspace_assistant]") {
+	ofxGgmlScriptSource githubSource;
+	REQUIRE(githubSource.setGitHubRepoFromInput(
+		"https://github.com/Jonathhhan/ofxGgml/tree/main",
+		""));
+	REQUIRE(githubSource.getGitHubOwnerRepo() == "Jonathhhan/ofxGgml");
+	REQUIRE(githubSource.getGitHubBranch() == "main");
+
+	const auto root = makeWorkspaceTestDir("vs_workspace");
+	std::filesystem::create_directories(root / "example");
+	{
+		std::ofstream out(root / "ofxGgml.sln");
+		out << "Microsoft Visual Studio Solution File";
+	}
+	{
+		std::ofstream out(root / "example" / "example.vcxproj");
+		out << "<Project DefaultTargets=\"Build\"></Project>";
+	}
+	{
+		std::ofstream out(root / "compile_commands.json");
+		out << "[]";
+	}
+	{
+		std::ofstream out(root / "addons.make");
+		out << "ofxGgml\n";
+	}
+
+	ofxGgmlScriptSource localSource;
+	REQUIRE(localSource.setVisualStudioWorkspace((root / "ofxGgml.sln").string()));
+	const auto info = localSource.getWorkspaceInfo();
+	REQUIRE(info.hasVisualStudioSolution);
+	REQUIRE(info.visualStudioSolutionPath == "ofxGgml.sln");
+	REQUIRE(info.visualStudioProjectPaths.size() == 1);
+	REQUIRE(info.visualStudioProjectPaths.front() == "example/example.vcxproj");
+	REQUIRE(info.hasCompilationDatabase);
+	REQUIRE(info.hasOpenFrameworksProject);
+}
+
+TEST_CASE("Workspace assistant suggests Visual Studio verification commands", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("vs_suggest");
+	{
+		std::ofstream out(root / "workspace.sln");
+		out << "Microsoft Visual Studio Solution File";
+	}
+
+	ofxGgmlWorkspaceAssistant assistant;
+	const auto commands = assistant.suggestVerificationCommands({}, root.string());
+#ifdef _WIN32
+	REQUIRE_FALSE(commands.empty());
+	REQUIRE(commands.front().label == "build-visual-studio-solution");
+	REQUIRE(commands.front().executable == "MSBuild.exe");
+	REQUIRE(commands.front().arguments.front() == "workspace.sln");
+#else
+	REQUIRE(commands.empty());
+#endif
+}
+
 TEST_CASE("Workspace assistant verification loop can retry with a new structured plan", "[workspace_assistant]") {
 	const auto root = makeWorkspaceTestDir("retry");
 	std::filesystem::create_directories(root / "src");

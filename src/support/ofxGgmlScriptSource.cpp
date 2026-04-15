@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <thread>
 
 namespace {
@@ -29,6 +30,46 @@ std::string normalizeLower(const std::string & s) {
 	return out;
 }
 
+std::vector<std::string> splitNonEmpty(
+	const std::string & input,
+	char delimiter) {
+	std::vector<std::string> parts;
+	std::string current;
+	for (char c : input) {
+		if (c == delimiter) {
+			if (!current.empty()) {
+				parts.push_back(current);
+				current.clear();
+			}
+			continue;
+		}
+		current.push_back(c);
+	}
+	if (!current.empty()) {
+		parts.push_back(current);
+	}
+	return parts;
+}
+
+bool isWorkspaceMetadataPath(const std::filesystem::path & path) {
+	const std::string filename = normalizeLower(path.filename().string());
+	const std::string ext = normalizeLower(path.extension().string());
+	if (filename == "compile_commands.json" ||
+		filename == "cmakelists.txt" ||
+		filename == "addons.make" ||
+		filename == "packages.config") {
+		return true;
+	}
+	return ext == ".sln" ||
+		ext == ".vcxproj" ||
+		ext == ".filters" ||
+		ext == ".props" ||
+		ext == ".targets" ||
+		ext == ".bat" ||
+		ext == ".cmd" ||
+		ext == ".rc";
+}
+
 }
 
 ofxGgmlScriptSource::~ofxGgmlScriptSource() {
@@ -45,6 +86,7 @@ void ofxGgmlScriptSource::clear() {
 	m_internetUrls.clear();
 	m_files.clear();
 	m_status.clear();
+	clearWorkspaceInfoLocked();
 	m_fetchDiagnostics.clear();
 }
 
@@ -56,6 +98,7 @@ void ofxGgmlScriptSource::setGitHubMode() {
 	m_internetUrls.clear();
 	m_files.clear();
 	m_status.clear();
+	clearWorkspaceInfoLocked();
 }
 
 void ofxGgmlScriptSource::setInternetMode() {
@@ -70,6 +113,7 @@ void ofxGgmlScriptSource::setInternetMode() {
 	m_localFolderPath.clear();
 	m_gitHubOwnerRepo.clear();
 	m_gitHubBranch.clear();
+	clearWorkspaceInfoLocked();
 }
 
 void ofxGgmlScriptSource::setPreferredExtension(const std::string & ext) {
@@ -101,9 +145,72 @@ bool ofxGgmlScriptSource::setLocalFolder(const std::string & path) {
 	return scanLocalFolderLocked();
 }
 
+bool ofxGgmlScriptSource::setVisualStudioWorkspace(const std::string & path) {
+	std::error_code ec;
+	std::filesystem::path workspacePath = std::filesystem::path(trim(path));
+	if (workspacePath.empty()) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_status = "Visual Studio path is empty";
+		return false;
+	}
+
+	workspacePath = std::filesystem::weakly_canonical(workspacePath, ec);
+	if (ec || workspacePath.empty()) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_status = "Visual Studio path is invalid";
+		return false;
+	}
+
+	const bool isDirectory = std::filesystem::is_directory(workspacePath, ec) && !ec;
+	const std::filesystem::path root = isDirectory
+		? workspacePath
+		: workspacePath.parent_path();
+	if (root.empty()) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_status = "Visual Studio workspace root is invalid";
+		return false;
+	}
+
+	if (!setLocalFolder(root.string())) {
+		return false;
+	}
+
+	std::lock_guard<std::mutex> lock(m_mutex);
+	if (!isDirectory) {
+		const std::string ext = normalizeLower(workspacePath.extension().string());
+		if (ext == ".sln") {
+			m_workspaceInfo.hasVisualStudioSolution = true;
+			m_workspaceInfo.visualStudioSolutionPath =
+				std::filesystem::relative(workspacePath, root, ec).generic_string();
+			if (ec) {
+				m_workspaceInfo.visualStudioSolutionPath = workspacePath.filename().string();
+			}
+		} else if (ext == ".vcxproj") {
+			const std::string projectRel =
+				std::filesystem::relative(workspacePath, root, ec).generic_string();
+			const std::string normalizedProject =
+				ec ? workspacePath.filename().string() : projectRel;
+			if (std::find(
+					m_workspaceInfo.visualStudioProjectPaths.begin(),
+					m_workspaceInfo.visualStudioProjectPaths.end(),
+					normalizedProject) ==
+				m_workspaceInfo.visualStudioProjectPaths.end()) {
+				m_workspaceInfo.visualStudioProjectPaths.insert(
+					m_workspaceInfo.visualStudioProjectPaths.begin(),
+					normalizedProject);
+			}
+		}
+	}
+	if (m_workspaceInfo.hasVisualStudioSolution ||
+		!m_workspaceInfo.visualStudioProjectPaths.empty()) {
+		m_status = "Loaded Visual Studio workspace";
+	}
+	return true;
+}
+
 bool ofxGgmlScriptSource::setGitHubRepo(const std::string & ownerRepo, const std::string & branch) {
 	const std::string ownerRepoTrim = trim(ownerRepo);
-	const std::string branchTrim = trim(branch);
+	const std::string branchTrim = sanitizeGitHubBranch(branch);
 	if (!isValidOwnerRepo(ownerRepoTrim)) {
 		std::lock_guard<std::mutex> lock(m_mutex);
 		m_sourceType = ofxGgmlScriptSourceType::GitHubRepo;
@@ -114,7 +221,7 @@ bool ofxGgmlScriptSource::setGitHubRepo(const std::string & ownerRepo, const std
 		m_status = "Invalid repo format (use owner/repo)";
 		return false;
 	}
-	if (!isValidBranch(branchTrim)) {
+	if (!branchTrim.empty() && !isValidBranch(branchTrim)) {
 		std::lock_guard<std::mutex> lock(m_mutex);
 		m_sourceType = ofxGgmlScriptSourceType::GitHubRepo;
 		m_localFolderPath.clear();
@@ -134,9 +241,28 @@ bool ofxGgmlScriptSource::setGitHubRepo(const std::string & ownerRepo, const std
 		m_internetUrls.clear();
 		m_files.clear();
 		m_status.clear();
+		clearWorkspaceInfoLocked();
 	}
 
 	return true;
+}
+
+bool ofxGgmlScriptSource::setGitHubRepoFromInput(
+	const std::string & ownerRepoOrUrl,
+	const std::string & branchHint) {
+	std::string ownerRepo;
+	std::string branch;
+	if (!parseGitHubInput(ownerRepoOrUrl, branchHint, &ownerRepo, &branch)) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_sourceType = ofxGgmlScriptSourceType::GitHubRepo;
+		m_gitHubOwnerRepo = trim(ownerRepoOrUrl);
+		m_gitHubBranch = sanitizeGitHubBranch(branchHint);
+		m_files.clear();
+		m_status = "Invalid GitHub input (use owner/repo or a GitHub URL)";
+		clearWorkspaceInfoLocked();
+		return false;
+	}
+	return setGitHubRepo(ownerRepo, branch);
 }
 
 void ofxGgmlScriptSource::setInternetUrls(const std::vector<std::string> & urls) {
@@ -156,6 +282,7 @@ void ofxGgmlScriptSource::setInternetUrls(const std::vector<std::string> & urls)
 	}
 
 	m_files.clear();
+	clearWorkspaceInfoLocked();
 	m_files.reserve(m_internetUrls.size()); // Pre-allocate capacity
 	for (const auto & url : m_internetUrls) {
 		ofxGgmlScriptSourceFileEntry fe;
@@ -183,6 +310,7 @@ bool ofxGgmlScriptSource::addInternetUrl(const std::string & url) {
 	m_localFolderPath.clear();
 	m_gitHubOwnerRepo.clear();
 	m_gitHubBranch.clear();
+	clearWorkspaceInfoLocked();
 
 	auto it = std::find(m_internetUrls.begin(), m_internetUrls.end(), trimmed);
 	if (it == m_internetUrls.end()) {
@@ -261,16 +389,31 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 	m_fetching.store(true, std::memory_order_release);
 
 	const std::string apiUrl = "https://api.github.com/repos/" + ownerRepo +
-		"/git/trees/" + branch + "?recursive=1";
-	const std::string rawPrefix = "https://raw.githubusercontent.com/" +
-		ownerRepo + "/" + branch + "/";
+		(branch.empty() ? "" : "/git/trees/" + branch + "?recursive=1");
 
-	std::thread worker([this, generation, apiUrl, rawPrefix, preferredExt, sourceType]() {
+	std::thread worker([this, generation, apiUrl, ownerRepo, branch, preferredExt, sourceType]() {
 		std::vector<ofxGgmlScriptSourceFileEntry> entries;
 		std::string status;
 		bool hadError = false;
+		std::string resolvedBranch = branch;
+		if (resolvedBranch.empty()) {
+			ofHttpResponse repoResponse = ofLoadURL("https://api.github.com/repos/" + ownerRepo);
+			if (repoResponse.status >= 200 && repoResponse.status < 300) {
+				ofJson repoJson = ofJson::parse(repoResponse.data.getText(), nullptr, false);
+				if (!repoJson.is_discarded()) {
+					resolvedBranch = repoJson.value("default_branch", "");
+				}
+			}
+			if (resolvedBranch.empty()) {
+				resolvedBranch = "main";
+			}
+		}
+		const std::string treeApiUrl = "https://api.github.com/repos/" + ownerRepo +
+			"/git/trees/" + resolvedBranch + "?recursive=1";
+		const std::string rawPrefix = "https://raw.githubusercontent.com/" +
+			ownerRepo + "/" + resolvedBranch + "/";
 
-		ofHttpResponse response = ofLoadURL(apiUrl);
+		ofHttpResponse response = ofLoadURL(treeApiUrl);
 		if (m_cancelFetch.load(std::memory_order_acquire) || m_fetchGeneration.load(std::memory_order_acquire) != generation) {
 			m_fetching.store(false, std::memory_order_release);
 			return;
@@ -303,8 +446,8 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 
 					const std::filesystem::path p(path);
 					const std::string ext = normalizeLower(p.extension().string());
-					bool include = hasSourceExtension(ext, true);
-					if (!preferredExt.empty()) {
+					bool include = hasSourceExtension(ext, true) || isWorkspaceMetadataPath(p);
+					if (!preferredExt.empty() && !isWorkspaceMetadataPath(p)) {
 						include = (ext == preferredExt);
 					}
 					if (!include) continue;
@@ -321,7 +464,7 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 						const ofxGgmlScriptSourceFileEntry & b) {
 						return a.name < b.name;
 					});
-				status = ofToString(entries.size()) + " files from GitHub";
+				status = ofToString(entries.size()) + " files from GitHub (" + resolvedBranch + ")";
 			}
 		}
 
@@ -335,6 +478,7 @@ bool ofxGgmlScriptSource::fetchGitHubRepo() {
 			if (m_sourceType == sourceType &&
 				m_fetchGeneration.load(std::memory_order_acquire) == generation) {
 				m_files = std::move(entries);
+				m_gitHubBranch = resolvedBranch;
 				m_status = status;
 				pushFetchDiagnosticLocked(
 					hadError ? "error" : "complete",
@@ -522,6 +666,11 @@ std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::getFiles() const 
 	return m_files;
 }
 
+ofxGgmlScriptSourceWorkspaceInfo ofxGgmlScriptSource::getWorkspaceInfo() const {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	return m_workspaceInfo;
+}
+
 std::string ofxGgmlScriptSource::getStatus() const {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	return m_status;
@@ -563,6 +712,10 @@ void ofxGgmlScriptSource::cancelFetchWorker(const std::string & reason) {
 	}
 }
 
+void ofxGgmlScriptSource::clearWorkspaceInfoLocked() {
+	m_workspaceInfo = {};
+}
+
 /// Creates a fetch diagnostic entry with timestamp. Maintains maximum of 64 entries.
 /// Must be called with m_mutex locked.
 void ofxGgmlScriptSource::pushFetchDiagnosticLocked(
@@ -590,9 +743,11 @@ bool ofxGgmlScriptSource::scanLocalFolderLocked() {
 	std::error_code ec;
 	if (!std::filesystem::is_directory(m_localFolderPath, ec) || ec) {
 		m_status = "Not a directory";
+		clearWorkspaceInfoLocked();
 		return false;
 	}
 	m_files = scanLocalFolderEntries(m_localFolderPath);
+	m_workspaceInfo = buildWorkspaceInfoForFolder(m_localFolderPath);
 	m_status = ofToString(m_files.size()) + " items";
 	return true;
 }
@@ -643,8 +798,9 @@ std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::scanLocalFolderEn
 		}
 
 		const std::string ext = normalizeLower(entry.path().extension().string());
-		bool include = hasSourceExtension(ext, false);
-		if (!preferredExt.empty()) {
+		const bool isWorkspaceMetadata = isWorkspaceMetadataPath(entry.path());
+		bool include = hasSourceExtension(ext, false) || isWorkspaceMetadata;
+		if (!preferredExt.empty() && !isWorkspaceMetadata) {
 			include = (ext == preferredExt);
 		}
 		if (include) {
@@ -658,6 +814,146 @@ std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::scanLocalFolderEn
 			return a.name < b.name;
 		});
 	return files;
+}
+
+ofxGgmlScriptSourceWorkspaceInfo ofxGgmlScriptSource::buildWorkspaceInfoForFolder(
+	const std::string & path) const {
+	ofxGgmlScriptSourceWorkspaceInfo info;
+	info.workspaceRoot = path;
+	info.workspaceLabel = std::filesystem::path(path).filename().string();
+	if (info.workspaceLabel.empty()) {
+		info.workspaceLabel = path;
+	}
+
+	std::error_code ec;
+	auto it = std::filesystem::recursive_directory_iterator(
+		path,
+		std::filesystem::directory_options::skip_permission_denied,
+		ec);
+	const auto end = std::filesystem::recursive_directory_iterator();
+	for (; it != end; it.increment(ec)) {
+		if (ec) {
+			ec.clear();
+			continue;
+		}
+		const auto & entry = *it;
+		const auto entryPath = entry.path();
+		const std::string filename = normalizeLower(entryPath.filename().string());
+		if (entry.is_directory(ec)) {
+			if (!filename.empty() && filename[0] == '.') {
+				it.disable_recursion_pending();
+			}
+			ec.clear();
+			continue;
+		}
+
+		const std::string ext = normalizeLower(entryPath.extension().string());
+		const std::string relPath =
+			std::filesystem::relative(entryPath, std::filesystem::path(path), ec).generic_string();
+		if (ec) {
+			ec.clear();
+			continue;
+		}
+
+		if (ext == ".sln" && !info.hasVisualStudioSolution) {
+			info.hasVisualStudioSolution = true;
+			info.visualStudioSolutionPath = relPath;
+		} else if (ext == ".vcxproj") {
+			info.visualStudioProjectPaths.push_back(relPath);
+		} else if (filename == "compile_commands.json" && !info.hasCompilationDatabase) {
+			info.hasCompilationDatabase = true;
+			info.compilationDatabasePath = relPath;
+		} else if (filename == "cmakelists.txt" && !info.hasCMakeProject) {
+			info.hasCMakeProject = true;
+			info.cmakeListsPath = relPath;
+		} else if (filename == "addons.make" && !info.hasOpenFrameworksProject) {
+			info.hasOpenFrameworksProject = true;
+			info.addonsMakePath = relPath;
+		}
+	}
+
+	std::sort(
+		info.visualStudioProjectPaths.begin(),
+		info.visualStudioProjectPaths.end());
+	return info;
+}
+
+bool ofxGgmlScriptSource::parseGitHubInput(
+	const std::string & ownerRepoOrUrl,
+	const std::string & branchHint,
+	std::string * outOwnerRepo,
+	std::string * outBranch) {
+	const std::string input = trim(ownerRepoOrUrl);
+	if (input.empty()) {
+		return false;
+	}
+
+	std::string ownerRepo = input;
+	std::string branch = sanitizeGitHubBranch(branchHint);
+
+	const auto isHttpUrl =
+		input.rfind("https://", 0) == 0 || input.rfind("http://", 0) == 0;
+	if (isHttpUrl) {
+		auto stripPrefix = [](const std::string & value, const std::string & prefix) {
+			return value.rfind(prefix, 0) == 0
+				? value.substr(prefix.size())
+				: value;
+		};
+		std::string normalized = stripPrefix(input, "https://");
+		normalized = stripPrefix(normalized, "http://");
+		if (normalized.rfind("github.com/", 0) == 0) {
+			normalized = normalized.substr(std::string("github.com/").size());
+			const size_t queryPos = normalized.find_first_of("?#");
+			if (queryPos != std::string::npos) {
+				normalized = normalized.substr(0, queryPos);
+			}
+			std::vector<std::string> parts = splitNonEmpty(normalized, '/');
+			if (parts.size() >= 2) {
+				ownerRepo = parts[0] + "/" + parts[1];
+				if (branch.empty() && parts.size() >= 4 && parts[2] == "tree") {
+					branch = parts[3];
+					for (size_t i = 4; i < parts.size(); ++i) {
+						branch += "/" + parts[i];
+					}
+				}
+			}
+		} else if (normalized.rfind("raw.githubusercontent.com/", 0) == 0) {
+			normalized = normalized.substr(std::string("raw.githubusercontent.com/").size());
+			const size_t queryPos = normalized.find_first_of("?#");
+			if (queryPos != std::string::npos) {
+				normalized = normalized.substr(0, queryPos);
+			}
+			std::vector<std::string> parts = splitNonEmpty(normalized, '/');
+			if (parts.size() >= 3) {
+				ownerRepo = parts[0] + "/" + parts[1];
+				if (branch.empty()) {
+					branch = parts[2];
+				}
+			}
+		}
+	}
+
+	if (!isValidOwnerRepo(ownerRepo)) {
+		return false;
+	}
+	if (!branch.empty() && !isValidBranch(branch)) {
+		return false;
+	}
+	if (outOwnerRepo != nullptr) {
+		*outOwnerRepo = ownerRepo;
+	}
+	if (outBranch != nullptr) {
+		*outBranch = branch;
+	}
+	return true;
+}
+
+std::string ofxGgmlScriptSource::sanitizeGitHubBranch(const std::string & branchHint) {
+	std::string branch = trim(branchHint);
+	if (normalizeLower(branch) == "auto") {
+		return {};
+	}
+	return branch;
 }
 
 /// Validates GitHub owner/repo format (e.g., "owner/repo").

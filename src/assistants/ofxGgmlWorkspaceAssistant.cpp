@@ -520,6 +520,53 @@ bool fileExistsWithinWorkspace(
 		ec) && !ec;
 }
 
+std::string findFirstWorkspaceFileByExtension(
+	const std::string & workspaceRoot,
+	const std::string & extension) {
+	if (trimCopy(workspaceRoot).empty() || trimCopy(extension).empty()) {
+		return {};
+	}
+
+	std::error_code ec;
+	auto it = std::filesystem::recursive_directory_iterator(
+		workspaceRoot,
+		std::filesystem::directory_options::skip_permission_denied,
+		ec);
+	const auto end = std::filesystem::recursive_directory_iterator();
+	std::string bestMatch;
+	for (; it != end; it.increment(ec)) {
+		if (ec) {
+			ec.clear();
+			continue;
+		}
+
+		const auto & entry = *it;
+		const std::string filename = entry.path().filename().string();
+		if (entry.is_directory(ec)) {
+			if (!filename.empty() && filename[0] == '.') {
+				it.disable_recursion_pending();
+			}
+			ec.clear();
+			continue;
+		}
+		if (toLowerCopy(entry.path().extension().string()) != toLowerCopy(extension)) {
+			continue;
+		}
+
+		const std::string rel =
+			std::filesystem::relative(entry.path(), workspaceRoot, ec).generic_string();
+		if (ec) {
+			ec.clear();
+			continue;
+		}
+		if (bestMatch.empty() || rel.size() < bestMatch.size()) {
+			bestMatch = rel;
+		}
+	}
+
+	return bestMatch;
+}
+
 std::string inferTestTagFromChangedFile(const std::string & filePath) {
 	const std::string normalized = toLowerCopy(filePath);
 	if (normalized.find("codeassistant") != std::string::npos) {
@@ -1400,9 +1447,35 @@ ofxGgmlWorkspaceAssistant::suggestVerificationCommands(
 	const std::string & workspaceRoot) const {
 	std::vector<ofxGgmlCodeAssistantCommandSuggestion> commands;
 	const auto normalized = normalizeChangedFiles(changedFiles);
-	if (normalized.empty() || trimCopy(workspaceRoot).empty()) {
+	if (trimCopy(workspaceRoot).empty()) {
 		return commands;
 	}
+
+#ifdef _WIN32
+	const std::string solutionPath =
+		findFirstWorkspaceFileByExtension(workspaceRoot, ".sln");
+	const std::string projectPath =
+		findFirstWorkspaceFileByExtension(workspaceRoot, ".vcxproj");
+	if (!solutionPath.empty() || !projectPath.empty()) {
+		ofxGgmlCodeAssistantCommandSuggestion vsBuild;
+		vsBuild.label = !solutionPath.empty()
+			? "build-visual-studio-solution"
+			: "build-visual-studio-project";
+		vsBuild.workingDirectory = workspaceRoot;
+		vsBuild.executable = "MSBuild.exe";
+		vsBuild.arguments = {
+			!solutionPath.empty() ? solutionPath : projectPath,
+			"/t:Build",
+			"/p:Configuration=Release",
+			"/p:Platform=x64",
+			"/m"
+		};
+		vsBuild.expectedOutcome = !solutionPath.empty()
+			? "Visual Studio solution builds successfully"
+			: "Visual Studio project builds successfully";
+		commands.push_back(std::move(vsBuild));
+	}
+#endif
 
 	const bool testsBuildExists =
 		fileExistsWithinWorkspace(workspaceRoot, "tests/build");
@@ -1418,7 +1491,7 @@ ofxGgmlWorkspaceAssistant::suggestVerificationCommands(
 		[](const std::string & file) {
 			return file.rfind("src/", 0) == 0 || file.rfind("tests/", 0) == 0;
 		});
-	if (testsBuildExists && touchesCode) {
+	if (testsBuildExists && (touchesCode || normalized.empty())) {
 		ofxGgmlCodeAssistantCommandSuggestion build;
 		build.label = "build-tests";
 		build.workingDirectory = workspaceRoot;

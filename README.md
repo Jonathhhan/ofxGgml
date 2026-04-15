@@ -33,6 +33,7 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
 - `ofxGgmlTextAssistant` for translation, summarization, rewriting, and reusable text-task prompts
 - `ofxGgmlCodeReview`, `ofxGgmlProjectMemory`, and `ofxGgmlScriptSource` helpers for local coding and multi-pass review workflows
+- `ofxGgmlScriptSource` now accepts local folders, Visual Studio `.sln` / `.vcxproj` workspaces, GitHub `owner/repo` values, full GitHub URLs, and branch-aware repo URLs
 - assistant eval coverage for retrieval quality, dry-run safety, and structured workspace execution
 - async graph submission and explicit synchronization for frame-friendly compute
 - Windows build scripts that refresh Visual Studio linking automatically

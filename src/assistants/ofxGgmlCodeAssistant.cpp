@@ -597,6 +597,7 @@ void appendRepoContext(
 
 	const auto sourceType = context.scriptSource->getSourceType();
 	const auto files = context.scriptSource->getFiles();
+	const auto workspaceInfo = context.scriptSource->getWorkspaceInfo();
 	if (sourceType == ofxGgmlScriptSourceType::None || files.empty()) {
 		return;
 	}
@@ -609,6 +610,26 @@ void appendRepoContext(
 	case ofxGgmlScriptSourceType::LocalFolder:
 		prompt << "Context: Loaded folder: "
 			<< context.scriptSource->getLocalFolderPath() << "\n";
+		if (workspaceInfo.hasVisualStudioSolution) {
+			prompt << "Visual Studio solution: "
+				<< workspaceInfo.visualStudioSolutionPath << "\n";
+		}
+		if (!workspaceInfo.visualStudioProjectPaths.empty()) {
+			prompt << "Visual Studio projects: "
+				<< workspaceInfo.visualStudioProjectPaths.size() << "\n";
+		}
+		if (workspaceInfo.hasCompilationDatabase) {
+			prompt << "Compilation database: "
+				<< workspaceInfo.compilationDatabasePath << "\n";
+		}
+		if (workspaceInfo.hasCMakeProject) {
+			prompt << "CMake entrypoint: "
+				<< workspaceInfo.cmakeListsPath << "\n";
+		}
+		if (workspaceInfo.hasOpenFrameworksProject) {
+			prompt << "openFrameworks project marker: "
+				<< workspaceInfo.addonsMakePath << "\n";
+		}
 		prompt << "Available files in this folder:\n";
 		break;
 	case ofxGgmlScriptSourceType::GitHubRepo:

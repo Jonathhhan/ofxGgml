@@ -31,6 +31,20 @@ struct ofxGgmlScriptSourceFetchDiagnostic {
 	uint64_t timestampMs = 0;
 };
 
+struct ofxGgmlScriptSourceWorkspaceInfo {
+	std::string workspaceRoot;
+	std::string workspaceLabel;
+	std::string visualStudioSolutionPath;
+	std::vector<std::string> visualStudioProjectPaths;
+	std::string compilationDatabasePath;
+	std::string cmakeListsPath;
+	std::string addonsMakePath;
+	bool hasVisualStudioSolution = false;
+	bool hasCompilationDatabase = false;
+	bool hasCMakeProject = false;
+	bool hasOpenFrameworksProject = false;
+};
+
 class ofxGgmlScriptSource {
 public:
 	~ofxGgmlScriptSource();
@@ -43,7 +57,11 @@ public:
 	std::string getPreferredExtension() const;
 
 	bool setLocalFolder(const std::string & path);
+	bool setVisualStudioWorkspace(const std::string & path);
 	bool setGitHubRepo(const std::string & ownerRepo, const std::string & branch);
+	bool setGitHubRepoFromInput(
+		const std::string & ownerRepoOrUrl,
+		const std::string & branchHint = "");
 	void setInternetUrls(const std::vector<std::string> & urls);
 	bool addInternetUrl(const std::string & url);
 	bool removeInternetUrl(size_t index);
@@ -59,19 +77,29 @@ public:
 	std::string getGitHubBranch() const noexcept;
 	std::vector<std::string> getInternetUrls() const;
 	std::vector<ofxGgmlScriptSourceFileEntry> getFiles() const;
+	ofxGgmlScriptSourceWorkspaceInfo getWorkspaceInfo() const;
 	std::string getStatus() const;
 	bool isFetching() const noexcept;
 	std::vector<ofxGgmlScriptSourceFetchDiagnostic> getFetchDiagnostics() const;
 
 private:
+	void clearWorkspaceInfoLocked();
 	bool scanLocalFolderLocked();
 	std::vector<ofxGgmlScriptSourceFileEntry> scanLocalFolderEntries(
+		const std::string & path) const;
+	ofxGgmlScriptSourceWorkspaceInfo buildWorkspaceInfoForFolder(
 		const std::string & path) const;
 	void cancelFetchWorker(const std::string & reason);
 	void pushFetchDiagnosticLocked(const std::string & state,
 		const std::string & message,
 		uint64_t generation);
 
+	static bool parseGitHubInput(
+		const std::string & ownerRepoOrUrl,
+		const std::string & branchHint,
+		std::string * outOwnerRepo,
+		std::string * outBranch);
+	static std::string sanitizeGitHubBranch(const std::string & branchHint);
 	static bool isValidOwnerRepo(const std::string & ownerRepo);
 	static bool isValidBranch(const std::string & branch);
 	static bool isSafeRepoPath(const std::string & path);
@@ -89,6 +117,7 @@ private:
 	std::vector<std::string> m_internetUrls;
 	std::vector<ofxGgmlScriptSourceFileEntry> m_files;
 	std::string m_status;
+	ofxGgmlScriptSourceWorkspaceInfo m_workspaceInfo;
 	std::vector<ofxGgmlScriptSourceFetchDiagnostic> m_fetchDiagnostics;
 	std::thread m_fetchThread;
 
