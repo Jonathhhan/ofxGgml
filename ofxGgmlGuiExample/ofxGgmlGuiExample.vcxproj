@@ -96,8 +96,8 @@
 			<GenerateDebugInformation>true</GenerateDebugInformation>
 			<SubSystem>Console</SubSystem>
 			<RandomizedBaseAddress>true</RandomizedBaseAddress>
-			<AdditionalDependencies>iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib;%(AdditionalDependencies);ggml.lib;ggml-base.lib;ggml-cpu.lib;ggml-cuda.lib;cublas.lib;cudart.lib;cuda.lib</AdditionalDependencies>
-			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);..\libs/ggml/build/src/$(Configuration);..\libs/ggml/build/src/ggml-cuda/$(Configuration);C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\lib\x64</AdditionalLibraryDirectories>
+			<AdditionalDependencies>$(ProjectDir)..\libs\ggml\build\src\Release\ggml.lib;$(ProjectDir)..\libs\ggml\build\src\Release\ggml-base.lib;$(ProjectDir)..\libs\ggml\build\src\Release\ggml-cpu.lib;$(ProjectDir)..\libs\ggml\build\src\ggml-cuda\Release\ggml-cuda.lib;$(ProjectDir)..\libs\ggml\build\src\ggml-vulkan\Release\ggml-vulkan.lib;$(CUDA_PATH)\lib\x64\cublas.lib;$(CUDA_PATH)\lib\x64\cudart.lib;$(CUDA_PATH)\lib\x64\cuda.lib;$(VULKAN_SDK)\Lib\vulkan-1.lib;iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib;%(AdditionalDependencies)</AdditionalDependencies>
+			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
 			<ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
 		</Link>
 	</ItemDefinitionGroup>
@@ -143,8 +143,8 @@
 			<OptimizeReferences>true</OptimizeReferences>
 			<EnableCOMDATFolding>true</EnableCOMDATFolding>
 			<RandomizedBaseAddress>true</RandomizedBaseAddress>
-			<AdditionalDependencies>iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib;%(AdditionalDependencies);ggml.lib;ggml-base.lib;ggml-cpu.lib;ggml-cuda.lib;cublas.lib;cudart.lib;cuda.lib</AdditionalDependencies>
-			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);..\libs/ggml/build/src/$(Configuration);..\libs/ggml/build/src/ggml-cuda/$(Configuration);C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\lib\x64</AdditionalLibraryDirectories>
+			<AdditionalDependencies>$(ProjectDir)..\libs\ggml\build\src\Release\ggml.lib;$(ProjectDir)..\libs\ggml\build\src\Release\ggml-base.lib;$(ProjectDir)..\libs\ggml\build\src\Release\ggml-cpu.lib;$(ProjectDir)..\libs\ggml\build\src\ggml-cuda\Release\ggml-cuda.lib;$(ProjectDir)..\libs\ggml\build\src\ggml-vulkan\Release\ggml-vulkan.lib;"$(CUDA_PATH)\lib\x64\cublas.lib";"$(CUDA_PATH)\lib\x64\cudart.lib";"$(CUDA_PATH)\lib\x64\cuda.lib";"$(VULKAN_SDK)\Lib\vulkan-1.lib";iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib;%(AdditionalDependencies)</AdditionalDependencies>
+			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
 			<ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
 		</Link>
 	</ItemDefinitionGroup>
