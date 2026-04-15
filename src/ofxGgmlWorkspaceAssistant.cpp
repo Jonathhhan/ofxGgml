@@ -483,6 +483,18 @@ std::filesystem::path resolveTargetPath(
 	return normalized;
 }
 
+std::set<std::string> normalizeAllowedFiles(
+	const std::vector<std::string> & allowedFiles) {
+	std::set<std::string> normalized;
+	for (const auto & file : allowedFiles) {
+		const std::string clean = std::filesystem::path(file).generic_string();
+		if (!clean.empty()) {
+			normalized.insert(clean);
+		}
+	}
+	return normalized;
+}
+
 ofxGgmlWorkspaceCommandResult runDefaultCommand(
 	const ofxGgmlCodeAssistantCommandSuggestion & command) {
 	ofxGgmlWorkspaceCommandResult result;
@@ -559,6 +571,7 @@ std::string ofxGgmlWorkspaceAssistant::resolveWorkspaceRoot(
 ofxGgmlWorkspaceApplyResult ofxGgmlWorkspaceAssistant::applyPatchOperations(
 	const std::vector<ofxGgmlCodeAssistantPatchOperation> & operations,
 	const std::string & workspaceRoot,
+	const std::vector<std::string> & allowedFiles,
 	bool dryRun) const {
 	ofxGgmlWorkspaceApplyResult result;
 	if (operations.empty()) {
@@ -583,6 +596,11 @@ ofxGgmlWorkspaceApplyResult ofxGgmlWorkspaceAssistant::applyPatchOperations(
 	}
 
 	std::set<std::string> touched;
+	const auto allowedFileSet = normalizeAllowedFiles(allowedFiles);
+	ofxGgmlCodeAssistantStructuredResult diffStructured;
+	diffStructured.patchOperations = operations;
+	result.unifiedDiffPreview =
+		ofxGgmlCodeAssistant::buildUnifiedDiffFromStructuredResult(diffStructured);
 	for (const auto & operation : operations) {
 		std::string error;
 		const std::filesystem::path target = resolveTargetPath(
@@ -592,6 +610,15 @@ ofxGgmlWorkspaceApplyResult ofxGgmlWorkspaceAssistant::applyPatchOperations(
 		if (!error.empty()) {
 			result.success = false;
 			result.messages.push_back(error);
+			continue;
+		}
+		const std::string relativeTarget =
+			std::filesystem::relative(target, root).generic_string();
+		if (!allowedFileSet.empty() &&
+			allowedFileSet.find(relativeTarget) == allowedFileSet.end()) {
+			result.success = false;
+			result.messages.push_back(
+				"Patch path is not in the allowed file list: " + relativeTarget);
 			continue;
 		}
 
@@ -750,6 +777,9 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 			const auto applyResult = applyPatchOperations(
 				currentStructured.patchOperations,
 				workspaceRoot,
+				workspaceSettings.allowedFiles.empty()
+					? request.allowedFiles
+					: workspaceSettings.allowedFiles,
 				workspaceSettings.dryRun);
 			result.applyResult.messages.insert(
 				result.applyResult.messages.end(),
@@ -759,6 +789,10 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 				result.applyResult.touchedFiles.end(),
 				applyResult.touchedFiles.begin(),
 				applyResult.touchedFiles.end());
+			if (result.applyResult.unifiedDiffPreview.empty()) {
+				result.applyResult.unifiedDiffPreview =
+					applyResult.unifiedDiffPreview;
+			}
 			result.applyResult.success =
 				result.applyResult.success && applyResult.success;
 			if (!applyResult.success && workspaceSettings.stopOnApplyError) {
@@ -808,7 +842,10 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 			}
 		} else if (workspaceSettings.autoRetryWithAssistant) {
 			ofxGgmlCodeAssistantRequest retryRequest = request;
-			retryRequest.action = ofxGgmlCodeAssistantAction::Debug;
+			retryRequest.action =
+				request.action == ofxGgmlCodeAssistantAction::FixBuild
+				? ofxGgmlCodeAssistantAction::FixBuild
+				: ofxGgmlCodeAssistantAction::Debug;
 			retryRequest.requestStructuredResult = true;
 			retryRequest.lastTask =
 				result.assistantAttempts.back().prepared.body;

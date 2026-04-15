@@ -14,8 +14,11 @@ enum class ofxGgmlCodeAssistantAction {
 	Explain,
 	Debug,
 	Optimize,
+	Edit,
 	Refactor,
 	Review,
+	FixBuild,
+	GroundedDocs,
 	ContinueTask,
 	Shorter,
 	MoreDetail,
@@ -36,6 +39,7 @@ struct ofxGgmlCodeLanguagePreset {
 };
 
 struct ofxGgmlCodeAssistantSymbolReference {
+	std::string kind;
 	std::string filePath;
 	int line = 0;
 	std::string preview;
@@ -68,6 +72,33 @@ struct ofxGgmlCodeAssistantPatchOperation {
 	std::string content;
 };
 
+struct ofxGgmlCodeAssistantReviewFinding {
+	int priority = 2;
+	float confidence = 0.0f;
+	std::string filePath;
+	int line = 0;
+	std::string title;
+	std::string description;
+	std::string fixSuggestion;
+};
+
+struct ofxGgmlCodeAssistantSymbolQuery {
+	std::string query;
+	std::vector<std::string> targetSymbols;
+	bool includeDefinitions = true;
+	bool includeReferences = true;
+	bool includeCallers = false;
+	size_t maxDefinitions = 4;
+	size_t maxReferences = 8;
+};
+
+struct ofxGgmlCodeAssistantSymbolContext {
+	std::string query;
+	std::vector<ofxGgmlCodeAssistantSymbol> definitions;
+	std::vector<ofxGgmlCodeAssistantSymbolReference> relatedReferences;
+	bool includesCallers = false;
+};
+
 struct ofxGgmlCodeAssistantCommandSuggestion {
 	std::string label;
 	std::string workingDirectory;
@@ -84,7 +115,9 @@ struct ofxGgmlCodeAssistantStructuredResult {
 	std::vector<std::string> steps;
 	std::vector<ofxGgmlCodeAssistantFileIntent> filesToTouch;
 	std::vector<ofxGgmlCodeAssistantPatchOperation> patchOperations;
+	std::string unifiedDiff;
 	std::vector<ofxGgmlCodeAssistantCommandSuggestion> verificationCommands;
+	std::vector<ofxGgmlCodeAssistantReviewFinding> reviewFindings;
 	std::vector<std::string> risks;
 	std::vector<std::string> questions;
 };
@@ -112,7 +145,15 @@ struct ofxGgmlCodeAssistantRequest {
 	std::string lastOutput;
 	std::string bodyOverride;
 	std::string labelOverride;
+	std::vector<std::string> allowedFiles;
+	std::vector<std::string> webUrls;
+	std::string buildErrors;
+	bool preservePublicApi = false;
+	bool updateTests = false;
+	bool forbidNewDependencies = false;
 	bool requestStructuredResult = false;
+	bool requestUnifiedDiff = false;
+	ofxGgmlCodeAssistantSymbolQuery symbolQuery;
 };
 
 struct ofxGgmlCodeAssistantPreparedPrompt {
@@ -124,7 +165,9 @@ struct ofxGgmlCodeAssistantPreparedPrompt {
 	bool includedFocusedFile = false;
 	bool includedSymbolContext = false;
 	bool requestsStructuredResult = false;
+	bool requestedUnifiedDiff = false;
 	std::vector<ofxGgmlCodeAssistantSymbol> retrievedSymbols;
+	ofxGgmlCodeAssistantSymbolContext retrievedSymbolContext;
 };
 
 struct ofxGgmlCodeAssistantResult {
@@ -157,6 +200,9 @@ public:
 	std::vector<ofxGgmlCodeAssistantSymbol> retrieveSymbols(
 		const std::string & query,
 		const ofxGgmlCodeAssistantContext & context) const;
+	ofxGgmlCodeAssistantSymbolContext buildSymbolContext(
+		const ofxGgmlCodeAssistantSymbolQuery & query,
+		const ofxGgmlCodeAssistantContext & context) const;
 
 	static std::vector<ofxGgmlCodeLanguagePreset> defaultLanguagePresets();
 	static std::string defaultActionBody(
@@ -175,6 +221,8 @@ public:
 	static ofxGgmlCodeAssistantStructuredResult parseStructuredResult(
 		const std::string & text);
 	static std::string buildStructuredResponseInstructions();
+	static std::string buildUnifiedDiffFromStructuredResult(
+		const ofxGgmlCodeAssistantStructuredResult & structured);
 
 private:
 	ofxGgmlInference m_inference;

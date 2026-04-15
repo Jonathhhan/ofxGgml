@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -173,6 +175,28 @@ std::string unescapeTaggedValue(const std::string & text) {
 	return out;
 }
 
+std::string escapeTaggedValue(const std::string & text) {
+	std::string out;
+	out.reserve(text.size());
+	for (char c : text) {
+		switch (c) {
+		case '\n':
+			out += "\\n";
+			break;
+		case '\t':
+			out += "\\t";
+			break;
+		case '\\':
+			out += "\\\\";
+			break;
+		default:
+			out.push_back(c);
+			break;
+		}
+	}
+	return out;
+}
+
 std::string patchKindToString(ofxGgmlCodeAssistantPatchKind kind) {
 	switch (kind) {
 	case ofxGgmlCodeAssistantPatchKind::WriteFile:
@@ -199,6 +223,110 @@ ofxGgmlCodeAssistantPatchKind parsePatchKind(const std::string & text) {
 		return ofxGgmlCodeAssistantPatchKind::DeleteFileOp;
 	}
 	return ofxGgmlCodeAssistantPatchKind::WriteFile;
+}
+
+bool isLikelyCallerLine(
+	const std::string & trimmedLine,
+	const std::string & symbolName) {
+	if (trimmedLine.empty() || symbolName.empty()) {
+		return false;
+	}
+
+	const std::string lowered = toLowerCopy(trimmedLine);
+	const std::string loweredName = toLowerCopy(symbolName);
+	const size_t pos = lowered.find(loweredName);
+	if (pos == std::string::npos) {
+		return false;
+	}
+
+	const bool hasOpenParen =
+		lowered.find('(', pos + loweredName.size()) != std::string::npos;
+	if (!hasOpenParen) {
+		return false;
+	}
+
+	if (trimmedLine.rfind("class ", 0) == 0 ||
+		trimmedLine.rfind("struct ", 0) == 0 ||
+		trimmedLine.rfind("enum ", 0) == 0 ||
+		trimmedLine.rfind("namespace ", 0) == 0 ||
+		trimmedLine.rfind("def ", 0) == 0 ||
+		trimmedLine.rfind("function ", 0) == 0) {
+		return false;
+	}
+
+	if (trimmedLine.find("::" + symbolName + "(") != std::string::npos ||
+		trimmedLine.find(symbolName + "(") != std::string::npos) {
+		const bool startsWithDefinition =
+			trimmedLine.find(" " + symbolName + "(") != std::string::npos &&
+			trimmedLine.find('{') != std::string::npos;
+		if (startsWithDefinition) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+std::string normalizeRelativeFilePath(const std::string & path) {
+	if (path.empty()) {
+		return {};
+	}
+	return std::filesystem::path(path).generic_string();
+}
+
+std::vector<std::string> splitEscapedLines(const std::string & text) {
+	return splitLines(unescapeTaggedValue(text));
+}
+
+std::string buildUnifiedDiffForPatch(
+	const ofxGgmlCodeAssistantPatchOperation & operation) {
+	std::ostringstream diff;
+	const std::string filePath = normalizeRelativeFilePath(operation.filePath);
+	switch (operation.kind) {
+	case ofxGgmlCodeAssistantPatchKind::WriteFile: {
+		diff << "--- /dev/null\n";
+		diff << "+++ b/" << filePath << "\n";
+		const auto lines = splitLines(operation.content);
+		diff << "@@ -0,0 +" << (lines.empty() ? 0 : static_cast<int>(lines.size()))
+			<< " @@\n";
+		if (lines.empty()) {
+			diff << "+\n";
+		}
+		for (const auto & line : lines) {
+			diff << "+" << line << "\n";
+		}
+		break;
+	}
+	case ofxGgmlCodeAssistantPatchKind::AppendText: {
+		diff << "--- a/" << filePath << "\n";
+		diff << "+++ b/" << filePath << "\n";
+		const auto lines = splitLines(operation.content);
+		diff << "@@ append @@\n";
+		for (const auto & line : lines) {
+			diff << "+" << line << "\n";
+		}
+		break;
+	}
+	case ofxGgmlCodeAssistantPatchKind::ReplaceTextOp: {
+		diff << "--- a/" << filePath << "\n";
+		diff << "+++ b/" << filePath << "\n";
+		diff << "@@ replace @@\n";
+		for (const auto & line : splitLines(operation.searchText)) {
+			diff << "-" << line << "\n";
+		}
+		for (const auto & line : splitLines(operation.replacementText)) {
+			diff << "+" << line << "\n";
+		}
+		break;
+	}
+	case ofxGgmlCodeAssistantPatchKind::DeleteFileOp: {
+		diff << "--- a/" << filePath << "\n";
+		diff << "+++ /dev/null\n";
+		diff << "@@ delete @@\n";
+		break;
+	}
+	}
+	return diff.str();
 }
 
 bool loadFocusedFile(
@@ -317,6 +445,55 @@ void appendStructuredResponseInstructions(std::ostringstream & prompt) {
 		<< "\n";
 }
 
+void appendAllowedFiles(
+	std::ostringstream & prompt,
+	const std::vector<std::string> & allowedFiles) {
+	if (allowedFiles.empty()) {
+		return;
+	}
+	prompt << "Allowed files for modifications:\n";
+	for (const auto & file : allowedFiles) {
+		prompt << "- " << normalizeRelativeFilePath(file) << "\n";
+	}
+	prompt << "Do not propose or modify any files outside this allow-list.\n\n";
+}
+
+void appendRequestConstraints(
+	std::ostringstream & prompt,
+	const ofxGgmlCodeAssistantRequest & request) {
+	appendAllowedFiles(prompt, request.allowedFiles);
+
+	if (!trimCopy(request.buildErrors).empty()) {
+		prompt << "Build or test failure details:\n"
+			<< request.buildErrors << "\n\n";
+	}
+
+	if (request.action == ofxGgmlCodeAssistantAction::Refactor) {
+		prompt << "Refactor invariants:\n";
+		prompt << "- Preserve the public API unless explicitly unavoidable.\n";
+		if (request.updateTests) {
+			prompt << "- Update or add tests to cover the refactor.\n";
+		}
+		if (request.forbidNewDependencies) {
+			prompt << "- Do not introduce new third-party dependencies.\n";
+		}
+		prompt << "\n";
+	}
+
+	if (request.action == ofxGgmlCodeAssistantAction::Review) {
+		prompt << "Return findings with explicit priority and confidence.\n\n";
+	}
+
+	if (request.action == ofxGgmlCodeAssistantAction::FixBuild) {
+		prompt << "Focus on the minimal repair that makes the build or tests pass again.\n";
+		prompt << "Collect likely affected files, propose concrete edits, and include verification commands.\n\n";
+	}
+
+	if (request.action == ofxGgmlCodeAssistantAction::GroundedDocs) {
+		prompt << "Use grounded sources only. If sources are missing, say what additional docs are needed.\n\n";
+	}
+}
+
 } // namespace
 
 void ofxGgmlCodeAssistant::setCompletionExecutable(const std::string & path) {
@@ -389,14 +566,28 @@ std::string ofxGgmlCodeAssistant::defaultActionBody(
 		return withExtraInstructions(
 			"Optimize the focused file code for performance. Show the improved version and explain what changed.",
 			"Optimize the following code for performance. Show the improved version and explain what changed:\n");
+	case ofxGgmlCodeAssistantAction::Edit:
+		return withExtraInstructions(
+			"Edit the focused file to satisfy the request. Keep unrelated code unchanged.",
+			"Edit the following code to satisfy the request. Keep unrelated code unchanged:\n");
 	case ofxGgmlCodeAssistantAction::Refactor:
 		return withExtraInstructions(
 			"Refactor the focused file code to improve readability, maintainability, and structure. Show the refactored version.",
 			"Refactor the following code to improve readability, maintainability, and structure. Show the refactored version:\n");
 	case ofxGgmlCodeAssistantAction::Review:
 		return withExtraInstructions(
-			"Review the focused file code for bugs, security issues, and style. Provide specific feedback.",
-			"Review the following code for bugs, security issues, and style. Provide specific feedback:\n");
+			"Review the focused file code for bugs, security issues, and style. Return findings with severity and suggested fixes.",
+			"Review the following code for bugs, security issues, and style. Return findings with severity and suggested fixes:\n");
+	case ofxGgmlCodeAssistantAction::FixBuild:
+		if (!trimmedOutput.empty()) {
+			return "Fix the build or test failure described below. Identify likely files, propose changes, and include verification commands.\n\n" +
+				trimmedOutput;
+		}
+		return "Fix the build or test failure for this request. Identify likely files, propose changes, and include verification commands.\n\n" +
+			trimmedInput;
+	case ofxGgmlCodeAssistantAction::GroundedDocs:
+		return "Answer the request using grounded documentation and source material only. Cite concrete supporting sources where possible.\n\n" +
+			trimmedInput;
 	case ofxGgmlCodeAssistantAction::ContinueTask: {
 		std::string body =
 			"Continue the task from the previous response. Keep the same intent and provide next concrete steps.\n\n";
@@ -463,6 +654,10 @@ std::string ofxGgmlCodeAssistant::defaultActionLabel(
 		return appendInstructions(hasFocusedFile
 			? "Optimize focused file."
 			: "Optimize code.");
+	case ofxGgmlCodeAssistantAction::Edit:
+		return appendInstructions(hasFocusedFile
+			? "Edit focused file."
+			: "Edit code.");
 	case ofxGgmlCodeAssistantAction::Refactor:
 		return appendInstructions(hasFocusedFile
 			? "Refactor focused file."
@@ -471,6 +666,10 @@ std::string ofxGgmlCodeAssistant::defaultActionLabel(
 		return appendInstructions(hasFocusedFile
 			? "Review focused file."
 			: "Review code.");
+	case ofxGgmlCodeAssistantAction::FixBuild:
+		return "Fix build or test failure.";
+	case ofxGgmlCodeAssistantAction::GroundedDocs:
+		return appendInstructions("Answer with grounded docs.");
 	case ofxGgmlCodeAssistantAction::ContinueTask:
 		return "Continue the previous task.";
 	case ofxGgmlCodeAssistantAction::Shorter:
@@ -662,6 +861,9 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::retrieveSymbols(
 				}
 
 				ofxGgmlCodeAssistantSymbolReference reference;
+				reference.kind = isLikelyCallerLine(trimCopy(lines[i]), symbol.name)
+					? "caller"
+					: "reference";
 				reference.filePath = fileEntry.first;
 				reference.line = static_cast<int>(i + 1);
 				reference.preview = trimCopy(lines[i]);
@@ -681,6 +883,82 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::retrieveSymbols(
 	return ranked;
 }
 
+ofxGgmlCodeAssistantSymbolContext ofxGgmlCodeAssistant::buildSymbolContext(
+	const ofxGgmlCodeAssistantSymbolQuery & query,
+	const ofxGgmlCodeAssistantContext & context) const {
+	ofxGgmlCodeAssistantSymbolContext symbolContext;
+	symbolContext.query = !trimCopy(query.query).empty()
+		? query.query
+		: joinStrings(query.targetSymbols, ", ");
+	symbolContext.includesCallers = query.includeCallers;
+
+	std::vector<ofxGgmlCodeAssistantSymbol> candidates = retrieveSymbols(
+		symbolContext.query,
+		context);
+	if (candidates.empty()) {
+		return symbolContext;
+	}
+
+	const auto preferredSymbols = [&]() {
+		std::vector<std::string> lowered;
+		lowered.reserve(query.targetSymbols.size());
+		for (const auto & symbol : query.targetSymbols) {
+			lowered.push_back(toLowerCopy(symbol));
+		}
+		return lowered;
+	}();
+
+	for (auto & symbol : candidates) {
+		if (symbolContext.definitions.size() >= query.maxDefinitions) {
+			break;
+		}
+		if (!preferredSymbols.empty()) {
+			const std::string loweredName = toLowerCopy(symbol.name);
+			if (std::find(preferredSymbols.begin(), preferredSymbols.end(),
+					loweredName) == preferredSymbols.end()) {
+				bool containsPreferred = false;
+				for (const auto & preferred : preferredSymbols) {
+					if (loweredName.find(preferred) != std::string::npos ||
+						preferred.find(loweredName) != std::string::npos) {
+						containsPreferred = true;
+						break;
+					}
+				}
+				if (!containsPreferred) {
+					continue;
+				}
+			}
+		}
+
+		if (query.includeDefinitions) {
+			symbolContext.definitions.push_back(symbol);
+		}
+		if (!query.includeReferences && !query.includeCallers) {
+			continue;
+		}
+
+		size_t collected = 0;
+		for (const auto & reference : symbol.references) {
+			if (symbolContext.relatedReferences.size() >= query.maxReferences) {
+				break;
+			}
+			if (reference.kind == "caller" && !query.includeCallers) {
+				continue;
+			}
+			if (reference.kind != "caller" && !query.includeReferences) {
+				continue;
+			}
+			symbolContext.relatedReferences.push_back(reference);
+			++collected;
+			if (collected >= query.maxReferences) {
+				break;
+			}
+		}
+	}
+
+	return symbolContext;
+}
+
 std::string ofxGgmlCodeAssistant::buildStructuredResponseInstructions() {
 	return
 		"Return a structured plan using one item per line with these tags:\n"
@@ -692,12 +970,32 @@ std::string ofxGgmlCodeAssistant::buildStructuredResponseInstructions() {
 		"SEARCH: escaped single-line search text for the previous PATCH when using replace\n"
 		"REPLACE: escaped single-line replacement text for the previous PATCH when using replace\n"
 		"CONTENT: escaped single-line file content for write/append patches (use \\n for newlines)\n"
+		"DIFF: escaped unified diff text when you can express the change as a unified diff\n"
 		"COMMAND: label | cwd | executable | arg1 | arg2 ...\n"
 		"EXPECT: expected verification outcome for the previous COMMAND\n"
 		"RETRY: true|false for the previous COMMAND\n"
+		"FINDING: priority | confidence | relative/path | line | title\n"
+		"DETAIL: description for the previous FINDING\n"
+		"FIX: concrete fix suggestion for the previous FINDING\n"
 		"RISK: possible risk or regression\n"
 		"QUESTION: unresolved question\n"
-		"Only use escaped single-line values for SEARCH, REPLACE, and CONTENT.";
+		"Only use escaped single-line values for SEARCH, REPLACE, CONTENT, and DIFF.";
+}
+
+std::string ofxGgmlCodeAssistant::buildUnifiedDiffFromStructuredResult(
+	const ofxGgmlCodeAssistantStructuredResult & structured) {
+	if (!trimCopy(structured.unifiedDiff).empty()) {
+		return structured.unifiedDiff;
+	}
+
+	std::ostringstream diff;
+	for (const auto & operation : structured.patchOperations) {
+		diff << buildUnifiedDiffForPatch(operation);
+		if (diff.tellp() > 0 && diff.str().back() != '\n') {
+			diff << "\n";
+		}
+	}
+	return diff.str();
 }
 
 ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult(
@@ -705,6 +1003,7 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 	ofxGgmlCodeAssistantStructuredResult structured;
 	ofxGgmlCodeAssistantPatchOperation * currentPatch = nullptr;
 	ofxGgmlCodeAssistantCommandSuggestion * currentCommand = nullptr;
+	ofxGgmlCodeAssistantReviewFinding * currentFinding = nullptr;
 
 	for (const auto & rawLine : splitLines(text)) {
 		const std::string line = trimCopy(rawLine);
@@ -766,6 +1065,7 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 				structured.patchOperations.push_back(std::move(operation));
 				currentPatch = &structured.patchOperations.back();
 				currentCommand = nullptr;
+				currentFinding = nullptr;
 				structured.detectedStructuredOutput = true;
 			}
 			continue;
@@ -785,6 +1085,12 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 		if (line.rfind("CONTENT:", 0) == 0 && currentPatch != nullptr) {
 			currentPatch->content = unescapeTaggedValue(
 				consumeValue("CONTENT:"));
+			structured.detectedStructuredOutput = true;
+			continue;
+		}
+		if (line.rfind("DIFF:", 0) == 0) {
+			structured.unifiedDiff = unescapeTaggedValue(
+				consumeValue("DIFF:"));
 			structured.detectedStructuredOutput = true;
 			continue;
 		}
@@ -811,6 +1117,7 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 				structured.verificationCommands.push_back(std::move(command));
 				currentCommand = &structured.verificationCommands.back();
 				currentPatch = nullptr;
+				currentFinding = nullptr;
 				structured.detectedStructuredOutput = true;
 			}
 			continue;
@@ -824,6 +1131,47 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 		if (line.rfind("RETRY:", 0) == 0 && currentCommand != nullptr) {
 			currentCommand->retryOnFailure =
 				toLowerCopy(consumeValue("RETRY:")) == "true";
+			structured.detectedStructuredOutput = true;
+			continue;
+		}
+		if (line.rfind("FINDING:", 0) == 0) {
+			const auto fields = splitPipeFields(consumeValue("FINDING:"));
+			if (fields.size() >= 5) {
+				ofxGgmlCodeAssistantReviewFinding finding;
+				try {
+					finding.priority = std::stoi(fields[0]);
+				} catch (...) {
+					finding.priority = 2;
+				}
+				try {
+					finding.confidence = std::stof(fields[1]);
+				} catch (...) {
+					finding.confidence = 0.0f;
+				}
+				finding.filePath = fields[2];
+				try {
+					finding.line = std::stoi(fields[3]);
+				} catch (...) {
+					finding.line = 0;
+				}
+				finding.title = unescapeTaggedValue(fields[4]);
+				structured.reviewFindings.push_back(std::move(finding));
+				currentFinding = &structured.reviewFindings.back();
+				currentPatch = nullptr;
+				currentCommand = nullptr;
+				structured.detectedStructuredOutput = true;
+			}
+			continue;
+		}
+		if (line.rfind("DETAIL:", 0) == 0 && currentFinding != nullptr) {
+			currentFinding->description = unescapeTaggedValue(
+				consumeValue("DETAIL:"));
+			structured.detectedStructuredOutput = true;
+			continue;
+		}
+		if (line.rfind("FIX:", 0) == 0 && currentFinding != nullptr) {
+			currentFinding->fixSuggestion = unescapeTaggedValue(
+				consumeValue("FIX:"));
 			structured.detectedStructuredOutput = true;
 			continue;
 		}
@@ -879,8 +1227,17 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 
 	prepared.focusedFileName = focusedFileName;
 	prepared.requestsStructuredResult = request.requestStructuredResult;
-	prepared.retrievedSymbols = retrieveSymbols(prepared.body, context);
-	prepared.includedSymbolContext = !prepared.retrievedSymbols.empty();
+	prepared.requestedUnifiedDiff = request.requestUnifiedDiff;
+
+	ofxGgmlCodeAssistantSymbolQuery symbolQuery = request.symbolQuery;
+	if (trimCopy(symbolQuery.query).empty()) {
+		symbolQuery.query = prepared.body;
+	}
+	prepared.retrievedSymbolContext = buildSymbolContext(symbolQuery, context);
+	prepared.retrievedSymbols = prepared.retrievedSymbolContext.definitions;
+	prepared.includedSymbolContext =
+		!prepared.retrievedSymbolContext.definitions.empty() ||
+		!prepared.retrievedSymbolContext.relatedReferences.empty();
 
 	std::ostringstream prompt;
 	if (!trimCopy(request.language.systemPrompt).empty()) {
@@ -898,9 +1255,12 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 		&prepared.includedFocusedFile,
 		&prepared.focusedFileName);
 
-	if (!prepared.retrievedSymbols.empty()) {
+	appendRequestConstraints(prompt, request);
+
+	if (!prepared.retrievedSymbolContext.definitions.empty() ||
+		!prepared.retrievedSymbolContext.relatedReferences.empty()) {
 		prompt << "Relevant symbols for this request:\n";
-		for (const auto & symbol : prepared.retrievedSymbols) {
+		for (const auto & symbol : prepared.retrievedSymbolContext.definitions) {
 			std::ostringstream scoreStream;
 			scoreStream.setf(std::ios::fixed);
 			scoreStream.precision(2);
@@ -911,16 +1271,46 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 			if (!symbol.signature.empty()) {
 				prompt << "  Signature: " << symbol.signature << "\n";
 			}
-			for (const auto & ref : symbol.references) {
-				prompt << "  Reference: " << ref.filePath << ":" << ref.line
-					<< " " << ref.preview << "\n";
-			}
+		}
+		for (const auto & ref : prepared.retrievedSymbolContext.relatedReferences) {
+			prompt << "  " << (ref.kind.empty() ? "Reference" : ref.kind)
+				<< ": " << ref.filePath << ":" << ref.line
+				<< " " << ref.preview << "\n";
+		}
+		prompt << "\n";
+	}
+
+	if (!request.webUrls.empty()) {
+		prompt << "Grounded web/doc sources requested:\n";
+		for (const auto & url : request.webUrls) {
+			prompt << "- " << url << "\n";
 		}
 		prompt << "\n";
 	}
 
 	if (request.requestStructuredResult) {
 		appendStructuredResponseInstructions(prompt);
+		if (request.requestUnifiedDiff) {
+			prompt << "Prefer including a DIFF: entry with a unified diff in addition to file operations when practical.\n\n";
+		}
+	}
+
+	if (!request.requestStructuredResult && request.requestUnifiedDiff) {
+		prompt << "When proposing changes, include a unified diff.\n\n";
+	}
+
+	if (request.action == ofxGgmlCodeAssistantAction::Edit &&
+		!request.allowedFiles.empty()) {
+		prompt << "This is a constrained edit request. Touch only the allowed files.\n\n";
+	}
+
+	if (request.action == ofxGgmlCodeAssistantAction::Refactor &&
+		request.preservePublicApi) {
+		prompt << "Preserve the existing public API surface.\n\n";
+	}
+
+	if (request.action == ofxGgmlCodeAssistantAction::GroundedDocs) {
+		prompt << "If the answer depends on documentation, prefer citations over guesses.\n\n";
 	}
 
 	prompt << "Generate high-quality code and short explanation for this request:\n"
@@ -939,12 +1329,25 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::run(
 	ofxGgmlCodeAssistantResult result;
 	result.prepared = preparePrompt(request, context);
 
-	if (context.attachScriptSourceDocuments &&
-		context.scriptSource != nullptr) {
-		result.inference = m_inference.generateWithScriptSource(
+	std::vector<ofxGgmlPromptSource> sources;
+	if (context.attachScriptSourceDocuments && context.scriptSource != nullptr) {
+		const auto docs = ofxGgmlInference::collectScriptSourceDocuments(
+			*context.scriptSource,
+			sourceSettings);
+		sources.insert(sources.end(), docs.begin(), docs.end());
+	}
+	if (!request.webUrls.empty()) {
+		const auto webSources = ofxGgmlInference::fetchUrlSources(
+			request.webUrls,
+			sourceSettings);
+		sources.insert(sources.end(), webSources.begin(), webSources.end());
+	}
+
+	if (!sources.empty()) {
+		result.inference = m_inference.generateWithSources(
 			modelPath,
 			result.prepared.prompt,
-			*context.scriptSource,
+			sources,
 			inferenceSettings,
 			sourceSettings,
 			onChunk);
@@ -957,5 +1360,11 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::run(
 	}
 
 	result.structured = parseStructuredResult(result.inference.text);
+	if (result.structured.unifiedDiff.empty() &&
+		request.requestUnifiedDiff &&
+		!result.structured.patchOperations.empty()) {
+		result.structured.unifiedDiff =
+			buildUnifiedDiffFromStructuredResult(result.structured);
+	}
 	return result;
 }

@@ -29,6 +29,10 @@ TEST_CASE("Assistant eval: symbol retrieval prioritizes relevant definitions", "
 		std::ofstream out(sourceDir / "audio.cpp");
 		out << "void mixAudio() {}\n";
 	}
+	{
+		std::ofstream out(sourceDir / "app.cpp");
+		out << "int main() { Renderer renderer; renderer.renderFrame(); }\n";
+	}
 
 	ofxGgmlScriptSource scriptSource;
 	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
@@ -41,6 +45,19 @@ TEST_CASE("Assistant eval: symbol retrieval prioritizes relevant definitions", "
 	const auto symbols = assistant.retrieveSymbols("render frame timing", context);
 	REQUIRE_FALSE(symbols.empty());
 	REQUIRE(symbols.front().name.find("render") != std::string::npos);
+
+	ofxGgmlCodeAssistantSymbolQuery query;
+	query.query = "renderFrame callers";
+	query.targetSymbols = {"renderFrame"};
+	query.includeCallers = true;
+	query.maxDefinitions = 2;
+	query.maxReferences = 4;
+	const auto symbolContext = assistant.buildSymbolContext(query, context);
+	REQUIRE_FALSE(symbolContext.definitions.empty());
+	REQUIRE_FALSE(symbolContext.relatedReferences.empty());
+	const std::string referenceKind =
+		symbolContext.relatedReferences.front().kind;
+	REQUIRE((referenceKind == "caller" || referenceKind == "reference"));
 }
 
 TEST_CASE("Assistant eval: structured workspace plans are dry-run safe", "[eval]") {
@@ -60,8 +77,10 @@ TEST_CASE("Assistant eval: structured workspace plans are dry-run safe", "[eval]
 	const auto applyResult = assistant.applyPatchOperations(
 		operations,
 		root.string(),
+		{},
 		true);
 	REQUIRE(applyResult.success);
 	REQUIRE_FALSE(std::filesystem::exists(root / "src" / "example.txt"));
 	REQUIRE(applyResult.messages.front().find("[dry-run]") != std::string::npos);
+	REQUIRE(applyResult.unifiedDiffPreview.find("+++ b/src/example.txt") != std::string::npos);
 }

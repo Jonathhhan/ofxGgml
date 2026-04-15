@@ -80,15 +80,20 @@ TEST_CASE("Code assistant prompt preparation includes coding and symbol context"
 	{
 		std::ofstream out(sourceDir / "main.cpp");
 		out << "#include \"helper.h\"\n";
-		out << "class App {\npublic:\n    int run() const { return add(1, 2); }\n};\n";
+		out << "int runInference();\n";
+		out << "class App {\npublic:\n    int run() const { return runInference(); }\n};\n";
 	}
 	{
 		std::ofstream out(sourceDir / "helper.h");
-		out << "#pragma once\nint add(int a, int b);\n";
+		out << "#pragma once\nint runInference();\n";
 	}
 	{
 		std::ofstream out(sourceDir / "helper.cpp");
-		out << "#include \"helper.h\"\nint add(int a, int b) { return a + b; }\n";
+		out << "#include \"helper.h\"\nint runInference() { return 42; }\n";
+	}
+	{
+		std::ofstream out(sourceDir / "caller.cpp");
+		out << "#include \"helper.h\"\nint useIt() { return runInference(); }\n";
 	}
 
 	ofxGgmlScriptSource scriptSource;
@@ -106,8 +111,16 @@ TEST_CASE("Code assistant prompt preparation includes coding and symbol context"
 	ofxGgmlCodeAssistantRequest request;
 	request.action = ofxGgmlCodeAssistantAction::Refactor;
 	request.language = languages.front();
-	request.userInput = "Refactor the add function and App class.";
+	request.userInput = "Refactor runInference and App without changing the public API.";
 	request.requestStructuredResult = true;
+	request.requestUnifiedDiff = true;
+	request.allowedFiles = {"main.cpp", "helper.cpp", "helper.h"};
+	request.preservePublicApi = true;
+	request.updateTests = true;
+	request.forbidNewDependencies = true;
+	request.symbolQuery.query = "runInference callers";
+	request.symbolQuery.targetSymbols = {"runInference"};
+	request.symbolQuery.includeCallers = true;
 
 	ofxGgmlCodeAssistantContext context;
 	context.scriptSource = &scriptSource;
@@ -120,16 +133,22 @@ TEST_CASE("Code assistant prompt preparation includes coding and symbol context"
 	REQUIRE(prepared.includedFocusedFile);
 	REQUIRE(prepared.includedSymbolContext);
 	REQUIRE(prepared.requestsStructuredResult);
+	REQUIRE(prepared.requestedUnifiedDiff);
 	REQUIRE_FALSE(prepared.retrievedSymbols.empty());
+	REQUIRE(prepared.retrievedSymbolContext.includesCallers);
+	REQUIRE_FALSE(prepared.retrievedSymbolContext.relatedReferences.empty());
 	REQUIRE(prepared.prompt.find("Project memory from previous coding requests:") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Available files in this folder:") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Focused file:") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Relevant symbols for this request:") != std::string::npos);
+	REQUIRE(prepared.prompt.find("Allowed files for modifications:") != std::string::npos);
+	REQUIRE(prepared.prompt.find("Preserve the existing public API surface.") != std::string::npos);
+	REQUIRE(prepared.prompt.find("Prefer including a DIFF: entry") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Return a structured plan using one item per line") != std::string::npos);
 }
 
 TEST_CASE("Code assistant parser and run path expose structured task results", "[code_assistant]") {
-	SECTION("Structured parser understands files, patches, and commands") {
+	SECTION("Structured parser understands files, patches, diffs, findings, and commands") {
 		const std::string text =
 			"GOAL: Stabilize the helper implementation\n"
 			"APPROACH: Replace the old greeting and verify the file\n"
@@ -138,9 +157,13 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 			"PATCH: replace | src/main.txt | update greeting\n"
 			"SEARCH: hello\n"
 			"REPLACE: ready\n"
+			"DIFF: --- a/src/main.txt\\n+++ b/src/main.txt\\n@@ replace @@\\n-hello\\n+ready\n"
 			"COMMAND: test | . | verify-tool | --fast\n"
 			"EXPECT: output contains ready\n"
 			"RETRY: true\n"
+			"FINDING: 1 | 0.95 | src/main.txt | 7 | Greeting is stale\n"
+			"DETAIL: The old text leaks into the UI path.\n"
+			"FIX: Replace the greeting before rendering.\n"
 			"RISK: callers may rely on the old text\n"
 			"QUESTION: should we update docs too?\n";
 
@@ -152,8 +175,13 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		REQUIRE(structured.patchOperations.front().kind ==
 			ofxGgmlCodeAssistantPatchKind::ReplaceTextOp);
 		REQUIRE(structured.patchOperations.front().searchText == "hello");
+		REQUIRE(structured.unifiedDiff.find("--- a/src/main.txt") != std::string::npos);
 		REQUIRE(structured.verificationCommands.size() == 1);
 		REQUIRE(structured.verificationCommands.front().retryOnFailure);
+		REQUIRE(structured.reviewFindings.size() == 1);
+		REQUIRE(structured.reviewFindings.front().priority == 1);
+		REQUIRE(structured.reviewFindings.front().confidence > 0.9f);
+		REQUIRE(structured.reviewFindings.front().fixSuggestion.find("Replace") != std::string::npos);
 		REQUIRE(structured.risks.size() == 1);
 		REQUIRE(structured.questions.size() == 1);
 	}
@@ -167,6 +195,7 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 			"FILE: src/path_helper.cpp | new utility implementation | normalizePath",
 			"PATCH: write | src/path_helper.cpp | add helper file",
 			"CONTENT: std::string normalizePath() {\\n    return \\\"ok\\\";\\n}",
+			"DIFF: --- /dev/null\\n+++ b/src/path_helper.cpp\\n@@ -0,0 +1,3 @@\\n+std::string normalizePath() {\\n+    return \\\"ok\\\";\\n+}",
 			"COMMAND: build | . | runner | --check",
 			"EXPECT: build succeeds",
 			"RETRY: false"
@@ -180,6 +209,7 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		request.userInput = "Write a helper to normalize paths.";
 		request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
 		request.requestStructuredResult = true;
+		request.requestUnifiedDiff = true;
 
 		const auto result = assistant.run(modelPath, request);
 		REQUIRE(result.inference.success);
@@ -187,8 +217,40 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		REQUIRE(result.structured.detectedStructuredOutput);
 		REQUIRE(result.structured.patchOperations.size() == 1);
 		REQUIRE(result.structured.patchOperations.front().content.find("normalizePath") != std::string::npos);
+		REQUIRE(result.structured.unifiedDiff.find("+++ b/src/path_helper.cpp") != std::string::npos);
 		REQUIRE(result.structured.verificationCommands.size() == 1);
 		REQUIRE(result.structured.verificationCommands.front().executable == "runner");
 		REQUIRE(result.prepared.prompt.find("Generate high-quality code and short explanation") != std::string::npos);
+	}
+
+	SECTION("Specialized modes inject edit, fix-build, and grounded-doc constraints") {
+		ofxGgmlCodeAssistant assistant;
+		const auto language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+
+		ofxGgmlCodeAssistantRequest editRequest;
+		editRequest.action = ofxGgmlCodeAssistantAction::Edit;
+		editRequest.language = language;
+		editRequest.userInput = "Rename helper usage.";
+		editRequest.allowedFiles = {"src/a.cpp", "src/b.cpp", "src/c.cpp"};
+		const auto editPrepared = assistant.preparePrompt(editRequest, {});
+		REQUIRE(editPrepared.prompt.find("Touch only the allowed files.") != std::string::npos);
+
+		ofxGgmlCodeAssistantRequest fixBuildRequest;
+		fixBuildRequest.action = ofxGgmlCodeAssistantAction::FixBuild;
+		fixBuildRequest.language = language;
+		fixBuildRequest.userInput = "Repair the broken Release build.";
+		fixBuildRequest.buildErrors = "main.cpp(42): error C2065: unknown_symbol";
+		const auto fixPrepared = assistant.preparePrompt(fixBuildRequest, {});
+		REQUIRE(fixPrepared.prompt.find("Build or test failure details:") != std::string::npos);
+		REQUIRE(fixPrepared.prompt.find("unknown_symbol") != std::string::npos);
+
+		ofxGgmlCodeAssistantRequest docsRequest;
+		docsRequest.action = ofxGgmlCodeAssistantAction::GroundedDocs;
+		docsRequest.language = language;
+		docsRequest.userInput = "Explain the Vulkan compiler flags.";
+		docsRequest.webUrls = {"https://example.com/vulkan-doc"};
+		const auto docsPrepared = assistant.preparePrompt(docsRequest, {});
+		REQUIRE(docsPrepared.prompt.find("Grounded web/doc sources requested:") != std::string::npos);
+		REQUIRE(docsPrepared.prompt.find("https://example.com/vulkan-doc") != std::string::npos);
 	}
 }

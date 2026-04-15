@@ -111,11 +111,36 @@ TEST_CASE("Workspace assistant applies structured patch operations", "[workspace
 	const auto applyResult = assistant.applyPatchOperations(
 		operations,
 		root.string(),
+		{},
 		false);
 	REQUIRE(applyResult.success);
 	REQUIRE(readFile(root / "src" / "main.txt") == "ready");
 	REQUIRE(readFile(root / "src" / "new.txt") == "helper");
 	REQUIRE(applyResult.touchedFiles.size() == 2);
+	REQUIRE(applyResult.unifiedDiffPreview.find("+++ b/src/new.txt") != std::string::npos);
+}
+
+TEST_CASE("Workspace assistant enforces allowed file edits", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("allowlist");
+	std::filesystem::create_directories(root / "src");
+
+	ofxGgmlWorkspaceAssistant assistant;
+	std::vector<ofxGgmlCodeAssistantPatchOperation> operations;
+
+	ofxGgmlCodeAssistantPatchOperation writeOp;
+	writeOp.kind = ofxGgmlCodeAssistantPatchKind::WriteFile;
+	writeOp.filePath = "src/blocked.txt";
+	writeOp.summary = "Create blocked file";
+	writeOp.content = "blocked";
+	operations.push_back(writeOp);
+
+	const auto applyResult = assistant.applyPatchOperations(
+		operations,
+		root.string(),
+		{"src/allowed.txt"},
+		false);
+	REQUIRE_FALSE(applyResult.success);
+	REQUIRE(applyResult.messages.front().find("allowed file list") != std::string::npos);
 }
 
 TEST_CASE("Workspace assistant verification loop can retry with a new structured plan", "[workspace_assistant]") {

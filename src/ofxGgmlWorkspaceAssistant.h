@@ -8,6 +8,7 @@
 
 struct ofxGgmlWorkspaceSettings {
 	std::string workspaceRoot;
+	std::vector<std::string> allowedFiles;
 	bool applyPatchOperations = true;
 	bool runVerification = true;
 	bool dryRun = false;
@@ -21,6 +22,7 @@ struct ofxGgmlWorkspaceApplyResult {
 	bool success = true;
 	std::vector<std::string> touchedFiles;
 	std::vector<std::string> messages;
+	std::string unifiedDiffPreview;
 };
 
 struct ofxGgmlWorkspaceCommandResult {
@@ -68,6 +70,7 @@ public:
 	ofxGgmlWorkspaceApplyResult applyPatchOperations(
 		const std::vector<ofxGgmlCodeAssistantPatchOperation> & operations,
 		const std::string & workspaceRoot,
+		const std::vector<std::string> & allowedFiles = {},
 		bool dryRun = false) const;
 
 	ofxGgmlWorkspaceVerificationResult runVerification(
