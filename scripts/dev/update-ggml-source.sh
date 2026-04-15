@@ -6,7 +6,7 @@
 # in libs/ggml/.  Preserves the addon's CMakeLists.txt wrapper.
 #
 # Usage:
-#   ./scripts/update-ggml-source.sh [--branch BRANCH] [--commit SHA]
+#   ./scripts/dev/update-ggml-source.sh [--branch BRANCH] [--commit SHA]
 #
 # Options:
 #   --branch BRANCH   Git branch to clone (default: master)
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ADDON_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GGML_DIR="$ADDON_ROOT/libs/ggml"
 GGML_REPO="https://github.com/ggml-org/ggml.git"
 GGML_BRANCH="master"

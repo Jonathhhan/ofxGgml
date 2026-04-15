@@ -1,5 +1,5 @@
 #include "ofxGgmlInference.h"
-#include "ofxGgmlScriptSource.h"
+#include "support/ofxGgmlScriptSource.h"
 
 #include <algorithm>
 #include <array>

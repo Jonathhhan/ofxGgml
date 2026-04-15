@@ -8,7 +8,7 @@
       "size": "~1.0 GB",
       "best_for": "chat, general",
       "sha256": "",
-      "note": "Run ./scripts/update-model-checksums.sh --preset 1 to compute and update checksum"
+      "note": "Run ./scripts/dev/update-model-checksums.sh --preset 1 to compute and update checksum"
     },
     {
       "preset": 2,
@@ -18,7 +18,7 @@
       "size": "~1.0 GB",
       "best_for": "scripting, code generation",
       "sha256": "",
-      "note": "Run ./scripts/update-model-checksums.sh --preset 2 to compute and update checksum"
+      "note": "Run ./scripts/dev/update-model-checksums.sh --preset 2 to compute and update checksum"
     },
     {
       "preset": 3,
@@ -28,7 +28,7 @@
       "size": "~2.4 GB",
       "best_for": "reasoning, analysis, complex tasks",
       "sha256": "",
-      "note": "Run ./scripts/update-model-checksums.sh --preset 3 to compute and update checksum"
+      "note": "Run ./scripts/dev/update-model-checksums.sh --preset 3 to compute and update checksum"
     },
     {
       "preset": 4,
@@ -38,7 +38,7 @@
       "size": "~0.9 GB",
       "best_for": "lightweight, fast inference, resource-constrained",
       "sha256": "",
-      "note": "Run ./scripts/update-model-checksums.sh --preset 4 to compute and update checksum"
+      "note": "Run ./scripts/dev/update-model-checksums.sh --preset 4 to compute and update checksum"
     },
     {
       "preset": 5,
@@ -48,7 +48,7 @@
       "size": "~0.6 GB",
       "best_for": "very lightweight, testing, prototyping",
       "sha256": "",
-      "note": "Run ./scripts/update-model-checksums.sh --preset 5 to compute and update checksum"
+      "note": "Run ./scripts/dev/update-model-checksums.sh --preset 5 to compute and update checksum"
     }
   ],
   "task_defaults": {

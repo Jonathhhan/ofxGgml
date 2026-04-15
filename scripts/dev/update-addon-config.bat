@@ -11,11 +11,11 @@ REM When GPU backends are detected, this script also adds the required
 REM system/toolkit libraries to fix linker errors.
 REM
 REM Usage:
-REM   scripts\update-addon-config.bat
+REM   scripts\dev\update-addon-config.bat
 REM ---------------------------------------------------------------------------
 
 set "SCRIPT_DIR=%~dp0"
-set "ADDON_ROOT=%SCRIPT_DIR%.."
+for %%I in ("%SCRIPT_DIR%..\..") do set "ADDON_ROOT=%%~fI"
 set "BUILD_DIR=%ADDON_ROOT%\libs\ggml\build"
 set "LIB_DIR=%BUILD_DIR%\src"
 set "CONFIG_FILE=%ADDON_ROOT%\addon_config.mk"

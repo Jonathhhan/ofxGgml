@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ofxGgmlCodeAssistant.h"
+#include "assistants/ofxGgmlCodeAssistant.h"
 
 #include <functional>
 #include <string>

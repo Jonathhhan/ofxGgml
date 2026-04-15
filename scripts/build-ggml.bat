@@ -206,7 +206,7 @@ REM addon_config.mk — Update VS library list (ggml + CUDA deps)
 REM ---------------------------------------------------------------------------
 
 echo ==^> Updating addon_config.mk for Visual Studio...
-call "%SCRIPT_DIR%update-addon-config.bat"
+call "%SCRIPT_DIR%dev\update-addon-config.bat"
 if errorlevel 1 (
     echo Error: addon_config.mk update failed.
     exit /b 1

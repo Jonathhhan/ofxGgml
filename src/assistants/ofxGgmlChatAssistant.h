@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ofxGgmlInference.h"
+#include "inference/ofxGgmlInference.h"
 
 #include <functional>
 #include <string>

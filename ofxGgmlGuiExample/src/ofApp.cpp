@@ -329,6 +329,30 @@ std::string buildInternetContextFromUrls(
 	return "\n\n" + heading + ":" + ctx.str();
 }
 
+std::string buildGroundedPromptFromInputUrls(
+	const std::string & prompt,
+	const std::string & rawUrls,
+	const std::string & heading,
+	bool requestCitations = true) {
+	const auto urls = extractHttpUrls(rawUrls);
+	if (urls.empty()) {
+		return prompt;
+	}
+
+	ofxGgmlPromptSourceSettings sourceSettings;
+	sourceSettings.maxSources = 4;
+	sourceSettings.maxCharsPerSource = 1800;
+	sourceSettings.maxTotalChars = 6000;
+	sourceSettings.heading = heading;
+	sourceSettings.requestCitations = requestCitations;
+
+	const auto sources = ofxGgmlInference::fetchUrlSources(urls, sourceSettings);
+	if (sources.empty()) {
+		return prompt;
+	}
+	return ofxGgmlInference::buildPromptWithSources(prompt, sources, sourceSettings);
+}
+
 std::string buildInternetContextFromText(const std::string & userText, bool allowSearchFallback) {
 	static constexpr size_t kMaxUrls = 3;
 	static constexpr size_t kMaxCharsPerUrl = 2000;
@@ -1867,17 +1891,47 @@ bool submitted = ImGui::InputText("##ChatIn", chatInput, sizeof(chatInput),
 ImGuiInputTextFlags_EnterReturnsTrue);
 ImGui::SameLine();
 bool sendClicked = ImGui::Button("Send", ImVec2(70, 0));
+ImGui::SameLine();
+bool sendWithSourcesClicked = ImGui::Button("Send with Sources", ImVec2(130, 0));
 if (strictOfflineMode) {
 	ImGui::SameLine();
 	ImGui::TextDisabled("(offline)");
 }
 
-if ((submitted || sendClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
+ImGui::InputTextMultiline(
+	"Reference URLs",
+	sourceUrlsInput,
+	sizeof(sourceUrlsInput),
+	ImVec2(-1, 48));
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Optional URLs for source-grounded answers in Chat, Summarize, and Custom.");
+}
+
+if ((submitted || sendClicked || sendWithSourcesClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
 std::string userText(chatInput);
 chatMessages.push_back({"user", userText, ofGetElapsedTimef()});
 fprintf(stderr, "[ChatWindow] You: %s\n", userText.c_str());
 std::memset(chatInput, 0, sizeof(chatInput));
-runInference(AiMode::Chat, userText);
+if (sendWithSourcesClicked) {
+	ofxGgmlChatAssistantRequest request;
+	request.userText = userText;
+	if (chatLanguageIndex > 0 &&
+		chatLanguageIndex < static_cast<int>(chatLanguages.size())) {
+		request.responseLanguage =
+			chatLanguages[static_cast<size_t>(chatLanguageIndex)].name;
+	}
+	const auto prepared = chatAssistant.preparePrompt(request);
+	runInference(
+		AiMode::Chat,
+		userText,
+		"",
+		buildGroundedPromptFromInputUrls(
+			prepared.prompt,
+			sourceUrlsInput,
+			"Reference URLs for this chat reply"));
+} else {
+	runInference(AiMode::Chat, userText);
+}
 }
 
 // Copy / Clear / Export row.
@@ -2070,6 +2124,8 @@ const bool hasSelectedFile =
 	selectedScriptFileIndex < static_cast<int>(scriptSourceFiles.size()) &&
 	!scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].isDirectory;
 const bool hasUserInput = std::strlen(scriptInput) > 0;
+static char scriptBuildErrors[8192] = {};
+static bool restrictWorkspaceToFocusedFile = true;
 
 auto buildScriptAssistantContext = [this]() {
 	ofxGgmlCodeAssistantContext context;
@@ -2082,11 +2138,173 @@ auto buildScriptAssistantContext = [this]() {
 	return context;
 };
 
+auto buildWorkspaceAllowedFiles = [&]() {
+	std::vector<std::string> allowedFiles;
+	if (restrictWorkspaceToFocusedFile && hasSelectedFile) {
+		allowedFiles.push_back(
+			scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].fullPath);
+	}
+	return allowedFiles;
+};
+
+auto appendScriptAssistantOutput = [&](const std::string & userLabel,
+	const std::string & assistantText) {
+	if (!userLabel.empty()) {
+		scriptMessages.push_back({"user", userLabel, ofGetElapsedTimef()});
+	}
+	scriptOutput = assistantText;
+	scriptMessages.push_back({"assistant", assistantText, ofGetElapsedTimef()});
+};
+
+auto formatSymbolContext = [](const ofxGgmlCodeAssistantSymbolContext & symbolContext) {
+	std::ostringstream out;
+	out << "Semantic context for: " << symbolContext.query << "\n\n";
+	if (symbolContext.definitions.empty()) {
+		out << "Definitions: none found\n";
+	} else {
+		out << "Definitions:\n";
+		for (const auto & symbol : symbolContext.definitions) {
+			out << "- " << symbol.name;
+			if (!symbol.signature.empty()) {
+				out << " :: " << symbol.signature;
+			}
+			out << "\n  " << symbol.filePath << ":" << symbol.line << "\n";
+			if (!symbol.preview.empty()) {
+				out << "  " << trim(symbol.preview) << "\n";
+			}
+		}
+	}
+
+	if (!symbolContext.relatedReferences.empty()) {
+		out << "\nReferences and callers:\n";
+		for (const auto & ref : symbolContext.relatedReferences) {
+			out << "- " << ref.kind << " in " << ref.filePath << ":" << ref.line;
+			if (!ref.callerSymbol.empty()) {
+				out << " via " << ref.callerSymbol;
+			}
+			out << "\n";
+			if (!ref.preview.empty()) {
+				out << "  " << trim(ref.preview) << "\n";
+			}
+		}
+	}
+
+	return out.str();
+};
+
+auto previewWorkspacePlan = [&](const std::string & label) {
+	if (sourceType != ofxGgmlScriptSourceType::LocalFolder ||
+		scriptSource.getLocalFolderPath().empty()) {
+		appendScriptAssistantOutput(label,
+			"Workspace preview requires a loaded local folder source.");
+		return;
+	}
+
+	auto structured = ofxGgmlCodeAssistant::parseStructuredResult(scriptOutput);
+	if (structured.unifiedDiff.empty()) {
+		structured.unifiedDiff =
+			ofxGgmlCodeAssistant::buildUnifiedDiffFromStructuredResult(structured);
+	}
+
+	const std::string workspaceRoot = scriptSource.getLocalFolderPath();
+	const auto allowedFiles = buildWorkspaceAllowedFiles();
+
+	ofxGgmlWorkspacePatchValidationResult validation;
+	ofxGgmlWorkspaceApplyResult applyResult;
+	if (!structured.unifiedDiff.empty()) {
+		validation = scriptWorkspaceAssistant.validateUnifiedDiff(
+			structured.unifiedDiff,
+			workspaceRoot,
+			allowedFiles);
+		applyResult = scriptWorkspaceAssistant.applyUnifiedDiff(
+			structured.unifiedDiff,
+			workspaceRoot,
+			allowedFiles,
+			true);
+	} else if (!structured.patchOperations.empty()) {
+		validation = scriptWorkspaceAssistant.validatePatchOperations(
+			structured.patchOperations,
+			workspaceRoot,
+			allowedFiles);
+		applyResult = scriptWorkspaceAssistant.applyPatchOperations(
+			structured.patchOperations,
+			workspaceRoot,
+			allowedFiles,
+			true);
+	} else {
+		appendScriptAssistantOutput(label,
+			"No structured patch plan was found in the latest script output.");
+		return;
+	}
+
+	std::vector<std::string> changedFiles = applyResult.touchedFiles;
+	if (changedFiles.empty()) {
+		changedFiles = validation.validatedFiles;
+	}
+	if (changedFiles.empty()) {
+		for (const auto & fileIntent : structured.filesToTouch) {
+			if (!fileIntent.filePath.empty()) {
+				changedFiles.push_back(fileIntent.filePath);
+			}
+		}
+	}
+	const auto verificationCommands = structured.verificationCommands.empty()
+		? scriptWorkspaceAssistant.suggestVerificationCommands(
+			changedFiles,
+			workspaceRoot)
+		: structured.verificationCommands;
+
+	std::ostringstream out;
+	out << label << "\n\n";
+	out << "Workspace root: " << workspaceRoot << "\n";
+	out << "Validation: " << (validation.success ? "passed" : "failed") << "\n";
+	if (!allowedFiles.empty()) {
+		out << "Allow-list:\n";
+		for (const auto & file : allowedFiles) {
+			out << "- " << file << "\n";
+		}
+	}
+	if (!validation.messages.empty()) {
+		out << "\nValidation notes:\n";
+		for (const auto & message : validation.messages) {
+			out << "- " << message << "\n";
+		}
+	}
+	if (!applyResult.messages.empty()) {
+		out << "\nDry-run result:\n";
+		for (const auto & message : applyResult.messages) {
+			out << "- " << message << "\n";
+		}
+	}
+	if (!applyResult.unifiedDiffPreview.empty()) {
+		out << "\nUnified diff preview:\n" << applyResult.unifiedDiffPreview << "\n";
+	}
+	if (!verificationCommands.empty()) {
+		out << "\nSuggested verification commands:\n";
+		for (const auto & command : verificationCommands) {
+			out << "- " << command.label << ": " << command.executable;
+			for (const auto & arg : command.arguments) {
+				out << " " << arg;
+			}
+			if (!command.workingDirectory.empty()) {
+				out << "  (cwd: " << command.workingDirectory << ")";
+			}
+			out << "\n";
+		}
+	}
+
+	appendScriptAssistantOutput(label, out.str());
+};
+
 auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 	const std::string & userInput = std::string(),
 	const std::string & bodyOverride = std::string(),
 	const std::string & labelOverride = std::string(),
-	bool clearInputAfter = false) {
+	bool clearInputAfter = false,
+	bool requestStructuredResult = false,
+	bool requestUnifiedDiff = false,
+	const std::string & buildErrors = std::string(),
+	const std::vector<std::string> & allowedFiles = {}) {
 	ofxGgmlCodeAssistantRequest request;
 	request.action = action;
 	request.userInput = userInput;
@@ -2094,6 +2312,10 @@ auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 	request.lastOutput = scriptOutput;
 	request.bodyOverride = bodyOverride;
 	request.labelOverride = labelOverride;
+	request.requestStructuredResult = requestStructuredResult;
+	request.requestUnifiedDiff = requestUnifiedDiff;
+	request.buildErrors = buildErrors;
+	request.allowedFiles = allowedFiles;
 	if (!scriptLanguages.empty() &&
 		selectedLanguageIndex >= 0 &&
 		selectedLanguageIndex < static_cast<int>(scriptLanguages.size())) {
@@ -2208,6 +2430,72 @@ for (size_t i = 0; i < std::size(actionSpecs); i++) {
 	}
 }
 ImGui::EndDisabled();
+
+if (ImGui::CollapsingHeader("Semantic & Workspace")) {
+	ImGui::Checkbox("Restrict workspace previews to focused file", &restrictWorkspaceToFocusedFile);
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("When enabled, structured edit previews stay inside the currently selected file.");
+	}
+
+	ImGui::BeginDisabled(generating.load() || (!hasUserInput && !hasSelectedFile));
+	if (ImGui::Button("Symbol Context", ImVec2(120, 0))) {
+		ofxGgmlCodeAssistantSymbolQuery query;
+		query.query = hasUserInput ? std::string(scriptInput) : lastScriptRequest;
+		query.includeCallers = true;
+		query.maxDefinitions = 6;
+		query.maxReferences = 8;
+		const auto symbolContext =
+			scriptAssistant.buildSymbolContext(query, buildScriptAssistantContext());
+		appendScriptAssistantOutput("Inspect symbol context", formatSymbolContext(symbolContext));
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Edit Plan", ImVec2(100, 0))) {
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::Edit,
+			scriptInput,
+			"",
+			"",
+			true,
+			true,
+			true,
+			"",
+			buildWorkspaceAllowedFiles());
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Grounded Docs", ImVec2(120, 0))) {
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::GroundedDocs,
+			scriptInput,
+			"",
+			"",
+			true);
+	}
+	ImGui::EndDisabled();
+
+	ImGui::InputTextMultiline(
+		"Build errors / compiler output",
+		scriptBuildErrors,
+		sizeof(scriptBuildErrors),
+		ImVec2(-1, 90));
+	ImGui::BeginDisabled(generating.load() || std::strlen(scriptBuildErrors) == 0);
+	if (ImGui::Button("Fix Build Plan", ImVec2(120, 0))) {
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::FixBuild,
+			scriptInput,
+			"",
+			"",
+			false,
+			true,
+			true,
+			scriptBuildErrors,
+			buildWorkspaceAllowedFiles());
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Workspace Dry Run", ImVec2(140, 0))) {
+		previewWorkspacePlan("Workspace dry run");
+	}
+	ImGui::EndDisabled();
+}
 
 if (ImGui::CollapsingHeader("Tools & Memory")) {
 	bool useProjectMemory = scriptProjectMemory.isEnabled();
@@ -2359,7 +2647,9 @@ auto submitTextTask = [&](ofxGgmlTextTask task) {
 	runInference(AiMode::Summarize, request.inputText, "", prepared.prompt);
 };
 
-ImGui::BeginDisabled(generating.load() || std::strlen(summarizeInput) == 0);
+const bool hasSummarizeInput = std::strlen(summarizeInput) > 0;
+const bool hasSummarizeUrls = !trim(sourceUrlsInput).empty();
+ImGui::BeginDisabled(generating.load() || (!hasSummarizeInput && !hasSummarizeUrls));
 if (ImGui::Button("Summarize", ImVec2(140, 0))) {
 submitTextTask(ofxGgmlTextTask::Summarize);
 }
@@ -2370,6 +2660,23 @@ submitTextTask(ofxGgmlTextTask::KeyPoints);
 ImGui::SameLine();
 if (ImGui::Button("TL;DR", ImVec2(140, 0))) {
 submitTextTask(ofxGgmlTextTask::TlDr);
+}
+ImGui::SameLine();
+if (ImGui::Button("Summarize URLs", ImVec2(150, 0))) {
+	ofxGgmlTextAssistantRequest request;
+	request.task = ofxGgmlTextTask::Summarize;
+	request.inputText = std::strlen(summarizeInput) > 0
+		? std::string(summarizeInput)
+		: "Summarize the reference sources.";
+	const auto prepared = textAssistant.preparePrompt(request);
+	runInference(
+		AiMode::Summarize,
+		request.inputText,
+		"",
+		buildGroundedPromptFromInputUrls(
+			prepared.prompt,
+			sourceUrlsInput,
+			"Reference URLs for summarization"));
 }
 ImGui::EndDisabled();
 
@@ -2442,6 +2749,10 @@ submitTextTask(ofxGgmlTextTask::MakeCasual);
 ImGui::SameLine();
 if (ImGui::Button("Fix Grammar", ImVec2(110, 0))) {
 submitTextTask(ofxGgmlTextTask::FixGrammar);
+}
+ImGui::SameLine();
+if (ImGui::Button("Polish", ImVec2(110, 0))) {
+	submitTextTask(ofxGgmlTextTask::Polish);
 }
 ImGui::EndDisabled();
 
@@ -2625,6 +2936,22 @@ if (ImGui::Button("Run", ImVec2(100, 0))) {
 	request.systemPrompt = customSystemPrompt;
 	const auto prepared = textAssistant.preparePrompt(request);
 	runInference(AiMode::Custom, request.inputText, customSystemPrompt, prepared.prompt);
+}
+ImGui::SameLine();
+if (ImGui::Button("Run with Sources", ImVec2(150, 0))) {
+	ofxGgmlTextAssistantRequest request;
+	request.task = ofxGgmlTextTask::Custom;
+	request.inputText = customInput;
+	request.systemPrompt = customSystemPrompt;
+	const auto prepared = textAssistant.preparePrompt(request);
+	runInference(
+		AiMode::Custom,
+		request.inputText,
+		customSystemPrompt,
+		buildGroundedPromptFromInputUrls(
+			prepared.prompt,
+			sourceUrlsInput,
+			"Reference URLs for this custom task"));
 }
 ImGui::EndDisabled();
 

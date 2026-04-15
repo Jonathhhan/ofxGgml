@@ -9,17 +9,17 @@ This document summarizes the medium and low priority enhancements implemented fo
 **Objective**: Replace placeholder checksums with actual values and provide tools for verification.
 
 **Implementation**:
-- Created `scripts/update-model-checksums.sh` - automated tool to download models and compute verified SHA256 checksums
+- Created `scripts/dev/update-model-checksums.sh` - automated tool to download models and compute verified SHA256 checksums
 - Updated `scripts/model-catalog.json` with clear instructions for checksum updates
 - Removed placeholder checksums, replaced with empty strings and helpful notes
 - Script supports both individual preset updates and batch processing
 
 **Files Modified**:
 - `scripts/model-catalog.json`
-- `scripts/update-model-checksums.sh` (new)
+- `scripts/dev/update-model-checksums.sh` (new)
 - `README.md` (documentation added)
 
-**Status**: Framework complete. Maintainers can run `./scripts/update-model-checksums.sh --all` to populate real checksums.
+**Status**: Framework complete. Maintainers can run `./scripts/dev/update-model-checksums.sh --all` to populate real checksums.
 
 ---
 
@@ -184,7 +184,7 @@ This document summarizes the medium and low priority enhancements implemented fo
 ## Recommendations for Next Steps
 
 ### Immediate (Next Sprint)
-1. Run `./scripts/update-model-checksums.sh --all` to populate real checksums
+1. Run `./scripts/dev/update-model-checksums.sh --all` to populate real checksums
 2. Review first static analysis reports from CI
 3. Set up Codecov account and add badge to README
 

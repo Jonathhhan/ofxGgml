@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ofxGgmlGraph.h"
-#include "ofxGgmlModel.h"
-#include "ofxGgmlTensor.h"
-#include "ofxGgmlTypes.h"
+#include "compute/ofxGgmlGraph.h"
+#include "compute/ofxGgmlTensor.h"
+#include "core/ofxGgmlTypes.h"
+#include "model/ofxGgmlModel.h"
 
 #include <cstddef>
 #include <memory>

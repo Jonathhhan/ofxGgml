@@ -97,6 +97,7 @@ private:
 	int translateTargetLang = 1;
 	char customInput[4096] = {};
 	char customSystemPrompt[2048] = {};
+	char sourceUrlsInput[2048] = {};
 
 	// -- conversation / output --
 	std::deque<Message> chatMessages;
@@ -197,6 +198,7 @@ private:
 	int selectedScriptFileIndex = -1;
 	ofxGgmlChatAssistant chatAssistant;
 	ofxGgmlCodeAssistant scriptAssistant;
+	ofxGgmlWorkspaceAssistant scriptWorkspaceAssistant;
 	ofxGgmlTextAssistant textAssistant;
 	ofxGgmlInference llmInference;
 	ofxGgmlCodeReview scriptCodeReview;

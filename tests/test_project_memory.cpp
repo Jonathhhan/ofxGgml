@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgmlProjectMemory.h"
+#include "../src/support/ofxGgmlProjectMemory.h"
 
 TEST_CASE("Project memory basic lifecycle", "[project_memory]") {
 	ofxGgmlProjectMemory mem;

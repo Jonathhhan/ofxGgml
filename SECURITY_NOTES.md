@@ -20,7 +20,7 @@ The `scripts/model-catalog.json` file contains SHA256 checksums for model verifi
 
 ### Current Status
 
-Model presets currently require maintainer-supplied SHA256 values from model publishers. Use `./scripts/update-model-checksums.sh` to populate them and `python3 scripts/validate-model-catalog.py` to validate catalog checksum formatting and completeness.
+Model presets currently require maintainer-supplied SHA256 values from model publishers. Use `./scripts/dev/update-model-checksums.sh` to populate them and `python3 scripts/dev/validate-model-catalog.py` to validate catalog checksum formatting and completeness.
 
 ## Security Features Implemented
 

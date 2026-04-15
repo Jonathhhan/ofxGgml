@@ -8,12 +8,12 @@
 # bundled copy, but it can also be run standalone.
 #
 # Usage:
-#   ./scripts/apply-patches.sh
+#   ./scripts/dev/apply-patches.sh
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ADDON_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GGML_DIR="$ADDON_ROOT/libs/ggml"
 
 # Portable sed -i: macOS requires a backup extension argument.

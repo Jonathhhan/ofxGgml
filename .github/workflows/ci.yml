@@ -17,17 +17,18 @@ jobs:
       - name: Script syntax checks
         run: |
           bash -n scripts/*.sh
+          bash -n scripts/dev/*.sh
 
       - name: Validate model catalog JSON
         run: python3 -m json.tool scripts/model-catalog.json > /dev/null
 
       - name: Validate model catalog checksums and schema
-        run: python3 scripts/validate-model-catalog.py scripts/model-catalog.json
+        run: python3 scripts/dev/validate-model-catalog.py scripts/model-catalog.json
 
       - name: Smoke test model tooling
         run: |
           ./scripts/download-model.sh --list
-          ./scripts/benchmark-llama-cli.sh --help
+          ./scripts/dev/benchmark-llama-cli.sh --help
 
       - name: Build and run unit tests
         run: ./tests/run-tests.sh

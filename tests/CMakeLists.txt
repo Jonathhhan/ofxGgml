@@ -73,6 +73,7 @@ endif()
 # Include directories
 include_directories(${GGML_DIR}/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
 if(OFXGGML_WITH_OPENFRAMEWORKS)
     include_directories(${OF_ROOT}/libs/openFrameworks)
@@ -107,22 +108,22 @@ endif()
 # ---------------------------------------------------------------------------
 
 set(ADDON_SOURCES
-    ../src/ofxGgmlCore.cpp
-    ../src/ofxGgmlGraph.cpp
-    ../src/ofxGgmlTensor.cpp
-    ../src/ofxGgmlModel.cpp
-    ../src/ofxGgmlProjectMemory.cpp
+    ../src/core/ofxGgmlCore.cpp
+    ../src/compute/ofxGgmlGraph.cpp
+    ../src/compute/ofxGgmlTensor.cpp
+    ../src/model/ofxGgmlModel.cpp
+    ../src/support/ofxGgmlProjectMemory.cpp
 )
 
 if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND ADDON_SOURCES
-        ../src/ofxGgmlChatAssistant.cpp
-        ../src/ofxGgmlInference.cpp
-        ../src/ofxGgmlScriptSource.cpp
-        ../src/ofxGgmlCodeAssistant.cpp
-        ../src/ofxGgmlWorkspaceAssistant.cpp
-        ../src/ofxGgmlTextAssistant.cpp
-        ../src/ofxGgmlCodeReview.cpp)
+        ../src/assistants/ofxGgmlChatAssistant.cpp
+        ../src/inference/ofxGgmlInference.cpp
+        ../src/support/ofxGgmlScriptSource.cpp
+        ../src/assistants/ofxGgmlCodeAssistant.cpp
+        ../src/assistants/ofxGgmlWorkspaceAssistant.cpp
+        ../src/assistants/ofxGgmlTextAssistant.cpp
+        ../src/assistants/ofxGgmlCodeReview.cpp)
 endif()
 
 set(TEST_SOURCES

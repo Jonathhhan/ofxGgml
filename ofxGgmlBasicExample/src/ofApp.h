@@ -2,7 +2,7 @@
 
 #include "ofMain.h"
 #include "ofxGgml.h"
-#include "ofxGgmlHelpers.h"
+#include "core/ofxGgmlHelpers.h"
 
 #include <random>
 #include <string>

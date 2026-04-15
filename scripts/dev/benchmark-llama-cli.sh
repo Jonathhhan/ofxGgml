@@ -15,7 +15,7 @@ cat <<USAGE
 benchmark-llama-cli.sh — quick llama.cpp benchmark helper
 
 Usage:
-  ./scripts/benchmark-llama-cli.sh --model <path.gguf> [options]
+  ./scripts/dev/benchmark-llama-cli.sh --model <path.gguf> [options]
 
 Options:
   --model PATH       GGUF model path (required)

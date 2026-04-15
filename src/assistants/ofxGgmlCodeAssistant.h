@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ofxGgmlInference.h"
-#include "ofxGgmlProjectMemory.h"
-#include "ofxGgmlScriptSource.h"
+#include "inference/ofxGgmlInference.h"
+#include "support/ofxGgmlProjectMemory.h"
+#include "support/ofxGgmlScriptSource.h"
 
 #include <functional>
 #include <string>

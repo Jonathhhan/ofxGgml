@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgmlResult.h"
+#include "../src/core/ofxGgmlResult.h"
 
 #include <cstring>
 

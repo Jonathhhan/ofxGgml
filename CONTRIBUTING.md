@@ -34,21 +34,17 @@ Main public header:
 
 Core runtime files:
 
-- `src/ofxGgmlCore.*`
-- `src/ofxGgmlGraph.*`
-- `src/ofxGgmlInference.*`
-- `src/ofxGgmlModel.*`
-- `src/ofxGgmlTensor.*`
-- `src/ofxGgmlProjectMemory.*`
-- `src/ofxGgmlScriptSource.*`
-- `src/ofxGgmlTypes.h`
-- `src/ofxGgmlResult.h`
-- `src/ofxGgmlHelpers.h`
-- `src/ofxGgmlVersion.h`
+- `src/core/`
+- `src/compute/`
+- `src/inference/`
+- `src/model/`
+- `src/assistants/`
+- `src/support/`
 
 Other important areas:
 
 - `scripts/`
+- `scripts/dev/`
 - `tests/`
 - `ofxGgmlBasicExample/`
 - `ofxGgmlGuiExample/`

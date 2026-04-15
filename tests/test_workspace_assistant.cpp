@@ -236,7 +236,7 @@ TEST_CASE("Workspace assistant suggests verification commands from changed files
 
 	ofxGgmlWorkspaceAssistant assistant;
 	const auto commands = assistant.suggestVerificationCommands(
-		{"src/ofxGgmlCodeAssistant.cpp"},
+		{"src/assistants/ofxGgmlCodeAssistant.cpp"},
 		root.string());
 	REQUIRE(commands.size() >= 1);
 	REQUIRE(commands.front().label == "build-tests");

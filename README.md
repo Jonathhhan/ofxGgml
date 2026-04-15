@@ -46,27 +46,18 @@ The main public API stays in:
 
 Core implementation is split by concern:
 
-- `src/ofxGgmlCore.*`
-- `src/ofxGgmlGraph.*`
-- `src/ofxGgmlInference.*`
-- `src/ofxGgmlChatAssistant.*`
-- `src/ofxGgmlCodeAssistant.*`
-- `src/ofxGgmlWorkspaceAssistant.*`
-- `src/ofxGgmlTextAssistant.*`
-- `src/ofxGgmlCodeReview.*`
-- `src/ofxGgmlModel.*`
-- `src/ofxGgmlTensor.*`
-- `src/ofxGgmlProjectMemory.*`
-- `src/ofxGgmlScriptSource.*`
-- `src/ofxGgmlTypes.h`
-- `src/ofxGgmlResult.h`
-- `src/ofxGgmlHelpers.h`
-- `src/ofxGgmlVersion.h`
+- `src/core/` for runtime entry points, shared types, helpers, and version metadata
+- `src/compute/` for tensors and graph building
+- `src/model/` for GGUF model loading
+- `src/inference/` for completion execution and grounded prompt assembly
+- `src/assistants/` for chat, code, workspace, review, and text-task helpers
+- `src/support/` for script sources and project memory
 
 Supporting areas:
 
 - `libs/ggml/`
-- `scripts/`
+- `scripts/` for user-facing setup, build, download, and benchmark entry points
+- `scripts/dev/` for maintainer update and patching helpers
 - `docs/`
 - `tests/`
 - `ofxGgmlBasicExample/`
@@ -289,7 +280,7 @@ Use it when an app wants translation or writing-assistant features without hardc
 
 ## Versioning
 
-Version macros live in `src/ofxGgmlVersion.h`. Runtime-facing version metadata is available through `ofxGgml::getAddonVersionInfo()`.
+Version macros live in `src/core/ofxGgmlVersion.h`. Runtime-facing version metadata is available through `ofxGgml::getAddonVersionInfo()`.
 
 ## Eval Coverage
 
