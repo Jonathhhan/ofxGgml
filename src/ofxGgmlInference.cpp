@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -13,6 +14,7 @@
 #include <numeric>
 #include <random>
 #include <sstream>
+#include <string_view>
 
 #ifdef _WIN32
 	#include <windows.h>
@@ -24,6 +26,29 @@
 
 namespace {
 
+struct TokenLiteral {
+	const char * text;
+	size_t len;
+};
+
+static constexpr TokenLiteral kRoleLabels[] = {
+	{ "user", 4 },
+	{ "assistant", 9 },
+	{ "system", 6 },
+	{ "User", 4 },
+	{ "Assistant", 9 },
+	{ "System", 6 },
+	{ "A:", 2 },
+	{ "> ", 2 },
+};
+
+static constexpr TokenLiteral kTrailingArtifacts[] = {
+	{ "> EOF by user", 13 },
+	{ "> EOF", 5 },
+	{ "EOF", 3 },
+	{ "Interrupted by user", 19 },
+};
+
 static std::string trim(const std::string & s) {
 	size_t b = 0;
 	while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b])))
@@ -32,6 +57,16 @@ static std::string trim(const std::string & s) {
 	while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
 		--e;
 	return s.substr(b, e - b);
+}
+
+static std::string_view trimView(const std::string & s) {
+	size_t b = 0;
+	while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b])))
+		++b;
+	size_t e = s.size();
+	while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
+		--e;
+	return std::string_view(s).substr(b, e - b);
 }
 
 /// Strip common llama.cpp warning messages from output.
@@ -53,13 +88,7 @@ static std::string stripLlamaWarnings(const std::string & text) {
 
 		// Filter backend/GPU log lines that start with specific prefixes
 		// to avoid filtering model output that might mention these terms
-		const std::string trimmedLine = [&line]() {
-			size_t start = 0;
-			while (start < line.size() && std::isspace(static_cast<unsigned char>(line[start]))) {
-				start++;
-			}
-			return line.substr(start);
-		}();
+		const std::string_view trimmedLine = trimView(line);
 
 		if (trimmedLine.rfind("ofxGgml [INFO]", 0) == 0 || trimmedLine.rfind("ofxGgml [WARN]", 0) == 0 || trimmedLine.rfind("ofxGgml [ERROR]", 0) == 0) {
 			continue;
@@ -77,15 +106,7 @@ static std::string stripLlamaWarnings(const std::string & text) {
 	return result;
 }
 
-static bool startsWithWord(const std::string & text, const std::string & word) {
-	if (text.size() < word.size()) return false;
-	if (text.compare(0, word.size(), word) != 0) return false;
-	if (text.size() == word.size()) return true;
-	const char after = text[word.size()];
-	return after == '\n' || after == '\r' || after == ':' || after == ' ';
-}
-
-static bool isRuntimeNoiseLine(const std::string & trimmedLine) {
+static bool isRuntimeNoiseLine(std::string_view trimmedLine) {
 	if (trimmedLine.empty()) return true;
 	if (trimmedLine.rfind("ofxGgml [", 0) == 0) return true;
 	if (trimmedLine.find("ggml_cuda_init") != std::string::npos) return true;
@@ -119,7 +140,7 @@ static std::string stripLeadingRuntimeNoise(const std::string & text) {
 	bool skipping = true;
 
 	while (std::getline(lines, line)) {
-		const std::string trimmedLine = trim(line);
+		const std::string_view trimmedLine = trimView(line);
 		if (skipping) {
 			if (isRuntimeNoiseLine(trimmedLine)) {
 				continue;
@@ -175,18 +196,10 @@ static std::string stripLeadingRoleLabels(const std::string & text) {
 	bool changed = true;
 	while (changed) {
 		changed = false;
-		for (const auto & label : {
-			std::string("user"),
-			std::string("assistant"),
-			std::string("system"),
-			std::string("User"),
-			std::string("Assistant"),
-			std::string("System"),
-			std::string("A:"),
-			std::string("> ")
-		}) {
-			if (startsWithWord(out, label)) {
-				out = trim(out.substr(label.size()));
+		for (const auto & label : kRoleLabels) {
+			if (out.size() >= label.len && out.compare(0, label.len, label.text) == 0 &&
+				(out.size() == label.len || out[label.len] == '\n' || out[label.len] == '\r' || out[label.len] == ':' || out[label.len] == ' ')) {
+				out = trim(out.substr(label.len));
 				if (!out.empty() && out.front() == ':') {
 					out = trim(out.substr(1));
 				}
@@ -207,15 +220,10 @@ static std::string stripTrailingArtifacts(const std::string & text) {
 	bool stripped = true;
 	while (stripped) {
 		stripped = false;
-		for (const auto & artifact : {
-			std::string("> EOF by user"),
-			std::string("> EOF"),
-			std::string("EOF"),
-			std::string("Interrupted by user")
-		}) {
-			if (out.size() >= artifact.size() &&
-				out.compare(out.size() - artifact.size(), artifact.size(), artifact) == 0) {
-				out = trim(out.substr(0, out.size() - artifact.size()));
+		for (const auto & artifact : kTrailingArtifacts) {
+			if (out.size() >= artifact.len &&
+				out.compare(out.size() - artifact.len, artifact.len, artifact.text) == 0) {
+				out = trim(out.substr(0, out.size() - artifact.len));
 				stripped = true;
 				break;
 			}
@@ -231,12 +239,59 @@ static std::string cleanCompletionOutput(const std::string & raw, const std::str
 	cleaned = stripPromptEcho(cleaned, prompt);
 	cleaned = stripLeadingRoleLabels(cleaned);
 	cleaned = stripTrailingArtifacts(cleaned);
+	for (const char * marker : {"[1m", "[32m", "[0m", "> "}) {
+		size_t pos = 0;
+		const size_t len = std::strlen(marker);
+		while ((pos = cleaned.find(marker, pos)) != std::string::npos) {
+			cleaned.erase(pos, len);
+		}
+	}
 	cleaned = stripLeadingRuntimeNoise(cleaned);
 	return trim(cleaned);
 }
 
 static std::string cleanStructuredOutput(const std::string & raw) {
 	return trim(stripLeadingRuntimeNoise(stripLlamaWarnings(raw)));
+}
+
+static bool looksLikeCodeOutput(const std::string & text) {
+	if (text.find("```") != std::string::npos) return true;
+	const bool hasBraces = text.find('{') != std::string::npos || text.find('}') != std::string::npos;
+	const bool hasSemicolon = text.find(';') != std::string::npos;
+	const bool hasIncludeOrImport =
+		text.find("#include") != std::string::npos ||
+		text.find("import ") != std::string::npos ||
+		text.find("from ") != std::string::npos;
+	return (hasBraces && hasSemicolon) || hasIncludeOrImport;
+}
+
+static std::string trimToNaturalBoundary(const std::string & text) {
+	std::string out = trim(text);
+	if (out.empty()) return out;
+
+	if (looksLikeCodeOutput(out)) {
+		if (out.back() != '\n') {
+			const size_t cut = out.find_last_of('\n');
+			if (cut != std::string::npos && cut > out.size() / 2) {
+				out = trim(out.substr(0, cut));
+			}
+		}
+		return out;
+	}
+
+	size_t sentenceEnd = std::string::npos;
+	for (size_t i = 0; i < out.size(); i++) {
+		const char c = out[i];
+		if (c == '.' || c == '!' || c == '?') {
+			if (i + 1 == out.size() || std::isspace(static_cast<unsigned char>(out[i + 1])) || out[i + 1] == '"' || out[i + 1] == '\'') {
+				sentenceEnd = i + 1;
+			}
+		}
+	}
+	if (sentenceEnd != std::string::npos && sentenceEnd > out.size() / 2) {
+		out = trim(out.substr(0, sentenceEnd));
+	}
+	return out;
 }
 
 /// Validate that a file path exists and is a regular file.
@@ -266,9 +321,8 @@ static bool isValidFilePath(const std::string & path) {
 static bool isValidExecutablePath(const std::string & path) {
 	if (path.empty()) return false;
 
-	// Check for null bytes and suspicious characters
+	// Check for null bytes
 	if (path.find('\0') != std::string::npos) return false;
-	if (path.find("..") != std::string::npos) return false; // Path traversal
 
 	std::error_code ec;
 	std::filesystem::path fsPath(path);
@@ -277,11 +331,15 @@ static bool isValidExecutablePath(const std::string & path) {
 	std::filesystem::path canonical = std::filesystem::weakly_canonical(fsPath, ec);
 	if (ec) {
 		// If we can't canonicalize, try basic existence check
-		return std::filesystem::exists(fsPath, ec) && !ec;
+		if (!std::filesystem::exists(fsPath, ec) || ec) return false;
+		if (!std::filesystem::is_regular_file(fsPath, ec) || ec) return false;
+		return true;
 	}
 
 	// Check if the canonical path exists
-	return std::filesystem::exists(canonical, ec) && !ec;
+	if (!std::filesystem::exists(canonical, ec) || ec) return false;
+	if (!std::filesystem::is_regular_file(canonical, ec) || ec) return false;
+	return true;
 }
 
 /// Sanitize a string for safe use in command arguments.
@@ -378,6 +436,11 @@ static bool runCommandCapture(
 
 	PROCESS_INFORMATION pi {};
 	std::string cmdLine;
+	size_t cmdReserve = 0;
+	for (const auto & arg : args) {
+		cmdReserve += arg.size() + 3;
+	}
+	cmdLine.reserve(cmdReserve);
 	for (size_t i = 0; i < args.size(); ++i) {
 		if (i > 0) cmdLine.push_back(' ');
 		cmdLine += quoteWindowsArg(args[i]);
@@ -518,14 +581,11 @@ static std::string makeTempPath(const char * prefix, const char * ext) {
 			return candidate.string();
 		}
 #else
-		// On POSIX systems, std::ios::noreplace is C++23, so use filesystem approach
-		std::error_code ec;
-		if (!std::filesystem::exists(candidate, ec) && !ec) {
-			std::ofstream test(candidate, std::ios::out);
-			if (test.is_open()) {
-				test.close();
-				return candidate.string();
-			}
+		// On POSIX systems, create atomically with O_EXCL.
+		const int fd = open(candidate.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0600);
+		if (fd >= 0) {
+			close(fd);
+			return candidate.string();
 		}
 #endif
 	}
@@ -697,33 +757,35 @@ static int parseVerbosePromptTokenCount(const std::string & raw) {
 	while (std::getline(iss, line)) {
 		if (line.empty()) continue;
 
-		// Check for "token" keyword (case-insensitive, inline comparison)
-		// More efficient than creating a lowercase copy of entire line
-		const char * tokenKeyword = "token";
-		size_t pos = 0;
-		bool foundToken = false;
-		while (pos + 5 <= line.size()) {
-			bool match = true;
-			for (size_t i = 0; i < 5 && match; ++i) {
-				const char c = line[pos + i];
-				const char k = tokenKeyword[i];
-				match = (c == k || std::tolower(static_cast<unsigned char>(c)) == k);
-			}
-			if (match) {
-				foundToken = true;
-				break;
-			}
-			++pos;
-		}
+		// Check for "token" keyword (case-insensitive) without allocating lowercase copies.
+		const std::string_view tokenKeyword = "token";
+		const auto tokenIt = std::search(
+			line.begin(), line.end(),
+			tokenKeyword.begin(), tokenKeyword.end(),
+			[](char a, char b) {
+				return std::tolower(static_cast<unsigned char>(a)) == b;
+			});
+		const bool foundToken = tokenIt != line.end();
 
 		if (foundToken) {
-			// Extract numbers from this line
-			std::istringstream ls(line);
-			long value = 0;
-			while (ls >> value) {
-				if (value > explicitCount && value < std::numeric_limits<int>::max()) {
+			// Extract signed integer-like numbers from this line.
+			const char * p = line.c_str();
+			char * end = nullptr;
+			while (*p != '\0') {
+				if (!std::isdigit(static_cast<unsigned char>(*p)) && *p != '-' && *p != '+') {
+					++p;
+					continue;
+				}
+				errno = 0;
+				const long value = std::strtol(p, &end, 10);
+				if (end == p) {
+					++p;
+					continue;
+				}
+				if (errno == 0 && value > explicitCount && value < std::numeric_limits<int>::max()) {
 					explicitCount = static_cast<int>(value);
 				}
+				p = end;
 			}
 		}
 
@@ -751,7 +813,7 @@ static int parseVerbosePromptTokenCount(const std::string & raw) {
 } // namespace
 
 ofxGgmlInference::ofxGgmlInference()
-	: m_completionExe("llama-cli")
+	: m_completionExe("llama-completion")
 	, m_embeddingExe("llama-embedding") { }
 
 void ofxGgmlInference::setCompletionExecutable(const std::string & path) {
@@ -811,31 +873,40 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 		return result;
 	}
 
-	std::vector<std::string> args = {
-		m_completionExe,
-		"-m", modelPath,
-		"--file", promptPath,
-		"-n", std::to_string(std::clamp(settings.maxTokens, 1, 8192)),
-		"-c", std::to_string(std::clamp(settings.contextSize, 128, 131072)),
-		"-b", std::to_string(std::clamp(settings.batchSize, 1, 8192)),
-		"-ngl", std::to_string(std::max(0, settings.gpuLayers)),
-		"--temp", std::to_string(std::clamp(settings.temperature, 0.0f, 3.0f)),
-		"--top-p", std::to_string(std::clamp(settings.topP, 0.0f, 1.0f)),
-		"--repeat-penalty", std::to_string(std::clamp(settings.repeatPenalty, 1.0f, 3.0f)),
-		"--no-display-prompt",
-		"--log-disable"
-	};
+	std::vector<std::string> args;
+	args.reserve(32); // Pre-reserve for typical number of arguments
+	args.emplace_back(m_completionExe);
+	args.emplace_back("-m");
+	args.emplace_back(modelPath);
+	args.emplace_back("--file");
+	args.emplace_back(promptPath);
+	args.emplace_back("-n");
+	args.emplace_back(std::to_string(std::clamp(settings.maxTokens, 1, 8192)));
+	args.emplace_back("-c");
+	args.emplace_back(std::to_string(std::clamp(settings.contextSize, 128, 131072)));
+	args.emplace_back("-b");
+	args.emplace_back(std::to_string(std::clamp(settings.batchSize, 1, 8192)));
+	args.emplace_back("-ngl");
+	args.emplace_back(std::to_string(std::max(0, settings.gpuLayers)));
+	args.emplace_back("--temp");
+	args.emplace_back(std::to_string(std::clamp(settings.temperature, 0.0f, 3.0f)));
+	args.emplace_back("--top-p");
+	args.emplace_back(std::to_string(std::clamp(settings.topP, 0.0f, 1.0f)));
+	args.emplace_back("--repeat-penalty");
+	args.emplace_back(std::to_string(std::clamp(settings.repeatPenalty, 1.0f, 3.0f)));
+	args.emplace_back("--no-display-prompt");
+	args.emplace_back("--log-disable");
 
 	if (settings.simpleIo) {
-		args.push_back("--simple-io");
+		args.emplace_back("--simple-io");
 	}
 	if (settings.threads > 0) {
-		args.push_back("--threads");
-		args.push_back(std::to_string(std::clamp(settings.threads, 1, 256)));
+		args.emplace_back("--threads");
+		args.emplace_back(std::to_string(std::clamp(settings.threads, 1, 256)));
 	}
 	if (settings.seed >= 0) {
-		args.push_back("--seed");
-		args.push_back(std::to_string(settings.seed));
+		args.emplace_back("--seed");
+		args.emplace_back(std::to_string(settings.seed));
 	}
 	if (!settings.promptCachePath.empty()) {
 		// Security: Validate cache path if it exists, or allow creation of new file
@@ -847,17 +918,17 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 				return result;
 			}
 		}
-		args.push_back("--prompt-cache");
-		args.push_back(settings.promptCachePath);
+		args.emplace_back("--prompt-cache");
+		args.emplace_back(settings.promptCachePath);
 		if (settings.promptCacheAll) {
-			args.push_back("--prompt-cache-all");
+			args.emplace_back("--prompt-cache-all");
 		}
 	}
 	if (!settings.jsonSchema.empty()) {
 		// Security: Sanitize JSON schema
 		std::string sanitizedSchema = sanitizeArgument(settings.jsonSchema);
-		args.push_back("--json-schema");
-		args.push_back(sanitizedSchema);
+		args.emplace_back("--json-schema");
+		args.emplace_back(std::move(sanitizedSchema));
 	}
 	if (!settings.grammarPath.empty()) {
 		// Security: Validate grammar file path
@@ -865,8 +936,8 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 			result.error = "invalid grammar file path: " + settings.grammarPath;
 			return result;
 		}
-		args.push_back("--grammar-file");
-		args.push_back(settings.grammarPath);
+		args.emplace_back("--grammar-file");
+		args.emplace_back(settings.grammarPath);
 	}
 
 	std::string raw;
@@ -879,6 +950,27 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 	}
 
 	std::string cleaned = cleanCompletionOutput(raw, sanitizedPrompt);
+	if (exitCode == 130 && settings.simpleIo) {
+		std::vector<std::string> retryArgs = args;
+		retryArgs.erase(
+			std::remove(retryArgs.begin(), retryArgs.end(), std::string("--simple-io")),
+			retryArgs.end());
+
+		std::string retryRaw;
+		int retryExitCode = -1;
+		if (runCommandCapture(retryArgs, retryRaw, retryExitCode, false)) {
+			std::string retryCleaned = cleanCompletionOutput(retryRaw, sanitizedPrompt);
+			if (retryExitCode == 0 && !retryCleaned.empty()) {
+				raw = std::move(retryRaw);
+				cleaned = std::move(retryCleaned);
+				exitCode = 0;
+			} else if (retryCleaned.size() > cleaned.size()) {
+				raw = std::move(retryRaw);
+				cleaned = std::move(retryCleaned);
+				exitCode = retryExitCode;
+			}
+		}
+	}
 	if (exitCode != 0 && cleaned.empty()) {
 		std::string diagRaw;
 		int diagExitCode = -1;
@@ -898,7 +990,10 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 	if (exitCode != 0) {
 		const bool isSigint = (exitCode == 130);
 		const bool hasOutput = !cleaned.empty();
-		const bool benignExit = isSigint // SIGINT (EOF on stdin) - benign even without output
+		const bool interruptedMarker =
+			raw.find("EOF by user") != std::string::npos ||
+			raw.find("Interrupted by user") != std::string::npos;
+		const bool benignExit = (isSigint && hasOutput && !interruptedMarker)
 			|| (hasOutput && (exitCode == -1073740791 // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
 					|| exitCode == -1073741819 // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
 					|| exitCode == 1 // generic error (may occur during cleanup)
@@ -919,7 +1014,7 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 	}
 
 	result.success = true;
-	result.text = cleaned;
+	result.text = trimToNaturalBoundary(cleaned);
 	const auto t1 = std::chrono::steady_clock::now();
 	result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 	return result;
@@ -965,16 +1060,20 @@ ofxGgmlEmbeddingResult ofxGgmlInference::embed(
 		return result;
 	}
 
-	std::vector<std::string> args = {
-		m_embeddingExe,
-		"-m", modelPath,
-		"--file", promptPath,
-		"--embd-output-format", "json",
-		"--pooling", settings.pooling,
-		"--log-disable"
-	};
+	std::vector<std::string> args;
+	args.reserve(16);
+	args.emplace_back(m_embeddingExe);
+	args.emplace_back("-m");
+	args.emplace_back(modelPath);
+	args.emplace_back("--file");
+	args.emplace_back(promptPath);
+	args.emplace_back("--embd-output-format");
+	args.emplace_back("json");
+	args.emplace_back("--pooling");
+	args.emplace_back(settings.pooling);
+	args.emplace_back("--log-disable");
 	if (settings.normalize) {
-		args.push_back("--embd-normalize");
+		args.emplace_back("--embd-normalize");
 	}
 
 	std::string raw;
@@ -1053,16 +1152,19 @@ int ofxGgmlInference::countPromptTokens(
 		return -1;
 	}
 
-	std::vector<std::string> args = {
-		m_completionExe,
-		"-m", modelPath,
-		"--file", promptPath,
-		"--vocab-only",
-		"-n", "0",
-		"--verbose-prompt",
-		"--no-display-prompt",
-		"--log-disable"
-	};
+	std::vector<std::string> args;
+	args.reserve(12);
+	args.emplace_back(m_completionExe);
+	args.emplace_back("-m");
+	args.emplace_back(modelPath);
+	args.emplace_back("--file");
+	args.emplace_back(promptPath);
+	args.emplace_back("--vocab-only");
+	args.emplace_back("-n");
+	args.emplace_back("0");
+	args.emplace_back("--verbose-prompt");
+	args.emplace_back("--no-display-prompt");
+	args.emplace_back("--log-disable");
 
 	std::string raw;
 	int exitCode = -1;
@@ -1104,44 +1206,56 @@ int ofxGgmlInference::sampleFromLogits(
 	}
 
 	const float maxLogit = *std::max_element(logits.begin(), logits.end());
-	std::vector<float> probs(logits.size(), 0.0f);
+	std::vector<std::pair<float, size_t>> prob_idx;
+	prob_idx.reserve(logits.size());
 	float sum = 0.0f;
 	for (size_t i = 0; i < logits.size(); ++i) {
 		const float z = (logits[i] - maxLogit) / temperature;
 		const float p = std::exp(z);
-		probs[i] = std::isfinite(p) ? p : 0.0f;
-		sum += probs[i];
+		const float valid_p = std::isfinite(p) ? p : 0.0f;
+		prob_idx.emplace_back(valid_p, i);
+		sum += valid_p;
 	}
 	if (sum <= 0.0f) {
 		return static_cast<int>(std::distance(logits.begin(), std::max_element(logits.begin(), logits.end())));
 	}
-	for (float & p : probs)
-		p /= sum;
+	for (auto & pi : prob_idx) {
+		pi.first /= sum;
+	}
 
-	std::vector<size_t> idx(probs.size());
-	std::iota(idx.begin(), idx.end(), static_cast<size_t>(0));
-	std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return probs[a] > probs[b]; });
+	std::sort(prob_idx.begin(), prob_idx.end(), [](const std::pair<float, size_t>& a, const std::pair<float, size_t>& b) {
+		return a.first > b.first;
+	});
 
 	topP = std::clamp(topP, 0.0f, 1.0f);
 	if (topP <= 0.0f) {
-		return static_cast<int>(idx.front());
+		return static_cast<int>(prob_idx.front().second);
 	}
 
-	std::vector<double> filtered;
-	std::vector<size_t> filteredIdx;
-	filtered.reserve(probs.size());
-	filteredIdx.reserve(probs.size());
-	float cum = 0.0f;
-	for (size_t i : idx) {
-		filtered.push_back(probs[i]);
-		filteredIdx.push_back(i);
-		cum += probs[i];
-		if (cum >= topP) break;
+	float selectedMass = 0.0f;
+	size_t selectedCount = 0;
+	for (const auto & pi : prob_idx) {
+		selectedMass += pi.first;
+		++selectedCount;
+		if (selectedMass >= topP) break;
+	}
+	if (selectedCount == 0) {
+		return static_cast<int>(prob_idx.front().second);
 	}
 
 	std::mt19937 rng(seed == 0 ? makeRandomSeed() : seed);
-	std::discrete_distribution<size_t> dist(filtered.begin(), filtered.end());
-	return static_cast<int>(filteredIdx[dist(rng)]);
+	std::uniform_real_distribution<float> dist(0.0f, selectedMass);
+	const float target = dist(rng);
+
+	float running = 0.0f;
+	for (size_t i = 0; i < selectedCount; ++i) {
+		running += prob_idx[i].first;
+		if (target <= running) {
+			return static_cast<int>(prob_idx[i].second);
+		}
+	}
+
+	return static_cast<int>(prob_idx[selectedCount - 1].second);
 }
 
 void ofxGgmlEmbeddingIndex::clear() {
@@ -1168,10 +1282,11 @@ std::vector<ofxGgmlSimilarityHit> ofxGgmlEmbeddingIndex::search(const std::vecto
 		return a.score > b.score;
 	};
 	if (limit < hits.size()) {
-		std::nth_element(hits.begin(), hits.begin() + limit, hits.end(), byScoreDesc);
+		std::partial_sort(hits.begin(), hits.begin() + limit, hits.end(), byScoreDesc);
 		hits.resize(limit);
+	} else {
+		std::sort(hits.begin(), hits.end(), byScoreDesc);
 	}
-	std::sort(hits.begin(), hits.end(), byScoreDesc);
 	return hits;
 }
 
@@ -1180,9 +1295,12 @@ float ofxGgmlEmbeddingIndex::cosineSimilarity(const std::vector<float> & a, cons
 	double dot = 0.0;
 	double na = 0.0;
 	double nb = 0.0;
-	for (size_t i = 0; i < a.size(); ++i) {
-		const double da = a[i];
-		const double db = b[i];
+	const float* pa = a.data();
+	const float* pb = b.data();
+	const size_t sz = a.size();
+	for (size_t i = 0; i < sz; ++i) {
+		const double da = pa[i];
+		const double db = pb[i];
 		dot += da * db;
 		na += da * da;
 		nb += db * db;

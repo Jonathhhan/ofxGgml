@@ -3,7 +3,8 @@ setlocal enabledelayedexpansion
 REM ---------------------------------------------------------------------------
 REM setup_windows.bat — One-command setup for ofxGgml on Windows.
 REM
-REM This script builds ggml and can optionally download recommended GGUF models.
+REM This script builds ggml and llama.cpp CLI tools.
+REM Model download is optional and disabled by default.
 REM
 REM Usage:
 REM   scripts\setup_windows.bat [OPTIONS]
@@ -14,7 +15,9 @@ REM   --auto             Auto-detect GPU backends (default)
 REM   --gpu, --cuda      Enable CUDA backend
 REM   --vulkan           Enable Vulkan backend
 REM   --skip-ggml        Skip building ggml
+REM   --skip-llama       Skip building llama.cpp CLI tools
 REM   --skip-model       Skip downloading model file(s)
+REM   --download-model   Download model file(s)
 REM   --model-preset N   Download preset 1 or 2 (default: both)
 REM   --jobs N           Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
 REM   --clean            Remove previous build directories before building
@@ -24,38 +27,48 @@ REM ---------------------------------------------------------------------------
 set "SCRIPT_DIR=%~dp0"
 set "ADDON_ROOT=%SCRIPT_DIR%.."
 set "MODEL_OUTPUT_DIR=%ADDON_ROOT%\ofxGgmlGuiExample\bin\data\models"
+set "MODEL_DOWNLOADER=%SCRIPT_DIR%download-model.ps1"
+set "LLAMA_BUILDER=%SCRIPT_DIR%build-llama-cli.sh"
 set "SKIP_GGML=0"
-set "SKIP_MODEL=0"
+set "SKIP_LLAMA=0"
+set "SKIP_MODEL=1"
 set "GPU_FLAG=--auto"
-set "JOBS_FLAG="
+set "LLAMA_GPU_FLAG=--auto"
+set "JOBS_FLAG=--jobs %NUMBER_OF_PROCESSORS%"
 set "CLEAN_FLAG="
 set "MODEL_PRESET="
 set "GGML_BUILD_FAILED=0"
+set "LLAMA_BUILD_FAILED=0"
 
 :parse_args
 if "%~1"=="" goto done_args
 if /i "%~1"=="--cpu-only" (
     set "GPU_FLAG=--cpu-only"
+    set "LLAMA_GPU_FLAG="
     shift
     goto parse_args
 )
 if /i "%~1"=="--auto" (
     set "GPU_FLAG=--auto"
+    set "LLAMA_GPU_FLAG=--auto"
     shift
     goto parse_args
 )
 if /i "%~1"=="--cuda" (
     set "GPU_FLAG=--cuda"
+    set "LLAMA_GPU_FLAG=--cuda"
     shift
     goto parse_args
 )
 if /i "%~1"=="--gpu" (
-    set "GPU_FLAG=--gpu"
+    set "GPU_FLAG=--cuda"
+    set "LLAMA_GPU_FLAG=--gpu"
     shift
     goto parse_args
 )
 if /i "%~1"=="--vulkan" (
     set "GPU_FLAG=--vulkan"
+    set "LLAMA_GPU_FLAG=--vulkan"
     shift
     goto parse_args
 )
@@ -64,8 +77,18 @@ if /i "%~1"=="--skip-ggml" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--skip-llama" (
+    set "SKIP_LLAMA=1"
+    shift
+    goto parse_args
+)
 if /i "%~1"=="--skip-model" (
     set "SKIP_MODEL=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--download-model" (
+    set "SKIP_MODEL=0"
     shift
     goto parse_args
 )
@@ -111,7 +134,9 @@ echo   --auto             Auto-detect GPU backends ^(default^)
 echo   --gpu, --cuda      Enable CUDA backend
 echo   --vulkan           Enable Vulkan backend
 echo   --skip-ggml        Skip building ggml
-echo   --skip-model       Skip downloading model files
+echo   --skip-llama       Skip building llama.cpp CLI tools
+echo   --skip-model       Skip downloading model files ^(default^)
+echo   --download-model   Download model files
 echo   --model-preset N   Download preset 1 or 2 ^(default: both^)
 echo   --jobs N           Parallel build jobs ^(default: %NUMBER_OF_PROCESSORS%^)
 echo   --clean            Remove previous build directories before building
@@ -127,27 +152,59 @@ echo   =====================================
 echo.
 
 if "%SKIP_GGML%"=="0" (
-    echo [1/2] Building ggml...
+    echo [1/3] Building ggml...
     call "%SCRIPT_DIR%build-ggml.bat" %GPU_FLAG% %JOBS_FLAG% %CLEAN_FLAG%
     if errorlevel 1 (
-        echo Warning: ggml build failed. Continuing to model download...
+        echo Warning: ggml build failed. Continuing...
         set "GGML_BUILD_FAILED=1"
     )
 ) else (
-    echo [1/2] Skipping ggml build ^(--skip-ggml^).
+    echo [1/3] Skipping ggml build ^(--skip-ggml^).
+)
+
+if "%SKIP_LLAMA%"=="0" (
+    echo [2/3] Building llama.cpp CLI tools...
+    where bash >nul 2>&1
+    if errorlevel 1 (
+        echo Warning: bash was not found in PATH. Install Git Bash or WSL, or use --skip-llama.
+        set "LLAMA_BUILD_FAILED=1"
+    ) else (
+        set "LLAMA_ARGS="
+        if defined LLAMA_GPU_FLAG set "LLAMA_ARGS=!LLAMA_GPU_FLAG!"
+        set "LLAMA_ARGS=!LLAMA_ARGS! %JOBS_FLAG% %CLEAN_FLAG%"
+        bash "%LLAMA_BUILDER%" !LLAMA_ARGS!
+        if errorlevel 1 (
+            echo Warning: llama.cpp CLI build failed.
+            set "LLAMA_BUILD_FAILED=1"
+        )
+    )
+) else (
+    echo [2/3] Skipping llama.cpp build ^(--skip-llama^).
 )
 
 if "%SKIP_MODEL%"=="0" (
-    echo [2/2] Downloading model files...
-    call :download_models
-    if errorlevel 1 exit /b 1
+    echo [3/3] Downloading model files...
+    set "DL_ARGS="
+    if defined MODEL_PRESET set "DL_ARGS=-Preset %MODEL_PRESET%"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%MODEL_DOWNLOADER%" %DL_ARGS% -OutputDir "%MODEL_OUTPUT_DIR%"
+    if errorlevel 1 (
+        echo Error: Model download failed.
+        exit /b 1
+    )
 ) else (
-    echo [2/2] Skipping model download ^(--skip-model^).
+    echo [3/3] Skipping model download ^(default^).
 )
 
 if "%GGML_BUILD_FAILED%"=="1" (
     echo.
     echo Setup partially completed: ggml build failed.
+    echo.
+    exit /b 1
+)
+
+if "%LLAMA_BUILD_FAILED%"=="1" (
+    echo.
+    echo Setup partially completed: llama.cpp CLI build failed.
     echo.
     exit /b 1
 )
@@ -159,65 +216,4 @@ echo Next steps:
 echo   1. Add ofxGgml to your project addons.make
 echo   2. Build and run your project
 echo.
-exit /b 0
-
-:download_models
-if not exist "%MODEL_OUTPUT_DIR%" mkdir "%MODEL_OUTPUT_DIR%"
-if not exist "%MODEL_OUTPUT_DIR%" (
-    echo Error: Could not create model output directory: %MODEL_OUTPUT_DIR%
-    exit /b 1
-)
-
-set "URL1=https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
-set "NAME1=qwen2.5-1.5b-instruct-q4_k_m.gguf"
-set "URL2=https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
-set "NAME2=qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
-
-if defined MODEL_PRESET (
-    if "%MODEL_PRESET%"=="1" (
-        call :download_one "%URL1%" "%NAME1%"
-        exit /b %errorlevel%
-    )
-    if "%MODEL_PRESET%"=="2" (
-        call :download_one "%URL2%" "%NAME2%"
-        exit /b %errorlevel%
-    )
-    echo Error: Invalid --model-preset value "%MODEL_PRESET%" ^(valid: 1 or 2^).
-    exit /b 1
-)
-
-call :download_one "%URL1%" "%NAME1%"
-if errorlevel 1 exit /b 1
-call :download_one "%URL2%" "%NAME2%"
-if errorlevel 1 exit /b 1
-exit /b 0
-
-:download_one
-set "MODEL_URL=%~1"
-set "MODEL_NAME=%~2"
-set "MODEL_PATH=%MODEL_OUTPUT_DIR%\%MODEL_NAME%"
-
-if exist "%MODEL_PATH%" (
-    echo   - %MODEL_NAME% already exists, skipping.
-    exit /b 0
-)
-
-echo   - Downloading %MODEL_NAME%
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "try { Invoke-WebRequest -Uri '%MODEL_URL%' -OutFile '%MODEL_PATH%' -UseBasicParsing } catch { exit 1 }"
-
-if errorlevel 1 (
-    echo Error: Failed to download %MODEL_NAME%
-    if exist "%MODEL_PATH%" del /q "%MODEL_PATH%" >nul 2>&1
-    exit /b 1
-)
-
-for %%A in ("%MODEL_PATH%") do set "MODEL_SIZE=%%~zA"
-if "!MODEL_SIZE!"=="0" (
-    echo Error: Downloaded file is empty: %MODEL_NAME%
-    del /q "%MODEL_PATH%" >nul 2>&1
-    exit /b 1
-)
-
-echo     Saved to %MODEL_PATH%
 exit /b 0

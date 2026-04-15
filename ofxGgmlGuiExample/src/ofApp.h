@@ -136,6 +136,7 @@ private:
 	// -- conversation / output --
 	std::deque<Message> chatMessages;
 	std::string scriptOutput;
+	std::deque<Message> scriptMessages;
 	std::string summarizeOutput;
 	std::string writeOutput;
 	std::string translateOutput;
@@ -154,11 +155,15 @@ private:
 	float generationStartTime = 0.0f;
 	std::string streamingOutput;
 	std::mutex streamMutex;
+	bool lastScriptOutputLikelyCutoff = false;
+	std::string lastScriptOutputTail;
 
 	// -- settings --
 	int maxTokens = 256;
 	float temperature = 0.7f;
 	float topP = 0.9f;
+	int topK = 40;
+	float minP = 0.0f;
 	float repeatPenalty = 1.1f;
 	int contextSize = 2048;
 	int batchSize = 512;
@@ -172,13 +177,23 @@ private:
 	int mirostatMode = 0;                            // 0=off, 1=Mirostat, 2=Mirostat 2.0
 	float mirostatTau = 5.0f;
 	float mirostatEta = 0.1f;
+	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512};
+	bool useModeTokenBudgets = true;
+	bool autoContinueCutoff = false;
 	bool showDeviceInfo = false;
 	bool showLog = false;
 	bool showPerformance = false;
 	ofLogLevel logLevel = OF_LOG_NOTICE;
 	std::deque<std::string> logMessages;
 	std::mutex logMutex;
-	bool chatAutoInternet = true;
+	bool internetContextAllModes = false;
+	bool strictOfflineMode = false;
+	bool scriptIncludeRepoContext = true;
+	bool stopAtNaturalBoundary = true;
+	bool cliCapabilitiesProbed = false;
+	bool cliSupportsTopK = true;
+	bool cliSupportsMinP = true;
+	bool cliSupportsMirostat = true;
 
 	// -- performance tracking --
 	float lastComputeMs = 0.0f;
@@ -189,6 +204,8 @@ private:
 	std::vector<ModelPreset> modelPresets;
 	int selectedModelIndex = 0;
 	std::array<int, kModeCount> taskDefaultModelIndices = {};
+	mutable int cachedModelPathIndex = -1;
+	mutable std::string cachedModelPath;
 	void initModelPresets();
 
 	// -- script language presets --
@@ -233,7 +250,8 @@ private:
 		const std::string & systemPrompt = "");
 	void runHierarchicalReview();
 	bool runRealInference(const std::string & prompt, std::string & output, std::string & error,
-		std::function<void(const std::string &)> onStreamData = nullptr);
+		std::function<void(const std::string &)> onStreamData = nullptr,
+		bool preserveLlamaInstructions = false);
 	std::string buildPromptForMode(AiMode mode, const std::string & userText,
 		const std::string & systemPrompt) const;
 	std::string getSelectedModelPath() const;
@@ -245,6 +263,7 @@ private:
 	void logWithLevel(ofLogLevel level, const std::string & message);
 	ofLogLevel mapGgmlLogLevel(int level) const;
 	void probeLlamaCli(const std::string & customPath = "");
+	void probeCliCapabilities();
 
 	// -- UI panels --
 	void drawMenuBar();
@@ -271,6 +290,7 @@ private:
 		const std::string & baseFolder);
 	void computeDependencyFanIn(std::vector<ScriptFileReviewInfo> & files);
 	int countTokensAccurate(const std::string & text, int fallback = -1);
+	ofxGgmlInferenceSettings makeReviewInferenceSettings(int tokenBudget) const;
 	std::string buildRepoTableOfContents(const std::vector<ScriptFileReviewInfo> & files,
 		size_t maxFiles) const;
 	std::string buildRepoTree(const std::vector<ScriptFileReviewInfo> & files) const;

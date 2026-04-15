@@ -9,6 +9,18 @@
 
 namespace {
 
+constexpr size_t kMaxCachedContentBytes = 16 * 1024 * 1024;
+constexpr size_t kMaxCachedEntryBytes = 2 * 1024 * 1024;
+
+static size_t totalCachedBytes(const std::vector<ofxGgmlScriptSourceFileEntry> & files) {
+	size_t total = 0;
+	for (const auto & f : files) {
+		if (!f.isCached) continue;
+		total += f.cachedContent.size();
+	}
+	return total;
+}
+
 std::string normalizeLower(const std::string & s) {
 	std::string out = s;
 	std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
@@ -379,6 +391,11 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 	}
 	if (entry.isDirectory) return false;
 
+	if (entry.isCached) {
+		outContent = entry.cachedContent;
+		return true;
+	}
+
 	if (type == ofxGgmlScriptSourceType::LocalFolder) {
 		std::ifstream in(entry.fullPath, std::ios::binary);
 		if (!in.is_open()) {
@@ -391,6 +408,8 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 		in.close();
 		outContent = std::move(content);
 		std::lock_guard<std::mutex> lock(m_mutex);
+		m_files[static_cast<size_t>(index)].cachedContent = outContent;
+		m_files[static_cast<size_t>(index)].isCached = true;
 		m_status = "Loaded: " + entry.name;
 		return true;
 	}
@@ -410,6 +429,8 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 		}
 		outContent = response.data.getText();
 		std::lock_guard<std::mutex> lock(m_mutex);
+		m_files[static_cast<size_t>(index)].cachedContent = outContent;
+		m_files[static_cast<size_t>(index)].isCached = true;
 		m_status = "Loaded: " + entry.name;
 		return true;
 	}
@@ -428,6 +449,8 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 		}
 		outContent = response.data.getText();
 		std::lock_guard<std::mutex> lock(m_mutex);
+		m_files[static_cast<size_t>(index)].cachedContent = outContent;
+		m_files[static_cast<size_t>(index)].isCached = true;
 		m_status = "Loaded: " + entry.name;
 		return true;
 	}
@@ -581,19 +604,38 @@ std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::scanLocalFolderEn
 	const std::string preferredExt = m_preferredExtension;
 	const std::filesystem::path basePath(path);
 
-	for (const auto & entry : std::filesystem::recursive_directory_iterator(path, ec)) {
-		if (ec) break;
+	auto it = std::filesystem::recursive_directory_iterator(path, std::filesystem::directory_options::skip_permission_denied, ec);
+	auto end = std::filesystem::recursive_directory_iterator();
+	for (; it != end; it.increment(ec)) {
+		if (ec) {
+			ec.clear();
+			continue;
+		}
+		const auto& entry = *it;
+		std::string filename = entry.path().filename().string();
+
+		// Skip hidden folders like .git to significantly speed up indexing
+		if (entry.is_directory(ec) && !filename.empty() && filename[0] == '.') {
+			it.disable_recursion_pending();
+			continue;
+		}
+
 		ofxGgmlScriptSourceFileEntry fe;
 		// Use relative path from base directory for better organization
+		ec.clear();
 		const std::filesystem::path relativePath = std::filesystem::relative(entry.path(), basePath, ec);
 		if (ec) {
-			fe.name = entry.path().filename().string();
+			fe.name = filename;
+			ec.clear();
 		} else {
 			fe.name = relativePath.string();
 		}
 		fe.fullPath = entry.path().string();
 		fe.isDirectory = entry.is_directory(ec);
-		if (ec) continue;
+		if (ec) {
+			ec.clear();
+			continue;
+		}
 
 		if (fe.isDirectory) {
 			files.push_back(std::move(fe));
@@ -727,19 +769,19 @@ bool ofxGgmlScriptSource::isValidUrl(const std::string & url) {
 
 bool ofxGgmlScriptSource::hasSourceExtension(
 	const std::string & ext, bool includeTextLikeExtensions) {
-	static const std::vector<std::string> sourceExts = {
+	static constexpr const char* sourceExts[] = {
 		".cpp", ".h", ".py", ".js", ".ts", ".rs", ".go",
 		".glsl", ".vert", ".frag", ".sh", ".c", ".hpp",
 		".java", ".kt", ".swift", ".lua", ".rb", ".cs"
 	};
-	static const std::vector<std::string> textLikeExts = {
+	static constexpr const char* textLikeExts[] = {
 		".md", ".txt", ".json", ".yaml", ".yml", ".toml"
 	};
-	for (const auto & candidate : sourceExts) {
+	for (const char* candidate : sourceExts) {
 		if (ext == candidate) return true;
 	}
 	if (includeTextLikeExtensions) {
-		for (const auto & candidate : textLikeExts) {
+		for (const char* candidate : textLikeExts) {
 			if (ext == candidate) return true;
 		}
 	}

@@ -175,11 +175,11 @@ static bool hasPrefixIgnoreCase(const char * value, const char * prefix) noexcep
 	if (!value || !prefix) return false;
 	while (*prefix) {
 		if (*value == '\0') return false;
-		const unsigned char a = static_cast<unsigned char>(*value);
-		const unsigned char b = static_cast<unsigned char>(*prefix);
-		const unsigned char la = (a >= 'A' && a <= 'Z') ? static_cast<unsigned char>(a + ('a' - 'A')) : a;
-		const unsigned char lb = (b >= 'A' && b <= 'Z') ? static_cast<unsigned char>(b + ('a' - 'A')) : b;
-		if (la != lb) return false;
+		const unsigned char ac = static_cast<unsigned char>(*value);
+		const unsigned char bc = static_cast<unsigned char>(*prefix);
+		const unsigned char lc_a = (ac >= 'A' && ac <= 'Z') ? (ac | 0x20) : ac;
+		const unsigned char lc_b = (bc >= 'A' && bc <= 'Z') ? (bc | 0x20) : bc;
+		if (lc_a != lc_b) return false;
 		++value;
 		++prefix;
 	}

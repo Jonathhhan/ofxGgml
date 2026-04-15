@@ -17,6 +17,7 @@
 #include <regex>
 #include <random>
 #include <sstream>
+#include <unordered_set>
 #include <vector>
 
 #ifdef _WIN32
@@ -41,10 +42,22 @@ const char * ofApp::modeLabels[kModeCount] = {
 };
 
 namespace {
+struct TokenLiteral {
+	const char * text;
+	size_t len;
+};
+
 struct LogLevelOption {
 	const char * label;
 	ofLogLevel level;
 };
+
+void drawPanelHeader(const char * title, const char * subtitle) {
+	ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "%s", title);
+	ImGui::SameLine();
+	ImGui::TextDisabled("(%s)", subtitle);
+	ImGui::Separator();
+}
 
 static const std::array<LogLevelOption, 5> kLogLevelOptions = {{
 	{"Silent",   OF_LOG_SILENT},
@@ -53,6 +66,35 @@ static const std::array<LogLevelOption, 5> kLogLevelOptions = {{
 	{"Notices",  OF_LOG_NOTICE},
 	{"Verbose",  OF_LOG_VERBOSE}
 }};
+
+static constexpr TokenLiteral kPreambleMarkers[] = {
+	{"Running in interactive mode", 27},
+	{"Press Ctrl+C to interject", 24},
+	{"Press Return to return control to the AI", 39},
+	{"To return control without starting a new line", 43},
+	{"If you want to submit another line", 34},
+	{"Not using system message", 24},
+	{"Using system message", 20},
+	{"Reverse prompt", 14},
+};
+
+static constexpr TokenLiteral kRoleLabels[] = {
+	{"user", 4},
+	{"assistant", 9},
+	{"system", 6},
+	{"User", 4},
+	{"Assistant", 9},
+	{"System", 6},
+	{"A:", 2},
+	{"> ", 2},
+};
+
+static constexpr TokenLiteral kTrailingArtifacts[] = {
+	{"> EOF by user", 13},
+	{"> EOF", 5},
+	{"EOF", 3},
+	{"Interrupted by user", 19},
+};
 
 const char * logLevelLabel(ofLogLevel level) noexcept {
 	switch (level) {
@@ -122,17 +164,14 @@ std::string trim(const std::string & s) {
 std::vector<std::string> extractHttpUrls(const std::string & text) {
 	static const std::regex urlRegex(R"(https?://[^\s<>\"]+)", std::regex::icase);
 	std::vector<std::string> urls;
+	std::unordered_set<std::string> seen;
 	for (std::sregex_iterator it(text.begin(), text.end(), urlRegex), end; it != end; ++it) {
-		urls.push_back(it->str());
-	}
-	// Deduplicate while preserving order.
-	std::vector<std::string> unique;
-	for (const auto & url : urls) {
-		if (std::find(unique.begin(), unique.end(), url) == unique.end()) {
-			unique.push_back(url);
+		const std::string url = it->str();
+		if (seen.insert(url).second) {
+			urls.push_back(url);
 		}
 	}
-	return unique;
+	return urls;
 }
 
 std::string fetchUrlContentLimited(const std::string & url, size_t maxChars) {
@@ -210,12 +249,68 @@ std::string fetchSearchSnippet(const std::string & query, size_t maxChars) {
 	return "";
 }
 
+std::string buildInternetContextFromUrls(
+	const std::vector<std::string> & urls,
+	size_t maxUrls,
+	size_t maxCharsPerUrl,
+	size_t maxTotalChars,
+	const std::string & heading) {
+	if (urls.empty() || maxUrls == 0 || maxTotalChars == 0) return {};
+
+	std::ostringstream ctx;
+	size_t used = 0;
+	size_t fetched = 0;
+
+	for (size_t i = 0; i < urls.size() && fetched < maxUrls; i++) {
+		const std::string content = fetchUrlContentLimited(urls[i], maxCharsPerUrl);
+		if (content.empty()) continue;
+		std::string clipped = content;
+		if (used + clipped.size() > maxTotalChars) {
+			clipped = clipped.substr(0, maxTotalChars - used) + "\n...[truncated]";
+		}
+		ctx << "\nURL: " << urls[i] << "\n" << clipped << "\n";
+		used += clipped.size();
+		fetched++;
+		if (used >= maxTotalChars) break;
+	}
+
+	if (used == 0) return {};
+	return "\n\n" + heading + ":" + ctx.str();
+}
+
+std::string buildInternetContextFromText(const std::string & userText, bool allowSearchFallback) {
+	static constexpr size_t kMaxUrls = 3;
+	static constexpr size_t kMaxCharsPerUrl = 2000;
+	static constexpr size_t kMaxTotalChars = 6000;
+
+	const auto urls = extractHttpUrls(userText);
+	std::string context = buildInternetContextFromUrls(
+		urls,
+		kMaxUrls,
+		kMaxCharsPerUrl,
+		kMaxTotalChars,
+		"Context fetched from URLs in your message");
+	if (!context.empty() || !allowSearchFallback) {
+		return context;
+	}
+
+	std::string lowered = userText;
+	std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	std::string autoContext;
+	if (lowered.find("weather") != std::string::npos) {
+		autoContext = fetchWeatherContext(userText, 512);
+	}
+	if (autoContext.empty()) {
+		autoContext = fetchSearchSnippet(userText, 1200);
+	}
+	if (autoContext.empty()) return {};
+	return "\n\nInternet context:\n" + autoContext + "\n";
+}
+
 // Remove the llama.cpp interactive banner/instruction block that can
 // precede the actual model response when the CLI runs in chat mode.
 std::string stripInteractivePreamble(const std::string & text) {
-	std::string out;
-	out.reserve(text.size());
-
 	bool skipping = true;
 	size_t pos = 0;
 	while (pos <= text.size()) {
@@ -227,39 +322,24 @@ std::string stripInteractivePreamble(const std::string & text) {
 
 		if (skipping) {
 			if (!trimmed.empty()) {
-				static const std::vector<std::string> preambleMarkers = {
-					"Running in interactive mode",
-					"Press Ctrl+C to interject",
-					"Press Return to return control to the AI",
-					"To return control without starting a new line",
-					"If you want to submit another line",
-					"Not using system message",
-					"Using system message",
-					"Reverse prompt"
-				};
 				bool isPreamble = false;
-				for (const auto & marker : preambleMarkers) {
-					if (trimmed.find(marker) != std::string::npos) {
+				for (const auto & marker : kPreambleMarkers) {
+					if (trimmed.find(marker.text) != std::string::npos) {
 						isPreamble = true;
 						break;
 					}
 				}
 				if (!isPreamble) {
-					skipping = false;
+					return trim(text.substr(pos));
 				}
 			}
-		}
-
-		if (!skipping) {
-			if (!out.empty()) out.push_back('\n');
-			out += line;
 		}
 
 		if (end == std::string::npos) break;
 		pos = end + 1;
 	}
 
-	return trim(out);
+	return "";
 }
 
 // Strip common chat-template role markers and prompt artefacts that
@@ -305,13 +385,9 @@ std::string cleanChatOutput(const std::string & text) {
 	while (changed) {
 		changed = false;
 		out = trim(out);
-		const std::vector<std::string> roleLabels = {
-			"user", "assistant", "system", "User", "Assistant", "System",
-			"A:", "> "
-		};
-		for (const auto & label : roleLabels) {
-			if (startsWithWord(out, label)) {
-				out = out.substr(label.size());
+		for (const auto & label : kRoleLabels) {
+			if (startsWithWord(out, label.text)) {
+				out = out.substr(label.len);
 				// Also strip an optional ':' delimiter after the role label.
 				out = trim(out);
 				if (!out.empty() && out[0] == ':') {
@@ -338,21 +414,28 @@ std::string cleanChatOutput(const std::string & text) {
 
 	// Strip trailing CLI artifacts: "> EOF", "EOF", "Interrupted by user".
 	{
-		const std::vector<std::string> trailingArtifacts = {
-			"> EOF by user", "> EOF", "EOF", "Interrupted by user"
-		};
 		bool stripped = true;
 		while (stripped) {
 			stripped = false;
-			for (const auto & art : trailingArtifacts) {
-				if (out.size() >= art.size() &&
-					out.compare(out.size() - art.size(), art.size(), art) == 0) {
-					out = trim(out.substr(0, out.size() - art.size()));
+			for (const auto & art : kTrailingArtifacts) {
+				if (out.size() >= art.len &&
+					out.compare(out.size() - art.len, art.len, art.text) == 0) {
+					out = trim(out.substr(0, out.size() - art.len));
 					stripped = true;
 				}
 			}
 		}
 	}
+
+	// Strip stray literal ANSI codes or terminal markers that bypassed parser
+	const char* const strayArtifacts[] = {"[1m", "[32m", "[0m", "> "};
+	for (const char* art : strayArtifacts) {
+		size_t pos = 0;
+		while ((pos = out.find(art, pos)) != std::string::npos) {
+			out.erase(pos, std::strlen(art));
+		}
+	}
+	out = trim(out);
 
 	return out;
 }
@@ -390,6 +473,49 @@ std::string describeExitCode(int code) {
 	return "";
 }
 
+bool isLikelyCutoffOutput(const std::string & text, AiMode mode) {
+	const std::string t = trim(text);
+	if (t.empty()) return false;
+	if (t.rfind("[Error]", 0) == 0) return false;
+
+	const char last = t.back();
+	if (mode == AiMode::Script) {
+		if (last == '\n' || last == '}' || last == ')' || last == ']' || last == ';') {
+			return false;
+		}
+		return t.size() > 80;
+	}
+
+	if (last == '.' || last == '!' || last == '?' || last == '"' || last == '\'') {
+		return false;
+	}
+	return t.size() > 80;
+}
+
+std::string clampPromptToContext(const std::string & prompt, size_t contextTokens, bool & trimmed) {
+	trimmed = false;
+	if (contextTokens == 0) return prompt;
+	const size_t charBudget = std::max<size_t>(512, contextTokens * 3);
+	if (prompt.size() <= charBudget) return prompt;
+
+	trimmed = true;
+	const size_t head = std::min<size_t>(2048, charBudget / 4);
+	if (charBudget <= head + 96) {
+		return prompt.substr(prompt.size() - charBudget);
+	}
+	const size_t tail = charBudget - head - 32;
+	return prompt.substr(0, head)
+		+ "\n...[context trimmed to fit window]...\n"
+		+ prompt.substr(prompt.size() - tail);
+}
+
+std::string buildCutoffContinuationRequest(const std::string & tailText) {
+	return
+		"Continue exactly from where the previous answer stopped. "
+		"Do not restart. Finish the incomplete thought/code naturally.\n\n"
+		"Tail of previous output:\n" + tailText;
+}
+
 constexpr size_t kMaxLogMessages = 500;
 constexpr size_t kExePathBufSize = 4096; // buffer for resolving the executable path
 constexpr float kDefaultTemp = 0.7f;
@@ -398,6 +524,17 @@ constexpr float kDefaultRepeatPenalty = 1.1f;
 constexpr int kExecNotFound = 127; // POSIX convention when execvp fails
 constexpr float kSpinnerInterval = 0.15f;       // seconds per spinner frame
 constexpr float kDotsAnimationSpeed = 3.0f;     // dots cycle speed multiplier
+constexpr size_t kMaxScriptContextFiles = 50;
+constexpr size_t kMaxFocusedFileSnippetChars = 2000;
+constexpr size_t kMaxReviewTocFiles = 50;
+constexpr size_t kMaxEmbeddingSnippetChars = 4000;
+constexpr size_t kMaxEmbeddingParallelTasks = 4;
+constexpr size_t kMaxSummaryParallelTasks = 3;
+constexpr size_t kMaxInternetSourceUrls = 3;
+constexpr size_t kMaxInternetCharsPerSourceUrl = 1500;
+constexpr size_t kMaxInternetCharsFromSourceUrls = 4500;
+constexpr auto kStreamUiUpdateInterval = std::chrono::milliseconds(50);
+constexpr size_t kStreamUiMinGrowth = 256;
 const char * const kWaitingLabels[] = {"generating", "generating.", "generating..", "generating..."};
 
 // Llama CLI detection state shared between probe and UI.
@@ -855,9 +992,45 @@ ofLogLevel ofApp::mapGgmlLogLevel(int level) const {
 }
 
 void ofApp::probeLlamaCli(const std::string & customPath) {
+	cliCapabilitiesProbed = false;
 	probeLlamaCliImpl(
 		[this](ofLogLevel lvl, const std::string & msg) { logWithLevel(lvl, msg); },
 		customPath);
+}
+
+void ofApp::probeCliCapabilities() {
+	if (cliCapabilitiesProbed) return;
+	cliCapabilitiesProbed = true;
+	cliSupportsTopK = true;
+	cliSupportsMinP = true;
+	cliSupportsMirostat = true;
+
+	std::string helpText;
+	int exitCode = -1;
+	if (!runProcessCapture({llamaCliCommand, "--help"}, helpText, exitCode) || helpText.empty()) {
+		return;
+	}
+
+	const bool hasTopK = helpText.find("--top-k") != std::string::npos;
+	const bool hasMinP = helpText.find("--min-p") != std::string::npos;
+	const bool hasMirostat =
+		helpText.find("--mirostat") != std::string::npos &&
+		helpText.find("--mirostat-lr") != std::string::npos &&
+		helpText.find("--mirostat-ent") != std::string::npos;
+
+	cliSupportsTopK = hasTopK;
+	cliSupportsMinP = hasMinP;
+	cliSupportsMirostat = hasMirostat;
+
+	if (!cliSupportsTopK) {
+		logWithLevel(OF_LOG_WARNING, "Detected CLI does not support --top-k; Top-K will be ignored.");
+	}
+	if (!cliSupportsMinP) {
+		logWithLevel(OF_LOG_WARNING, "Detected CLI does not support --min-p; Min-P will be ignored.");
+	}
+	if (!cliSupportsMirostat) {
+		logWithLevel(OF_LOG_WARNING, "Detected CLI does not support Mirostat flags; Mirostat settings will be ignored.");
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1090,6 +1263,10 @@ ggml.setLogCallback([this](int level, const std::string & msg) {
 // Auto-load last session if available.
 autoLoadSession();
 
+if (useModeTokenBudgets) {
+	maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(activeMode)], 32, 4096);
+}
+
 // Detect llama-completion / llama-cli / llama at startup.
 probeLlamaCli();
 
@@ -1190,6 +1367,7 @@ loadSession(result.getPath());
 ImGui::Separator();
 if (ImGui::MenuItem("Clear All Output")) {
 chatMessages.clear();
+scriptMessages.clear();
 scriptOutput.clear();
 summarizeOutput.clear();
 writeOutput.clear();
@@ -1206,112 +1384,6 @@ if (ImGui::BeginMenu("View")) {
 ImGui::MenuItem("Device Info    (F1)", nullptr, &showDeviceInfo);
 ImGui::MenuItem("Engine Log     (F2)", nullptr, &showLog);
 ImGui::MenuItem("Performance    (F3)", nullptr, &showPerformance);
-ImGui::EndMenu();
-}
-if (ImGui::BeginMenu("Options")) {
-ImGui::SeparatorText("Generation");
-ImGui::SliderInt("Max Tokens", &maxTokens, 32, 4096);
-ImGui::SliderFloat("Temperature", &temperature, 0.0f, 2.0f, "%.2f");
-ImGui::SliderFloat("Top-P", &topP, 0.0f, 1.0f, "%.2f");
-ImGui::SliderFloat("Repeat Penalty", &repeatPenalty, 1.0f, 2.0f, "%.2f");
-ImGui::SliderInt("Seed", &seed, -1, 99999);
-if (ImGui::IsItemHovered()) {
-ImGui::SetTooltip("-1 = random seed each run");
-}
-
-ImGui::SeparatorText("Mirostat Sampling");
-const char * mirostatLabels[] = { "Off", "Mirostat", "Mirostat 2.0" };
-ImGui::Combo("Mirostat Mode", &mirostatMode, mirostatLabels, 3);
-if (ImGui::IsItemHovered()) {
-ImGui::SetTooltip("Mirostat controls perplexity during generation\n"
-"Off = use standard Top-P sampling");
-}
-if (mirostatMode > 0) {
-ImGui::SliderFloat("Mirostat Tau", &mirostatTau, 0.0f, 10.0f, "%.1f");
-if (ImGui::IsItemHovered()) ImGui::SetTooltip("Target entropy (lower = more focused)");
-ImGui::SliderFloat("Mirostat Eta", &mirostatEta, 0.0f, 1.0f, "%.2f");
-if (ImGui::IsItemHovered()) ImGui::SetTooltip("Learning rate for Mirostat adjustment");
-}
-
-ImGui::SeparatorText("Engine");
-ImGui::SliderInt("Threads", &numThreads, 1, 32);
-ImGui::SliderInt("Context Size", &contextSize, 256, 16384);
-ImGui::SliderInt("Batch Size", &batchSize, 32, 4096);
-if (!backendNames.empty()) {
-	selectedBackendIndex = std::clamp(selectedBackendIndex, 0, static_cast<int>(backendNames.size()) - 1);
-	const std::string currentBackendLabel = backendNames[static_cast<size_t>(selectedBackendIndex)];
-	if (ImGui::BeginCombo("Preferred Backend", currentBackendLabel.c_str())) {
-		for (int i = 0; i < static_cast<int>(backendNames.size()); i++) {
-			const bool isSelected = (selectedBackendIndex == i);
-			if (ImGui::Selectable(backendNames[static_cast<size_t>(i)].c_str(), isSelected)) {
-				if (selectedBackendIndex != i) {
-					selectedBackendIndex = i;
-					reinitBackend();
-				}
-			}
-			if (isSelected) {
-				ImGui::SetItemDefaultFocus();
-			}
-		}
-		ImGui::EndCombo();
-	}
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Choose a discovered backend/device (Vulkan appears when available).");
-	}
-} else {
-	ImGui::TextDisabled("Preferred Backend: (no devices)");
-}
-{
-// GPU layers control the llama-completion CLI process, which has
-// its own GPU support — always allow the user to adjust them.
-int settingsSliderMax = detectedModelLayers > 0 ? detectedModelLayers : 128;
-ImGui::SliderInt("GPU Layers", &gpuLayers, 0, settingsSliderMax);
-if (ImGui::IsItemHovered()) {
-if (detectedModelLayers > 0) {
-ImGui::SetTooltip("Number of model layers to offload to GPU (llama-completion)\n"
-	"0 = all on CPU\nModel has %d layers", detectedModelLayers);
-} else {
-ImGui::SetTooltip("Number of model layers to offload to GPU (llama-completion)\n0 = all on CPU");
-}
-}
-ImGui::SameLine();
-if (ImGui::SmallButton("None##settgpu")) gpuLayers = 0;
-ImGui::SameLine();
-if (ImGui::SmallButton("All##settgpu")) gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
-}
-
-ImGui::SeparatorText("Logging");
-int currentLogIdx = std::clamp(logLevelIndex(logLevel), 0,
-	static_cast<int>(kLogLevelOptions.size()) - 1);
-const char * currentLogLabel = kLogLevelOptions[static_cast<size_t>(currentLogIdx)].label;
-if (ImGui::BeginCombo("Log Level", currentLogLabel)) {
-	for (size_t i = 0; i < kLogLevelOptions.size(); i++) {
-		const bool isSelected = (currentLogIdx == static_cast<int>(i));
-		if (ImGui::Selectable(kLogLevelOptions[i].label, isSelected)) {
-			if (!isSelected) {
-				applyLogLevel(kLogLevelOptions[i].level);
-				logWithLevel(OF_LOG_NOTICE,
-					std::string("Log level set to ") + kLogLevelOptions[i].label);
-				currentLogIdx = static_cast<int>(i);
-			}
-		}
-		if (isSelected) {
-			ImGui::SetItemDefaultFocus();
-		}
-	}
-	ImGui::EndCombo();
-}
-ImGui::Checkbox("Show Engine Log", &showLog);
-if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("ofLog-style level applies to console and engine log window.");
-}
-
-ImGui::SeparatorText("Appearance");
-const char * themeLabels[] = { "Dark", "Light", "Classic" };
-if (ImGui::Combo("Theme", &themeIndex, themeLabels, 3)) {
-applyTheme(themeIndex);
-}
-
 ImGui::EndMenu();
 }
 ImGui::EndMainMenuBar();
@@ -1337,6 +1409,9 @@ for (int i = 0; i < kModeCount; i++) {
 bool selected = (static_cast<int>(activeMode) == i);
 if (ImGui::Selectable(modeLabels[i], selected, ImGuiSelectableFlags_None, ImVec2(0, 28))) {
 activeMode = static_cast<AiMode>(i);
+	if (useModeTokenBudgets) {
+		maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(i)], 32, 4096);
+	}
 }
 }
 
@@ -1414,14 +1489,104 @@ if (!modelPresets.empty()) {
 ImGui::Spacing();
 ImGui::Separator();
 ImGui::Spacing();
-ImGui::Text("Quick Settings");
+ImGui::Text("Settings");
 ImGui::Spacing();
+
+if (ImGui::Button("Balanced", ImVec2(ImGui::GetContentRegionAvail().x / 3.0f - 3.0f, 0))) {
+	maxTokens = 512;
+	temperature = 0.7f;
+	topP = 0.9f;
+	topK = 40;
+	minP = 0.0f;
+	repeatPenalty = 1.1f;
+	mirostatMode = 0;
+}
+ImGui::SameLine();
+if (ImGui::Button("Code", ImVec2(ImGui::GetContentRegionAvail().x / 2.0f - 2.0f, 0))) {
+	maxTokens = 1024;
+	temperature = 0.25f;
+	topP = 0.92f;
+	topK = 60;
+	minP = 0.05f;
+	repeatPenalty = 1.05f;
+	mirostatMode = 0;
+}
+ImGui::SameLine();
+if (ImGui::Button("Creative", ImVec2(-1, 0))) {
+	maxTokens = 768;
+	temperature = 1.0f;
+	topP = 0.95f;
+	topK = 80;
+	minP = 0.0f;
+	repeatPenalty = 1.05f;
+	mirostatMode = 0;
+}
+
 ImGui::SetNextItemWidth(-1);
-ImGui::SliderInt("##MaxTok", &maxTokens, 32, 4096, "Tokens: %d");
+if (ImGui::SliderInt("##MaxTok", &maxTokens, 32, 4096, "Tokens: %d")) {
+	modeMaxTokens[static_cast<size_t>(activeMode)] = maxTokens;
+}
+ImGui::Checkbox("Per-mode token budgets", &useModeTokenBudgets);
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Remember and auto-apply a separate Max Tokens value per mode.");
+}
 ImGui::SetNextItemWidth(-1);
 ImGui::SliderFloat("##Temp", &temperature, 0.0f, 2.0f, "Temp: %.2f");
 ImGui::SetNextItemWidth(-1);
 ImGui::SliderFloat("##TopP", &topP, 0.0f, 1.0f, "Top-P: %.2f");
+ImGui::SetNextItemWidth(-1);
+ImGui::SliderInt("##TopK", &topK, 0, 200, "Top-K: %d");
+ImGui::SetNextItemWidth(-1);
+ImGui::SliderFloat("##MinP", &minP, 0.0f, 1.0f, "Min-P: %.2f");
+ImGui::SetNextItemWidth(-1);
+ImGui::SliderFloat("##RepeatPenalty", &repeatPenalty, 1.0f, 2.0f, "Repeat Penalty: %.2f");
+ImGui::SetNextItemWidth(-1);
+ImGui::SliderInt("##Seed", &seed, -1, 99999, "Seed: %d");
+ImGui::Checkbox("Stop on natural boundary", &stopAtNaturalBoundary);
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Trims cut-off output to sentence or line boundaries when generation ends abruptly.");
+}
+ImGui::Checkbox("Auto-continue cutoffs (Script)", &autoContinueCutoff);
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("When Script output appears cut off, run one automatic continuation pass.");
+}
+ImGui::Checkbox("Offline mode", &strictOfflineMode);
+
+const char * mirostatLabels[] = { "Mirostat: Off", "Mirostat", "Mirostat 2.0" };
+ImGui::SetNextItemWidth(-1);
+ImGui::Combo("##MirostatMode", &mirostatMode, mirostatLabels, 3);
+if (mirostatMode > 0) {
+	ImGui::SetNextItemWidth(-1);
+	ImGui::SliderFloat("##MirostatTau", &mirostatTau, 0.0f, 10.0f, "Mirostat Tau: %.1f");
+	ImGui::SetNextItemWidth(-1);
+	ImGui::SliderFloat("##MirostatEta", &mirostatEta, 0.0f, 1.0f, "Mirostat Eta: %.2f");
+}
+
+ImGui::SetNextItemWidth(-1);
+ImGui::SliderInt("##Threads", &numThreads, 1, 32, "Threads: %d");
+ImGui::SetNextItemWidth(-1);
+ImGui::SliderInt("##ContextSize", &contextSize, 256, 16384, "Context: %d");
+ImGui::SetNextItemWidth(-1);
+ImGui::SliderInt("##BatchSize", &batchSize, 32, 4096, "Batch: %d");
+
+if (!backendNames.empty()) {
+	selectedBackendIndex = std::clamp(selectedBackendIndex, 0, static_cast<int>(backendNames.size()) - 1);
+	const std::string currentBackendLabel = backendNames[static_cast<size_t>(selectedBackendIndex)];
+	if (ImGui::BeginCombo("Backend", currentBackendLabel.c_str())) {
+		for (int i = 0; i < static_cast<int>(backendNames.size()); i++) {
+			const bool isSelected = (selectedBackendIndex == i);
+			if (ImGui::Selectable(backendNames[static_cast<size_t>(i)].c_str(), isSelected)) {
+				if (selectedBackendIndex != i) {
+					selectedBackendIndex = i;
+					reinitBackend();
+				}
+			}
+			if (isSelected) ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+}
+
 ImGui::SetNextItemWidth(-1);
 {
 // GPU layers control the llama-completion CLI process, which has
@@ -1441,6 +1606,32 @@ ImGui::SameLine();
 if (ImGui::Button("All##gpu", ImVec2(-1, 0))) {
 gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
 }
+}
+
+ImGui::Separator();
+int currentLogIdx = std::clamp(logLevelIndex(logLevel), 0,
+	static_cast<int>(kLogLevelOptions.size()) - 1);
+const char * currentLogLabel = kLogLevelOptions[static_cast<size_t>(currentLogIdx)].label;
+if (ImGui::BeginCombo("Log Level", currentLogLabel)) {
+	for (size_t i = 0; i < kLogLevelOptions.size(); i++) {
+		const bool isSelected = (currentLogIdx == static_cast<int>(i));
+		if (ImGui::Selectable(kLogLevelOptions[i].label, isSelected)) {
+			if (!isSelected) {
+				applyLogLevel(kLogLevelOptions[i].level);
+				logWithLevel(OF_LOG_NOTICE,
+					std::string("Log level set to ") + kLogLevelOptions[i].label);
+				currentLogIdx = static_cast<int>(i);
+			}
+		}
+		if (isSelected) ImGui::SetItemDefaultFocus();
+	}
+	ImGui::EndCombo();
+}
+ImGui::Checkbox("Show Engine Log", &showLog);
+
+const char * themeLabels[] = { "Dark", "Light", "Classic" };
+if (ImGui::Combo("Theme", &themeIndex, themeLabels, 3)) {
+	applyTheme(themeIndex);
 }
 
 ImGui::Spacing();
@@ -1497,10 +1688,7 @@ ImGui::End();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawChatPanel() {
-ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Chat");
-ImGui::SameLine();
-ImGui::TextDisabled("(conversation with the ggml engine)");
-ImGui::Separator();
+drawPanelHeader("Chat", "conversation with the ggml engine");
 
 // Message history.
 float inputH = 60.0f;
@@ -1549,9 +1737,15 @@ ImGuiInputTextFlags_EnterReturnsTrue);
 ImGui::SameLine();
 bool sendClicked = ImGui::Button("Send", ImVec2(70, 0));
 ImGui::SameLine();
-ImGui::Checkbox("Use internet context", &chatAutoInternet);
+ImGui::BeginDisabled(strictOfflineMode);
+ImGui::Checkbox("All modes", &internetContextAllModes);
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("When on, the assistant will fetch concise web snippets to ground answers.");
+	ImGui::SetTooltip("When enabled, internet grounding can be applied to non-chat modes too. Chat mode is grounded by default unless Offline mode is enabled.");
+}
+ImGui::EndDisabled();
+if (strictOfflineMode) {
+	ImGui::SameLine();
+	ImGui::TextDisabled("(offline)");
 }
 
 if ((submitted || sendClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
@@ -1591,10 +1785,7 @@ exportChatHistory(result.getPath());
 // ---------------------------------------------------------------------------
 
 void ofApp::drawScriptPanel() {
-ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Script Generation");
-ImGui::SameLine();
-ImGui::TextDisabled("(generate or explain code)");
-ImGui::Separator();
+drawPanelHeader("Script Generation", "generate or explain code");
 
 // Language selector and source controls on same row.
 ImGui::Text("Language:");
@@ -1694,43 +1885,61 @@ std::string icon = entry.isDirectory ? "[dir] " : "      ";
 bool isSelected = (selectedScriptFileIndex == i);
 if (ImGui::Selectable((icon + entry.name).c_str(), isSelected) && !entry.isDirectory) {
 selectedScriptFileIndex = i;
-	std::string content;
-	if (scriptSource.loadFileContent(i, content)) {
-		size_t maxLen = sizeof(scriptInput) - 1;
-		std::strncpy(scriptInput, content.c_str(), maxLen);
-		scriptInput[maxLen] = '\0';
-	}
 }
 ImGui::PopID();
 }
 ImGui::EndChild();
 }
 
-if (sourceType == ofxGgmlScriptSourceType::GitHubRepo ||
-	sourceType == ofxGgmlScriptSourceType::Internet) {
-drawScriptSourcePanel();
-}
+	if (sourceType == ofxGgmlScriptSourceType::GitHubRepo ||
+		sourceType == ofxGgmlScriptSourceType::Internet) {
+		drawScriptSourcePanel();
+	}
 
-ImGui::Text("Describe what you want:");
-ImGui::InputTextMultiline("##ScriptIn", scriptInput, sizeof(scriptInput),
-ImVec2(-1, 100));
+	ImGui::Spacing();
 
-bool useProjectMemory = scriptProjectMemory.isEnabled();
-if (ImGui::Checkbox("Use project memory", &useProjectMemory)) {
-scriptProjectMemory.setEnabled(useProjectMemory);
-}
-ImGui::SameLine();
-ImGui::TextDisabled("(learn from prior script requests in this session)");
-if (ImGui::CollapsingHeader("Project Memory", ImGuiTreeNodeFlags_DefaultOpen)) {
-if (ImGui::SmallButton("Clear Memory")) {
-scriptProjectMemory.clear();
-}
-ImGui::SameLine();
-ImGui::TextDisabled("(%d chars)", static_cast<int>(scriptProjectMemory.getMemoryText().size()));
-ImGui::BeginChild("##ProjectMemory", ImVec2(-1, 100), true);
-ImGui::TextWrapped("%s", scriptProjectMemory.getMemoryText().c_str());
-ImGui::EndChild();
-}
+	// --- 3. Chat History (dynamic size) ---
+	ImGui::Text("Coding Chat:");
+	ImGui::BeginChild("##ScriptChatHistory", ImVec2(-1, -120), true);
+	for (const auto & msg : scriptMessages) {
+		if (msg.role == "user") {
+			ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "You:");
+		} else {
+			ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "AI:");
+		}
+		ImGui::TextWrapped("%s", msg.text.c_str());
+		ImGui::Spacing();
+	}
+	if (generating.load() && activeGenerationMode == AiMode::Script) {
+		ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "AI:");
+		std::string partial;
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			partial = streamingOutput;
+		}
+		if (partial.empty()) {
+			int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+			ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
+		} else {
+			std::string preview;
+			if (!scriptOutput.empty() && partial.size() > scriptOutput.size()) {
+				preview = partial.substr(scriptOutput.size());
+			} else {
+				preview = partial;
+			}
+			ImGui::TextWrapped("%s", preview.c_str());
+		}
+	}
+	
+	if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 40.0f) {
+		ImGui::SetScrollHereY(1.0f);
+	}
+	ImGui::EndChild();
+
+	// --- 4. Multiline Chat Input ---
+	const bool scriptChatSubmitted = ImGui::InputTextMultiline(
+		"##ScriptIn", scriptInput, sizeof(scriptInput), ImVec2(-1, 50),
+		ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine);
 
 auto buildScriptPrompt = [this, sourceType, &scriptSourceFiles](const std::string & body) {
 std::string prompt;
@@ -1739,7 +1948,7 @@ prompt = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].systemPromp
 }
 
 // If a folder or GitHub repo is loaded, provide context about available files
-if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
+if (scriptIncludeRepoContext && sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 	if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 		const std::string folderPath = scriptSource.getLocalFolderPath();
 		prompt += "\nContext: Loaded folder: " + folderPath + "\n";
@@ -1752,8 +1961,8 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 	} else {
 		prompt += "\nContext: Loaded internet sources (URLs):\n";
 	}
-	// List up to 50 files to avoid overly long prompts
-	const size_t maxFilesToList = 50;
+	// List up to a bounded number of files to avoid overly long prompts
+	const size_t maxFilesToList = kMaxScriptContextFiles;
 	size_t fileCount = 0;
 	for (const auto & entry : scriptSourceFiles) {
 		if (!entry.isDirectory) {
@@ -1768,93 +1977,199 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 		}
 	}
 	prompt += "\n";
+
+	if (selectedScriptFileIndex >= 0 &&
+		selectedScriptFileIndex < static_cast<int>(scriptSourceFiles.size())) {
+		const auto & selected = scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)];
+		if (!selected.isDirectory) {
+			std::string selectedContent;
+			if (scriptSource.loadFileContent(selectedScriptFileIndex, selectedContent)) {
+				const size_t maxSelectedSnippet = kMaxFocusedFileSnippetChars;
+				if (selectedContent.size() > maxSelectedSnippet) {
+					selectedContent = selectedContent.substr(0, maxSelectedSnippet) + "\n...[truncated]";
+				}
+				prompt += "Focused file: " + selected.name + "\n";
+				prompt += "Focused file snippet:\n" + selectedContent + "\n\n";
+			}
+		}
+	}
 }
 
 prompt += body;
 return prompt;
 };
 
-ImGui::BeginDisabled(generating.load() || std::strlen(scriptInput) == 0);
-if (ImGui::Button("Generate Code", ImVec2(120, 0))) {
-runInference(AiMode::Script, buildScriptPrompt(scriptInput));
+const bool hasSelectedFile =
+	selectedScriptFileIndex >= 0 &&
+	selectedScriptFileIndex < static_cast<int>(scriptSourceFiles.size()) &&
+	!scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].isDirectory;
+const bool hasUserInput = std::strlen(scriptInput) > 0;
+
+auto buildScriptActionBody = [&](const std::string & defaultForFile,
+	const std::string & prefixForInput) {
+	if (hasSelectedFile) {
+		if (hasUserInput) {
+			return defaultForFile + "\n\nExtra instructions:\n" + std::string(scriptInput);
+		}
+		return defaultForFile;
+	}
+	return prefixForInput + std::string(scriptInput);
+};
+
+struct ScriptActionSpec {
+	const char * label;
+	ImVec2 size;
+	const char * defaultForFile;
+	const char * prefixForInput;
+	bool plainInput;
+};
+
+const ScriptActionSpec actionSpecs[] = {
+	{ "Generate",    ImVec2(100, 0), "Generate improved code for the focused file.", "", true },
+	{ "Explain",     ImVec2(100, 0), "Explain the focused file code.", "Explain the following code:\n", false },
+	{ "Debug",       ImVec2(100, 0), "Find bugs in the focused file code.", "Find bugs in the following code:\n", false },
+	{ "Optimize",    ImVec2(100, 0), "Optimize the focused file code for performance. Show the improved version and explain what changed.", "Optimize the following code for performance. Show the improved version and explain what changed:\n", false },
+	{ "Refactor",    ImVec2(100, 0), "Refactor the focused file code to improve readability, maintainability, and structure. Show the refactored version.", "Refactor the following code to improve readability, maintainability, and structure. Show the refactored version:\n", false },
+	{ "Review Mode", ImVec2(100, 0), "Review the focused file code for bugs, security issues, and style. Provide specific feedback.", "Review the following code for bugs, security issues, and style. Provide specific feedback:\n", false },
+};
+
+bool canSendScriptChat = !generating.load() && hasUserInput;
+
+ImGui::BeginDisabled(generating.load());
+if (canSendScriptChat) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.3f, 1.0f));
+if ((ImGui::Button("Send to Chat", ImVec2(110, 0)) || scriptChatSubmitted) && canSendScriptChat) {
+	const std::string message(scriptInput);
+	scriptMessages.push_back({"user", message, ofGetElapsedTimef()});
+	runInference(AiMode::Script, buildScriptPrompt(message));
+	std::memset(scriptInput, 0, sizeof(scriptInput));
+}
+if (canSendScriptChat) ImGui::PopStyleColor();
+ImGui::SameLine();
+if (ImGui::Button("Clear Chat", ImVec2(90, 0))) {
+	scriptMessages.clear();
+	scriptOutput.clear();
+	lastScriptOutputLikelyCutoff = false;
+	lastScriptOutputTail.clear();
 }
 ImGui::SameLine();
-if (ImGui::Button("Explain Code", ImVec2(110, 0))) {
-runInference(AiMode::Script, buildScriptPrompt(
-	std::string("Explain the following code:\n") + scriptInput));
-}
-ImGui::SameLine();
-if (ImGui::Button("Debug Code", ImVec2(100, 0))) {
-runInference(AiMode::Script, buildScriptPrompt(
-	std::string("Find bugs in the following code:\n") + scriptInput));
-}
-ImGui::SameLine();
-if (ImGui::Button("Optimize", ImVec2(80, 0))) {
-runInference(AiMode::Script, buildScriptPrompt(
-	std::string("Optimize the following code for performance. Show the improved version and explain what changed:\n") + scriptInput));
-}
-ImGui::SameLine();
-if (ImGui::Button("Refactor", ImVec2(80, 0))) {
-runInference(AiMode::Script, buildScriptPrompt(
-	std::string("Refactor the following code to improve readability, maintainability, and structure. Show the refactored version:\n") + scriptInput));
-}
-ImGui::SameLine();
-if (ImGui::Button("Review", ImVec2(70, 0))) {
-runInference(AiMode::Script, buildScriptPrompt(
-	std::string("Review the following code for bugs, security issues, and style. Provide specific feedback:\n") + scriptInput));
+
+ImGui::BeginDisabled(generating.load() || !lastScriptOutputLikelyCutoff || lastScriptOutputTail.empty());
+if (ImGui::Button("Continue cutoff", ImVec2(120, 0))) {
+	const std::string continuation = buildCutoffContinuationRequest(lastScriptOutputTail);
+	scriptMessages.push_back({"user", "Continue from cutoff.", ofGetElapsedTimef()});
+	runInference(AiMode::Script, buildScriptPrompt(continuation));
 }
 ImGui::EndDisabled();
+ImGui::SameLine();
 
 // Review all files button (enabled when folder/repo is loaded)
 if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
-	ImGui::BeginDisabled(generating.load());
 	if (ImGui::Button("Review All Files", ImVec2(120, 0))) {
+		scriptMessages.push_back({"user", "Review all files in loaded " + std::string(sourceType == ofxGgmlScriptSourceType::LocalFolder ? "folder" : "repo") + ".", ofGetElapsedTimef()});
 		runHierarchicalReview();
 	}
-	ImGui::EndDisabled();
-
 	if (ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("Run embedding-powered, multi-pass review over the loaded folder/repository");
 	}
 }
 
+const bool hasScriptOutput = !scriptOutput.empty();
+const bool hasLastTask = !lastScriptRequest.empty();
+
 // Save output to source.
-if (!scriptOutput.empty() && sourceType == ofxGgmlScriptSourceType::LocalFolder) {
-ImGui::SameLine();
-if (ImGui::Button("Save to Folder", ImVec2(130, 0))) {
-std::string filename = buildScriptFilename();
-scriptSource.saveToLocalSource(filename, scriptOutput);
-}
+if (hasScriptOutput && sourceType == ofxGgmlScriptSourceType::LocalFolder) {
+	ImGui::SameLine();
+	if (ImGui::Button("Save Output", ImVec2(120, 0))) {
+		std::string filename = buildScriptFilename();
+		scriptSource.saveToLocalSource(filename, scriptOutput);
+	}
 }
 
-ImGui::Separator();
-ImGui::Text("Output:");
-if (!scriptOutput.empty()) {
-ImGui::SameLine();
-if (ImGui::SmallButton("Copy##ScriptCopy")) copyToClipboard(scriptOutput);
-ImGui::SameLine();
-if (ImGui::SmallButton("Clear##ScriptClear")) scriptOutput.clear();
-ImGui::SameLine();
-ImGui::TextDisabled("(%d chars)", static_cast<int>(scriptOutput.size()));
+ImGui::EndDisabled();
+
+ImGui::Spacing();
+ImGui::TextDisabled("Quick Actions:");
+ImGui::BeginDisabled(generating.load() || (!hasUserInput && !hasSelectedFile));
+for (size_t i = 0; i < std::size(actionSpecs); i++) {
+	const auto & spec = actionSpecs[i];
+	if (ImGui::Button(spec.label, spec.size)) {
+		std::string body;
+		if (spec.plainInput) {
+			body = hasUserInput ? std::string(scriptInput) : std::string(spec.defaultForFile);
+		} else {
+			body = buildScriptActionBody(spec.defaultForFile, spec.prefixForInput);
+		}
+		
+		std::string chatActionLabel = std::string(spec.label) + (hasSelectedFile ? " focused file." : "");
+		if (hasUserInput) chatActionLabel += " Instructions: " + std::string(scriptInput);
+		
+		scriptMessages.push_back({"user", chatActionLabel, ofGetElapsedTimef()});
+		runInference(AiMode::Script, buildScriptPrompt(body));
+		std::memset(scriptInput, 0, sizeof(scriptInput));
+	}
+	if (i + 1 < std::size(actionSpecs)) {
+		ImGui::SameLine();
+	}
 }
-if (generating.load() && activeGenerationMode == AiMode::Script) {
-ImGui::BeginChild("##ScriptOut", ImVec2(0, 0), true);
-std::string partial;
-{
-std::lock_guard<std::mutex> lock(streamMutex);
-partial = streamingOutput;
-}
-if (partial.empty()) {
-int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
-ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
-} else {
-ImGui::TextWrapped("%s", partial.c_str());
-}
-ImGui::EndChild();
-} else {
-ImGui::BeginChild("##ScriptOut", ImVec2(0, 0), true);
-ImGui::TextWrapped("%s", scriptOutput.c_str());
-ImGui::EndChild();
+ImGui::EndDisabled();
+
+if (ImGui::CollapsingHeader("Tools & Memory")) {
+	bool useProjectMemory = scriptProjectMemory.isEnabled();
+	if (ImGui::Checkbox("Use project memory", &useProjectMemory)) {
+		scriptProjectMemory.setEnabled(useProjectMemory);
+	}
+	ImGui::SameLine();
+	ImGui::Checkbox("Include repo context", &scriptIncludeRepoContext);
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Include loaded file list and selected file snippet in script prompts");
+	
+	ImGui::BeginDisabled(generating.load() || (!hasScriptOutput && !hasLastTask));
+	if (ImGui::Button("Continue Task", ImVec2(120, 0))) {
+		std::string followup = "Continue the task from the previous response. Keep the same intent and provide next concrete steps.\n\n";
+		if (hasScriptOutput) followup += "Previous response:\n" + scriptOutput;
+		scriptMessages.push_back({"user", "Continue the previous task.", ofGetElapsedTimef()});
+		runInference(AiMode::Script, buildScriptPrompt(followup));
+	}
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Continue from the latest coding response without rewriting your full prompt.");
+	ImGui::SameLine();
+	if (ImGui::Button("Shorter", ImVec2(80, 0))) {
+		std::string req = hasLastTask ? lastScriptRequest : std::string("Rewrite the previous response");
+		req += "\n\nProvide a shorter answer. Keep only essential code and brief explanation.";
+		scriptMessages.push_back({"user", "Provide a shorter answer for the previous task.", ofGetElapsedTimef()});
+		runInference(AiMode::Script, buildScriptPrompt(req));
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("More Detail", ImVec2(90, 0))) {
+		std::string req = hasLastTask ? lastScriptRequest : std::string("Expand the previous response");
+		req += "\n\nProvide a more detailed answer with reasoning, edge cases, and step-by-step implementation notes.";
+		scriptMessages.push_back({"user", "Provide more detail for the previous task.", ofGetElapsedTimef()});
+		runInference(AiMode::Script, buildScriptPrompt(req));
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Long Code Preset", ImVec2(120, 0))) {
+		maxTokens = std::max(maxTokens, 2048);
+		contextSize = std::max(contextSize, 8192);
+		temperature = 0.35f;
+		topP = 0.92f;
+		topK = std::max(topK, 60);
+		minP = std::max(minP, 0.05f);
+		repeatPenalty = 1.05f;
+	}
+	
+	if (ImGui::Button("Reuse Last Task", ImVec2(120, 0))) {
+		if (hasLastTask) {
+			size_t maxLen = sizeof(scriptInput) - 1;
+			std::strncpy(scriptInput, lastScriptRequest.c_str(), maxLen);
+			scriptInput[maxLen] = '\0';
+		}
+	}
+	ImGui::EndDisabled();
+
+	if (ImGui::SmallButton("Clear Project Memory")) scriptProjectMemory.clear();
+	ImGui::SameLine();
+	ImGui::TextDisabled("Learned context (%d chars)", static_cast<int>(scriptProjectMemory.getMemoryText().size()));
+	ImGui::BeginChild("##ProjectMemory", ImVec2(-1, 80), true);
+	ImGui::TextWrapped("%s", scriptProjectMemory.getMemoryText().c_str());
+	ImGui::EndChild();
 }
 }
 
@@ -1945,10 +2260,7 @@ return "generated_" + ofToString(ms) + ext;
 // ---------------------------------------------------------------------------
 
 void ofApp::drawSummarizePanel() {
-ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Summarize");
-ImGui::SameLine();
-ImGui::TextDisabled("(condense text into key points)");
-ImGui::Separator();
+drawPanelHeader("Summarize", "condense text into key points");
 
 ImGui::Text("Paste text to summarize:");
 ImGui::InputTextMultiline("##SumIn", summarizeInput, sizeof(summarizeInput),
@@ -2006,10 +2318,7 @@ ImGui::EndChild();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawWritePanel() {
-ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Writing Assistant");
-ImGui::SameLine();
-ImGui::TextDisabled("(rewrite, expand, polish text)");
-ImGui::Separator();
+drawPanelHeader("Writing Assistant", "rewrite, expand, polish text");
 
 ImGui::Text("Enter your text:");
 ImGui::InputTextMultiline("##WriteIn", writeInput, sizeof(writeInput),
@@ -2086,10 +2395,7 @@ static constexpr int kTranslateLangCount = static_cast<int>(
 sizeof(kTranslateLanguages) / sizeof(kTranslateLanguages[0]));
 
 void ofApp::drawTranslatePanel() {
-ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Translate");
-ImGui::SameLine();
-ImGui::TextDisabled("(translate text between languages)");
-ImGui::Separator();
+drawPanelHeader("Translate", "translate text between languages");
 
 ImGui::Text("Source language:");
 ImGui::SameLine();
@@ -2160,10 +2466,7 @@ ImGui::EndChild();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawCustomPanel() {
-ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Custom Prompt");
-ImGui::SameLine();
-ImGui::TextDisabled("(configure system prompt + user input)");
-ImGui::Separator();
+drawPanelHeader("Custom Prompt", "configure system prompt + user input");
 
 // Prompt template selector.
 if (!promptTemplates.empty()) {
@@ -2256,7 +2559,12 @@ ImGui::SameLine();
 ImGui::Text(" | Lang: %s", scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].name.c_str());
 }
 ImGui::SameLine();
-ImGui::Text(" | Tokens: %d  Temp: %.2f  Top-P: %.2f", maxTokens, temperature, topP);
+ImGui::Text(" | Tokens: %d  Temp: %.2f  Top-P: %.2f  Top-K: %d  Min-P: %.2f",
+	maxTokens, temperature, topP, topK, minP);
+if (strictOfflineMode) {
+	ImGui::SameLine();
+	ImGui::TextDisabled(" | Offline");
+}
 if (gpuLayers > 0) {
 ImGui::SameLine();
 if (detectedModelLayers > 0) {
@@ -2273,6 +2581,16 @@ float elapsed = ofGetElapsedTimef() - generationStartTime;
 char statusLabel[64];
 snprintf(statusLabel, sizeof(statusLabel), " | %c Generating... (%.1fs)", spinner[spinIdx], elapsed);
 ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "%s", statusLabel);
+	std::string partial;
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		partial = streamingOutput;
+	}
+	if (elapsed > 0.2f && !partial.empty()) {
+		const float cps = static_cast<float>(partial.size()) / elapsed;
+		ImGui::SameLine();
+		ImGui::TextDisabled(" | %.0f chars/s", cps);
+	}
 } else if (lastComputeMs > 0.0f) {
 ImGui::SameLine();
 ImGui::TextDisabled(" | Last: %.1f ms", lastComputeMs);
@@ -2395,6 +2713,8 @@ out << "language=" << selectedLanguageIndex << "\n";
 out << "maxTokens=" << maxTokens << "\n";
 out << "temperature=" << ofToString(temperature, 4) << "\n";
 out << "topP=" << ofToString(topP, 4) << "\n";
+out << "topK=" << topK << "\n";
+out << "minP=" << ofToString(minP, 4) << "\n";
 out << "repeatPenalty=" << ofToString(repeatPenalty, 4) << "\n";
 out << "contextSize=" << contextSize << "\n";
 out << "batchSize=" << batchSize << "\n";
@@ -2414,6 +2734,12 @@ out << "theme=" << themeIndex << "\n";
 out << "mirostatMode=" << mirostatMode << "\n";
 out << "mirostatTau=" << ofToString(mirostatTau, 4) << "\n";
 out << "mirostatEta=" << ofToString(mirostatEta, 4) << "\n";
+out << "useModeTokenBudgets=" << (useModeTokenBudgets ? 1 : 0) << "\n";
+out << "autoContinueCutoff=" << (autoContinueCutoff ? 1 : 0) << "\n";
+for (int i = 0; i < kModeCount; i++) {
+	out << "modeTokenBudget" << i << "="
+		<< std::clamp(modeMaxTokens[static_cast<size_t>(i)], 32, 4096) << "\n";
+}
 out << "logLevel=" << static_cast<int>(logLevel) << "\n";
 
 // Script source.
@@ -2432,6 +2758,7 @@ out << "scriptSourceBranch=" << escapeSessionText(scriptSourceBranch) << "\n";
 }
 out << "useProjectMemory=" << (scriptProjectMemory.isEnabled() ? 1 : 0) << "\n";
 out << "projectMemory=" << escapeSessionText(scriptProjectMemory.getMemoryText()) << "\n";
+	out << "scriptIncludeRepoContext=" << (scriptIncludeRepoContext ? 1 : 0) << "\n";
 
 // Input buffers.
 out << "chatInput=" << escapeSessionText(chatInput) << "\n";
@@ -2450,7 +2777,9 @@ out << "summarizeOutput=" << escapeSessionText(summarizeOutput) << "\n";
 out << "writeOutput=" << escapeSessionText(writeOutput) << "\n";
 out << "translateOutput=" << escapeSessionText(translateOutput) << "\n";
 out << "customOutput=" << escapeSessionText(customOutput) << "\n";
-out << "chatAutoInternet=" << (chatAutoInternet ? 1 : 0) << "\n";
+out << "internetContextAllModes=" << (internetContextAllModes ? 1 : 0) << "\n";
+out << "strictOfflineMode=" << (strictOfflineMode ? 1 : 0) << "\n";
+out << "stopAtNaturalBoundary=" << (stopAtNaturalBoundary ? 1 : 0) << "\n";
 
 // Chat messages.
 out << "chatMessageCount=" << chatMessages.size() << "\n";
@@ -2523,6 +2852,8 @@ else if (key == "language") {
 else if (key == "maxTokens") maxTokens = std::clamp(safeStoi(value, 256), 32, 4096);
 else if (key == "temperature") temperature = std::clamp(safeStof(value, 0.7f), 0.0f, 2.0f);
 else if (key == "topP") topP = std::clamp(safeStof(value, 0.9f), 0.0f, 1.0f);
+else if (key == "topK") topK = std::clamp(safeStoi(value, 40), 0, 200);
+else if (key == "minP") minP = std::clamp(safeStof(value, 0.0f), 0.0f, 1.0f);
 else if (key == "repeatPenalty") repeatPenalty = std::clamp(safeStof(value, 1.1f), 1.0f, 2.0f);
 else if (key == "contextSize") contextSize = std::clamp(safeStoi(value, 2048), 256, 16384);
 else if (key == "batchSize") batchSize = std::clamp(safeStoi(value, 512), 32, 4096);
@@ -2557,6 +2888,17 @@ else if (key == "theme") {
 else if (key == "mirostatMode") mirostatMode = std::clamp(safeStoi(value), 0, 2);
 else if (key == "mirostatTau") mirostatTau = std::clamp(safeStof(value, 5.0f), 0.0f, 10.0f);
 else if (key == "mirostatEta") mirostatEta = std::clamp(safeStof(value, 0.1f), 0.0f, 1.0f);
+else if (key == "useModeTokenBudgets") useModeTokenBudgets = (safeStoi(value, 1) != 0);
+else if (key == "autoContinueCutoff") autoContinueCutoff = (safeStoi(value, 0) != 0);
+else if (key.rfind("modeTokenBudget", 0) == 0) {
+	try {
+		int idx = std::stoi(key.substr(std::strlen("modeTokenBudget")));
+		if (idx >= 0 && idx < kModeCount) {
+			modeMaxTokens[static_cast<size_t>(idx)] = std::clamp(safeStoi(value, 512), 32, 4096);
+		}
+	} catch (...) {
+	}
+}
 else if (key == "logLevel") {
 	int lvl = std::clamp(
 		safeStoi(value, static_cast<int>(OF_LOG_NOTICE)),
@@ -2581,6 +2923,7 @@ else if (key == "useProjectMemory") scriptProjectMemory.setEnabled(safeStoi(valu
 else if (key == "projectMemory") {
 scriptProjectMemory.setMemoryText(unescapeSessionText(value));
 }
+else if (key == "scriptIncludeRepoContext") scriptIncludeRepoContext = (safeStoi(value, 1) != 0);
 else if (key == "chatInput") copyToBuf(chatInput, sizeof(chatInput), value);
 else if (key == "scriptInput") copyToBuf(scriptInput, sizeof(scriptInput), value);
 else if (key == "summarizeInput") copyToBuf(summarizeInput, sizeof(summarizeInput), value);
@@ -2595,7 +2938,9 @@ else if (key == "summarizeOutput") summarizeOutput = unescapeSessionText(value);
 else if (key == "writeOutput") writeOutput = unescapeSessionText(value);
 else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
 else if (key == "customOutput") customOutput = unescapeSessionText(value);
-else if (key == "chatAutoInternet") chatAutoInternet = (safeStoi(value, 1) != 0);
+else if (key == "internetContextAllModes") internetContextAllModes = (safeStoi(value, 0) != 0);
+else if (key == "strictOfflineMode") strictOfflineMode = (safeStoi(value, 0) != 0);
+else if (key == "stopAtNaturalBoundary") stopAtNaturalBoundary = (safeStoi(value, 1) != 0);
 else if (key == "msg") {
 // Parse: role|timestamp|text
 size_t sep1 = value.find('|');
@@ -2648,6 +2993,12 @@ if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::LocalFol
 	selectedScriptFileIndex = -1;
 }
 
+if (useModeTokenBudgets) {
+	maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(activeMode)], 32, 4096);
+} else {
+	modeMaxTokens[static_cast<size_t>(activeMode)] = std::clamp(maxTokens, 32, 4096);
+}
+
 return true;
 }
 
@@ -2669,8 +3020,13 @@ loadSession(lastSessionPath);
 std::string ofApp::getSelectedModelPath() const {
 	if (modelPresets.empty()) return "";
 	if (selectedModelIndex < 0 || selectedModelIndex >= static_cast<int>(modelPresets.size())) return "";
+	if (cachedModelPathIndex == selectedModelIndex && !cachedModelPath.empty()) {
+		return cachedModelPath;
+	}
 	const auto & preset = modelPresets[static_cast<size_t>(selectedModelIndex)];
-	return ofToDataPath(ofFilePath::join("models", preset.filename), true);
+	cachedModelPath = ofToDataPath(ofFilePath::join("models", preset.filename), true);
+	cachedModelPathIndex = selectedModelIndex;
+	return cachedModelPath;
 }
 
 void ofApp::detectModelLayers() {
@@ -2733,7 +3089,7 @@ size_t countLines(const std::string & text) {
 }
 
 size_t estimateCyclomaticComplexity(const std::string & text) {
-	static const std::vector<std::string> tokens = {
+	static constexpr const char * tokens[] = {
 		" if ", " for ", " while ", " case ", "&&", "||", "?", " catch ", " else if ",
 		" switch ", " foreach ", " guard ", " when ", " except ", " elif ", " goto "
 	};
@@ -2743,10 +3099,11 @@ size_t estimateCyclomaticComplexity(const std::string & text) {
 		return static_cast<char>(std::tolower(c));
 	});
 	for (const auto & tok : tokens) {
+		const std::string token(tok);
 		size_t pos = 0;
-		while ((pos = lower.find(tok, pos)) != std::string::npos) {
+		while ((pos = lower.find(token, pos)) != std::string::npos) {
 			++score;
-			pos += tok.size();
+			pos += token.size();
 		}
 	}
 	return score;
@@ -2772,10 +3129,12 @@ std::vector<std::string> extractDependencies(const std::string & text) {
 				}
 			}
 			size_t lt = trimmed.find('<');
-			size_t gt = trimmed.find('>', lt == std::string::npos ? 0 : lt + 1);
-			if (lt != std::string::npos && gt != std::string::npos && gt > lt + 1) {
-				addDep(trimmed.substr(lt + 1, gt - lt - 1));
-				continue;
+			if (lt != std::string::npos) {
+				size_t gt = trimmed.find('>', lt + 1);
+				if (gt != std::string::npos && gt > lt + 1) {
+					addDep(trimmed.substr(lt + 1, gt - lt - 1));
+					continue;
+				}
 			}
 		}
 		// import / require / from statements
@@ -2783,9 +3142,10 @@ std::vector<std::string> extractDependencies(const std::string & text) {
 		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
 			return static_cast<char>(std::tolower(c));
 		});
-		const std::vector<std::string> prefixes = {"import ", "from ", "require("};
+		static constexpr const char * prefixes[] = {"import ", "from ", "require("};
 		for (const auto & p : prefixes) {
-			if (lower.rfind(p, 0) == 0) {
+			const std::string prefix(p);
+			if (lower.rfind(prefix, 0) == 0) {
 				size_t quote = trimmed.find('"');
 				if (quote == std::string::npos) quote = trimmed.find('\'');
 				if (quote != std::string::npos) {
@@ -2795,7 +3155,7 @@ std::vector<std::string> extractDependencies(const std::string & text) {
 					}
 				} else {
 					// fallback: grab next token
-					std::istringstream ls(trimmed.substr(p.size()));
+					std::istringstream ls(trimmed.substr(prefix.size()));
 					std::string dep;
 					if (ls >> dep) addDep(dep);
 				}
@@ -2811,18 +3171,18 @@ float importanceFromExtension(const std::string & name) {
 	std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
 		return static_cast<char>(std::tolower(c));
 	});
-	const std::vector<std::string> coreExt = {
+	static constexpr const char * coreExt[] = {
 		".cpp", ".c", ".h", ".hpp", ".cc", ".hh", ".cxx", ".hxx",
 		".py", ".js", ".ts", ".go", ".rs", ".java", ".kt", ".swift",
 		".cs", ".m", ".mm"
 	};
-	const std::vector<std::string> testExt = {
+	static constexpr const char * testExt[] = {
 		".spec", ".test", ".tests", ".stories", ".snap"
 	};
-	const std::vector<std::string> docExt = {
+	static constexpr const char * docExt[] = {
 		".md", ".rst", ".txt"
 	};
-	const std::vector<std::string> configExt = {
+	static constexpr const char * configExt[] = {
 		".json", ".yaml", ".yml", ".toml", ".ini"
 	};
 
@@ -2830,20 +3190,23 @@ float importanceFromExtension(const std::string & name) {
 		if (lower.rfind(ext) != std::string::npos) return 0.7f;
 	}
 	for (const auto & ext : docExt) {
-		if (lower.size() >= ext.size() &&
-			lower.compare(lower.size() - ext.size(), ext.size(), ext) == 0) {
+		const size_t len = std::char_traits<char>::length(ext);
+		if (lower.size() >= len &&
+			lower.compare(lower.size() - len, len, ext) == 0) {
 			return 0.3f;
 		}
 	}
 	for (const auto & ext : configExt) {
-		if (lower.size() >= ext.size() &&
-			lower.compare(lower.size() - ext.size(), ext.size(), ext) == 0) {
+		const size_t len = std::char_traits<char>::length(ext);
+		if (lower.size() >= len &&
+			lower.compare(lower.size() - len, len, ext) == 0) {
 			return 0.5f;
 		}
 	}
 	for (const auto & ext : coreExt) {
-		if (lower.size() >= ext.size() &&
-			lower.compare(lower.size() - ext.size(), ext.size(), ext) == 0) {
+		const size_t len = std::char_traits<char>::length(ext);
+		if (lower.size() >= len &&
+			lower.compare(lower.size() - len, len, ext) == 0) {
 			return 1.2f;
 		}
 	}
@@ -3082,12 +3445,9 @@ std::vector<ScriptFileReviewInfo *> ofApp::selectFilesForReview(
 	return chosen;
 }
 
-std::string ofApp::runFileSummary(const ScriptFileReviewInfo & info,
-	const std::string & reviewQuery,
-	int perFileBudget,
-	const std::string & modelPath) {
+ofxGgmlInferenceSettings ofApp::makeReviewInferenceSettings(int tokenBudget) const {
 	ofxGgmlInferenceSettings settings;
-	settings.maxTokens = std::clamp(perFileBudget, 96, maxTokens);
+	settings.maxTokens = std::clamp(tokenBudget, 96, maxTokens);
 	settings.temperature = temperature;
 	settings.topP = topP;
 	settings.repeatPenalty = repeatPenalty;
@@ -3096,6 +3456,14 @@ std::string ofApp::runFileSummary(const ScriptFileReviewInfo & info,
 	settings.gpuLayers = gpuLayers;
 	settings.threads = numThreads;
 	settings.simpleIo = true;
+	return settings;
+}
+
+std::string ofApp::runFileSummary(const ScriptFileReviewInfo & info,
+	const std::string & reviewQuery,
+	int perFileBudget,
+	const std::string & modelPath) {
+	auto settings = makeReviewInferenceSettings(perFileBudget);
 
 	std::ostringstream prompt;
 	prompt << "First pass: Review this single file in isolation. "
@@ -3126,33 +3494,25 @@ std::string ofApp::runArchitectureReview(
 	const std::string & repoTree,
 	const std::string & reviewQuery,
 	const std::string & modelPath) {
-	ofxGgmlInferenceSettings settings;
-	settings.maxTokens = maxTokens;
-	settings.temperature = temperature;
-	settings.topP = topP;
-	settings.repeatPenalty = repeatPenalty;
-	settings.contextSize = contextSize;
-	settings.batchSize = batchSize;
-	settings.gpuLayers = gpuLayers;
-	settings.threads = numThreads;
-	settings.simpleIo = true;
+	auto settings = makeReviewInferenceSettings(maxTokens);
 
-	std::ostringstream prompt;
-	prompt << "Second pass: Architectural review using only the summaries below.\n";
-	prompt << "Request: " << reviewQuery << "\n\n";
-	prompt << repoTree << "\n";
-	prompt << "File summaries:\n";
+	std::string prompt;
+	prompt.reserve(repoTree.size() + reviewQuery.size() + 8192);
+	prompt += "Second pass: Architectural review using only the summaries below.\n";
+	prompt += "Request: " + reviewQuery + "\n\n";
+	prompt += repoTree + "\n";
+	prompt += "File summaries:\n";
 	int listed = 0;
 	for (const auto & f : files) {
 		if (f->summary.empty()) continue;
-		prompt << "- " << f->name << ": " << f->summary << "\n";
+		prompt += "- " + f->name + ": " + f->summary + "\n";
 		if (++listed >= 24) break; // guard context
 	}
-	prompt << "\nIdentify architecture, layering, and dependency issues. "
+	prompt += "\nIdentify architecture, layering, and dependency issues. "
 		"Highlight risky boundaries, missing invariants, and testing gaps. "
 		"Keep output concise and actionable.\n";
 
-	auto result = scriptReviewInference.generate(modelPath, prompt.str(), settings);
+	auto result = scriptReviewInference.generate(modelPath, prompt, settings);
 	if (!result.success) {
 		return "[error] " + result.error;
 	}
@@ -3164,35 +3524,27 @@ std::string ofApp::runIntegrationReview(
 	const std::string & repoTree,
 	const std::string & reviewQuery,
 	const std::string & modelPath) {
-	ofxGgmlInferenceSettings settings;
-	settings.maxTokens = maxTokens;
-	settings.temperature = temperature;
-	settings.topP = topP;
-	settings.repeatPenalty = repeatPenalty;
-	settings.contextSize = contextSize;
-	settings.batchSize = batchSize;
-	settings.gpuLayers = gpuLayers;
-	settings.threads = numThreads;
-	settings.simpleIo = true;
+	auto settings = makeReviewInferenceSettings(maxTokens);
 
-	std::ostringstream prompt;
-	prompt << "Third pass: Cross-file dependency and integration analysis.\n";
-	prompt << "Request: " << reviewQuery << "\n\n";
-	prompt << repoTree << "\n";
-	prompt << "Per-file findings:\n";
+	std::string prompt;
+	prompt.reserve(repoTree.size() + reviewQuery.size() + 8192);
+	prompt += "Third pass: Cross-file dependency and integration analysis.\n";
+	prompt += "Request: " + reviewQuery + "\n\n";
+	prompt += repoTree + "\n";
+	prompt += "Per-file findings:\n";
 	int listed = 0;
 	for (const auto & f : files) {
 		if (f->summary.empty()) continue;
-		prompt << "- " << f->name << " (fan-in " << f->dependencyFanIn
-			<< ", fan-out " << f->dependencyFanOut << "): "
-			<< f->summary << "\n";
+		prompt += "- " + f->name + " (fan-in " + std::to_string(f->dependencyFanIn)
+			+ ", fan-out " + std::to_string(f->dependencyFanOut) + "): "
+			+ f->summary + "\n";
 		if (++listed >= 24) break;
 	}
-	prompt << "\nFocus on contract mismatches, API misuse, inconsistent assumptions, "
+	prompt += "\nFocus on contract mismatches, API misuse, inconsistent assumptions, "
 		"shared state, and missing integration tests. "
 		"Propose cross-file actions and dependency trims.\n";
 
-	auto result = scriptReviewInference.generate(modelPath, prompt.str(), settings);
+	auto result = scriptReviewInference.generate(modelPath, prompt, settings);
 	if (!result.success) {
 		return "[error] " + result.error;
 	}
@@ -3263,8 +3615,13 @@ void ofApp::runHierarchicalReview() {
 				(scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder)
 					? scriptSource.getLocalFolderPath() : "";
 			computeFileHeuristics(files, baseFolder);
+			if (cancelRequested.load()) {
+				setError("[Cancelled] Review cancelled.");
+				generating.store(false);
+				return;
+			}
 
-			const std::string toc = buildRepoTableOfContents(files, 50);
+			const std::string toc = buildRepoTableOfContents(files, kMaxReviewTocFiles);
 			const std::string repoTree = buildRepoTree(files);
 
 			{
@@ -3280,17 +3637,22 @@ void ofApp::runHierarchicalReview() {
 			} else {
 				logWithLevel(OF_LOG_WARNING, "embedding query failed: " + queryEmbed.error);
 			}
+			if (cancelRequested.load()) {
+				setError("[Cancelled] Review cancelled.");
+				generating.store(false);
+				return;
+			}
 
 			// Build embeddings for all files (parallel, bounded).
 			scriptEmbeddingIndex.clear();
-			const size_t maxEmbedParallel = std::max<size_t>(1, std::min<size_t>(4, std::thread::hardware_concurrency()));
+			const size_t maxEmbedParallel = std::max<size_t>(1, std::min<size_t>(kMaxEmbeddingParallelTasks, std::thread::hardware_concurrency()));
 			std::mutex embedMutex;
 			std::vector<std::future<void>> embedTasks;
 			for (auto & f : files) {
 				auto task = std::async(std::launch::async, [this, &f, &modelPath, &embedMutex]() {
 					std::string snippet = f.truncatedContent;
-					if (snippet.size() > 4000) {
-						snippet = slidingWindowText(snippet, 4000);
+					if (snippet.size() > kMaxEmbeddingSnippetChars) {
+						snippet = slidingWindowText(snippet, kMaxEmbeddingSnippetChars);
 					}
 					auto er = scriptReviewInference.embed(modelPath, snippet);
 					if (er.success) {
@@ -3308,6 +3670,11 @@ void ofApp::runHierarchicalReview() {
 				if (cancelRequested.load()) break;
 			}
 			for (auto & t : embedTasks) t.get();
+			if (cancelRequested.load()) {
+				setError("[Cancelled] Review cancelled.");
+				generating.store(false);
+				return;
+			}
 
 			if (!queryEmbedding.empty()) {
 				for (auto & f : files) {
@@ -3330,7 +3697,7 @@ void ofApp::runHierarchicalReview() {
 				streamingOutput = "Running first-pass summaries...";
 			}
 
-			const size_t maxSummaryParallel = std::max<size_t>(1, std::min<size_t>(3, std::thread::hardware_concurrency()));
+			const size_t maxSummaryParallel = std::max<size_t>(1, std::min<size_t>(kMaxSummaryParallelTasks, std::thread::hardware_concurrency()));
 			std::vector<std::future<void>> summaryTasks;
 			for (auto * f : selected) {
 				auto task = std::async(std::launch::async, [this, f, &reviewQuery, &modelPath, responseReserve]() {
@@ -3345,18 +3712,33 @@ void ofApp::runHierarchicalReview() {
 				if (cancelRequested.load()) break;
 			}
 			for (auto & t : summaryTasks) t.get();
+			if (cancelRequested.load()) {
+				setError("[Cancelled] Review cancelled.");
+				generating.store(false);
+				return;
+			}
 
 			{
 				std::lock_guard<std::mutex> lock(streamMutex);
 				streamingOutput = "Aggregating architecture review...";
 			}
 			const std::string archReview = runArchitectureReview(selected, repoTree, reviewQuery, modelPath);
+			if (cancelRequested.load()) {
+				setError("[Cancelled] Review cancelled.");
+				generating.store(false);
+				return;
+			}
 
 			{
 				std::lock_guard<std::mutex> lock(streamMutex);
 				streamingOutput = "Running integration analysis...";
 			}
 			const std::string integrationReview = runIntegrationReview(selected, repoTree, reviewQuery, modelPath);
+			if (cancelRequested.load()) {
+				setError("[Cancelled] Review cancelled.");
+				generating.store(false);
+				return;
+			}
 
 			std::ostringstream summaries;
 			for (auto * f : selected) {
@@ -3452,7 +3834,8 @@ std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
 }
 
 bool ofApp::runRealInference(const std::string & prompt, std::string & output, std::string & error,
-	std::function<void(const std::string &)> onStreamData) {
+	std::function<void(const std::string &)> onStreamData,
+	bool preserveLlamaInstructions) {
 	output.clear();
 	error.clear();
 
@@ -3479,6 +3862,7 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 			return false;
 		}
 	}
+	probeCliCapabilities();
 
 	std::error_code tempEc;
 	std::string dataDir = std::filesystem::temp_directory_path(tempEc).string();
@@ -3504,6 +3888,8 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	const int safeMaxTokens = std::clamp(maxTokens, 1, 8192);
 	const float safeTemp = (std::isfinite(temperature) ? std::clamp(temperature, 0.0f, 2.0f) : kDefaultTemp);
 	const float safeTopP = (std::isfinite(topP) ? std::clamp(topP, 0.0f, 1.0f) : kDefaultTopP);
+const int safeTopK = std::clamp(topK, 0, 200);
+const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0f);
 	const float safeRepeatPenalty = (std::isfinite(repeatPenalty) ? std::clamp(repeatPenalty, 1.0f, 2.0f) : kDefaultRepeatPenalty);
 	const int safeThreads = std::clamp(numThreads, 1, 128);
 	const int safeContext = std::clamp(contextSize, 256, 16384);
@@ -3520,35 +3906,55 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	repeatPenaltyStr << std::fixed << std::setprecision(3) << safeRepeatPenalty;
 
 	auto makeArgs = [&](bool shortFlags) {
-		std::vector<std::string> out = {
-			llamaCliCommand,
-			"-m", modelPath,
-			(shortFlags ? "-f" : "--file"), promptPath,
-			"-n", ofToString(safeMaxTokens),
-			"-c", ofToString(safeContext),
-			"-b", ofToString(safeBatch),
-			"-ngl", ofToString(effectiveGpuLayers),
-			"--temp", tempStr.str(),
-			"--top-p", topPStr.str(),
-			"--repeat-penalty", repeatPenaltyStr.str(),
-			(shortFlags ? "-t" : "--threads"), ofToString(safeThreads),
-			"--no-display-prompt",
-			"--simple-io"
-		};
-		if (seed >= 0) {
-			out.push_back("--seed");
-			out.push_back(ofToString(seed));
+		std::vector<std::string> out;
+		out.reserve(32);
+		out.emplace_back(llamaCliCommand);
+		out.emplace_back("-m");
+		out.emplace_back(modelPath);
+		out.emplace_back(shortFlags ? "-f" : "--file");
+		out.emplace_back(promptPath);
+		out.emplace_back("-n");
+		out.emplace_back(ofToString(safeMaxTokens));
+		out.emplace_back("-c");
+		out.emplace_back(ofToString(safeContext));
+		out.emplace_back("-b");
+		out.emplace_back(ofToString(safeBatch));
+		out.emplace_back("-ngl");
+		out.emplace_back(ofToString(effectiveGpuLayers));
+		out.emplace_back("--temp");
+		out.emplace_back(tempStr.str());
+		out.emplace_back("--top-p");
+		out.emplace_back(topPStr.str());
+		if (safeTopK > 0 && cliSupportsTopK) {
+			out.emplace_back("--top-k");
+			out.emplace_back(ofToString(safeTopK));
 		}
-		if (mirostatMode == 1 || mirostatMode == 2) {
-			out.push_back("--mirostat");
-			out.push_back(ofToString(mirostatMode));
+		if (safeMinP > 0.0f && cliSupportsMinP) {
+			std::ostringstream minPStr;
+			minPStr << std::fixed << std::setprecision(3) << safeMinP;
+			out.emplace_back("--min-p");
+			out.emplace_back(minPStr.str());
+		}
+		out.emplace_back("--repeat-penalty");
+		out.emplace_back(repeatPenaltyStr.str());
+		out.emplace_back(shortFlags ? "-t" : "--threads");
+		out.emplace_back(ofToString(safeThreads));
+		out.emplace_back("--no-display-prompt");
+		out.emplace_back("--simple-io");
+		if (seed >= 0) {
+			out.emplace_back("--seed");
+			out.emplace_back(ofToString(seed));
+		}
+		if ((mirostatMode == 1 || mirostatMode == 2) && cliSupportsMirostat) {
+			out.emplace_back("--mirostat");
+			out.emplace_back(ofToString(mirostatMode));
 			std::ostringstream tauStr, etaStr;
 			tauStr << std::fixed << std::setprecision(3) << std::clamp(mirostatTau, 0.0f, 20.0f);
 			etaStr << std::fixed << std::setprecision(3) << std::clamp(mirostatEta, 0.0f, 1.0f);
-			out.push_back("--mirostat-lr");
-			out.push_back(etaStr.str());
-			out.push_back("--mirostat-ent");
-			out.push_back(tauStr.str());
+			out.emplace_back("--mirostat-lr");
+			out.emplace_back(etaStr.str());
+			out.emplace_back("--mirostat-ent");
+			out.emplace_back(tauStr.str());
 		}
 		return out;
 	};
@@ -3645,6 +4051,13 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 	}
 
 	output = trim(stripAnsi(raw));
+	if (preserveLlamaInstructions) {
+		if (output.empty()) {
+			error = llamaCliCommand + " returned empty output.";
+			return false;
+		}
+		return true;
+	}
 
 	// Strip the prompt echo from the output — llama-cli may echo the
 	// prompt before the generated text.  Return only the generated part.
@@ -3754,43 +4167,29 @@ workerThread.join();
  workerThread = std::thread([this, mode, userText, systemPrompt]() {
  try {
  std::string userTextWithInternet = userText;
- if (mode == AiMode::Chat && chatAutoInternet) {
- const auto urls = extractHttpUrls(userText);
- static constexpr size_t kMaxUrls = 3;
- static constexpr size_t kMaxCharsPerUrl = 2000;
- static constexpr size_t kMaxTotalChars = 6000;
- size_t used = 0;
- size_t fetched = 0;
- std::ostringstream ctx;
- for (size_t i = 0; i < urls.size() && fetched < kMaxUrls; i++) {
- const std::string content = fetchUrlContentLimited(urls[i], kMaxCharsPerUrl);
- if (content.empty()) continue;
- std::string clipped = content;
- if (used + clipped.size() > kMaxTotalChars) {
- clipped = clipped.substr(0, kMaxTotalChars - used) + "\n...[truncated]";
- }
- ctx << "\nURL: " << urls[i] << "\n" << clipped << "\n";
- used += clipped.size();
- fetched++;
- if (used >= kMaxTotalChars) break;
- }
- if (used > 0) {
- userTextWithInternet += "\n\nContext fetched from URLs in your message:" + ctx.str();
- } else {
- std::string lowered = userText;
- std::transform(lowered.begin(), lowered.end(), lowered.begin(),
- 	[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
- std::string autoContext;
- if (lowered.find("weather") != std::string::npos) {
- 	autoContext = fetchWeatherContext(userText, 512);
- }
- if (autoContext.empty()) {
- 	autoContext = fetchSearchSnippet(userText, 1200);
- }
- if (!autoContext.empty()) {
- 	userTextWithInternet += "\n\nInternet context:\n" + autoContext + "\n";
- }
- }
+ const bool preserveLlamaInstructions = (mode == AiMode::Script);
+ const bool allowInternet = !strictOfflineMode;
+ const bool internetFromChat = (mode == AiMode::Chat);
+ const bool internetFromAllModes = (internetContextAllModes && mode != AiMode::Translate);
+ const bool internetFromScriptSource =
+	(mode == AiMode::Script && scriptSource.getSourceType() == ofxGgmlScriptSourceType::Internet);
+ if (allowInternet && (internetFromChat || internetFromAllModes || internetFromScriptSource)) {
+	std::string gatheredContext;
+	gatheredContext += buildInternetContextFromText(userText, true);
+
+	if (internetFromScriptSource) {
+		const auto sourceUrls = scriptSource.getInternetUrls();
+		gatheredContext += buildInternetContextFromUrls(
+			sourceUrls,
+			kMaxInternetSourceUrls,
+			kMaxInternetCharsPerSourceUrl,
+			kMaxInternetCharsFromSourceUrls,
+			"Context fetched from loaded internet sources");
+	}
+
+	if (!gatheredContext.empty()) {
+		userTextWithInternet += gatheredContext;
+	}
  }
 
  std::string prompt = buildPromptForMode(mode, userTextWithInternet, systemPrompt);
@@ -3803,50 +4202,60 @@ workerThread.join();
  logWithLevel(OF_LOG_VERBOSE, "Prompt (" + ofToString(prompt.size()) + " chars):\n" + prompt);
  }
 
- // Safety check: Estimate if prompt is too large for context window
- // Use conservative estimate of ~3 chars per token
+ bool promptTrimmed = false;
  const size_t estimatedTokens = prompt.size() / 3;
- const size_t maxTokens = static_cast<size_t>(contextSize);
- if (estimatedTokens > maxTokens) {
- const std::string warningMsg =
- "[Warning] Prompt is very large (~" + std::to_string(estimatedTokens) +
- " estimated tokens) and may exceed context size (" + std::to_string(maxTokens) +
- " tokens). Consider reducing input size or increasing context size in settings.";
-
- logWithLevel(OF_LOG_WARNING, warningMsg);
-
- // Provide a helpful error message to the user
- result = warningMsg + "\n\nPrompt size: " + std::to_string(prompt.size()) + " characters";
-
- std::lock_guard<std::mutex> lock(outputMutex);
- if (!cancelRequested.load()) {
- pendingOutput = result;
- pendingRole = "assistant";
- pendingMode = mode;
- }
- generating.store(false);
- return;
+ const size_t maxCtxTokens = static_cast<size_t>(contextSize);
+ if (estimatedTokens > maxCtxTokens) {
+ 	prompt = clampPromptToContext(prompt, maxCtxTokens, promptTrimmed);
+ 	if (promptTrimmed) {
+ 		logWithLevel(OF_LOG_WARNING,
+ 			"Prompt exceeded context budget (~" + std::to_string(estimatedTokens) +
+ 			" tokens > " + std::to_string(maxCtxTokens) +
+ 			"); trimmed automatically to fit.");
+ 	}
  }
 
  const std::string trimmedPrompt = trim(prompt);
- auto streamCb = [this, trimmedPrompt](const std::string & partial) {
- std::string cleaned = stripAnsi(partial);
- // Strip the prompt echo so only generated text is shown during streaming.
- if (!trimmedPrompt.empty()) {
- const size_t pos = cleaned.find(trimmedPrompt);
- if (pos != std::string::npos) {
- cleaned = cleaned.substr(pos + trimmedPrompt.size());
- } else if (cleaned.size() < trimmedPrompt.size()) {
- // Prompt likely still being echoed — suppress display.
- cleaned.clear();
- }
- }
- cleaned = cleanChatOutput(cleaned);
+ std::string latestRawPartial;
+
+ auto cleanPartialForDisplay = [&](const std::string & rawPartial) {
+	if (preserveLlamaInstructions) {
+		return trim(stripAnsi(rawPartial));
+	}
+	std::string cleaned = stripAnsi(rawPartial);
+	if (!trimmedPrompt.empty()) {
+		const size_t pos = cleaned.find(trimmedPrompt);
+		if (pos != std::string::npos) {
+			cleaned = cleaned.substr(pos + trimmedPrompt.size());
+		} else if (cleaned.size() < trimmedPrompt.size()) {
+			cleaned.clear();
+		}
+	}
+	return cleanChatOutput(cleaned);
+ };
+
+ auto streamCb = [this, trimmedPrompt,
+	lastUiUpdate = std::chrono::steady_clock::now(),
+	lastOutputSize = static_cast<size_t>(0),
+	&latestRawPartial, &cleanPartialForDisplay](const std::string & partial) mutable {
+	latestRawPartial = partial;
+	const auto now = std::chrono::steady_clock::now();
+	const bool sizeAdvanced = partial.size() > lastOutputSize;
+	if (!sizeAdvanced) {
+		return;
+	}
+	if ((partial.size() - lastOutputSize) < kStreamUiMinGrowth &&
+		(now - lastUiUpdate) < kStreamUiUpdateInterval) {
+		return;
+	}
+	lastUiUpdate = now;
+	lastOutputSize = partial.size();
+	std::string cleaned = cleanPartialForDisplay(partial);
  std::lock_guard<std::mutex> lock(streamMutex);
  streamingOutput = cleaned;
  };
 
- if (!runRealInference(prompt, result, error, streamCb)) {
+ if (!runRealInference(prompt, result, error, streamCb, preserveLlamaInstructions)) {
  // If inference failed but streaming already delivered output
  // (e.g. llama-completion crashed during cleanup after producing
  // text), use the streamed data as the result instead of showing
@@ -3855,6 +4264,9 @@ workerThread.join();
  {
  std::lock_guard<std::mutex> lock(streamMutex);
  streamed = streamingOutput;
+ }
+ if (streamed.empty() && !latestRawPartial.empty()) {
+	streamed = cleanPartialForDisplay(latestRawPartial);
  }
  if (!streamed.empty()) {
  logWithLevel(OF_LOG_WARNING,
@@ -3874,12 +4286,75 @@ workerThread.join();
  logWithLevel(OF_LOG_VERBOSE, "=== Generation finished ===");
  }
 
+	bool likelyCutoff = isLikelyCutoffOutput(result, mode);
+
+	if (stopAtNaturalBoundary && result.rfind("[Error]", 0) != 0) {
+		if (mode == AiMode::Script) {
+			if (!result.empty() && result.back() != '\n') {
+				size_t cut = result.find_last_of('\n');
+				if (cut != std::string::npos && cut > result.size() / 2) {
+					result = trim(result.substr(0, cut));
+				}
+			}
+		} else {
+			size_t best = std::string::npos;
+			for (size_t i = 0; i < result.size(); i++) {
+				const char c = result[i];
+				if (c == '.' || c == '!' || c == '?') {
+					if (i + 1 == result.size() || std::isspace(static_cast<unsigned char>(result[i + 1])) ||
+						result[i + 1] == '"' || result[i + 1] == '\'') {
+						best = i + 1;
+					}
+				}
+			}
+			if (best != std::string::npos && best > result.size() / 2) {
+				result = trim(result.substr(0, best));
+			}
+		}
+	}
+
+	if (mode == AiMode::Script && autoContinueCutoff && likelyCutoff &&
+		result.rfind("[Error]", 0) != 0 && !cancelRequested.load()) {
+		const size_t tailChars = std::min<size_t>(result.size(), 600);
+		const std::string tail = result.substr(result.size() - tailChars);
+		const std::string continuationRequest = buildCutoffContinuationRequest(tail);
+		std::string continuationPrompt = buildPromptForMode(mode, continuationRequest, systemPrompt);
+		bool contTrimmed = false;
+		const size_t contEstimatedTokens = continuationPrompt.size() / 3;
+		const size_t contMaxCtxTokens = static_cast<size_t>(contextSize);
+		if (contEstimatedTokens > contMaxCtxTokens) {
+			continuationPrompt = clampPromptToContext(continuationPrompt, contMaxCtxTokens, contTrimmed);
+		}
+
+		std::string continuationOut;
+		std::string continuationErr;
+		if (runRealInference(continuationPrompt, continuationOut, continuationErr, nullptr, preserveLlamaInstructions) &&
+			!continuationOut.empty()) {
+			if (stopAtNaturalBoundary && continuationOut.back() != '\n') {
+				size_t cut = continuationOut.find_last_of('\n');
+				if (cut != std::string::npos && cut > continuationOut.size() / 2) {
+					continuationOut = trim(continuationOut.substr(0, cut));
+				}
+			}
+			result += "\n" + continuationOut;
+			likelyCutoff = isLikelyCutoffOutput(continuationOut, mode);
+			logWithLevel(OF_LOG_NOTICE, "Auto-continued Script output after cutoff detection.");
+		} else if (!continuationErr.empty()) {
+			logWithLevel(OF_LOG_WARNING, "Auto-continue failed: " + continuationErr);
+		}
+	}
+
 {
 std::lock_guard<std::mutex> lock(outputMutex);
 if (!cancelRequested.load()) {
 pendingOutput = result;
 pendingRole = "assistant";
 pendingMode = mode;
+	if (mode == AiMode::Script) {
+		lastScriptOutputLikelyCutoff = likelyCutoff;
+		const size_t tailChars = std::min<size_t>(result.size(), 600);
+		lastScriptOutputTail = result.substr(result.size() - tailChars);
+	}
 }
 }
 
@@ -3932,6 +4407,7 @@ fprintf(stderr, "[ChatWindow] AI: %s\n", pendingOutput.c_str());
 break;
 case AiMode::Script:
 scriptOutput = pendingOutput;
+scriptMessages.push_back({"assistant", pendingOutput, ofGetElapsedTimef()});
 if (pendingOutput.rfind("[Error]", 0) != 0) {
 scriptProjectMemory.addInteraction(lastScriptRequest, pendingOutput);
 }
@@ -3997,6 +4473,8 @@ ImGui::Separator();
 ImGui::Text("  Tokens:     %d", maxTokens);
 ImGui::Text("  Temp:       %.2f", temperature);
 ImGui::Text("  Top-P:      %.2f", topP);
+ImGui::Text("  Top-K:      %d", topK);
+ImGui::Text("  Min-P:      %.2f", minP);
 ImGui::Text("  Repeat Pen: %.2f", repeatPenalty);
 ImGui::Spacing();
 

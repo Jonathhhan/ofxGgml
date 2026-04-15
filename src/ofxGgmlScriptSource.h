@@ -19,7 +19,9 @@ enum class ofxGgmlScriptSourceType {
 struct ofxGgmlScriptSourceFileEntry {
 	std::string name;
 	std::string fullPath;
+	std::string cachedContent;
 	bool isDirectory = false;
+	bool isCached = false;
 };
 
 struct ofxGgmlScriptSourceFetchDiagnostic {

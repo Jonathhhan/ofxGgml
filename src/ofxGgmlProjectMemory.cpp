@@ -1,5 +1,78 @@
 #include "ofxGgmlProjectMemory.h"
 
+#include <algorithm>
+#include <cctype>
+#include <vector>
+
+namespace {
+
+std::string trimCopy(const std::string & s) {
+	size_t b = 0;
+	while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) {
+		++b;
+	}
+	size_t e = s.size();
+	while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) {
+		--e;
+	}
+	return s.substr(b, e - b);
+}
+
+std::string stripCodeBlocks(const std::string & text) {
+	if (text.find("```") == std::string::npos) return text;
+
+	std::string out;
+	out.reserve(text.size());
+	size_t pos = 0;
+	while (pos < text.size()) {
+		size_t fence = text.find("```", pos);
+		if (fence == std::string::npos) {
+			out.append(text, pos, std::string::npos);
+			break;
+		}
+		out.append(text, pos, fence - pos);
+		size_t close = text.find("```", fence + 3);
+		out += "\n[code omitted]\n";
+		if (close == std::string::npos) break;
+		pos = close + 3;
+	}
+	return out;
+}
+
+std::string collapseWhitespace(const std::string & text) {
+	std::string out;
+	out.reserve(text.size());
+	bool inSpace = false;
+	for (char c : text) {
+		if (std::isspace(static_cast<unsigned char>(c))) {
+			if (!inSpace) {
+				out.push_back(' ');
+				inSpace = true;
+			}
+		} else {
+			out.push_back(c);
+			inSpace = false;
+		}
+	}
+	return trimCopy(out);
+}
+
+std::string compactForMemory(const std::string & text, size_t maxChars) {
+	if (text.empty()) return {};
+	std::string compact = collapseWhitespace(stripCodeBlocks(text));
+	if (compact.size() <= maxChars) return compact;
+
+	const size_t head = static_cast<size_t>(maxChars * 0.7);
+	const size_t tail = (maxChars > head + 24) ? (maxChars - head - 24) : 0;
+	if (tail == 0) {
+		compact.resize(maxChars);
+		return compact;
+	}
+	return compact.substr(0, head) + " ...[compressed]... " + compact.substr(compact.size() - tail);
+}
+
+} // namespace
+
 void ofxGgmlProjectMemory::setEnabled(bool enabled) {
 	m_enabled = enabled;
 }
@@ -28,14 +101,10 @@ bool ofxGgmlProjectMemory::empty() const {
 bool ofxGgmlProjectMemory::addInteraction(const std::string & request, const std::string & response) {
 	if (request.empty() || response.empty()) return false;
 
-	std::string safeRequest = request;
-	if (safeRequest.size() > m_entryMaxChars) {
-		safeRequest.resize(m_entryMaxChars);
-	}
-	std::string safeResponse = response;
-	if (safeResponse.size() > m_entryMaxChars) {
-		safeResponse.resize(m_entryMaxChars);
-	}
+	const size_t reqMax = std::max<size_t>(128, m_entryMaxChars / 3);
+	const size_t resMax = std::max<size_t>(256, m_entryMaxChars - reqMax);
+	std::string safeRequest = compactForMemory(request, reqMax);
+	std::string safeResponse = compactForMemory(response, resMax);
 
 	// Pre-allocate before any appends to avoid reallocation
 	const size_t separator_size = m_memoryText.empty() ? 0 : 8; // "\n\n---\n\n"
@@ -81,8 +150,33 @@ void ofxGgmlProjectMemory::clampMemory() {
 		return;
 	}
 	if (m_memoryText.size() > m_maxChars) {
-		// Use erase() for in-place modification instead of substr which creates a copy
-		m_memoryText.erase(0, m_memoryText.size() - m_maxChars);
+		const std::string separator = "\n\n---\n\n";
+		std::vector<std::string> entries;
+		size_t start = 0;
+		while (start <= m_memoryText.size()) {
+			size_t sep = m_memoryText.find(separator, start);
+			if (sep == std::string::npos) {
+				entries.push_back(m_memoryText.substr(start));
+				break;
+			}
+			entries.push_back(m_memoryText.substr(start, sep - start));
+			start = sep + separator.size();
+		}
+
+		std::string rebuilt;
+		for (size_t i = entries.size(); i > 0; --i) {
+			const std::string & e = entries[i - 1];
+			std::string candidate = rebuilt.empty() ? e : (e + separator + rebuilt);
+			if (candidate.size() > m_maxChars) {
+				break;
+			}
+			rebuilt = std::move(candidate);
+		}
+
+		if (rebuilt.empty()) {
+			rebuilt = m_memoryText.substr(m_memoryText.size() - m_maxChars);
+		}
+		m_memoryText = std::move(rebuilt);
 	}
 }
 

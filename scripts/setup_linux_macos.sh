@@ -2,9 +2,8 @@
 # ---------------------------------------------------------------------------
 # setup_linux_macos.sh — One-command setup for the ofxGgml addon (Linux/macOS).
 #
-# Builds ggml (auto-detect GPU backends by default), installs the llama.cpp CLI
-# tools, and downloads a recommended model so you can run the examples
-# right away.
+# Builds ggml (auto-detect GPU backends by default) and installs the
+# llama.cpp CLI tools. Model download is optional and disabled by default.
 #
 # Use --cpu-only to force CPU-only builds, or --cuda / --vulkan / --metal
 # to force a specific backend.
@@ -19,10 +18,11 @@
 #   --vulkan           Enable Vulkan backend
 #   --metal            Enable Metal backend (macOS only)
 #   --prefix DIR       Install prefix for llama tools
-#                      (default: /usr/local on Linux, addon-local libs/ on Windows)
+#                      (default: /usr/local on Linux, /usr/local on macOS)
 #   --skip-ggml        Skip building ggml (if already built)
 #   --skip-llama       Skip building llama.cpp CLI tools
-#   --skip-model       Skip downloading the model file
+#   --skip-model       Skip downloading the model file (default)
+#   --download-model   Download the model file(s)
 #   --model-preset N   Download a specific model preset (default: both)
 #   --jobs N           Parallel build jobs (default: auto-detect)
 #   --clean            Remove previous build directories before building
@@ -35,13 +35,21 @@ ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SKIP_GGML=0
 SKIP_LLAMA=0
-SKIP_MODEL=0
+SKIP_MODEL=1
 GPU_FLAG="--auto"
 LLAMA_GPU_FLAG="--auto"
 PREFIX_VALUE=""
 JOBS_VALUE=""
 CLEAN=0
 MODEL_PRESET_VALUE=""
+
+if [[ -z "$JOBS_VALUE" ]]; then
+	if command -v nproc >/dev/null 2>&1; then
+		JOBS_VALUE="$(nproc)"
+	elif command -v sysctl >/dev/null 2>&1; then
+		JOBS_VALUE="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+	fi
+fi
 
 write_step() {
 	printf '\n\033[1;34m==> %s\033[0m\n' "$1"
@@ -111,6 +119,10 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--skip-model)
 			SKIP_MODEL=1
+			shift
+			;;
+		--download-model)
+			SKIP_MODEL=0
 			shift
 			;;
 		--model-preset)
@@ -203,7 +215,7 @@ if [[ "$SKIP_MODEL" -eq 0 ]]; then
 	fi
 	write_ok "Model download complete."
 else
-	write_warn "Skipping model download (--skip-model)."
+	write_warn "Skipping model download (default)."
 fi
 
 # ---------------------------------------------------------------------------
