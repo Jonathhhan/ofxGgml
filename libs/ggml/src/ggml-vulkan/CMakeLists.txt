@@ -163,8 +163,17 @@ if (Vulkan_FOUND)
         message(STATUS "vulkan-shaders-gen toolchain file: ${HOST_CMAKE_TOOLCHAIN_FILE}")
     endif()
 
+    # Use a short prefix for the external project to avoid hitting Windows
+    # MAX_PATH limits in deeply nested build directories.
+    set(_ggml_vk_ext_prefix "${CMAKE_BINARY_DIR}/vsg")
+
     ExternalProject_Add(
         vulkan-shaders-gen
+        PREFIX ${_ggml_vk_ext_prefix}
+        BINARY_DIR ${_ggml_vk_ext_prefix}/build
+        STAMP_DIR ${_ggml_vk_ext_prefix}/stamp
+        TMP_DIR ${_ggml_vk_ext_prefix}/tmp
+        DOWNLOAD_DIR ${_ggml_vk_ext_prefix}/download
         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vulkan-shaders
         CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/$<CONFIG>
                    -DCMAKE_INSTALL_BINDIR=.
