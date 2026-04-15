@@ -55,6 +55,8 @@ TEST_CASE("Inference settings", "[inference]") {
 		REQUIRE(settings.seed == -1);
 		REQUIRE(settings.simpleIo == true);
 		REQUIRE(settings.promptCacheAll == true);
+		REQUIRE(settings.autoPromptCache == true);
+		REQUIRE(settings.promptCachePath.empty());
 	}
 
 	SECTION("Custom settings") {

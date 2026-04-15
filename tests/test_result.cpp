@@ -1,6 +1,8 @@
 #include "catch2.hpp"
 #include "../src/ofxGgmlResult.h"
 
+#include <cstring>
+
 TEST_CASE("Result with success value", "[result]") {
 	SECTION("Integer result") {
 		Result<int> r(42);
@@ -169,6 +171,6 @@ TEST_CASE("Error code coverage", "[result]") {
 
 	for (auto code : codes) {
 		ofxGgmlError err(code);
-		REQUIRE_FALSE(err.codeString().empty());
+		REQUIRE(std::strlen(err.codeString()) > 0);
 	}
 }

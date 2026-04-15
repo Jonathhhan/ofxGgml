@@ -1,2 +1,18 @@
 build/
 libs/ggml/build/
+
+# Visual Studio build artifacts
+.vs/
+obj/
+*.user
+*.exe
+*.exp
+*.lib
+*.pdb
+*.ini
+
+# Generated / cached data
+ofxGgmlGuiExample/bin/data/cache/
+ofxGgmlGuiExample/bin/data/models/
+ofxGgmlGuiExample/bin/data/sessions/
+

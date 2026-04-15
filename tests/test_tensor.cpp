@@ -7,15 +7,15 @@ TEST_CASE("Tensor creation - 1D", "[tensor]") {
 	SECTION("Create F32 tensor") {
 		auto t = graph.newTensor1d(ofxGgmlType::F32, 10);
 		REQUIRE(t.isValid());
-		REQUIRE(t.getNumDims() == 1);
-		REQUIRE(t.getDim(0) == 10);
+		REQUIRE(t.getNumDimensions() == 1);
+		REQUIRE(t.getDimSize(0) == 10);
 		REQUIRE(t.getType() == ofxGgmlType::F32);
 	}
 
 	SECTION("Create I32 tensor") {
 		auto t = graph.newTensor1d(ofxGgmlType::I32, 5);
 		REQUIRE(t.isValid());
-		REQUIRE(t.getDim(0) == 5);
+		REQUIRE(t.getDimSize(0) == 5);
 		REQUIRE(t.getType() == ofxGgmlType::I32);
 	}
 
@@ -32,16 +32,16 @@ TEST_CASE("Tensor creation - 2D", "[tensor]") {
 	SECTION("Create 2D F32 tensor") {
 		auto t = graph.newTensor2d(ofxGgmlType::F32, 4, 3);
 		REQUIRE(t.isValid());
-		REQUIRE(t.getNumDims() == 2);
-		REQUIRE(t.getDim(0) == 4);
-		REQUIRE(t.getDim(1) == 3);
+		REQUIRE(t.getNumDimensions() == 2);
+		REQUIRE(t.getDimSize(0) == 4);
+		REQUIRE(t.getDimSize(1) == 3);
 		REQUIRE(t.getNumElements() == 12);
 	}
 
 	SECTION("Matrix dimensions") {
 		auto t = graph.newTensor2d(ofxGgmlType::F32, 2, 8);
-		REQUIRE(t.getDim(0) == 2);  // rows
-		REQUIRE(t.getDim(1) == 8);  // cols
+		REQUIRE(t.getDimSize(0) == 2);  // rows
+		REQUIRE(t.getDimSize(1) == 8);  // cols
 	}
 }
 
@@ -51,17 +51,17 @@ TEST_CASE("Tensor creation - 3D and 4D", "[tensor]") {
 	SECTION("3D tensor") {
 		auto t = graph.newTensor3d(ofxGgmlType::F32, 2, 3, 4);
 		REQUIRE(t.isValid());
-		REQUIRE(t.getNumDims() == 3);
-		REQUIRE(t.getDim(0) == 2);
-		REQUIRE(t.getDim(1) == 3);
-		REQUIRE(t.getDim(2) == 4);
+		REQUIRE(t.getNumDimensions() == 3);
+		REQUIRE(t.getDimSize(0) == 2);
+		REQUIRE(t.getDimSize(1) == 3);
+		REQUIRE(t.getDimSize(2) == 4);
 		REQUIRE(t.getNumElements() == 24);
 	}
 
 	SECTION("4D tensor") {
 		auto t = graph.newTensor4d(ofxGgmlType::F32, 2, 2, 2, 2);
 		REQUIRE(t.isValid());
-		REQUIRE(t.getNumDims() == 4);
+		REQUIRE(t.getNumDimensions() == 4);
 		REQUIRE(t.getNumElements() == 16);
 	}
 }
@@ -72,7 +72,7 @@ TEST_CASE("Tensor properties", "[tensor]") {
 
 	SECTION("Valid tensor has properties") {
 		REQUIRE(t.isValid());
-		REQUIRE(t.getNumDims() > 0);
+		REQUIRE(t.getNumDimensions() > 0);
 		REQUIRE(t.getNumElements() > 0);
 	}
 
@@ -83,7 +83,7 @@ TEST_CASE("Tensor properties", "[tensor]") {
 	SECTION("Name can be set and retrieved") {
 		// Note: Name setting depends on ggml implementation
 		// This test checks if the API is available
-		REQUIRE(t.getName() != nullptr);
+		REQUIRE(t.getName().size() >= 0);
 	}
 }
 
@@ -96,8 +96,8 @@ TEST_CASE("Element-wise operations", "[tensor][ops]") {
 		auto c = graph.add(a, b);
 
 		REQUIRE(c.isValid());
-		REQUIRE(c.getDim(0) == 2);
-		REQUIRE(c.getDim(1) == 2);
+		REQUIRE(c.getDimSize(0) == 2);
+		REQUIRE(c.getDimSize(1) == 2);
 	}
 
 	SECTION("Subtraction") {
@@ -130,7 +130,7 @@ TEST_CASE("Element-wise operations", "[tensor][ops]") {
 		auto c = graph.scale(a, 2.5f);
 
 		REQUIRE(c.isValid());
-		REQUIRE(c.getDim(0) == 2);
+		REQUIRE(c.getDimSize(0) == 2);
 	}
 
 	SECTION("Invalid input returns invalid tensor") {
@@ -150,8 +150,8 @@ TEST_CASE("Unary operations", "[tensor][ops]") {
 		auto c = graph.sqr(a);
 
 		REQUIRE(c.isValid());
-		REQUIRE(c.getDim(0) == 3);
-		REQUIRE(c.getDim(1) == 3);
+		REQUIRE(c.getDimSize(0) == 3);
+		REQUIRE(c.getDimSize(1) == 3);
 	}
 
 	SECTION("Square root") {
@@ -167,6 +167,7 @@ TEST_CASE("Unary operations", "[tensor][ops]") {
 		auto c = graph.clamp(a, -1.0f, 1.0f);
 
 		REQUIRE(c.isValid());
-		REQUIRE(c.getDim(0) == 10);
+		REQUIRE(c.getDimSize(0) == 10);
 	}
 }
+

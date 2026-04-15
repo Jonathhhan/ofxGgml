@@ -1,6 +1,9 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
 
+#include <algorithm>
+#include <fstream>
+
 // Note: Model tests that require actual GGUF files are marked [model][requires-file]
 // and will be skipped if the test file doesn't exist.
 
@@ -132,9 +135,9 @@ TEST_CASE("Model tensor access", "[model]") {
 		REQUIRE(name.empty());
 	}
 
-	SECTION("Find tensor by invalid name") {
-		int64_t idx = model.findTensor("nonexistent.tensor");
-		REQUIRE(idx == -1);
+	SECTION("Get tensor names from unloaded model") {
+		auto names = model.getTensorNames();
+		REQUIRE(names.empty());
 	}
 }
 
@@ -160,16 +163,16 @@ TEST_CASE("Model metadata types", "[model][requires-file]") {
 		// Try to get an integer metadata value
 		int32_t val = model.getMetadataInt32("test.int_key");
 		// 0 or actual value is fine
-		REQUIRE(val >= 0 || val < 0); // Just check it doesn't crash
+		REQUIRE(true); // Just check it doesn't crash
 	}
 
 	SECTION("Get uint32 metadata") {
-		uint32_t val = model.getMetadataUInt32("test.uint_key");
+		uint32_t val = model.getMetadataUint32("test.uint_key");
 		REQUIRE(val >= 0); // uint is always >= 0
 	}
 
-	SECTION("Get float32 metadata") {
-		float val = model.getMetadataFloat32("test.float_key");
+	SECTION("Get float metadata") {
+		float val = model.getMetadataFloat("test.float_key");
 		// Any value is ok
 		REQUIRE(val == val); // Check not NaN (NaN != NaN)
 	}
@@ -206,9 +209,9 @@ TEST_CASE("Model iteration", "[model][requires-file]") {
 			auto tensor = model.getTensor(name);
 			REQUIRE(tensor.isValid());
 
-			// Find should return same index
-			int64_t foundIdx = model.findTensor(name);
-			REQUIRE(foundIdx == i);
+			// Should also be present in the exported name list
+			auto allNames = model.getTensorNames();
+			REQUIRE(std::find(allNames.begin(), allNames.end(), name) != allNames.end());
 		}
 	}
 }

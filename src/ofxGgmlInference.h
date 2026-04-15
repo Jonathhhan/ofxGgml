@@ -4,27 +4,37 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 struct ofxGgmlInferenceSettings {
-int maxTokens = 256;
-float temperature = 0.7f;
-float topP = 0.9f;
-float repeatPenalty = 1.1f;
-int contextSize = 2048;
-int batchSize = 512;
-int gpuLayers = 0;
-int threads = 0;
-int seed = -1;
-bool simpleIo = true;
-bool promptCacheAll = true;
-std::string promptCachePath;
-bool autoPromptCache = true;
-std::string jsonSchema;
-std::string grammarPath;
+	int maxTokens = 256;
+	float temperature = 0.7f;
+	float topP = 0.9f;
+	float minP = 0.05f;
+	int topK = 40;
+	float presencePenalty = 0.0f;
+	float frequencyPenalty = 0.0f;
+	float repeatPenalty = 1.1f;
+	int contextSize = 2048;
+	int batchSize = 512;
+	int ubatchSize = 512;
+	int gpuLayers = 0;
+	int threads = 0;
+	int threadsBatch = 0;
+	int seed = -1;
+	bool simpleIo = true;
+	bool promptCacheAll = true;
+	bool flashAttn = false;
+	bool mlock = false;
+	std::string promptCachePath;
+	bool autoPromptCache = true;
+	std::string jsonSchema;
+	std::string grammarPath;
+	std::string chatTemplate;
 };
 
 struct ofxGgmlInferenceResult {
@@ -71,7 +81,8 @@ const std::string & getEmbeddingExecutable() const;
 ofxGgmlInferenceResult generate(
 const std::string & modelPath,
 const std::string & prompt,
-const ofxGgmlInferenceSettings & settings = {}) const;
+const ofxGgmlInferenceSettings & settings = {},
+std::function<bool(const std::string&)> onChunk = nullptr) const;
 
 ofxGgmlEmbeddingResult embed(
 	const std::string & modelPath,
@@ -116,4 +127,32 @@ std::string text;
 std::vector<float> embedding;
 };
 std::vector<Entry> m_entries;
+};
+
+class ofxGgmlInferenceAsync : public ofThread {
+public:
+	ofxGgmlInferenceAsync();
+	~ofxGgmlInferenceAsync();
+
+	ofEvent<std::string> onTokenStream;
+	ofEvent<ofxGgmlInferenceResult> onInferenceComplete;
+
+	void startInference(
+		const std::string & modelPath,
+		const std::string & prompt,
+		const ofxGgmlInferenceSettings & settings = {});
+
+	void update();
+	void stopInference();
+
+protected:
+	void threadedFunction() override;
+
+private:
+	std::string m_modelPath;
+	std::string m_prompt;
+	ofxGgmlInferenceSettings m_settings;
+
+	ofThreadChannel<std::string> m_tokenQueue;
+	std::string m_fullResponse;
 };

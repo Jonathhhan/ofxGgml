@@ -402,13 +402,14 @@ static std::string quoteWindowsArg(const std::string & arg) {
 #endif
 
 static bool runCommandCapture(
-	const std::vector<std::string> & args,
-	std::string & output,
-	int & exitCode,
-	bool mergeStderr = true) {
-	output.clear();
-	exitCode = -1;
-	if (args.empty() || args.front().empty()) return false;
+const std::vector<std::string> & args,
+std::string & output,
+int & exitCode,
+bool mergeStderr = true,
+std::function<bool(const std::string&)> onChunk = nullptr) {
+output.clear();
+exitCode = -1;
+if (args.empty() || args.front().empty()) return false;
 #ifdef _WIN32
 	SECURITY_ATTRIBUTES sa {};
 	sa.nLength = sizeof(sa);
@@ -484,7 +485,13 @@ static bool runCommandCapture(
 	std::array<char, 4096> buf {};
 	DWORD bytesRead = 0;
 	while (ReadFile(readPipe, buf.data(), static_cast<DWORD>(buf.size()), &bytesRead, nullptr) && bytesRead > 0) {
-		output.append(buf.data(), bytesRead);
+		std::string chunk(buf.data(), bytesRead);
+		output.append(chunk);
+		if (onChunk && !onChunk(chunk)) {
+			// Terminate process if callback requested early exit
+			TerminateProcess(pi.hProcess, 1);
+			break;
+		}
 	}
 	CloseHandle(readPipe);
 
@@ -538,7 +545,13 @@ static bool runCommandCapture(
 	std::array<char, 4096> buf {};
 	ssize_t bytesRead = 0;
 	while ((bytesRead = read(pipeFds[0], buf.data(), buf.size())) > 0) {
-		output.append(buf.data(), static_cast<size_t>(bytesRead));
+		std::string chunk(buf.data(), static_cast<size_t>(bytesRead));
+		output.append(chunk);
+		if (onChunk && !onChunk(chunk)) {
+			// Terminate process if callback requested early exit
+			kill(pid, SIGTERM);
+			break;
+		}
 	}
 	close(pipeFds[0]);
 
@@ -843,9 +856,10 @@ const std::string & ofxGgmlInference::getEmbeddingExecutable() const {
 }
 
 ofxGgmlInferenceResult ofxGgmlInference::generate(
-	const std::string & modelPath,
-	const std::string & prompt,
-	const ofxGgmlInferenceSettings & settings) const {
+const std::string & modelPath,
+const std::string & prompt,
+const ofxGgmlInferenceSettings & settings,
+std::function<bool(const std::string&)> onChunk) const {
 	ofxGgmlInferenceResult result;
 	if (modelPath.empty()) {
 		result.error = "model path is empty";
@@ -896,12 +910,22 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 	args.emplace_back(std::to_string(std::clamp(settings.contextSize, 128, 131072)));
 	args.emplace_back("-b");
 	args.emplace_back(std::to_string(std::clamp(settings.batchSize, 1, 8192)));
+	args.emplace_back("-ub");
+	args.emplace_back(std::to_string(std::clamp(settings.ubatchSize, 1, 8192)));
 	args.emplace_back("-ngl");
 	args.emplace_back(std::to_string(std::max(0, settings.gpuLayers)));
 	args.emplace_back("--temp");
 	args.emplace_back(std::to_string(std::clamp(settings.temperature, 0.0f, 3.0f)));
 	args.emplace_back("--top-p");
 	args.emplace_back(std::to_string(std::clamp(settings.topP, 0.0f, 1.0f)));
+	args.emplace_back("--min-p");
+	args.emplace_back(std::to_string(std::clamp(settings.minP, 0.0f, 1.0f)));
+	args.emplace_back("--top-k");
+	args.emplace_back(std::to_string(std::clamp(settings.topK, 0, 100)));
+	args.emplace_back("--presence-penalty");
+	args.emplace_back(std::to_string(std::clamp(settings.presencePenalty, -2.0f, 2.0f)));
+	args.emplace_back("--frequency-penalty");
+	args.emplace_back(std::to_string(std::clamp(settings.frequencyPenalty, -2.0f, 2.0f)));
 	args.emplace_back("--repeat-penalty");
 	args.emplace_back(std::to_string(std::clamp(settings.repeatPenalty, 1.0f, 3.0f)));
 	args.emplace_back("--no-display-prompt");
@@ -910,13 +934,27 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 	if (settings.simpleIo) {
 		args.emplace_back("--simple-io");
 	}
+	if (settings.flashAttn) {
+		args.emplace_back("-fa");
+	}
+	if (settings.mlock) {
+		args.emplace_back("--mlock");
+	}
 	if (settings.threads > 0) {
 		args.emplace_back("--threads");
 		args.emplace_back(std::to_string(std::clamp(settings.threads, 1, 256)));
 	}
+	if (settings.threadsBatch > 0) {
+		args.emplace_back("--threads-batch");
+		args.emplace_back(std::to_string(std::clamp(settings.threadsBatch, 1, 256)));
+	}
 	if (settings.seed >= 0) {
 		args.emplace_back("--seed");
 		args.emplace_back(std::to_string(settings.seed));
+	}
+	if (!settings.chatTemplate.empty()) {
+		args.emplace_back("--chat-template");
+		args.emplace_back(settings.chatTemplate);
 	}
 	std::string effectivePromptCachePath = settings.promptCachePath;
 	if (effectivePromptCachePath.empty() && settings.autoPromptCache) {
@@ -956,7 +994,7 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 
 	std::string raw;
 	int exitCode = -1;
-	const bool started = runCommandCapture(args, raw, exitCode, false);
+	const bool started = runCommandCapture(args, raw, exitCode, false, onChunk);
 
 	if (!started) {
 		result.error = "failed to start llama completion process";
@@ -1339,4 +1377,78 @@ float ofxGgmlEmbeddingIndex::cosineSimilarity(const std::vector<float> & a, cons
 	}
 	if (na <= 0.0 || nb <= 0.0) return 0.0f;
 	return static_cast<float>(dot / (std::sqrt(na) * std::sqrt(nb)));
+}
+
+// -----------------------------------------------------------------------------
+// ofxGgmlInferenceAsync
+// -----------------------------------------------------------------------------
+
+ofxGgmlInferenceAsync::ofxGgmlInferenceAsync() {}
+
+ofxGgmlInferenceAsync::~ofxGgmlInferenceAsync() {
+	stopInference();
+	waitForThread(true);
+}
+
+void ofxGgmlInferenceAsync::startInference(
+	const std::string & modelPath,
+	const std::string & prompt,
+	const ofxGgmlInferenceSettings & settings) {
+	
+	if (isThreadRunning()) {
+		ofLogWarning("ofxGgmlInferenceAsync") << "Inference is already running.";
+		return;
+	}
+
+	m_modelPath = modelPath;
+	m_prompt = prompt;
+	m_settings = settings;
+	m_fullResponse.clear();
+
+	// Drain the queue of any stale tokens from a previous run
+	std::string stale;
+	while (m_tokenQueue.tryReceive(stale)) {}
+
+	startThread();
+}
+
+void ofxGgmlInferenceAsync::stopInference() {
+	if (isThreadRunning()) {
+		stopThread();
+	}
+}
+
+void ofxGgmlInferenceAsync::update() {
+	std::string chunk;
+	// Process all queued tokens this frame
+	while (m_tokenQueue.tryReceive(chunk)) {
+		m_fullResponse += chunk;
+		ofNotifyEvent(onTokenStream, chunk, this);
+	}
+}
+
+void ofxGgmlInferenceAsync::threadedFunction() {
+	ofxGgmlInference localInference;
+	// Since we are running in an async thread, let's inject our own token handler 
+	// into the generate call to capture tokens as they stream from the CLI pipe.
+	auto chunkCallback = [this](const std::string& tokenChunk) -> bool {
+		// Stop thread request received
+		if (!isThreadRunning()) return false;
+		
+		if (!tokenChunk.empty()) {
+			m_tokenQueue.send(tokenChunk);
+		}
+		return true;
+	};
+
+	ofxGgmlInferenceResult result = localInference.generate(
+		m_modelPath,
+		m_prompt,
+		m_settings,
+		chunkCallback);
+
+	// In async context, the text may be the joined cleaned response,
+	// but the UI typically relies on the actual stream. We still include
+	// the cleaned text inside the final result.
+	ofNotifyEvent(onInferenceComplete, result, this);
 }

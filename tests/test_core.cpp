@@ -1,6 +1,8 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
 
+#include <cmath>
+
 TEST_CASE("Core initialization", "[core]") {
 	ofxGgml ggml;
 
@@ -98,9 +100,12 @@ TEST_CASE("Graph allocation", "[core]") {
 	SECTION("Allocate simple graph") {
 		ofxGgmlGraph graph;
 		auto a = graph.newTensor2d(ofxGgmlType::F32, 2, 2);
+		auto b = graph.newTensor2d(ofxGgmlType::F32, 2, 2);
 		graph.setInput(a);
-		graph.setOutput(a);
-		graph.build(a);
+		graph.setInput(b);
+		auto c = graph.add(a, b);
+		graph.setOutput(c);
+		graph.build(c);
 
 		bool ok = ggml.allocGraph(graph);
 		REQUIRE(ok);
@@ -126,37 +131,53 @@ TEST_CASE("Tensor data operations", "[core]") {
 	ggml.setup();
 
 	ofxGgmlGraph graph;
-	auto t = graph.newTensor2d(ofxGgmlType::F32, 2, 2);
-	graph.setInput(t);
+	auto a = graph.newTensor2d(ofxGgmlType::F32, 2, 2);
+	auto b = graph.newTensor2d(ofxGgmlType::F32, 2, 2);
+	graph.setInput(a);
+	graph.setInput(b);
+	auto t = graph.add(a, b);
 	graph.setOutput(t);
 	graph.build(t);
 	ggml.allocGraph(graph);
 
 	SECTION("Set and get tensor data") {
-		float input[] = {1.0f, 2.0f, 3.0f, 4.0f};
-		ggml.setTensorData(t, input, sizeof(input));
+		float inputA[] = {1.0f, 2.0f, 3.0f, 4.0f};
+		float inputB[] = {0.5f, 0.5f, 0.5f, 0.5f};
+		ggml.setTensorData(a, inputA, sizeof(inputA));
+		ggml.setTensorData(b, inputB, sizeof(inputB));
+		auto compute = ggml.computeGraph(graph);
+		REQUIRE(compute.success);
 
 		float output[4];
 		ggml.getTensorData(t, output, sizeof(output));
 
-		for (int i = 0; i < 4; i++) {
-			REQUIRE(output[i] == input[i]);
-		}
+		REQUIRE(std::abs(output[0] - 1.5f) < 0.0001f);
+		REQUIRE(std::abs(output[1] - 2.5f) < 0.0001f);
+		REQUIRE(std::abs(output[2] - 3.5f) < 0.0001f);
+		REQUIRE(std::abs(output[3] - 4.5f) < 0.0001f);
 	}
 
 	SECTION("Set tensor data multiple times") {
-		float input1[] = {1.0f, 2.0f, 3.0f, 4.0f};
-		float input2[] = {5.0f, 6.0f, 7.0f, 8.0f};
+		float inputA1[] = {1.0f, 2.0f, 3.0f, 4.0f};
+		float inputA2[] = {5.0f, 6.0f, 7.0f, 8.0f};
+		float inputB[] = {1.0f, 1.0f, 1.0f, 1.0f};
 
-		ggml.setTensorData(t, input1, sizeof(input1));
-		ggml.setTensorData(t, input2, sizeof(input2));
+		ggml.setTensorData(a, inputA1, sizeof(inputA1));
+		ggml.setTensorData(b, inputB, sizeof(inputB));
+		auto r1 = ggml.computeGraph(graph);
+		REQUIRE(r1.success);
+
+		ggml.setTensorData(a, inputA2, sizeof(inputA2));
+		auto r2 = ggml.computeGraph(graph);
+		REQUIRE(r2.success);
 
 		float output[4];
 		ggml.getTensorData(t, output, sizeof(output));
 
-		for (int i = 0; i < 4; i++) {
-			REQUIRE(output[i] == input2[i]);
-		}
+		REQUIRE(std::abs(output[0] - 6.0f) < 0.0001f);
+		REQUIRE(std::abs(output[1] - 7.0f) < 0.0001f);
+		REQUIRE(std::abs(output[2] - 8.0f) < 0.0001f);
+		REQUIRE(std::abs(output[3] - 9.0f) < 0.0001f);
 	}
 }
 
@@ -275,8 +296,9 @@ TEST_CASE("Timings tracking", "[core]") {
 	ofxGgmlGraph graph;
 	auto a = graph.newTensor2d(ofxGgmlType::F32, 10, 10);
 	graph.setInput(a);
-	graph.setOutput(a);
-	graph.build(a);
+	auto b = graph.sqr(a);
+	graph.setOutput(b);
+	graph.build(b);
 
 	ggml.allocGraph(graph);
 
@@ -284,7 +306,8 @@ TEST_CASE("Timings tracking", "[core]") {
 	ggml.setTensorData(a, data.data(), data.size() * sizeof(float));
 
 	SECTION("Get timings after computation") {
-		ggml.computeGraph(graph);
+		auto r = ggml.computeGraph(graph);
+		REQUIRE(r.success);
 
 		auto timings = ggml.getLastTimings();
 		// Setup time should be recorded

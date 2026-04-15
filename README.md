@@ -4,6 +4,8 @@ An [openFrameworks](https://openframeworks.cc) addon wrapping the [ggml](https:/
 
 > **Version 0.3** — ggml is bundled as a static library, plus native llama.cpp CLI inference helpers for generation, embeddings, and cache-aware workflows.
 
+See `CHANGELOG.md` for a running list of user-visible changes.
+
 ---
 
 ## Quick Start
