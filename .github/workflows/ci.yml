@@ -21,6 +21,9 @@ jobs:
       - name: Validate model catalog JSON
         run: python3 -m json.tool scripts/model-catalog.json > /dev/null
 
+      - name: Validate model catalog checksums and schema
+        run: python3 scripts/validate-model-catalog.py scripts/model-catalog.json
+
       - name: Smoke test model tooling
         run: |
           ./scripts/download-model.sh --list
@@ -28,6 +31,23 @@ jobs:
 
       - name: Build and run unit tests
         run: ./tests/run-tests.sh
+
+  runtime-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build bundled ggml (CPU-only)
+        run: ./scripts/build-ggml.sh --cpu-only
+
+      - name: Build tests with runtime sources enabled
+        run: |
+          cmake -B build/runtime-tests -S tests -DOFXGGML_ENABLE_RUNTIME_SOURCES=ON
+          cmake --build build/runtime-tests --config Release
+
+      - name: Run inference-focused tests
+        run: ./build/runtime-tests/ofxGgml-tests "[inference]"
 
   static-analysis:
     runs-on: ubuntu-latest

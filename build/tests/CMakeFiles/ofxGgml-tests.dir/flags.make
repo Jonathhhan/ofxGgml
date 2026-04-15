@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/runner/work/ofxGgml/ofxGgml/tests/../libs/ggml/include -I/home/runner/work/ofxGgml/ofxGgml/tests
+CXX_INCLUDES = -I/home/runner/work/ofxGgml/ofxGgml/tests/../libs/ggml/include -I/home/runner/work/ofxGgml/ofxGgml/tests -I/home/runner/work/ofxGgml/ofxGgml/tests/stubs
 
 CXX_FLAGS = -std=gnu++17
 

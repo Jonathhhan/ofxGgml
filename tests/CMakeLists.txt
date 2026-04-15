@@ -46,6 +46,7 @@ endif()
 
 option(ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
 option(OFXGGML_ENABLE_BENCHMARK_TESTS "Build benchmark tests (slower)" OFF)
+option(OFXGGML_ENABLE_RUNTIME_SOURCES "Build inference/script-source with stubs in headless mode" ON)
 
 if(ENABLE_COVERAGE)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -113,7 +114,7 @@ set(ADDON_SOURCES
     ../src/ofxGgmlProjectMemory.cpp
 )
 
-if(OFXGGML_WITH_OPENFRAMEWORKS)
+if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND ADDON_SOURCES
         ../src/ofxGgmlInference.cpp
         ../src/ofxGgmlScriptSource.cpp)
@@ -130,7 +131,7 @@ set(TEST_SOURCES
     test_integration.cpp
 )
 
-if(OFXGGML_WITH_OPENFRAMEWORKS)
+if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND TEST_SOURCES test_inference.cpp)
 endif()
 
@@ -173,13 +174,18 @@ endif()
 # Link ggml libraries
 if(UNIX AND NOT APPLE)
     # Linux
+    find_package(OpenMP QUIET)
     target_link_libraries(ofxGgml-tests
         ${GGML_BUILD_DIR}/src/libggml.a
         ${GGML_BUILD_DIR}/src/libggml-base.a
         ${GGML_BUILD_DIR}/src/libggml-cpu.a
+        ${GGML_OPTIONAL_LIBS}
         pthread
         dl
     )
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(ofxGgml-tests OpenMP::OpenMP_CXX)
+    endif()
 elseif(APPLE)
     # macOS
     target_link_libraries(ofxGgml-tests

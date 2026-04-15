@@ -70,6 +70,8 @@ static std::string_view trimView(const std::string & s) {
 	return std::string_view(s).substr(b, e - b);
 }
 
+static bool isRuntimeNoiseLine(std::string_view trimmedLine);
+
 /// Strip common llama.cpp warning messages from output.
 /// Even with --log-disable, some warnings may still appear in stderr
 /// which gets captured alongside stdout by runCommandCapture.
@@ -81,21 +83,11 @@ static std::string stripLlamaWarnings(const std::string & text) {
 	std::string line;
 
 	while (std::getline(lines, line)) {
-		// Skip lines that are common llama.cpp warnings and backend initialization messages
-		// Use more specific patterns to avoid filtering legitimate model output
-		if (line.find("warning: no usable GPU found") != std::string::npos || line.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos || line.find("warning: consult docs/build.md for compilation instructions") != std::string::npos || line.find("--gpu-layers option will be ignored") != std::string::npos || line.find("ggml_cuda_init") != std::string::npos || line.find("ggml_vulkan_init") != std::string::npos || line.find("ggml_metal_init") != std::string::npos) {
-			continue;
-		}
-
-		// Filter backend/GPU log lines that start with specific prefixes
-		// to avoid filtering model output that might mention these terms
 		const std::string_view trimmedLine = trimView(line);
-
-		if (trimmedLine.rfind("ofxGgml [INFO]", 0) == 0 || trimmedLine.rfind("ofxGgml [WARN]", 0) == 0 || trimmedLine.rfind("ofxGgml [ERROR]", 0) == 0) {
+		if (isRuntimeNoiseLine(trimmedLine)) {
 			continue;
 		}
 
-		// Keep non-warning lines
 		filtered << line << '\n';
 	}
 
@@ -110,13 +102,16 @@ static std::string stripLlamaWarnings(const std::string & text) {
 static bool isRuntimeNoiseLine(std::string_view trimmedLine) {
 	if (trimmedLine.empty()) return true;
 	if (trimmedLine.rfind("ofxGgml [", 0) == 0) return true;
+	if (trimmedLine.find("warning: no usable GPU found") != std::string::npos) return true;
+	if (trimmedLine.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos) return true;
+	if (trimmedLine.find("warning: consult docs/build.md for compilation instructions") != std::string::npos) return true;
 	if (trimmedLine.find("ggml_cuda_init") != std::string::npos) return true;
 	if (trimmedLine.find("ggml_vulkan_init") != std::string::npos) return true;
 	if (trimmedLine.find("ggml_metal_init") != std::string::npos) return true;
-	if (trimmedLine.find("warning: no usable GPU found") != std::string::npos) return true;
 	if (trimmedLine.find("--gpu-layers option will be ignored") != std::string::npos) return true;
 	if (trimmedLine.find("Total VRAM:") != std::string::npos) return true;
 	if (trimmedLine.find("compute capability") != std::string::npos) return true;
+	if (trimmedLine.find("backend = ") != std::string::npos) return true;
 	if (trimmedLine.find("VMM:") != std::string::npos) return true;
 	if (trimmedLine.rfind("Device ", 0) == 0) {
 		const size_t colon = trimmedLine.find(':');
@@ -334,22 +329,97 @@ static bool isValidExecutablePath(const std::string & path) {
 	// Check for null bytes
 	if (path.find('\0') != std::string::npos) return false;
 
-	std::error_code ec;
-	std::filesystem::path fsPath(path);
-
-	// For security, normalize the path to resolve any symlinks
-	std::filesystem::path canonical = std::filesystem::weakly_canonical(fsPath, ec);
-	if (ec) {
-		// If we can't canonicalize, try basic existence check
-		if (!std::filesystem::exists(fsPath, ec) || ec) return false;
-		if (!std::filesystem::is_regular_file(fsPath, ec) || ec) return false;
+	auto containsPathSeparator = [](const std::string & value) {
+		return value.find('/') != std::string::npos || value.find('\\') != std::string::npos;
+	};
+	auto isLikelyPath = [&](const std::string & value) {
+		std::filesystem::path fsPath(value);
+		return fsPath.is_absolute() || fsPath.has_parent_path() || containsPathSeparator(value);
+	};
+	auto isRegularExecutableFile = [](const std::filesystem::path & candidate) {
+		std::error_code ec;
+		if (!std::filesystem::exists(candidate, ec) || ec) return false;
+		if (!std::filesystem::is_regular_file(candidate, ec) || ec) return false;
+#ifndef _WIN32
+		return access(candidate.c_str(), X_OK) == 0;
+#else
 		return true;
+#endif
+	};
+
+	// Explicit path: validate this path directly.
+	if (isLikelyPath(path)) {
+		std::error_code ec;
+		const std::filesystem::path fsPath(path);
+		const std::filesystem::path canonical = std::filesystem::weakly_canonical(fsPath, ec);
+		if (!ec && isRegularExecutableFile(canonical)) return true;
+		return isRegularExecutableFile(fsPath);
 	}
 
-	// Check if the canonical path exists
-	if (!std::filesystem::exists(canonical, ec) || ec) return false;
-	if (!std::filesystem::is_regular_file(canonical, ec) || ec) return false;
-	return true;
+	// Command name: search PATH (same contract as execvp/CreateProcess).
+	for (char c : path) {
+		const unsigned char uc = static_cast<unsigned char>(c);
+		if (std::iscntrl(uc) || std::isspace(uc)) return false;
+	}
+	const char * envPath = std::getenv("PATH");
+	if (!envPath || *envPath == '\0') return false;
+
+#ifdef _WIN32
+	const char pathSep = ';';
+	std::vector<std::string> executableExtensions;
+	const char * envPathext = std::getenv("PATHEXT");
+	if (envPathext && *envPathext != '\0') {
+		std::istringstream extStream(envPathext);
+		std::string ext;
+		while (std::getline(extStream, ext, ';')) {
+			if (!ext.empty()) executableExtensions.push_back(ext);
+		}
+	}
+	if (executableExtensions.empty()) {
+		executableExtensions = { ".exe", ".bat", ".cmd", ".com" };
+	}
+#else
+	const char pathSep = ':';
+#endif
+
+	std::istringstream pathEntries(envPath);
+	std::string dir;
+	while (std::getline(pathEntries, dir, pathSep)) {
+		if (dir.empty()) continue;
+		const std::filesystem::path base(dir);
+		if (!std::filesystem::is_directory(base)) continue;
+#ifdef _WIN32
+		std::filesystem::path candidate = base / path;
+		if (isRegularExecutableFile(candidate)) return true;
+		for (const auto & ext : executableExtensions) {
+			candidate = base / (path + ext);
+			if (isRegularExecutableFile(candidate)) return true;
+		}
+#else
+		if (isRegularExecutableFile(base / path)) return true;
+#endif
+	}
+	return false;
+}
+
+static bool shouldTreatNonZeroExitAsSuccess(
+	int exitCode,
+	bool hasOutput,
+	const std::string & rawOutput) {
+	if (exitCode == 0) return true;
+	if (exitCode == 130) return true;
+	if (!hasOutput) return false;
+
+	const bool interruptedMarker =
+		rawOutput.find("EOF by user") != std::string::npos ||
+		rawOutput.find("Interrupted by user") != std::string::npos;
+	if (interruptedMarker) return false;
+
+	return exitCode == -1073740791 // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
+		|| exitCode == -1073741819 // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
+		|| exitCode == 1 // generic error (may occur during cleanup)
+		|| exitCode == -1 // signal-killed on POSIX
+		|| (exitCode >= 128 && exitCode < 160); // POSIX signal exits (128+signal)
 }
 
 /// Sanitize a string for safe use in command arguments.
@@ -1036,25 +1106,8 @@ std::function<bool(const std::string&)> onChunk) const {
 		}
 	}
 
-	// Exit code 130 (128 + SIGINT) specifically indicates SIGINT, often from EOF on stdin
-	// or Ctrl+C. This is frequently benign even without output (e.g., initialization only).
-	// For other exit codes, only treat as benign if we have actual output.
-	if (exitCode != 0) {
-		const bool isSigint = (exitCode == 130);
-		const bool hasOutput = !cleaned.empty();
-		const bool interruptedMarker =
-			raw.find("EOF by user") != std::string::npos ||
-			raw.find("Interrupted by user") != std::string::npos;
-		const bool benignExit = (isSigint && hasOutput && !interruptedMarker)
-			|| (hasOutput && (exitCode == -1073740791 // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
-					|| exitCode == -1073741819 // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
-					|| exitCode == 1 // generic error (may occur during cleanup)
-					|| exitCode == -1 // signal-killed on POSIX
-					|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
-					));
-		if (benignExit) {
-			exitCode = 0;
-		}
+	if (exitCode != 0 && shouldTreatNonZeroExitAsSuccess(exitCode, !cleaned.empty(), raw)) {
+		exitCode = 0;
 	}
 
 	if (exitCode != 0) {
@@ -1146,22 +1199,8 @@ ofxGgmlEmbeddingResult ofxGgmlInference::embed(
 		}
 	}
 
-	// Exit code 130 (128 + SIGINT) specifically indicates SIGINT, often from EOF on stdin
-	// or Ctrl+C. This is frequently benign even without output (e.g., initialization only).
-	// For other exit codes, only treat as benign if we have actual output.
-	if (exitCode != 0) {
-		const bool isSigint = (exitCode == 130);
-		const bool hasOutput = !trim(raw).empty();
-		const bool benignExit = isSigint // SIGINT (EOF on stdin) - benign even without output
-			|| (hasOutput && (exitCode == -1073740791 // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
-					|| exitCode == -1073741819 // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
-					|| exitCode == 1 // generic error (may occur during cleanup)
-					|| exitCode == -1 // signal-killed on POSIX
-					|| (exitCode >= 128 && exitCode < 160) // POSIX signal exits (128+signal)
-					));
-		if (benignExit) {
-			exitCode = 0;
-		}
+	if (exitCode != 0 && shouldTreatNonZeroExitAsSuccess(exitCode, !trim(raw).empty(), raw)) {
+		exitCode = 0;
 	}
 
 	if (exitCode != 0) {

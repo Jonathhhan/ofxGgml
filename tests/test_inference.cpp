@@ -1,8 +1,93 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+
+#ifndef _WIN32
+	#include <sys/stat.h>
+#endif
 
 // Inference tests are mostly API tests since they depend on external llama.cpp executables
 // Tests marked [inference][requires-executable] need llama CLI tools installed
+
+namespace {
+
+std::filesystem::path makeUniqueTestDir(const std::string & name) {
+	const auto base = std::filesystem::temp_directory_path() / "ofxggml_tests";
+	std::filesystem::create_directories(base);
+	const auto dir = base / (name + "_" + std::to_string(std::rand()));
+	std::filesystem::create_directories(dir);
+	return dir;
+}
+
+std::string createDummyModel() {
+	const auto dir = makeUniqueTestDir("model");
+	const auto model = dir / "dummy.gguf";
+	std::ofstream out(model);
+	out << "dummy-model";
+	out.close();
+	return model.string();
+}
+
+std::string createExecutableScript(const std::string & body) {
+	const auto dir = makeUniqueTestDir("exec");
+#ifdef _WIN32
+	const auto exe = dir / "fake_llama.bat";
+	std::ofstream out(exe);
+	out << "@echo off\r\n" << body << "\r\n";
+	out.close();
+#else
+	const auto exe = dir / "fake_llama.sh";
+	std::ofstream out(exe);
+	out << "#!/usr/bin/env bash\nset -euo pipefail\n" << body << "\n";
+	out.close();
+	::chmod(exe.c_str(), 0755);
+#endif
+	return exe.string();
+}
+
+void setEnvVar(const std::string & key, const std::string & value) {
+#ifdef _WIN32
+	_putenv_s(key.c_str(), value.c_str());
+#else
+	setenv(key.c_str(), value.c_str(), 1);
+#endif
+}
+
+void unsetEnvVar(const std::string & key) {
+#ifdef _WIN32
+	_putenv_s(key.c_str(), "");
+#else
+	unsetenv(key.c_str());
+#endif
+}
+
+struct ScopedEnvVar {
+	std::string key;
+	std::string original;
+	bool hadOriginal = false;
+
+	ScopedEnvVar(std::string keyIn, std::string value)
+		: key(std::move(keyIn)) {
+		const char * existing = std::getenv(key.c_str());
+		if (existing) {
+			hadOriginal = true;
+			original = existing;
+		}
+		setEnvVar(key, value);
+	}
+
+	~ScopedEnvVar() {
+		if (hadOriginal) {
+			setEnvVar(key, original);
+		} else {
+			unsetEnvVar(key);
+		}
+	}
+};
+
+} // namespace
 
 TEST_CASE("Inference initialization", "[inference]") {
 	ofxGgmlInference inf;
@@ -37,6 +122,72 @@ TEST_CASE("Inference executable configuration", "[inference]") {
 	SECTION("Set empty path") {
 		inf.setCompletionExecutable("");
 		REQUIRE(inf.getCompletionExecutable() == "");
+	}
+}
+
+TEST_CASE("Executable resolution accepts absolute path and PATH command", "[inference]") {
+	const std::string modelPath = createDummyModel();
+	const std::string completionScript = createExecutableScript("echo absolute-ok");
+	const std::string embeddingScript = createExecutableScript("echo [0.1, 0.2, 0.3]");
+
+	SECTION("absolute path executable works for completion and embedding") {
+		ofxGgmlInference inf;
+		inf.setCompletionExecutable(completionScript);
+		inf.setEmbeddingExecutable(embeddingScript);
+
+		auto gen = inf.generate(modelPath, "hello");
+		REQUIRE(gen.success);
+		REQUIRE(gen.text.find("absolute-ok") != std::string::npos);
+
+		auto emb = inf.embed(modelPath, "hello");
+		REQUIRE(emb.success);
+		REQUIRE(emb.embedding.size() == 3);
+	}
+
+	SECTION("PATH-resolvable command works") {
+		const auto cmdDir = makeUniqueTestDir("pathcmd");
+#ifdef _WIN32
+		const auto cmdPath = cmdDir / "ofxggml-path-cmd.bat";
+		std::ofstream out(cmdPath);
+		out << "@echo off\r\necho path-ok\r\n";
+		out.close();
+#else
+		const auto cmdPath = cmdDir / "ofxggml-path-cmd";
+		std::ofstream out(cmdPath);
+		out << "#!/usr/bin/env bash\nset -euo pipefail\necho path-ok\n";
+		out.close();
+		::chmod(cmdPath.c_str(), 0755);
+#endif
+		std::string pathValue = cmdDir.string();
+		if (const char * existingPath = std::getenv("PATH")) {
+#ifdef _WIN32
+			pathValue += ";";
+#else
+			pathValue += ":";
+#endif
+			pathValue += existingPath;
+		}
+		ScopedEnvVar scopedPath("PATH", pathValue);
+
+		ofxGgmlInference inf;
+		inf.setCompletionExecutable("ofxggml-path-cmd");
+		auto gen = inf.generate(modelPath, "hello");
+		REQUIRE(gen.success);
+		REQUIRE(gen.text.find("path-ok") != std::string::npos);
+	}
+
+	SECTION("missing command and non-file path are rejected") {
+		ofxGgmlInference inf;
+		inf.setCompletionExecutable("ofxggml-command-that-should-not-exist");
+		auto missing = inf.generate(modelPath, "hello");
+		REQUIRE_FALSE(missing.success);
+		REQUIRE(missing.error.find("invalid or inaccessible completion executable") != std::string::npos);
+
+		const auto dirPath = makeUniqueTestDir("nonfile");
+		inf.setCompletionExecutable(dirPath.string());
+		auto nonFile = inf.generate(modelPath, "hello");
+		REQUIRE_FALSE(nonFile.success);
+		REQUIRE(nonFile.error.find("invalid or inaccessible completion executable") != std::string::npos);
 	}
 }
 
@@ -147,6 +298,81 @@ TEST_CASE("Inference generation - without executable", "[inference]") {
 		auto result = inf.generate("nonexistent_model.gguf", "test", settings);
 		REQUIRE_FALSE(result.success);
 	}
+}
+
+TEST_CASE("Inference nonzero exit handling is consistent", "[inference]") {
+	const std::string modelPath = createDummyModel();
+	const std::string completionScript = createExecutableScript(R"(
+case "${OFXGGML_EXIT_TEST_MODE:-}" in
+  nonempty) echo "generated-output"; exit 1 ;;
+  sigint-empty) exit 130 ;;
+  *) exit 1 ;;
+esac
+)");
+	const std::string embeddingScript = createExecutableScript(R"(
+case "${OFXGGML_EXIT_TEST_MODE:-}" in
+  nonempty) echo "[0.25, 0.50, 0.75]"; exit 1 ;;
+  *) exit 1 ;;
+esac
+)");
+
+	ofxGgmlInference inf;
+	inf.setCompletionExecutable(completionScript);
+	inf.setEmbeddingExecutable(embeddingScript);
+
+	SECTION("completion: nonzero with non-empty output succeeds") {
+		ScopedEnvVar mode("OFXGGML_EXIT_TEST_MODE", "nonempty");
+		auto result = inf.generate(modelPath, "hello");
+		REQUIRE(result.success);
+		REQUIRE(result.text.find("generated-output") != std::string::npos);
+	}
+
+	SECTION("completion: nonzero with empty output fails") {
+		ScopedEnvVar mode("OFXGGML_EXIT_TEST_MODE", "empty");
+		auto result = inf.generate(modelPath, "hello");
+		REQUIRE_FALSE(result.success);
+		REQUIRE(result.error.find("exit code 1") != std::string::npos);
+	}
+
+	SECTION("completion: SIGINT (130) with empty output is treated as benign") {
+		ScopedEnvVar mode("OFXGGML_EXIT_TEST_MODE", "sigint-empty");
+		auto result = inf.generate(modelPath, "hello");
+		REQUIRE(result.success);
+	}
+
+	SECTION("embedding: nonzero with non-empty output succeeds") {
+		ScopedEnvVar mode("OFXGGML_EXIT_TEST_MODE", "nonempty");
+		auto result = inf.embed(modelPath, "hello");
+		REQUIRE(result.success);
+		REQUIRE(result.embedding.size() == 3);
+	}
+
+	SECTION("embedding: nonzero with empty output fails") {
+		ScopedEnvVar mode("OFXGGML_EXIT_TEST_MODE", "empty");
+		auto result = inf.embed(modelPath, "hello");
+		REQUIRE_FALSE(result.success);
+		REQUIRE(result.error.find("exit code 1") != std::string::npos);
+	}
+}
+
+TEST_CASE("Inference output cleaning removes runtime noise", "[inference]") {
+	const std::string modelPath = createDummyModel();
+	const std::string completionScript = createExecutableScript(R"(
+echo "ofxGgml [INFO] startup"
+echo "warning: no usable GPU found"
+echo "Device 0: Fake GPU"
+echo "clean-payload"
+exit 0
+)");
+
+	ofxGgmlInference inf;
+	inf.setCompletionExecutable(completionScript);
+	auto result = inf.generate(modelPath, "hello");
+	REQUIRE(result.success);
+	REQUIRE(result.text.find("clean-payload") != std::string::npos);
+	REQUIRE(result.text.find("ofxGgml [INFO]") == std::string::npos);
+	REQUIRE(result.text.find("warning: no usable GPU found") == std::string::npos);
+	REQUIRE(result.text.find("Device 0:") == std::string::npos);
 }
 
 TEST_CASE("Inference embedding - without executable", "[inference]") {
