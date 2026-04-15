@@ -6,7 +6,22 @@
 #include <string>
 #include <vector>
 
-/// Backend device type — mirrors ggml_backend_dev_type.
+// ---------------------------------------------------------------------------
+// Version metadata.
+// ---------------------------------------------------------------------------
+
+struct ofxGgmlAddonVersionInfo {
+	int major = 0;
+	int minor = 0;
+	int patch = 0;
+	std::string versionString;
+};
+
+// ---------------------------------------------------------------------------
+// Core runtime types.
+// ---------------------------------------------------------------------------
+
+/// Backend device type. Mirrors ggml_backend_dev_type.
 enum class ofxGgmlBackendType {
 	Cpu = 0,
 	Gpu,
@@ -14,7 +29,7 @@ enum class ofxGgmlBackendType {
 	Accelerator
 };
 
-/// Tensor element type — mirrors ggml_type for the most common formats.
+/// Tensor element type. Mirrors ggml_type for the most common formats.
 enum class ofxGgmlType {
 	F32 = 0,
 	F16 = 1,
@@ -32,13 +47,13 @@ enum class ofxGgmlType {
 	BF16 = 30
 };
 
-/// Pooling operation type — mirrors ggml_op_pool.
+/// Pooling operation type. Mirrors ggml_op_pool.
 enum class ofxGgmlPoolType {
 	Max = 0,
 	Avg = 1
 };
 
-/// Unary activation functions — mirrors ggml_unary_op.
+/// Unary activation functions. Mirrors ggml_unary_op.
 enum class ofxGgmlUnaryOp {
 	Abs,
 	Sgn,
@@ -66,12 +81,12 @@ enum class ofxGgmlState {
 
 /// Log message severity levels.
 enum class ofxGgmlLogLevel {
-	None = 0,     // No logging
-	Debug = 1,    // Debug information
-	Info = 2,     // Informational messages
-	Warn = 3,     // Warning messages
-	Error = 4,    // Error messages
-	Cont = 5      // Continuation of previous message
+	None = 0,
+	Debug = 1,
+	Info = 2,
+	Warn = 3,
+	Error = 4,
+	Cont = 5
 };
 
 /// Configuration for ofxGgml::setup().
@@ -79,18 +94,16 @@ struct ofxGgmlSettings {
 	/// Number of CPU threads for computation (0 = auto-detect).
 	int threads = 0;
 
-	/// Preferred backend device name using the raw ggml name (e.g.
-	/// "CPU", "CUDA0", "Metal", "Vulkan0").  When non-empty this takes
-	/// priority over preferredBackend.  The addon will fall back to the
-	/// best available backend when the named device is not found.
+	/// Preferred backend device name using the raw ggml name (for example
+	/// "CPU", "CUDA0", "Metal", or "Vulkan0"). When non-empty this takes
+	/// priority over preferredBackend.
 	std::string preferredBackendName;
 
-	/// Preferred backend type.  Only used when preferredBackendName is
-	/// empty.  The addon will fall back to CPU when the requested
-	/// backend is unavailable.
+	/// Preferred backend type used when preferredBackendName is empty.
+	/// The addon falls back to CPU when the requested backend is unavailable.
 	ofxGgmlBackendType preferredBackend = ofxGgmlBackendType::Gpu;
 
-	/// Size of the default computation-graph arena (number of nodes).
+	/// Size of the default computation-graph arena in nodes.
 	size_t graphSize = 2048;
 };
 
@@ -119,6 +132,5 @@ struct ofxGgmlTimings {
 	float computeTotalMs = 0.0f;
 };
 
-/// Progress / log callback signature.
-/// For backward compatibility, also accepts int level parameter.
+/// Progress and log callback signature.
 using ofxGgmlLogCallback = std::function<void(int level, const std::string & message)>;

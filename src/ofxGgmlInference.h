@@ -38,95 +38,91 @@ struct ofxGgmlInferenceSettings {
 };
 
 struct ofxGgmlInferenceResult {
-bool success = false;
-float elapsedMs = 0.0f;
-std::string text;
-std::string error;
+	bool success = false;
+	float elapsedMs = 0.0f;
+	std::string text;
+	std::string error;
 };
 
 struct ofxGgmlEmbeddingSettings {
-bool normalize = true;
-std::string pooling = "mean";
+	bool normalize = true;
+	std::string pooling = "mean";
 };
 
 struct ofxGgmlEmbeddingResult {
-bool success = false;
-std::vector<float> embedding;
-std::string error;
+	bool success = false;
+	std::vector<float> embedding;
+	std::string error;
 };
 
 struct ofxGgmlSimilarityHit {
-std::string id;
-std::string text;
-float score = 0.0f;
-size_t index = 0;
+	std::string id;
+	std::string text;
+	float score = 0.0f;
+	size_t index = 0;
 };
 
 /// CLI-backed inference helper for llama.cpp tools.
-///
-/// This provides:
-/// - text generation with optional prompt-cache reuse (KV/session cache)
-/// - structured output flags (JSON schema / grammar file)
-/// - embedding extraction through llama-embedding
-/// - utility tokenize/sample/detokenize helpers for app-side postprocessing
 class ofxGgmlInference {
 public:
-ofxGgmlInference();
+	ofxGgmlInference();
 
-void setCompletionExecutable(const std::string & path);
-void setEmbeddingExecutable(const std::string & path);
-const std::string & getCompletionExecutable() const;
-const std::string & getEmbeddingExecutable() const;
+	void setCompletionExecutable(const std::string & path);
+	void setEmbeddingExecutable(const std::string & path);
+	const std::string & getCompletionExecutable() const;
+	const std::string & getEmbeddingExecutable() const;
 
-ofxGgmlInferenceResult generate(
-const std::string & modelPath,
-const std::string & prompt,
-const ofxGgmlInferenceSettings & settings = {},
-std::function<bool(const std::string&)> onChunk = nullptr) const;
+	ofxGgmlInferenceResult generate(
+		const std::string & modelPath,
+		const std::string & prompt,
+		const ofxGgmlInferenceSettings & settings = {},
+		std::function<bool(const std::string &)> onChunk = nullptr) const;
 
-ofxGgmlEmbeddingResult embed(
-	const std::string & modelPath,
-	const std::string & text,
-	const ofxGgmlEmbeddingSettings & settings = {}) const;
+	ofxGgmlEmbeddingResult embed(
+		const std::string & modelPath,
+		const std::string & text,
+		const ofxGgmlEmbeddingSettings & settings = {}) const;
 
-/// Count tokens for a given text using the model's tokenizer. Returns
-/// -1 on failure (e.g. missing executable or model file).
-int countPromptTokens(
-	const std::string & modelPath,
-	const std::string & text) const;
+	/// Count prompt tokens using the model's tokenizer. Returns -1 on failure.
+	int countPromptTokens(
+		const std::string & modelPath,
+		const std::string & text) const;
 
-static std::vector<std::string> tokenize(const std::string & text);
-static std::string detokenize(const std::vector<std::string> & tokens);
-static int sampleFromLogits(
-	const std::vector<float> & logits,
-	float temperature = 1.0f,
-float topP = 1.0f,
-uint32_t seed = 0);
+	static std::vector<std::string> tokenize(const std::string & text);
+	static std::string detokenize(const std::vector<std::string> & tokens);
+	static int sampleFromLogits(
+		const std::vector<float> & logits,
+		float temperature = 1.0f,
+		float topP = 1.0f,
+		uint32_t seed = 0);
 
 private:
-std::string m_completionExe;
-std::string m_embeddingExe;
+	std::string m_completionExe;
+	std::string m_embeddingExe;
 
-mutable std::unordered_map<std::string, int> m_tokenCountCache;
-mutable std::mutex m_tokenCountCacheMutex;
+	mutable std::unordered_map<std::string, int> m_tokenCountCache;
+	mutable std::mutex m_tokenCountCacheMutex;
 };
 
 /// Lightweight in-memory similarity index for RAG-style retrieval.
 class ofxGgmlEmbeddingIndex {
 public:
-void clear();
-void add(const std::string & id, const std::string & text, const std::vector<float> & embedding);
-std::vector<ofxGgmlSimilarityHit> search(const std::vector<float> & queryEmbedding, size_t topK = 3) const;
+	void clear();
+	void add(const std::string & id, const std::string & text, const std::vector<float> & embedding);
+	std::vector<ofxGgmlSimilarityHit> search(
+		const std::vector<float> & queryEmbedding,
+		size_t topK = 3) const;
 
-static float cosineSimilarity(const std::vector<float> & a, const std::vector<float> & b);
+	static float cosineSimilarity(const std::vector<float> & a, const std::vector<float> & b);
 
 private:
-struct Entry {
-std::string id;
-std::string text;
-std::vector<float> embedding;
-};
-std::vector<Entry> m_entries;
+	struct Entry {
+		std::string id;
+		std::string text;
+		std::vector<float> embedding;
+	};
+
+	std::vector<Entry> m_entries;
 };
 
 class ofxGgmlInferenceAsync : public ofThread {

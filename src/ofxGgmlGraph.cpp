@@ -5,6 +5,10 @@
 #include <cstdio>
 #include <stdexcept>
 
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
 ofxGgmlGraph::ofxGgmlGraph(size_t maxNodes)
 	: m_maxNodes(maxNodes) {
 	ensureContext();
@@ -28,10 +32,14 @@ void ofxGgmlGraph::reset() {
 }
 
 void ofxGgmlGraph::ensureContext() {
-	if (m_ctx) return;
+	if (m_ctx) {
+		return;
+	}
+
 	const size_t bufSize = ggml_tensor_overhead() * m_maxNodes
 		+ ggml_graph_overhead_custom(m_maxNodes, false);
 	m_buf.resize(bufSize);
+
 	struct ggml_init_params params = {
 		/*.mem_size   =*/ bufSize,
 		/*.mem_buffer =*/ m_buf.data(),
@@ -39,14 +47,14 @@ void ofxGgmlGraph::ensureContext() {
 	};
 	m_ctx = ggml_init(params);
 	if (!m_ctx) {
-		throw std::runtime_error("ofxGgmlGraph: ggml_init failed — "
-			"buffer too small or ggml not linked correctly");
+		throw std::runtime_error(
+			"ofxGgmlGraph: ggml_init failed - buffer too small or ggml not linked correctly");
 	}
 }
 
-// --------------------------------------------------------------------------
-//  Tensor creation
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Tensor creation
+// ---------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::newTensor1d(ofxGgmlType type, int64_t ne0) {
 	return ofxGgmlTensor(ggml_new_tensor_1d(m_ctx, static_cast<enum ggml_type>(type), ne0));
@@ -65,20 +73,26 @@ ofxGgmlTensor ofxGgmlGraph::newTensor4d(ofxGgmlType type, int64_t ne0, int64_t n
 }
 
 void ofxGgmlGraph::setParam(ofxGgmlTensor tensor) {
-	if (tensor.raw()) ggml_set_param(tensor.raw());
+	if (tensor.raw()) {
+		ggml_set_param(tensor.raw());
+	}
 }
 
 void ofxGgmlGraph::setInput(ofxGgmlTensor tensor) {
-	if (tensor.raw()) ggml_set_input(tensor.raw());
+	if (tensor.raw()) {
+		ggml_set_input(tensor.raw());
+	}
 }
 
 void ofxGgmlGraph::setOutput(ofxGgmlTensor tensor) {
-	if (tensor.raw()) ggml_set_output(tensor.raw());
+	if (tensor.raw()) {
+		ggml_set_output(tensor.raw());
+	}
 }
 
-// --------------------------------------------------------------------------
-//  Element-wise arithmetic
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Element-wise arithmetic
+// ---------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::add(ofxGgmlTensor a, ofxGgmlTensor b) {
 	if (!a.raw() || !b.raw()) return ofxGgmlTensor();
@@ -120,9 +134,9 @@ ofxGgmlTensor ofxGgmlGraph::clamp(ofxGgmlTensor a, float minVal, float maxVal) {
 	return ofxGgmlTensor(ggml_clamp(m_ctx, a.raw(), minVal, maxVal));
 }
 
-// --------------------------------------------------------------------------
-//  Reduction
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Reduction
+// ---------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::sum(ofxGgmlTensor a) {
 	if (!a.raw()) return ofxGgmlTensor();
@@ -144,24 +158,22 @@ ofxGgmlTensor ofxGgmlGraph::argmax(ofxGgmlTensor a) {
 	return ofxGgmlTensor(ggml_argmax(m_ctx, a.raw()));
 }
 
-// --------------------------------------------------------------------------
-//  Matrix / linear algebra
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Matrix and tensor transforms
+// ---------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::matMul(ofxGgmlTensor a, ofxGgmlTensor b) {
 	if (!a.raw() || !b.raw()) return ofxGgmlTensor();
 	if (a.raw()->ne[0] != b.raw()->ne[0]) {
-		fprintf(stderr, "ofxGgmlGraph: matMul shape mismatch: a.ne[0]=%lld, b.ne[0]=%lld\n",
+		fprintf(
+			stderr,
+			"ofxGgmlGraph: matMul shape mismatch: a.ne[0]=%lld, b.ne[0]=%lld\n",
 			static_cast<long long>(a.raw()->ne[0]),
 			static_cast<long long>(b.raw()->ne[0]));
 		return ofxGgmlTensor();
 	}
 	return ofxGgmlTensor(ggml_mul_mat(m_ctx, a.raw(), b.raw()));
 }
-
-// --------------------------------------------------------------------------
-//  Tensor manipulation
-// --------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::reshape2d(ofxGgmlTensor a, int64_t ne0, int64_t ne1) {
 	if (!a.raw()) return ofxGgmlTensor();
@@ -203,9 +215,9 @@ ofxGgmlTensor ofxGgmlGraph::concat(ofxGgmlTensor a, ofxGgmlTensor b, int dim) {
 	return ofxGgmlTensor(ggml_concat(m_ctx, a.raw(), b.raw(), dim));
 }
 
-// --------------------------------------------------------------------------
-//  Normalization
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Normalization and activations
+// ---------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::norm(ofxGgmlTensor a, float eps) {
 	if (!a.raw()) return ofxGgmlTensor();
@@ -216,10 +228,6 @@ ofxGgmlTensor ofxGgmlGraph::rmsNorm(ofxGgmlTensor a, float eps) {
 	if (!a.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_rms_norm(m_ctx, a.raw(), eps));
 }
-
-// --------------------------------------------------------------------------
-//  Activations
-// --------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::relu(ofxGgmlTensor a) {
 	if (!a.raw()) return ofxGgmlTensor();
@@ -251,16 +259,26 @@ ofxGgmlTensor ofxGgmlGraph::softmax(ofxGgmlTensor a) {
 	return ofxGgmlTensor(ggml_soft_max(m_ctx, a.raw()));
 }
 
-// --------------------------------------------------------------------------
-//  Attention / Transformer helpers
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Attention and positional helpers
+// ---------------------------------------------------------------------------
 
-ofxGgmlTensor ofxGgmlGraph::flashAttn(ofxGgmlTensor q, ofxGgmlTensor k, ofxGgmlTensor v,
+ofxGgmlTensor ofxGgmlGraph::flashAttn(
+	ofxGgmlTensor q,
+	ofxGgmlTensor k,
+	ofxGgmlTensor v,
 	ofxGgmlTensor mask) {
 	if (!q.raw() || !k.raw() || !v.raw()) return ofxGgmlTensor();
 	constexpr float scale = 1.0f;
-	return ofxGgmlTensor(ggml_flash_attn_ext(m_ctx, q.raw(), k.raw(), v.raw(),
-		mask.raw(), scale, 0.0f, 0.0f));
+	return ofxGgmlTensor(ggml_flash_attn_ext(
+		m_ctx,
+		q.raw(),
+		k.raw(),
+		v.raw(),
+		mask.raw(),
+		scale,
+		0.0f,
+		0.0f));
 }
 
 ofxGgmlTensor ofxGgmlGraph::rope(ofxGgmlTensor a, ofxGgmlTensor positions, int nDims, int mode) {
@@ -268,9 +286,9 @@ ofxGgmlTensor ofxGgmlGraph::rope(ofxGgmlTensor a, ofxGgmlTensor positions, int n
 	return ofxGgmlTensor(ggml_rope(m_ctx, a.raw(), positions.raw(), nDims, mode));
 }
 
-// --------------------------------------------------------------------------
-//  Convolution / Pooling
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Convolution and pooling
+// ---------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::conv1d(ofxGgmlTensor a, ofxGgmlTensor kernel, int stride, int padding, int dilation) {
 	if (!a.raw() || !kernel.raw()) return ofxGgmlTensor();
@@ -282,19 +300,39 @@ ofxGgmlTensor ofxGgmlGraph::convTranspose1d(ofxGgmlTensor a, ofxGgmlTensor kerne
 	return ofxGgmlTensor(ggml_conv_transpose_1d(m_ctx, kernel.raw(), a.raw(), stride, padding, dilation));
 }
 
-ofxGgmlTensor ofxGgmlGraph::pool1d(ofxGgmlTensor a, int kernelSize, int stride, int padding,
+ofxGgmlTensor ofxGgmlGraph::pool1d(
+	ofxGgmlTensor a,
+	int kernelSize,
+	int stride,
+	int padding,
 	ofxGgmlPoolType type) {
 	if (!a.raw()) return ofxGgmlTensor();
-	return ofxGgmlTensor(ggml_pool_1d(m_ctx, a.raw(),
-		static_cast<enum ggml_op_pool>(type), kernelSize, stride, padding));
+	return ofxGgmlTensor(ggml_pool_1d(
+		m_ctx,
+		a.raw(),
+		static_cast<enum ggml_op_pool>(type),
+		kernelSize,
+		stride,
+		padding));
 }
 
-ofxGgmlTensor ofxGgmlGraph::pool2d(ofxGgmlTensor a, int kernelSize, int stride, int padding,
+ofxGgmlTensor ofxGgmlGraph::pool2d(
+	ofxGgmlTensor a,
+	int kernelSize,
+	int stride,
+	int padding,
 	ofxGgmlPoolType type) {
 	if (!a.raw()) return ofxGgmlTensor();
-	return ofxGgmlTensor(ggml_pool_2d(m_ctx, a.raw(),
+	return ofxGgmlTensor(ggml_pool_2d(
+		m_ctx,
+		a.raw(),
 		static_cast<enum ggml_op_pool>(type),
-		kernelSize, kernelSize, stride, stride, padding, padding));
+		kernelSize,
+		kernelSize,
+		stride,
+		stride,
+		static_cast<float>(padding),
+		static_cast<float>(padding)));
 }
 
 ofxGgmlTensor ofxGgmlGraph::upscale(ofxGgmlTensor a, int scaleFactor) {
@@ -302,18 +340,18 @@ ofxGgmlTensor ofxGgmlGraph::upscale(ofxGgmlTensor a, int scaleFactor) {
 	return ofxGgmlTensor(ggml_upscale(m_ctx, a.raw(), scaleFactor, GGML_SCALE_MODE_NEAREST));
 }
 
-// --------------------------------------------------------------------------
-//  Loss
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Loss
+// ---------------------------------------------------------------------------
 
 ofxGgmlTensor ofxGgmlGraph::crossEntropyLoss(ofxGgmlTensor logits, ofxGgmlTensor targets) {
 	if (!logits.raw() || !targets.raw()) return ofxGgmlTensor();
 	return ofxGgmlTensor(ggml_cross_entropy_loss(m_ctx, logits.raw(), targets.raw()));
 }
 
-// --------------------------------------------------------------------------
-//  Graph finalization
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Graph finalization
+// ---------------------------------------------------------------------------
 
 void ofxGgmlGraph::build(ofxGgmlTensor output) {
 	if (!output.raw()) {
@@ -323,8 +361,6 @@ void ofxGgmlGraph::build(ofxGgmlTensor output) {
 	if (!m_graph) {
 		m_graph = ggml_new_graph_custom(m_ctx, m_maxNodes, /*grads=*/false);
 	} else {
-		// Reuse the existing cgraph storage so repeated build() calls do not
-		// keep consuming metadata space from the fixed ggml context arena.
 		ggml_graph_clear(m_graph);
 	}
 	ggml_build_forward_expand(m_graph, output.raw());
@@ -340,6 +376,7 @@ void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
 	} else {
 		ggml_graph_clear(m_graph);
 	}
+
 	int validCount = 0;
 	for (auto t : outputs) {
 		if (t.raw()) {
@@ -347,6 +384,7 @@ void ofxGgmlGraph::build(const std::vector<ofxGgmlTensor> & outputs) {
 			++validCount;
 		}
 	}
+
 	if (validCount == 0) {
 		fprintf(stderr, "ofxGgmlGraph: build(outputs) failed: all output tensors were invalid\n");
 		m_graph = nullptr;
@@ -362,14 +400,19 @@ int ofxGgmlGraph::getNumNodes() const {
 
 ofxGgmlTensor ofxGgmlGraph::getNode(int index) const {
 	if (!m_graph) return ofxGgmlTensor();
-	const int n = ggml_graph_n_nodes(m_graph);
-	if (n <= 0) return ofxGgmlTensor();
-	int resolved = index;
-	if (resolved < 0) {
-		resolved = n + resolved;
-	}
-	if (resolved < 0 || resolved >= n) {
+
+	const int nodeCount = ggml_graph_n_nodes(m_graph);
+	if (nodeCount <= 0) {
 		return ofxGgmlTensor();
 	}
-	return ofxGgmlTensor(ggml_graph_node(m_graph, resolved));
+
+	int resolvedIndex = index;
+	if (resolvedIndex < 0) {
+		resolvedIndex = nodeCount + resolvedIndex;
+	}
+	if (resolvedIndex < 0 || resolvedIndex >= nodeCount) {
+		return ofxGgmlTensor();
+	}
+
+	return ofxGgmlTensor(ggml_graph_node(m_graph, resolvedIndex));
 }

@@ -70,6 +70,27 @@ static std::string_view trimView(const std::string & s) {
 	return std::string_view(s).substr(b, e - b);
 }
 
+static std::string getEnvVarString(const char * name) {
+	if (!name || *name == '\0') {
+		return "";
+	}
+#ifdef _WIN32
+	char * value = nullptr;
+	size_t len = 0;
+	const errno_t err = _dupenv_s(&value, &len, name);
+	if (err != 0 || value == nullptr || len == 0) {
+		free(value);
+		return "";
+	}
+	std::string result(value);
+	free(value);
+	return result;
+#else
+	const char * value = std::getenv(name);
+	return value ? std::string(value) : std::string();
+#endif
+}
+
 static bool isRuntimeNoiseLine(std::string_view trimmedLine);
 
 /// Strip common llama.cpp warning messages from output.
@@ -361,14 +382,14 @@ static bool isValidExecutablePath(const std::string & path) {
 		const unsigned char uc = static_cast<unsigned char>(c);
 		if (std::iscntrl(uc) || std::isspace(uc)) return false;
 	}
-	const char * envPath = std::getenv("PATH");
-	if (!envPath || *envPath == '\0') return false;
+	const std::string envPath = getEnvVarString("PATH");
+	if (envPath.empty()) return false;
 
 #ifdef _WIN32
 	const char pathSep = ';';
 	std::vector<std::string> executableExtensions;
-	const char * envPathext = std::getenv("PATHEXT");
-	if (envPathext && *envPathext != '\0') {
+	const std::string envPathext = getEnvVarString("PATHEXT");
+	if (!envPathext.empty()) {
 		std::istringstream extStream(envPathext);
 		std::string ext;
 		while (std::getline(extStream, ext, ';')) {

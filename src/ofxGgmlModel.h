@@ -9,35 +9,15 @@
 #include <string>
 #include <vector>
 
-struct gguf_context;
-struct ggml_context;
 struct ggml_backend_buffer;
+struct ggml_context;
+struct gguf_context;
 
-/// Load and inspect a GGUF model file.
+/// GGUF model loader and inspection helper.
 ///
-/// Typical usage:
-///
-/// @code
-///   ofxGgmlModel model;
-///   if (!model.load("path/to/model.gguf")) { /* handle error */ }
-///
-///   // Query metadata.
-///   std::string arch = model.getMetadataString("general.architecture");
-///
-///   // List tensors.
-///   for (int64_t i = 0; i < model.getNumTensors(); i++) {
-///       auto name = model.getTensorName(i);
-///       auto t    = model.getTensor(name);
-///       // ... use tensor shape / type information ...
-///   }
-///
-///   // After loading, upload weights to a backend buffer:
-///   ofxGgml ggml;
-///   ggml.setup();
-///   ggml.loadModelWeights(model);
-///   // model tensors now reside in backend memory and can be used
-///   // in computation graphs.
-/// @endcode
+/// The loader keeps GGUF metadata and tensor data in host memory. Use
+/// `ofxGgml::loadModelWeights()` when you want those tensors uploaded into a
+/// backend buffer for execution.
 class ofxGgmlModel {
 public:
 	ofxGgmlModel();
@@ -46,76 +26,70 @@ public:
 	ofxGgmlModel(const ofxGgmlModel &) = delete;
 	ofxGgmlModel & operator=(const ofxGgmlModel &) = delete;
 
-	// ------------------------------------------------------------------
-	//  Loading
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Loading
+	// ---------------------------------------------------------------------------
 
-	/// Load a GGUF file.  Reads all tensor data into host (CPU) memory.
-	/// Returns true on success.
+	/// Load a GGUF file into host memory.
 	bool load(const std::string & path);
 
-	/// Release all resources.
+	/// Release all owned resources.
 	void close();
 
-	/// True when a model has been loaded successfully.
+	/// True when a model is loaded.
 	bool isLoaded() const;
 
-	/// File path that was loaded (empty when no model is loaded).
+	/// Path of the currently loaded file, or empty when not loaded.
 	std::string getPath() const;
 
-	// ------------------------------------------------------------------
-	//  Metadata  (key-value pairs stored in the GGUF header)
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Metadata
+	// ---------------------------------------------------------------------------
 
-	/// Total number of metadata key-value pairs.
+	/// Number of GGUF metadata key-value entries.
 	int64_t getNumMetadataKeys() const;
 
-	/// Key name at the given index (0-based).
+	/// Metadata key name at the given zero-based index.
 	std::string getMetadataKey(int64_t index) const;
 
-	/// Find a metadata key.  Returns the key index, or -1 if not found.
+	/// Find a metadata key. Returns -1 when missing.
 	int64_t findMetadataKey(const std::string & key) const;
 
-	/// Read a string-valued metadata entry.  Returns "" if missing.
+	/// Read a string metadata value. Returns an empty string when missing.
 	std::string getMetadataString(const std::string & key) const;
 
-	/// Read an integer metadata entry.  Returns defaultVal if missing
-	/// or if the type does not match.
+	/// Read an integer metadata value with fallback.
 	int32_t getMetadataInt32(const std::string & key, int32_t defaultVal = 0) const;
 
-	/// Read a uint32 metadata entry.
+	/// Read an unsigned integer metadata value with fallback.
 	uint32_t getMetadataUint32(const std::string & key, uint32_t defaultVal = 0) const;
 
-	/// Read a float metadata entry.
+	/// Read a float metadata value with fallback.
 	float getMetadataFloat(const std::string & key, float defaultVal = 0.0f) const;
 
-	// ------------------------------------------------------------------
-	//  Tensor information
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Tensor inspection
+	// ---------------------------------------------------------------------------
 
 	/// Number of tensors stored in the GGUF file.
 	int64_t getNumTensors() const;
 
-	/// Name of the tensor at the given index (0-based).
+	/// Tensor name at the given zero-based index.
 	std::string getTensorName(int64_t index) const;
 
-	/// Retrieve a tensor by name from the loaded model.
-	/// The returned wrapper points into host memory allocated during
-	/// load().  Returns an invalid (null) tensor if not found.
+	/// Retrieve a tensor view by name.
 	ofxGgmlTensor getTensor(const std::string & name);
 
 	/// List all tensor names.
 	std::vector<std::string> getTensorNames() const;
 
-	// ------------------------------------------------------------------
-	//  Low-level access
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Low-level access
+	// ---------------------------------------------------------------------------
 
-	/// Underlying GGUF context (valid after load()).
 	struct gguf_context * ggufContext();
 	const struct gguf_context * ggufContext() const;
 
-	/// Underlying ggml context holding the loaded tensor data.
 	struct ggml_context * ggmlContext();
 	const struct ggml_context * ggmlContext() const;
 

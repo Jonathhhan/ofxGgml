@@ -8,53 +8,47 @@
 #include <string>
 #include <vector>
 
-struct ggml_context;
 struct ggml_cgraph;
+struct ggml_context;
 
-/// Builder for ggml computation graphs.
+/// Fluent builder for ggml computation graphs.
 ///
-/// Usage:
-///   1. Call newTensor*() to define input/weight tensors.
-///   2. Chain tensor operations (add, mul, matMul, …) to build the graph.
-///   3. Call build() to finalize the graph, then pass it to ofxGgml::compute().
-///
-/// The graph and all tensors it references are owned by this object
-/// and freed on destruction or reset().
+/// The builder owns the ggml context, tensor metadata arena, and finalized
+/// graph object. Create tensors, chain operations, call build(), then pass the
+/// graph to `ofxGgml` for allocation and execution.
 class ofxGgmlGraph {
 public:
-	/// Construct a graph builder with the given arena size.
-	/// @param maxNodes  Maximum number of nodes in the computation graph.
+	/// Construct a graph builder with the requested node arena size.
 	explicit ofxGgmlGraph(size_t maxNodes = 2048);
 	~ofxGgmlGraph();
 
 	ofxGgmlGraph(const ofxGgmlGraph &) = delete;
 	ofxGgmlGraph & operator=(const ofxGgmlGraph &) = delete;
 
-	/// Discard the current graph and context so the builder can be reused.
+	/// Discard the current graph and recreate the builder context.
 	void reset();
 
-	// ------------------------------------------------------------------
-	//  Tensor creation
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Tensor creation
+	// ---------------------------------------------------------------------------
 
 	ofxGgmlTensor newTensor1d(ofxGgmlType type, int64_t ne0);
 	ofxGgmlTensor newTensor2d(ofxGgmlType type, int64_t ne0, int64_t ne1);
 	ofxGgmlTensor newTensor3d(ofxGgmlType type, int64_t ne0, int64_t ne1, int64_t ne2);
 	ofxGgmlTensor newTensor4d(ofxGgmlType type, int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3);
 
-	/// Mark a tensor as a differentiable parameter (for automatic
-	/// differentiation / optimisation).
+	/// Mark a tensor as a differentiable parameter.
 	void setParam(ofxGgmlTensor tensor);
 
-	/// Mark a tensor as a graph input (never overwritten during alloc).
+	/// Mark a tensor as a graph input.
 	void setInput(ofxGgmlTensor tensor);
 
-	/// Mark a tensor as a graph output (never freed during alloc).
+	/// Mark a tensor as a graph output.
 	void setOutput(ofxGgmlTensor tensor);
 
-	// ------------------------------------------------------------------
-	//  Element-wise arithmetic
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Element-wise arithmetic
+	// ---------------------------------------------------------------------------
 
 	ofxGgmlTensor add(ofxGgmlTensor a, ofxGgmlTensor b);
 	ofxGgmlTensor sub(ofxGgmlTensor a, ofxGgmlTensor b);
@@ -65,25 +59,21 @@ public:
 	ofxGgmlTensor scale(ofxGgmlTensor a, float s);
 	ofxGgmlTensor clamp(ofxGgmlTensor a, float minVal, float maxVal);
 
-	// ------------------------------------------------------------------
-	//  Reduction
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Reduction
+	// ---------------------------------------------------------------------------
 
 	ofxGgmlTensor sum(ofxGgmlTensor a);
 	ofxGgmlTensor sumRows(ofxGgmlTensor a);
 	ofxGgmlTensor mean(ofxGgmlTensor a);
 	ofxGgmlTensor argmax(ofxGgmlTensor a);
 
-	// ------------------------------------------------------------------
-	//  Matrix / linear algebra
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Matrix and tensor transforms
+	// ---------------------------------------------------------------------------
 
-	/// Matrix multiplication:  result = a * b^T.
+	/// Matrix multiplication using ggml's `mul_mat` semantics.
 	ofxGgmlTensor matMul(ofxGgmlTensor a, ofxGgmlTensor b);
-
-	// ------------------------------------------------------------------
-	//  Tensor manipulation
-	// ------------------------------------------------------------------
 
 	ofxGgmlTensor reshape2d(ofxGgmlTensor a, int64_t ne0, int64_t ne1);
 	ofxGgmlTensor reshape3d(ofxGgmlTensor a, int64_t ne0, int64_t ne1, int64_t ne2);
@@ -94,17 +84,12 @@ public:
 	ofxGgmlTensor repeat(ofxGgmlTensor a, ofxGgmlTensor b);
 	ofxGgmlTensor concat(ofxGgmlTensor a, ofxGgmlTensor b, int dim = 0);
 
-	// ------------------------------------------------------------------
-	//  Normalization
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Normalization and activations
+	// ---------------------------------------------------------------------------
 
 	ofxGgmlTensor norm(ofxGgmlTensor a, float eps = 1e-5f);
 	ofxGgmlTensor rmsNorm(ofxGgmlTensor a, float eps = 1e-5f);
-
-	// ------------------------------------------------------------------
-	//  Activations
-	// ------------------------------------------------------------------
-
 	ofxGgmlTensor relu(ofxGgmlTensor a);
 	ofxGgmlTensor gelu(ofxGgmlTensor a);
 	ofxGgmlTensor silu(ofxGgmlTensor a);
@@ -112,63 +97,67 @@ public:
 	ofxGgmlTensor tanh(ofxGgmlTensor a);
 	ofxGgmlTensor softmax(ofxGgmlTensor a);
 
-	// ------------------------------------------------------------------
-	//  Attention / Transformer helpers
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Attention and positional helpers
+	// ---------------------------------------------------------------------------
 
-	/// Scaled-dot-product attention (flash attention when available).
-	/// When a valid mask tensor is provided it is used as the attention
-	/// mask (e.g. a causal mask filled with -INFINITY for masked
-	/// positions).  Pass an invalid (default-constructed) tensor for
-	/// unmasked attention.
-	ofxGgmlTensor flashAttn(ofxGgmlTensor q, ofxGgmlTensor k, ofxGgmlTensor v,
+	/// Attention helper. Pass an invalid tensor for unmasked attention.
+	ofxGgmlTensor flashAttn(
+		ofxGgmlTensor q,
+		ofxGgmlTensor k,
+		ofxGgmlTensor v,
 		ofxGgmlTensor mask = ofxGgmlTensor());
 
-	/// Rotary position embedding.
 	ofxGgmlTensor rope(ofxGgmlTensor a, ofxGgmlTensor positions, int nDims, int mode = 0);
 
-	// ------------------------------------------------------------------
-	//  Convolution / Pooling
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Convolution and pooling
+	// ---------------------------------------------------------------------------
 
 	ofxGgmlTensor conv1d(ofxGgmlTensor a, ofxGgmlTensor kernel, int stride = 1, int padding = 0, int dilation = 1);
 	ofxGgmlTensor convTranspose1d(ofxGgmlTensor a, ofxGgmlTensor kernel, int stride = 1, int padding = 0, int dilation = 1);
-	ofxGgmlTensor pool1d(ofxGgmlTensor a, int kernelSize, int stride = 1, int padding = 0,
+	ofxGgmlTensor pool1d(
+		ofxGgmlTensor a,
+		int kernelSize,
+		int stride = 1,
+		int padding = 0,
 		ofxGgmlPoolType type = ofxGgmlPoolType::Avg);
-	ofxGgmlTensor pool2d(ofxGgmlTensor a, int kernelSize, int stride = 1, int padding = 0,
+	ofxGgmlTensor pool2d(
+		ofxGgmlTensor a,
+		int kernelSize,
+		int stride = 1,
+		int padding = 0,
 		ofxGgmlPoolType type = ofxGgmlPoolType::Avg);
 	ofxGgmlTensor upscale(ofxGgmlTensor a, int scaleFactor);
 
-	// ------------------------------------------------------------------
-	//  Loss
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Loss
+	// ---------------------------------------------------------------------------
 
-	/// Cross-entropy loss between logits and one-hot targets.
 	ofxGgmlTensor crossEntropyLoss(ofxGgmlTensor logits, ofxGgmlTensor targets);
 
-	// ------------------------------------------------------------------
-	//  Graph finalization
-	// ------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Graph finalization
+	// ---------------------------------------------------------------------------
 
-	/// Finalize the graph by expanding forward from the given output tensor.
-	/// Must be called before passing to ofxGgml::compute().
+	/// Finalize the graph by expanding forward from one output tensor.
 	void build(ofxGgmlTensor output);
 
-	/// Finalize with multiple outputs.
+	/// Finalize the graph from multiple outputs.
 	void build(const std::vector<ofxGgmlTensor> & outputs);
 
-	/// Access the underlying ggml_cgraph (valid after build()).
+	/// Underlying ggml graph handle. Valid after build().
 	struct ggml_cgraph * raw() { return m_graph; }
 	const struct ggml_cgraph * raw() const { return m_graph; }
 
-	/// Access the underlying ggml_context.
+	/// Underlying ggml context.
 	struct ggml_context * context() { return m_ctx; }
 	const struct ggml_context * context() const { return m_ctx; }
 
 	/// Number of nodes in the finalized graph.
 	int getNumNodes() const;
 
-	/// Get the i-th node tensor (negative indices count from the end).
+	/// Fetch a graph node by index. Negative indices count from the end.
 	ofxGgmlTensor getNode(int index) const;
 
 private:

@@ -1,4 +1,5 @@
 #include "ofxGgmlCore.h"
+#include "ofxGgmlVersion.h"
 
 #include "ggml.h"
 #include "ggml-alloc.h"
@@ -71,7 +72,7 @@ struct ofxGgml::Impl {
 	/// Last timings.
 	ofxGgmlTimings timings;
 
-	/// Log callback — initialised to the built-in console logger so that
+	/// Log callback initialized to the built-in console logger so that
 	/// messages are visible by default.
 	ofxGgmlLogCallback logCb = defaultLogCallback;
 
@@ -84,19 +85,19 @@ struct ofxGgml::Impl {
 //  Abort recovery for ggml calls
 // --------------------------------------------------------------------------
 //
-// ggml calls GGML_ABORT("fatal error") → ggml_abort() → abort() when an
+// ggml calls GGML_ABORT("fatal error") -> ggml_abort() -> abort() when an
 // internal allocation fails (e.g. inside ggml_malloc / ggml_calloc).
 //
 // Since ggml is compiled directly into the addon as a static library,
 // there is only a single copy of libggml-base.  The abort callback set
-// via ggml_set_abort_callback() is always effective — no SIGABRT handler
+// via ggml_set_abort_callback() is always effective - no SIGABRT handler
 // or environment-variable workarounds are needed.
 
 static thread_local std::jmp_buf s_ggmlAbortJmpBuf;
 static thread_local bool s_ggmlAbortGuardActive = false;
 static thread_local char s_ggmlAbortMsg[256] = {};
 
-/// ggml abort callback — intercepts ggml_abort() and longjmp's back to
+/// ggml abort callback intercepts ggml_abort() and longjmp's back to
 /// the recovery point set by guardedGgmlCall().
 static void ggmlAbortHandler(const char * message) {
 	if (s_ggmlAbortGuardActive) {
@@ -270,6 +271,15 @@ static bool validateGraphForCompute(struct ggml_cgraph * graph, std::string & er
 //  Lifecycle
 // --------------------------------------------------------------------------
 
+ofxGgmlAddonVersionInfo ofxGgml::getAddonVersionInfo() {
+	return {
+		OFX_GGML_VERSION_MAJOR,
+		OFX_GGML_VERSION_MINOR,
+		OFX_GGML_VERSION_PATCH,
+		OFX_GGML_VERSION_STRING
+	};
+}
+
 ofxGgml::ofxGgml()
 	: m_impl(std::make_unique<Impl>()) {}
 
@@ -292,7 +302,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	// (triggered by #ifdef GGML_USE_CUDA / GGML_USE_VULKAN / etc. in
 	// ggml-backend-reg.cpp).  We still call ggml_backend_load_all()
 	// to pick up any additional runtime-loadable backends, but this is
-	// safe — there is only one copy of libggml-base so no duplicate
+	// safe - there is only one copy of libggml-base so no duplicate
 	// static initializer assertions.
 	static std::once_flag backendLoadOnce;
 	std::call_once(backendLoadOnce, [&]() {
@@ -416,7 +426,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 #endif
 
 	if (!m_impl->backend) {
-		// Explicit CPU init as a fallback — avoids ggml_backend_init_best()
+		// Explicit CPU init as a fallback - avoids ggml_backend_init_best()
 		// which would attempt GPU init again and could crash.
 		guardedGgmlCall([&]() {
 			m_impl->backend = ggml_backend_init_by_type(
@@ -750,7 +760,7 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	//   2. Allocate a backend buffer (which reassigns data pointers).
 	//   3. Copy the saved host data into the backend buffer.
 
-	// Step 1 — snapshot host pointers for every tensor.
+	// Step 1 - snapshot host pointers for every tensor.
 	struct TensorSnapshot {
 		struct ggml_tensor * tensor;
 		const void * hostData;
@@ -771,7 +781,7 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 		}
 	}
 
-	// Step 2 — allocate a backend buffer for all context tensors.
+	// Step 2 - allocate a backend buffer for all context tensors.
 	// Free any previously allocated model weight buffer.
 	if (m_impl->modelWeightBuf) {
 		ggml_backend_buffer_free(m_impl->modelWeightBuf);
@@ -791,7 +801,7 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	ggml_backend_buffer_set_usage(buf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
 	m_impl->modelWeightBuf = buf;
 
-	// Step 3 — copy host data into the (possibly GPU-resident) buffer.
+	// Step 3 - copy host data into the (possibly GPU-resident) buffer.
 	ggml_backend_t uploadBackend = m_impl->backend ? m_impl->backend : m_impl->cpuBackend;
 	for (const auto & snap : snapshots) {
 		ggml_backend_tensor_set_async(uploadBackend, snap.tensor, snap.hostData, 0, snap.bytes);

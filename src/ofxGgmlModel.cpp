@@ -3,11 +3,9 @@
 #include "ggml.h"
 #include "gguf.h"
 
-#include <cstdio>
-
-// --------------------------------------------------------------------------
-//  PIMPL
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// PIMPL
+// ---------------------------------------------------------------------------
 
 struct ofxGgmlModel::Impl {
 	struct gguf_context * ggufCtx = nullptr;
@@ -15,9 +13,9 @@ struct ofxGgmlModel::Impl {
 	std::string path;
 };
 
-// --------------------------------------------------------------------------
-//  Lifecycle
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
 
 ofxGgmlModel::ofxGgmlModel()
 	: m_impl(std::make_unique<Impl>()) {}
@@ -27,28 +25,24 @@ ofxGgmlModel::~ofxGgmlModel() {
 }
 
 bool ofxGgmlModel::load(const std::string & path) {
-	// Close any previously loaded model.
 	close();
 
-	// Prepare a ggml_context pointer that gguf_init_from_file will
-	// populate with the tensor metadata and data.
 	struct ggml_context * dataCtx = nullptr;
-
 	struct gguf_init_params params;
-	params.no_alloc = false;   // allocate and read tensor data into memory
-	params.ctx      = &dataCtx;
+	params.no_alloc = false;
+	params.ctx = &dataCtx;
 
-	struct gguf_context * guf = gguf_init_from_file(path.c_str(), params);
-	if (!guf || !dataCtx) {
-		if (guf) {
-			gguf_free(guf);
+	struct gguf_context * ggufCtx = gguf_init_from_file(path.c_str(), params);
+	if (!ggufCtx || !dataCtx) {
+		if (ggufCtx) {
+			gguf_free(ggufCtx);
 		}
 		return false;
 	}
 
-	m_impl->ggufCtx = guf;
+	m_impl->ggufCtx = ggufCtx;
 	m_impl->ggmlCtx = dataCtx;
-	m_impl->path    = path;
+	m_impl->path = path;
 	return true;
 }
 
@@ -72,9 +66,9 @@ std::string ofxGgmlModel::getPath() const {
 	return m_impl->path;
 }
 
-// --------------------------------------------------------------------------
-//  Metadata
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Metadata
+// ---------------------------------------------------------------------------
 
 int64_t ofxGgmlModel::getNumMetadataKeys() const {
 	if (!m_impl->ggufCtx) return 0;
@@ -83,8 +77,12 @@ int64_t ofxGgmlModel::getNumMetadataKeys() const {
 
 std::string ofxGgmlModel::getMetadataKey(int64_t index) const {
 	if (!m_impl->ggufCtx) return {};
-	const int64_t n = static_cast<int64_t>(gguf_get_n_kv(m_impl->ggufCtx));
-	if (index < 0 || index >= n) return {};
+
+	const int64_t keyCount = static_cast<int64_t>(gguf_get_n_kv(m_impl->ggufCtx));
+	if (index < 0 || index >= keyCount) {
+		return {};
+	}
+
 	const char * key = gguf_get_key(m_impl->ggufCtx, static_cast<int>(index));
 	return key ? key : "";
 }
@@ -96,48 +94,56 @@ int64_t ofxGgmlModel::findMetadataKey(const std::string & key) const {
 
 std::string ofxGgmlModel::getMetadataString(const std::string & key) const {
 	if (!m_impl->ggufCtx) return {};
+
 	const int64_t id = gguf_find_key(m_impl->ggufCtx, key.c_str());
 	if (id < 0) return {};
 	if (gguf_get_kv_type(m_impl->ggufCtx, id) != GGUF_TYPE_STRING) return {};
-	const char * val = gguf_get_val_str(m_impl->ggufCtx, id);
-	return val ? val : "";
+
+	const char * value = gguf_get_val_str(m_impl->ggufCtx, id);
+	return value ? value : "";
 }
 
 int32_t ofxGgmlModel::getMetadataInt32(const std::string & key, int32_t defaultVal) const {
 	if (!m_impl->ggufCtx) return defaultVal;
+
 	const int64_t id = gguf_find_key(m_impl->ggufCtx, key.c_str());
 	if (id < 0) return defaultVal;
-	const enum gguf_type t = gguf_get_kv_type(m_impl->ggufCtx, id);
-	if (t == GGUF_TYPE_INT32)  return gguf_get_val_i32(m_impl->ggufCtx, id);
-	if (t == GGUF_TYPE_UINT32) return static_cast<int32_t>(gguf_get_val_u32(m_impl->ggufCtx, id));
-	if (t == GGUF_TYPE_INT8)   return static_cast<int32_t>(gguf_get_val_i8(m_impl->ggufCtx, id));
-	if (t == GGUF_TYPE_UINT8)  return static_cast<int32_t>(gguf_get_val_u8(m_impl->ggufCtx, id));
-	if (t == GGUF_TYPE_INT16)  return static_cast<int32_t>(gguf_get_val_i16(m_impl->ggufCtx, id));
-	if (t == GGUF_TYPE_UINT16) return static_cast<int32_t>(gguf_get_val_u16(m_impl->ggufCtx, id));
+
+	const enum gguf_type type = gguf_get_kv_type(m_impl->ggufCtx, id);
+	if (type == GGUF_TYPE_INT32)  return gguf_get_val_i32(m_impl->ggufCtx, id);
+	if (type == GGUF_TYPE_UINT32) return static_cast<int32_t>(gguf_get_val_u32(m_impl->ggufCtx, id));
+	if (type == GGUF_TYPE_INT8)   return static_cast<int32_t>(gguf_get_val_i8(m_impl->ggufCtx, id));
+	if (type == GGUF_TYPE_UINT8)  return static_cast<int32_t>(gguf_get_val_u8(m_impl->ggufCtx, id));
+	if (type == GGUF_TYPE_INT16)  return static_cast<int32_t>(gguf_get_val_i16(m_impl->ggufCtx, id));
+	if (type == GGUF_TYPE_UINT16) return static_cast<int32_t>(gguf_get_val_u16(m_impl->ggufCtx, id));
 	return defaultVal;
 }
 
 uint32_t ofxGgmlModel::getMetadataUint32(const std::string & key, uint32_t defaultVal) const {
 	if (!m_impl->ggufCtx) return defaultVal;
+
 	const int64_t id = gguf_find_key(m_impl->ggufCtx, key.c_str());
 	if (id < 0) return defaultVal;
-	const enum gguf_type t = gguf_get_kv_type(m_impl->ggufCtx, id);
-	if (t == GGUF_TYPE_UINT32) return gguf_get_val_u32(m_impl->ggufCtx, id);
-	if (t == GGUF_TYPE_INT32)  return static_cast<uint32_t>(gguf_get_val_i32(m_impl->ggufCtx, id));
+
+	const enum gguf_type type = gguf_get_kv_type(m_impl->ggufCtx, id);
+	if (type == GGUF_TYPE_UINT32) return gguf_get_val_u32(m_impl->ggufCtx, id);
+	if (type == GGUF_TYPE_INT32)  return static_cast<uint32_t>(gguf_get_val_i32(m_impl->ggufCtx, id));
 	return defaultVal;
 }
 
 float ofxGgmlModel::getMetadataFloat(const std::string & key, float defaultVal) const {
 	if (!m_impl->ggufCtx) return defaultVal;
+
 	const int64_t id = gguf_find_key(m_impl->ggufCtx, key.c_str());
 	if (id < 0) return defaultVal;
 	if (gguf_get_kv_type(m_impl->ggufCtx, id) != GGUF_TYPE_FLOAT32) return defaultVal;
+
 	return gguf_get_val_f32(m_impl->ggufCtx, id);
 }
 
-// --------------------------------------------------------------------------
-//  Tensor information
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Tensor inspection
+// ---------------------------------------------------------------------------
 
 int64_t ofxGgmlModel::getNumTensors() const {
 	if (!m_impl->ggufCtx) return 0;
@@ -146,33 +152,39 @@ int64_t ofxGgmlModel::getNumTensors() const {
 
 std::string ofxGgmlModel::getTensorName(int64_t index) const {
 	if (!m_impl->ggufCtx) return {};
-	const int64_t n = gguf_get_n_tensors(m_impl->ggufCtx);
-	if (index < 0 || index >= n) return {};
+
+	const int64_t tensorCount = gguf_get_n_tensors(m_impl->ggufCtx);
+	if (index < 0 || index >= tensorCount) {
+		return {};
+	}
+
 	const char * name = gguf_get_tensor_name(m_impl->ggufCtx, index);
 	return name ? name : "";
 }
 
 ofxGgmlTensor ofxGgmlModel::getTensor(const std::string & name) {
 	if (!m_impl->ggmlCtx) return ofxGgmlTensor();
-	struct ggml_tensor * t = ggml_get_tensor(m_impl->ggmlCtx, name.c_str());
-	return ofxGgmlTensor(t);
+	return ofxGgmlTensor(ggml_get_tensor(m_impl->ggmlCtx, name.c_str()));
 }
 
 std::vector<std::string> ofxGgmlModel::getTensorNames() const {
 	std::vector<std::string> names;
-	if (!m_impl->ggufCtx) return names;
-	const int64_t n = gguf_get_n_tensors(m_impl->ggufCtx);
-	names.reserve(static_cast<size_t>(n));
-	for (int64_t i = 0; i < n; i++) {
+	if (!m_impl->ggufCtx) {
+		return names;
+	}
+
+	const int64_t tensorCount = gguf_get_n_tensors(m_impl->ggufCtx);
+	names.reserve(static_cast<size_t>(tensorCount));
+	for (int64_t i = 0; i < tensorCount; ++i) {
 		const char * name = gguf_get_tensor_name(m_impl->ggufCtx, i);
 		names.emplace_back(name ? name : "");
 	}
 	return names;
 }
 
-// --------------------------------------------------------------------------
-//  Low-level access
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Low-level access
+// ---------------------------------------------------------------------------
 
 struct gguf_context * ofxGgmlModel::ggufContext() {
 	return m_impl->ggufCtx;
