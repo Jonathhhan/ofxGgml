@@ -61,6 +61,23 @@ if (Vulkan_FOUND)
 
     set(VULKAN_SHADER_GEN_CMAKE_ARGS "")
 
+    if (NOT CMAKE_CROSSCOMPILING)
+        # Ensure the external shader generator reuses the parent compiler/toolset (fixes
+        # missing MSVC compiler detection in Visual Studio multi-config builds).
+        if (CMAKE_C_COMPILER)
+            list(APPEND VULKAN_SHADER_GEN_CMAKE_ARGS "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}")
+        endif()
+        if (CMAKE_CXX_COMPILER)
+            list(APPEND VULKAN_SHADER_GEN_CMAKE_ARGS "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}")
+        endif()
+        if (CMAKE_GENERATOR_TOOLSET)
+            list(APPEND VULKAN_SHADER_GEN_CMAKE_ARGS "-DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}")
+        endif()
+        if (CMAKE_GENERATOR_INSTANCE)
+            list(APPEND VULKAN_SHADER_GEN_CMAKE_ARGS "-DCMAKE_GENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}")
+        endif()
+    endif()
+
     # Test all shader extensions
     test_shader_extension_support(
         "GL_KHR_cooperative_matrix"
