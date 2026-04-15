@@ -29,8 +29,8 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlModel` GGUF inspection and backend weight upload
 - `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, CLI capability probing, cutoff continuation, and source-grounded prompt building
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
-- `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, symbol-aware retrieval, repo context, focused-file assistance, and follow-up scripting actions
-- `ofxGgmlWorkspaceAssistant` for patch application, allow-listed edit enforcement, verification commands, and retry-oriented coding loops on top of structured assistant output
+- `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
+- `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
 - `ofxGgmlTextAssistant` for translation, summarization, rewriting, and reusable text-task prompts
 - `ofxGgmlCodeReview`, `ofxGgmlProjectMemory`, and `ofxGgmlScriptSource` helpers for local coding and multi-pass review workflows
 - assistant eval coverage for retrieval quality, dry-run safety, and structured workspace execution
@@ -255,23 +255,28 @@ Use it when an app wants local chat behavior without duplicating prompt assembly
 
 ## Code Assistant Helpers
 
-`ofxGgmlCodeAssistant` lifts the scripting workflow out of the `GuiExample`. It builds coding prompts with language presets, project memory, repo/file context, focused-file snippets, symbol-aware retrieval, and reusable actions such as `Generate`, `Edit`, `Refactor`, `Review`, `FixBuild`, `GroundedDocs`, `ContinueTask`, and `ContinueCutoff`.
+`ofxGgmlCodeAssistant` lifts the scripting workflow out of the `GuiExample`. It builds coding prompts with language presets, project memory, repo/file context, focused-file snippets, semantic symbol retrieval, and reusable actions such as `Generate`, `Edit`, `Refactor`, `Review`, `FixBuild`, `GroundedDocs`, `ContinueTask`, and `ContinueCutoff`.
 
-It can also request structured task output so apps receive a machine-readable plan instead of only free-form prose. Structured responses can include file intents, patch operations, unified diffs, verification commands, review findings with severity/confidence, risks, and open questions.
+It can also request structured task output so apps receive a machine-readable plan instead of only free-form prose. Structured responses can include file intents, patch operations, unified diffs, verification commands, review findings with severity/confidence, risks, open questions, and parsed build-error context.
 
 Use it when an app wants Copilot-style local coding assistance without duplicating prompt assembly, retrieval, and follow-up logic in UI code.
 
-Symbol context is no longer limited to file snippets. Apps can build symbol-aware context for queries such as "show me the relevant definitions of `runInference` and all callers", then feed that directly into coding or review prompts.
+Symbol context is no longer limited to file snippets. Apps can build a semantic index, query relevant definitions of `runInference` and likely callers, and feed that directly into coding or review prompts. When a local workspace exposes `compile_commands.json`, the assistant upgrades retrieval with compile-database-aware file coverage and range-based caller tracking.
+
+For editor-style integrations, `prepareInlineCompletion(...)` and `runInlineCompletion(...)` provide cursor-aware completion prompts built from the text before and after the insertion point.
 
 ## Workspace Assistant Helpers
 
-`ofxGgmlWorkspaceAssistant` wraps `ofxGgmlCodeAssistant` with a workspace execution loop. It can apply structured patch operations inside a workspace root, enforce an allow-list for edit mode, run verification commands, and request an updated remediation plan when verification fails.
+`ofxGgmlWorkspaceAssistant` wraps `ofxGgmlCodeAssistant` with a workspace execution loop. It can validate structured patch operations inside a workspace root, validate and apply unified diffs with hunk matching, enforce an allow-list for edit mode, preview unified diffs, apply transactions with rollback data, auto-select verification commands from changed files, and request an updated remediation plan when verification fails.
 
 Use it when an app wants a local coding assistant that can move beyond "suggest code" into "plan, edit, verify, retry" without hardcoding file operations or command orchestration in UI code.
 
 The public result types make that loop inspectable:
 
 - `ofxGgmlCodeAssistantStructuredResult` for plans, patches, and verification commands
+- `ofxGgmlWorkspacePatchValidationResult` for pre-apply safety checks
+- `ofxGgmlWorkspaceUnifiedDiffFile` and `ofxGgmlWorkspaceUnifiedDiffHunk` for parsed diff structure
+- `ofxGgmlWorkspaceTransaction` for transaction state, backups, and rollback-ready previews
 - `ofxGgmlWorkspaceApplyResult` for touched files and apply messages
 - `ofxGgmlWorkspaceVerificationResult` for command-by-command outcomes
 - `ofxGgmlWorkspaceResult` for end-to-end attempts across build/test/retry cycles
@@ -292,10 +297,16 @@ The addon test suite now includes assistant-focused eval coverage for:
 
 - symbol-aware retrieval quality
 - symbol-aware caller/definition context building
+- inline completion prompt assembly
+- compiler-output parsing for fix-build flows
+- compile-database-aware semantic indexing
 - structured code-task parsing
 - unified diff generation
 - workspace dry-run safety
 - workspace allow-list enforcement
+- patch validation and transaction rollback behavior
+- unified-diff hunk validation and apply behavior
+- automatic verification command selection from changed files
 - verification retry loops
 
 That keeps the scripting assistant features regression-tested as first-class addon APIs instead of GUI-only behavior.

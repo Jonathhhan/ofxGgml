@@ -38,11 +38,21 @@ struct ofxGgmlCodeLanguagePreset {
 	std::string systemPrompt;
 };
 
+struct ofxGgmlCodeAssistantSourceRange {
+	int startLine = 0;
+	int startColumn = 0;
+	int endLine = 0;
+	int endColumn = 0;
+};
+
 struct ofxGgmlCodeAssistantSymbolReference {
 	std::string kind;
 	std::string filePath;
 	int line = 0;
 	std::string preview;
+	std::string callerSymbol;
+	std::string targetSymbol;
+	ofxGgmlCodeAssistantSourceRange range;
 };
 
 struct ofxGgmlCodeAssistantSymbol {
@@ -52,6 +62,11 @@ struct ofxGgmlCodeAssistantSymbol {
 	int line = 0;
 	std::string signature;
 	std::string preview;
+	std::string qualifiedName;
+	std::string containerName;
+	std::string semanticBackend;
+	bool isDefinition = true;
+	ofxGgmlCodeAssistantSourceRange range;
 	float score = 0.0f;
 	std::vector<ofxGgmlCodeAssistantSymbolReference> references;
 };
@@ -97,6 +112,23 @@ struct ofxGgmlCodeAssistantSymbolContext {
 	std::vector<ofxGgmlCodeAssistantSymbol> definitions;
 	std::vector<ofxGgmlCodeAssistantSymbolReference> relatedReferences;
 	bool includesCallers = false;
+};
+
+struct ofxGgmlCodeAssistantSemanticIndex {
+	std::string backendName;
+	std::string compilationDatabasePath;
+	bool hasCompilationDatabase = false;
+	std::vector<ofxGgmlCodeAssistantSymbol> symbols;
+	std::vector<ofxGgmlCodeAssistantSymbolReference> callers;
+};
+
+struct ofxGgmlCodeAssistantBuildError {
+	std::string filePath;
+	int line = 0;
+	int column = 0;
+	std::string code;
+	std::string message;
+	std::string rawLine;
 };
 
 struct ofxGgmlCodeAssistantCommandSuggestion {
@@ -156,6 +188,28 @@ struct ofxGgmlCodeAssistantRequest {
 	ofxGgmlCodeAssistantSymbolQuery symbolQuery;
 };
 
+struct ofxGgmlCodeAssistantInlineCompletionRequest {
+	ofxGgmlCodeLanguagePreset language;
+	std::string filePath;
+	std::string prefix;
+	std::string suffix;
+	std::string instruction;
+	int maxTokens = 128;
+	bool singleLine = false;
+	bool useFillInTheMiddle = true;
+};
+
+struct ofxGgmlCodeAssistantInlineCompletionPreparedPrompt {
+	std::string prompt;
+	std::string label;
+};
+
+struct ofxGgmlCodeAssistantInlineCompletionResult {
+	ofxGgmlCodeAssistantInlineCompletionPreparedPrompt prepared;
+	ofxGgmlInferenceResult inference;
+	std::string completion;
+};
+
 struct ofxGgmlCodeAssistantPreparedPrompt {
 	std::string prompt;
 	std::string body;
@@ -200,9 +254,18 @@ public:
 	std::vector<ofxGgmlCodeAssistantSymbol> retrieveSymbols(
 		const std::string & query,
 		const ofxGgmlCodeAssistantContext & context) const;
+	ofxGgmlCodeAssistantSemanticIndex buildSemanticIndex(
+		const ofxGgmlCodeAssistantContext & context) const;
 	ofxGgmlCodeAssistantSymbolContext buildSymbolContext(
 		const ofxGgmlCodeAssistantSymbolQuery & query,
 		const ofxGgmlCodeAssistantContext & context) const;
+	ofxGgmlCodeAssistantInlineCompletionPreparedPrompt prepareInlineCompletion(
+		const ofxGgmlCodeAssistantInlineCompletionRequest & request) const;
+	ofxGgmlCodeAssistantInlineCompletionResult runInlineCompletion(
+		const std::string & modelPath,
+		const ofxGgmlCodeAssistantInlineCompletionRequest & request,
+		const ofxGgmlInferenceSettings & inferenceSettings = {},
+		std::function<bool(const std::string &)> onChunk = nullptr) const;
 
 	static std::vector<ofxGgmlCodeLanguagePreset> defaultLanguagePresets();
 	static std::string defaultActionBody(
@@ -223,6 +286,8 @@ public:
 	static std::string buildStructuredResponseInstructions();
 	static std::string buildUnifiedDiffFromStructuredResult(
 		const ofxGgmlCodeAssistantStructuredResult & structured);
+	static std::vector<ofxGgmlCodeAssistantBuildError> parseBuildErrors(
+		const std::string & text);
 
 private:
 	ofxGgmlInference m_inference;

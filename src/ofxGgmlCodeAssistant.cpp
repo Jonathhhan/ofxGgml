@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
+#include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -278,6 +281,217 @@ std::vector<std::string> splitEscapedLines(const std::string & text) {
 	return splitLines(unescapeTaggedValue(text));
 }
 
+struct CompileCommandsIndex {
+	std::string path;
+	std::unordered_set<std::string> files;
+};
+
+bool hasExtension(
+	const std::string & path,
+	const std::initializer_list<const char *> & extensions) {
+	const std::string ext = toLowerCopy(std::filesystem::path(path).extension().string());
+	for (const auto * candidate : extensions) {
+		if (ext == candidate) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool isCppLikeFile(const std::string & path) {
+	return hasExtension(path, {
+		".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl"
+	});
+}
+
+bool isPythonLikeFile(const std::string & path) {
+	return hasExtension(path, {".py"});
+}
+
+std::string joinScope(const std::vector<std::string> & scopes) {
+	if (scopes.empty()) {
+		return {};
+	}
+	std::ostringstream stream;
+	for (size_t i = 0; i < scopes.size(); ++i) {
+		if (i > 0) {
+			stream << "::";
+		}
+		stream << scopes[i];
+	}
+	return stream.str();
+}
+
+ofxGgmlCodeAssistantSourceRange estimateBraceRange(
+	const std::vector<std::string> & lines,
+	size_t startIndex) {
+	ofxGgmlCodeAssistantSourceRange range;
+	range.startLine = static_cast<int>(startIndex + 1);
+	range.startColumn = 1;
+	range.endLine = range.startLine;
+	range.endColumn = static_cast<int>(lines[startIndex].size()) + 1;
+
+	int depth = 0;
+	bool seenOpenBrace = false;
+	for (size_t i = startIndex; i < lines.size(); ++i) {
+		for (char ch : lines[i]) {
+			if (ch == '{') {
+				++depth;
+				seenOpenBrace = true;
+			} else if (ch == '}') {
+				--depth;
+			}
+			if (seenOpenBrace && depth == 0) {
+				range.endLine = static_cast<int>(i + 1);
+				range.endColumn = static_cast<int>(lines[i].size()) + 1;
+				return range;
+			}
+		}
+		if (!seenOpenBrace && lines[i].find(';') != std::string::npos) {
+			range.endLine = static_cast<int>(i + 1);
+			range.endColumn = static_cast<int>(lines[i].size()) + 1;
+			return range;
+		}
+	}
+	return range;
+}
+
+ofxGgmlCodeAssistantSourceRange estimateIndentRange(
+	const std::vector<std::string> & lines,
+	size_t startIndex) {
+	ofxGgmlCodeAssistantSourceRange range;
+	range.startLine = static_cast<int>(startIndex + 1);
+	range.startColumn = 1;
+	range.endLine = range.startLine;
+	range.endColumn = static_cast<int>(lines[startIndex].size()) + 1;
+
+	const std::string firstLine = lines[startIndex];
+	const size_t firstIndent = firstLine.find_first_not_of(" \t");
+	if (firstIndent == std::string::npos) {
+		return range;
+	}
+
+	for (size_t i = startIndex + 1; i < lines.size(); ++i) {
+		const std::string trimmed = trimCopy(lines[i]);
+		if (trimmed.empty()) {
+			continue;
+		}
+		const size_t indent = lines[i].find_first_not_of(" \t");
+		if (indent == std::string::npos || indent <= firstIndent) {
+			range.endLine = static_cast<int>(i);
+			range.endColumn = static_cast<int>(lines[i - 1].size()) + 1;
+			return range;
+		}
+	}
+
+	range.endLine = static_cast<int>(lines.size());
+	range.endColumn = lines.empty()
+		? 1
+		: static_cast<int>(lines.back().size()) + 1;
+	return range;
+}
+
+std::string readTextFile(const std::filesystem::path & path) {
+	std::ifstream in(path, std::ios::binary);
+	if (!in.is_open()) {
+		return {};
+	}
+	return std::string(
+		(std::istreambuf_iterator<char>(in)),
+		std::istreambuf_iterator<char>());
+}
+
+std::optional<std::filesystem::path> findCompilationDatabasePath(
+	const std::string & rootPath) {
+	if (trimCopy(rootPath).empty()) {
+		return std::nullopt;
+	}
+
+	const std::filesystem::path root(rootPath);
+	const std::vector<std::filesystem::path> candidates = {
+		root / "compile_commands.json",
+		root / "build" / "compile_commands.json",
+		root / "out" / "build" / "compile_commands.json",
+		root / "tests" / "build" / "compile_commands.json"
+	};
+	std::error_code ec;
+	for (const auto & candidate : candidates) {
+		if (std::filesystem::exists(candidate, ec) && !ec) {
+			return candidate;
+		}
+	}
+	return std::nullopt;
+}
+
+CompileCommandsIndex parseCompilationDatabase(
+	const std::string & rootPath,
+	const std::filesystem::path & dbPath) {
+	CompileCommandsIndex index;
+	index.path = dbPath.generic_string();
+	const std::string text = readTextFile(dbPath);
+	if (text.empty()) {
+		return index;
+	}
+
+	static const std::regex filePattern(R"json("file"\s*:\s*"([^"]+)")json");
+	const std::filesystem::path root(rootPath);
+	for (std::sregex_iterator it(text.begin(), text.end(), filePattern), end;
+		it != end; ++it) {
+		std::filesystem::path filePath((*it)[1].str());
+		if (!filePath.is_absolute()) {
+			filePath = (dbPath.parent_path() / filePath).lexically_normal();
+		}
+		std::error_code ec;
+		const auto relative = std::filesystem::relative(filePath, root, ec);
+		if (!ec && !relative.empty()) {
+			index.files.insert(relative.generic_string());
+		} else {
+			index.files.insert(filePath.lexically_normal().generic_string());
+		}
+	}
+	return index;
+}
+
+std::vector<std::string> extractInvokedNames(const std::string & line) {
+	std::vector<std::string> names;
+	static const std::regex invokePattern(
+		R"(\b([A-Za-z_]\w*)\s*\()"
+	);
+	std::unordered_set<std::string> seen;
+	for (std::sregex_iterator it(line.begin(), line.end(), invokePattern), end;
+		it != end; ++it) {
+		const std::string name = (*it)[1].str();
+		const std::string lowered = toLowerCopy(name);
+		if (lowered == "if" || lowered == "for" || lowered == "while" ||
+			lowered == "switch" || lowered == "return" || lowered == "sizeof" ||
+			lowered == "catch") {
+			continue;
+		}
+		if (seen.insert(lowered).second) {
+			names.push_back(name);
+		}
+	}
+	return names;
+}
+
+std::string normalizeContextFilePath(
+	const ofxGgmlCodeAssistantContext & context,
+	const std::string & path) {
+	const std::string normalized = std::filesystem::path(path).generic_string();
+	if (context.scriptSource == nullptr ||
+		context.scriptSource->getSourceType() != ofxGgmlScriptSourceType::LocalFolder) {
+		return normalized;
+	}
+
+	const std::filesystem::path root(context.scriptSource->getLocalFolderPath());
+	std::error_code ec;
+	const auto relative = std::filesystem::relative(std::filesystem::path(path), root, ec);
+	if (!ec && !relative.empty()) {
+		return relative.generic_string();
+	}
+	return normalized;
+}
+
 std::string buildUnifiedDiffForPatch(
 	const ofxGgmlCodeAssistantPatchOperation & operation) {
 	std::ostringstream diff;
@@ -466,6 +680,25 @@ void appendRequestConstraints(
 	if (!trimCopy(request.buildErrors).empty()) {
 		prompt << "Build or test failure details:\n"
 			<< request.buildErrors << "\n\n";
+		const auto parsedErrors =
+			ofxGgmlCodeAssistant::parseBuildErrors(request.buildErrors);
+		if (!parsedErrors.empty()) {
+			prompt << "Likely affected files from compiler output:\n";
+			for (const auto & error : parsedErrors) {
+				prompt << "- " << error.filePath;
+				if (error.line > 0) {
+					prompt << ":" << error.line;
+				}
+				if (!error.code.empty()) {
+					prompt << " [" << error.code << "]";
+				}
+				if (!error.message.empty()) {
+					prompt << " " << error.message;
+				}
+				prompt << "\n";
+			}
+			prompt << "\n";
+		}
 	}
 
 	if (request.action == ofxGgmlCodeAssistantAction::Refactor) {
@@ -690,7 +923,7 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::extractSymbols(
 	const auto lines = splitLines(text);
 
 	static const std::regex cppFunction(
-		R"(^\s*(?:template\s*<[^>]+>\s*)?(?:[\w:&*<>\[\],~]+\s+)+(?:(?:[A-Za-z_]\w*)::)*([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:const\b)?\s*(?:\{|$))");
+		R"(^\s*(?:template\s*<[^>]+>\s*)?(?:[\w:&*<>\[\],~]+\s+)+((?:(?:[A-Za-z_]\w*)::)*)?([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:const\b)?\s*(?:\{|$))");
 	static const std::regex cppType(
 		R"(^\s*(class|struct|enum|namespace)\s+([A-Za-z_]\w*))");
 	static const std::regex pythonDecl(
@@ -700,9 +933,17 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::extractSymbols(
 	static const std::regex assignDecl(
 		R"(^\s*(?:const|let|var|auto)\s+([A-Za-z_]\w*)\s*=\s*(?:\(|\[|async\b))");
 
+	std::vector<std::pair<int, std::string>> lexicalScopes;
+	int braceDepth = 0;
 	for (size_t i = 0; i < lines.size(); ++i) {
 		const std::string line = trimCopy(lines[i]);
 		if (line.empty()) {
+			int openCount = static_cast<int>(std::count(lines[i].begin(), lines[i].end(), '{'));
+			int closeCount = static_cast<int>(std::count(lines[i].begin(), lines[i].end(), '}'));
+			braceDepth += openCount - closeCount;
+			while (!lexicalScopes.empty() && lexicalScopes.back().first > braceDepth) {
+				lexicalScopes.pop_back();
+			}
 			continue;
 		}
 
@@ -712,27 +953,92 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::extractSymbols(
 		symbol.line = static_cast<int>(i + 1);
 		symbol.signature = line;
 		symbol.preview = line;
+		symbol.semanticBackend = "scope_graph";
+		symbol.containerName = joinScope([&]() {
+			std::vector<std::string> scopeNames;
+			scopeNames.reserve(lexicalScopes.size());
+			for (const auto & scope : lexicalScopes) {
+				scopeNames.push_back(scope.second);
+			}
+			return scopeNames;
+		}());
 
 		if (std::regex_search(line, match, cppType) && match.size() >= 3) {
 			symbol.kind = match[1].str();
 			symbol.name = match[2].str();
-		} else if (std::regex_search(line, match, cppFunction) && match.size() >= 2) {
+			symbol.isDefinition = lines[i].find('{') != std::string::npos;
+			symbol.qualifiedName = symbol.containerName.empty()
+				? symbol.name
+				: symbol.containerName + "::" + symbol.name;
+			symbol.range = estimateBraceRange(lines, i);
+		} else if (std::regex_search(line, match, cppFunction) && match.size() >= 3) {
 			symbol.kind = "function";
-			symbol.name = match[1].str();
+			const std::string qualifier = trimCopy(match[1].str());
+			symbol.name = match[2].str();
+			if (!qualifier.empty()) {
+				const std::string normalizedQualifier =
+					qualifier.size() >= 2 && qualifier.substr(qualifier.size() - 2) == "::"
+					? qualifier.substr(0, qualifier.size() - 2)
+					: qualifier;
+				symbol.containerName = normalizedQualifier;
+				symbol.qualifiedName = normalizedQualifier + "::" + symbol.name;
+			} else {
+				symbol.qualifiedName = symbol.containerName.empty()
+					? symbol.name
+					: symbol.containerName + "::" + symbol.name;
+			}
+			symbol.isDefinition = lines[i].find('{') != std::string::npos;
+			symbol.range = estimateBraceRange(lines, i);
 		} else if (std::regex_search(line, match, pythonDecl) && match.size() >= 3) {
 			symbol.kind = match[1].str() == "def" ? "function" : "class";
 			symbol.name = match[2].str();
+			symbol.isDefinition = true;
+			symbol.qualifiedName = symbol.containerName.empty()
+				? symbol.name
+				: symbol.containerName + "::" + symbol.name;
+			symbol.range = estimateIndentRange(lines, i);
 		} else if (std::regex_search(line, match, jsDecl) && match.size() >= 3) {
 			symbol.kind = match[1].str() == "function" ? "function" : "class";
 			symbol.name = match[2].str();
+			symbol.isDefinition = lines[i].find('{') != std::string::npos;
+			symbol.qualifiedName = symbol.containerName.empty()
+				? symbol.name
+				: symbol.containerName + "::" + symbol.name;
+			symbol.range = estimateBraceRange(lines, i);
 		} else if (std::regex_search(line, match, assignDecl) && match.size() >= 2) {
 			symbol.kind = "binding";
 			symbol.name = match[1].str();
+			symbol.isDefinition = true;
+			symbol.qualifiedName = symbol.containerName.empty()
+				? symbol.name
+				: symbol.containerName + "::" + symbol.name;
+			symbol.range.startLine = static_cast<int>(i + 1);
+			symbol.range.startColumn = 1;
+			symbol.range.endLine = static_cast<int>(i + 1);
+			symbol.range.endColumn = static_cast<int>(lines[i].size()) + 1;
 		} else {
+			int openCount = static_cast<int>(std::count(lines[i].begin(), lines[i].end(), '{'));
+			int closeCount = static_cast<int>(std::count(lines[i].begin(), lines[i].end(), '}'));
+			braceDepth += openCount - closeCount;
+			while (!lexicalScopes.empty() && lexicalScopes.back().first > braceDepth) {
+				lexicalScopes.pop_back();
+			}
 			continue;
 		}
 
 		symbols.push_back(std::move(symbol));
+
+		const int openCount = static_cast<int>(std::count(lines[i].begin(), lines[i].end(), '{'));
+		const int closeCount = static_cast<int>(std::count(lines[i].begin(), lines[i].end(), '}'));
+		if ((symbols.back().kind == "class" || symbols.back().kind == "struct" ||
+			symbols.back().kind == "namespace") &&
+			openCount > closeCount) {
+			lexicalScopes.emplace_back(braceDepth + openCount, symbols.back().name);
+		}
+		braceDepth += openCount - closeCount;
+		while (!lexicalScopes.empty() && lexicalScopes.back().first > braceDepth) {
+			lexicalScopes.pop_back();
+		}
 	}
 
 	return symbols;
@@ -745,45 +1051,21 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::retrieveSymbols(
 	if (context.scriptSource == nullptr || !context.includeSymbolContext) {
 		return ranked;
 	}
-
-	const auto files = context.scriptSource->getFiles();
-	if (files.empty()) {
-		return ranked;
-	}
-
 	const auto queryTokens = tokenizeQuery(query);
-	std::unordered_map<std::string, std::vector<std::string>> fileLines;
-	std::vector<ofxGgmlCodeAssistantSymbol> allSymbols;
-	allSymbols.reserve(64);
-
-	for (size_t i = 0; i < files.size(); ++i) {
-		const auto & entry = files[i];
-		if (entry.isDirectory) {
-			continue;
-		}
-
-		std::string content;
-		if (!context.scriptSource->loadFileContent(static_cast<int>(i), content)) {
-			continue;
-		}
-
-		fileLines[entry.name] = splitLines(content);
-		auto fileSymbols = extractSymbols(content, entry.name);
-		allSymbols.insert(
-			allSymbols.end(),
-			fileSymbols.begin(),
-			fileSymbols.end());
-	}
-
-	if (allSymbols.empty()) {
+	auto index = buildSemanticIndex(context);
+	if (index.symbols.empty()) {
 		return ranked;
 	}
 
-	for (auto & symbol : allSymbols) {
+	for (auto & symbol : index.symbols) {
 		const std::string lowerName = toLowerCopy(symbol.name);
+		const std::string lowerQualified = toLowerCopy(symbol.qualifiedName);
+		const std::string lowerContainer = toLowerCopy(symbol.containerName);
 		const std::string lowerSig = toLowerCopy(symbol.signature);
 		const std::string lowerFile = toLowerCopy(symbol.filePath);
 		const auto nameTokens = tokenizeIdentifier(symbol.name);
+		const auto qualifiedTokens = tokenizeIdentifier(symbol.qualifiedName);
+		const auto containerTokens = tokenizeIdentifier(symbol.containerName);
 		const auto signatureTokens = tokenizeIdentifier(symbol.signature);
 		const auto fileTokens = tokenizeIdentifier(symbol.filePath);
 		float score = 0.0f;
@@ -806,6 +1088,18 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::retrieveSymbols(
 			} else if (lowerName.find(token) != std::string::npos) {
 				score += 2.25f;
 			}
+			if (containsToken(qualifiedTokens, token)) {
+				score += 2.0f;
+			}
+			if (lowerQualified.find(token) != std::string::npos) {
+				score += 1.5f;
+			}
+			if (containsToken(containerTokens, token)) {
+				score += 1.0f;
+			}
+			if (lowerContainer.find(token) != std::string::npos) {
+				score += 0.75f;
+			}
 			if (containsToken(signatureTokens, token)) {
 				score += 1.5f;
 			}
@@ -823,10 +1117,14 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::retrieveSymbols(
 		if (score <= 0.0f) {
 			score = 0.15f;
 		}
+		if (!symbol.semanticBackend.empty() &&
+			symbol.semanticBackend.find("compilation_database") != std::string::npos) {
+			score += 0.5f;
+		}
 		symbol.score = score;
 	}
 
-	std::sort(allSymbols.begin(), allSymbols.end(),
+	std::sort(index.symbols.begin(), index.symbols.end(),
 		[](const ofxGgmlCodeAssistantSymbol & a,
 			const ofxGgmlCodeAssistantSymbol & b) {
 			if (a.score != b.score) {
@@ -838,45 +1136,14 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::retrieveSymbols(
 			return a.line < b.line;
 		});
 
-	if (allSymbols.size() > context.maxSymbols) {
-		allSymbols.resize(context.maxSymbols);
+	if (index.symbols.size() > context.maxSymbols) {
+		index.symbols.resize(context.maxSymbols);
 	}
 
-	for (auto & symbol : allSymbols) {
-		const auto fileIt = fileLines.find(symbol.filePath);
-		if (fileIt == fileLines.end()) {
-			ranked.push_back(std::move(symbol));
-			continue;
+	for (auto & symbol : index.symbols) {
+		if (symbol.references.size() > context.maxSymbolReferences) {
+			symbol.references.resize(context.maxSymbolReferences);
 		}
-
-		for (const auto & fileEntry : fileLines) {
-			const auto & lines = fileEntry.second;
-			for (size_t i = 0; i < lines.size(); ++i) {
-				if (fileEntry.first == symbol.filePath &&
-					static_cast<int>(i + 1) == symbol.line) {
-					continue;
-				}
-				if (lines[i].find(symbol.name) == std::string::npos) {
-					continue;
-				}
-
-				ofxGgmlCodeAssistantSymbolReference reference;
-				reference.kind = isLikelyCallerLine(trimCopy(lines[i]), symbol.name)
-					? "caller"
-					: "reference";
-				reference.filePath = fileEntry.first;
-				reference.line = static_cast<int>(i + 1);
-				reference.preview = trimCopy(lines[i]);
-				symbol.references.push_back(std::move(reference));
-				if (symbol.references.size() >= context.maxSymbolReferences) {
-					break;
-				}
-			}
-			if (symbol.references.size() >= context.maxSymbolReferences) {
-				break;
-			}
-		}
-
 		ranked.push_back(std::move(symbol));
 	}
 
@@ -891,14 +1158,14 @@ ofxGgmlCodeAssistantSymbolContext ofxGgmlCodeAssistant::buildSymbolContext(
 		? query.query
 		: joinStrings(query.targetSymbols, ", ");
 	symbolContext.includesCallers = query.includeCallers;
+	auto semanticIndex = buildSemanticIndex(context);
+	if (semanticIndex.symbols.empty()) {
+		return symbolContext;
+	}
 
 	std::vector<ofxGgmlCodeAssistantSymbol> candidates = retrieveSymbols(
 		symbolContext.query,
 		context);
-	if (candidates.empty()) {
-		return symbolContext;
-	}
-
 	const auto preferredSymbols = [&]() {
 		std::vector<std::string> lowered;
 		lowered.reserve(query.targetSymbols.size());
@@ -956,7 +1223,184 @@ ofxGgmlCodeAssistantSymbolContext ofxGgmlCodeAssistant::buildSymbolContext(
 		}
 	}
 
+	if (query.includeCallers && symbolContext.relatedReferences.empty()) {
+		for (const auto & caller : semanticIndex.callers) {
+			if (symbolContext.relatedReferences.size() >= query.maxReferences) {
+				break;
+			}
+			for (const auto & preferred : preferredSymbols) {
+				if (toLowerCopy(caller.preview).find(preferred) != std::string::npos) {
+					symbolContext.relatedReferences.push_back(caller);
+					break;
+				}
+			}
+		}
+	}
+
 	return symbolContext;
+}
+
+ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
+	const ofxGgmlCodeAssistantContext & context) const {
+	ofxGgmlCodeAssistantSemanticIndex index;
+	if (context.scriptSource == nullptr) {
+		return index;
+	}
+
+	const auto files = context.scriptSource->getFiles();
+	if (files.empty()) {
+		return index;
+	}
+
+	CompileCommandsIndex compileCommands;
+	if (context.scriptSource->getSourceType() == ofxGgmlScriptSourceType::LocalFolder) {
+		if (const auto dbPath = findCompilationDatabasePath(
+				context.scriptSource->getLocalFolderPath())) {
+			compileCommands = parseCompilationDatabase(
+				context.scriptSource->getLocalFolderPath(),
+				*dbPath);
+			index.hasCompilationDatabase = !compileCommands.files.empty();
+			index.compilationDatabasePath = compileCommands.path;
+		}
+	}
+	index.backendName = index.hasCompilationDatabase
+		? "compilation_database+scope_graph"
+		: "scope_graph";
+
+	std::unordered_map<std::string, std::vector<std::string>> fileLines;
+	std::unordered_map<std::string, std::vector<std::string>> fileBodies;
+	for (size_t i = 0; i < files.size(); ++i) {
+		const auto & entry = files[i];
+		if (entry.isDirectory) {
+			continue;
+		}
+
+		std::string content;
+		if (!context.scriptSource->loadFileContent(static_cast<int>(i), content)) {
+			continue;
+		}
+
+		const std::string normalizedFile = normalizeContextFilePath(context, entry.name);
+		fileLines[normalizedFile] = splitLines(content);
+		fileBodies[normalizedFile] = splitLines(content);
+		auto symbols = extractSymbols(content, normalizedFile);
+		for (auto & symbol : symbols) {
+			if (index.hasCompilationDatabase &&
+				compileCommands.files.find(normalizedFile) != compileCommands.files.end()) {
+				symbol.semanticBackend = "compilation_database+scope_graph";
+			}
+			index.symbols.push_back(std::move(symbol));
+		}
+	}
+
+	std::unordered_map<std::string, std::vector<size_t>> symbolsByName;
+	for (size_t i = 0; i < index.symbols.size(); ++i) {
+		symbolsByName[toLowerCopy(index.symbols[i].name)].push_back(i);
+		if (!index.symbols[i].qualifiedName.empty()) {
+			symbolsByName[toLowerCopy(index.symbols[i].qualifiedName)].push_back(i);
+		}
+	}
+
+	std::set<std::tuple<std::string, int, std::string>> seenReferenceKeys;
+	for (size_t symbolIndex = 0; symbolIndex < index.symbols.size(); ++symbolIndex) {
+		auto & callerSymbol = index.symbols[symbolIndex];
+		if (callerSymbol.kind != "function") {
+			continue;
+		}
+		const auto linesIt = fileBodies.find(callerSymbol.filePath);
+		if (linesIt == fileBodies.end()) {
+			continue;
+		}
+		const auto & lines = linesIt->second;
+		const int startLine = (std::max)(1, callerSymbol.range.startLine);
+		const int endLine = callerSymbol.range.endLine > 0
+			? callerSymbol.range.endLine
+			: callerSymbol.line;
+		for (int lineNumber = startLine; lineNumber <= endLine &&
+			lineNumber <= static_cast<int>(lines.size()); ++lineNumber) {
+			const std::string trimmed = trimCopy(lines[static_cast<size_t>(lineNumber - 1)]);
+			if (trimmed.empty()) {
+				continue;
+			}
+			for (const auto & invoked : extractInvokedNames(trimmed)) {
+				const auto targetIt = symbolsByName.find(toLowerCopy(invoked));
+				if (targetIt == symbolsByName.end()) {
+					continue;
+				}
+				for (size_t targetIndex : targetIt->second) {
+					auto & callee = index.symbols[targetIndex];
+					if (callee.qualifiedName == callerSymbol.qualifiedName &&
+						callee.filePath == callerSymbol.filePath) {
+						continue;
+					}
+					const auto key = std::make_tuple(
+						callee.filePath,
+						lineNumber,
+						callerSymbol.qualifiedName + "->" + callee.qualifiedName);
+					if (!seenReferenceKeys.insert(key).second) {
+						continue;
+					}
+					ofxGgmlCodeAssistantSymbolReference reference;
+					reference.kind = "caller";
+					reference.filePath = callerSymbol.filePath;
+					reference.line = lineNumber;
+					reference.preview = trimmed;
+					reference.callerSymbol = callerSymbol.qualifiedName;
+					reference.targetSymbol = callee.qualifiedName;
+					reference.range.startLine = lineNumber;
+					reference.range.startColumn = 1;
+					reference.range.endLine = lineNumber;
+					reference.range.endColumn = static_cast<int>(trimmed.size()) + 1;
+					callee.references.push_back(reference);
+					index.callers.push_back(reference);
+				}
+			}
+		}
+	}
+
+	for (auto & symbol : index.symbols) {
+		for (const auto & fileEntry : fileLines) {
+			const auto & lines = fileEntry.second;
+			for (size_t lineIndex = 0; lineIndex < lines.size(); ++lineIndex) {
+				const int currentLine = static_cast<int>(lineIndex + 1);
+				if (fileEntry.first == symbol.filePath &&
+					currentLine >= symbol.range.startLine &&
+					currentLine <= symbol.range.endLine) {
+					continue;
+				}
+				if (lines[lineIndex].find(symbol.name) == std::string::npos) {
+					continue;
+				}
+				const auto referenceKey = std::make_tuple(
+					fileEntry.first,
+					currentLine,
+					symbol.qualifiedName);
+				if (!seenReferenceKeys.insert(referenceKey).second) {
+					continue;
+				}
+
+				ofxGgmlCodeAssistantSymbolReference reference;
+				reference.kind = isLikelyCallerLine(trimCopy(lines[lineIndex]), symbol.name)
+					? "caller"
+					: "reference";
+				reference.filePath = fileEntry.first;
+				reference.line = currentLine;
+				reference.preview = trimCopy(lines[lineIndex]);
+				reference.targetSymbol = symbol.qualifiedName;
+				reference.range.startLine = currentLine;
+				reference.range.startColumn = 1;
+				reference.range.endLine = currentLine;
+				reference.range.endColumn =
+					static_cast<int>(reference.preview.size()) + 1;
+				symbol.references.push_back(reference);
+				if (reference.kind == "caller") {
+					index.callers.push_back(reference);
+				}
+			}
+		}
+	}
+
+	return index;
 }
 
 std::string ofxGgmlCodeAssistant::buildStructuredResponseInstructions() {
@@ -996,6 +1440,104 @@ std::string ofxGgmlCodeAssistant::buildUnifiedDiffFromStructuredResult(
 		}
 	}
 	return diff.str();
+}
+
+std::vector<ofxGgmlCodeAssistantBuildError> ofxGgmlCodeAssistant::parseBuildErrors(
+	const std::string & text) {
+	std::vector<ofxGgmlCodeAssistantBuildError> errors;
+	static const std::regex msvcPattern(
+		R"(^(.+)\((\d+)(?:,(\d+))?\):\s*(fatal error|error|warning)\s+([A-Za-z]+\d+):\s*(.+)$)");
+
+	for (const auto & rawLine : splitLines(text)) {
+		const std::string line = trimCopy(rawLine);
+		if (line.empty()) {
+			continue;
+		}
+
+		std::smatch match;
+		ofxGgmlCodeAssistantBuildError error;
+		error.rawLine = line;
+		if (std::regex_match(line, match, msvcPattern) && match.size() >= 7) {
+			error.filePath = match[1].str();
+			error.line = std::stoi(match[2].str());
+			if (match[3].matched) {
+				error.column = std::stoi(match[3].str());
+			}
+			error.code = match[5].str();
+			error.message = match[6].str();
+			errors.push_back(std::move(error));
+			continue;
+		}
+
+		std::string severity;
+		std::string severityToken;
+		std::size_t severityPos = std::string::npos;
+		for (const auto & candidate : std::vector<std::pair<std::string, std::string>>{
+				 {": fatal error:", "fatal error"},
+				 {": error:", "error"},
+				 {": warning:", "warning"}}) {
+			severityPos = line.find(candidate.first);
+			if (severityPos != std::string::npos) {
+				severityToken = candidate.first;
+				severity = candidate.second;
+				break;
+			}
+		}
+		if (severityPos == std::string::npos) {
+			continue;
+		}
+
+		const std::string locationPart = trimCopy(line.substr(0, severityPos));
+		const std::size_t lastColon = locationPart.rfind(':');
+		if (lastColon == std::string::npos) {
+			continue;
+		}
+
+		auto isDigits = [](const std::string & value) {
+			return !value.empty() &&
+				std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+					return std::isdigit(ch) != 0;
+				});
+		};
+
+		std::string lineText;
+		std::string columnText;
+		std::string filePath;
+		const std::string tailText = trimCopy(locationPart.substr(lastColon + 1));
+		if (!isDigits(tailText)) {
+			continue;
+		}
+
+		const std::string beforeLast = trimCopy(locationPart.substr(0, lastColon));
+		const std::size_t secondLastColon = beforeLast.rfind(':');
+		if (secondLastColon != std::string::npos) {
+			const std::string maybeLine = trimCopy(beforeLast.substr(secondLastColon + 1));
+			const std::string maybeFile = trimCopy(beforeLast.substr(0, secondLastColon));
+			if (isDigits(maybeLine) && !maybeFile.empty()) {
+				filePath = maybeFile;
+				lineText = maybeLine;
+				columnText = tailText;
+			}
+		}
+		if (lineText.empty()) {
+			filePath = beforeLast;
+			lineText = tailText;
+		}
+		if (filePath.empty() || !isDigits(lineText)) {
+			continue;
+		}
+
+		error.filePath = trimCopy(filePath);
+		error.line = std::stoi(lineText);
+		if (isDigits(columnText)) {
+			error.column = std::stoi(columnText);
+		}
+		error.code = severity;
+		error.message = trimCopy(line.substr(severityPos + severityToken.size()));
+		errors.push_back(std::move(error));
+	}
+
+	return errors;
 }
 
 ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult(
@@ -1366,5 +1908,68 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::run(
 		result.structured.unifiedDiff =
 			buildUnifiedDiffFromStructuredResult(result.structured);
 	}
+	return result;
+}
+
+ofxGgmlCodeAssistantInlineCompletionPreparedPrompt
+ofxGgmlCodeAssistant::prepareInlineCompletion(
+	const ofxGgmlCodeAssistantInlineCompletionRequest & request) const {
+	ofxGgmlCodeAssistantInlineCompletionPreparedPrompt prepared;
+	prepared.label = trimCopy(request.filePath);
+	if (prepared.label.empty()) {
+		prepared.label = "Inline completion";
+	}
+
+	std::ostringstream prompt;
+	if (!trimCopy(request.language.systemPrompt).empty()) {
+		prompt << request.language.systemPrompt << "\n";
+	}
+	prompt << "You are completing code at the current cursor position.\n";
+	prompt << "Return only the missing code that should be inserted at the cursor.\n";
+	if (request.useFillInTheMiddle) {
+		prompt << "Use fill-in-the-middle reasoning and preserve surrounding syntax.\n";
+	}
+	if (request.singleLine) {
+		prompt << "Keep the completion to a single line.\n";
+	}
+	if (!trimCopy(request.filePath).empty()) {
+		prompt << "File: " << request.filePath << "\n";
+	}
+	if (!trimCopy(request.instruction).empty()) {
+		prompt << "Instruction: " << request.instruction << "\n";
+	}
+	if (request.useFillInTheMiddle) {
+		prompt << "\n<PRE>\n" << request.prefix << "\n</PRE>\n";
+		prompt << "<SUF>\n" << request.suffix << "\n</SUF>\n\n";
+	} else {
+		prompt << "\nBefore cursor:\n";
+		prompt << request.prefix << "\n";
+		prompt << "<CURSOR>\n";
+		prompt << "After cursor:\n";
+		prompt << request.suffix << "\n\n";
+	}
+	prompt << "Completion:\n";
+	prepared.prompt = prompt.str();
+	return prepared;
+}
+
+ofxGgmlCodeAssistantInlineCompletionResult
+ofxGgmlCodeAssistant::runInlineCompletion(
+	const std::string & modelPath,
+	const ofxGgmlCodeAssistantInlineCompletionRequest & request,
+	const ofxGgmlInferenceSettings & inferenceSettings,
+	std::function<bool(const std::string &)> onChunk) const {
+	ofxGgmlCodeAssistantInlineCompletionResult result;
+	result.prepared = prepareInlineCompletion(request);
+	ofxGgmlInferenceSettings effectiveSettings = inferenceSettings;
+	if (effectiveSettings.maxTokens <= 0 || effectiveSettings.maxTokens > request.maxTokens) {
+		effectiveSettings.maxTokens = request.maxTokens;
+	}
+	result.inference = m_inference.generate(
+		modelPath,
+		result.prepared.prompt,
+		effectiveSettings,
+		onChunk);
+	result.completion = trimCopy(result.inference.text);
 	return result;
 }

@@ -11,11 +11,61 @@ struct ofxGgmlWorkspaceSettings {
 	std::vector<std::string> allowedFiles;
 	bool applyPatchOperations = true;
 	bool runVerification = true;
+	bool validatePatchesBeforeApply = true;
+	bool rollbackOnVerificationFailure = false;
+	bool autoSelectVerificationCommands = true;
 	bool dryRun = false;
 	int maxVerificationAttempts = 2;
 	bool autoRetryWithAssistant = true;
 	bool stopOnApplyError = true;
 	bool stopOnFirstFailedCommand = true;
+};
+
+struct ofxGgmlWorkspacePatchValidationResult {
+	bool success = true;
+	std::vector<std::string> messages;
+	std::vector<std::string> validatedFiles;
+};
+
+struct ofxGgmlWorkspaceUnifiedDiffLine {
+	char kind = ' ';
+	std::string text;
+};
+
+struct ofxGgmlWorkspaceUnifiedDiffHunk {
+	int oldStart = 0;
+	int oldCount = 0;
+	int newStart = 0;
+	int newCount = 0;
+	std::vector<ofxGgmlWorkspaceUnifiedDiffLine> lines;
+};
+
+struct ofxGgmlWorkspaceUnifiedDiffFile {
+	std::string oldPath;
+	std::string newPath;
+	std::string normalizedPath;
+	bool isNewFile = false;
+	bool isDeleteFile = false;
+	std::vector<ofxGgmlWorkspaceUnifiedDiffHunk> hunks;
+};
+
+struct ofxGgmlWorkspaceBackupEntry {
+	std::string filePath;
+	bool existedBefore = false;
+	std::string originalContent;
+};
+
+struct ofxGgmlWorkspaceTransaction {
+	std::string workspaceRoot;
+	std::vector<ofxGgmlCodeAssistantPatchOperation> operations;
+	std::string unifiedDiff;
+	std::vector<ofxGgmlWorkspaceUnifiedDiffFile> parsedDiffFiles;
+	std::vector<ofxGgmlWorkspaceBackupEntry> backups;
+	ofxGgmlWorkspacePatchValidationResult validationResult;
+	std::string unifiedDiffPreview;
+	bool usesUnifiedDiff = false;
+	bool applied = false;
+	bool rolledBack = false;
 };
 
 struct ofxGgmlWorkspaceApplyResult {
@@ -72,11 +122,41 @@ public:
 		const std::string & workspaceRoot,
 		const std::vector<std::string> & allowedFiles = {},
 		bool dryRun = false) const;
+	ofxGgmlWorkspacePatchValidationResult validatePatchOperations(
+		const std::vector<ofxGgmlCodeAssistantPatchOperation> & operations,
+		const std::string & workspaceRoot,
+		const std::vector<std::string> & allowedFiles = {}) const;
+	ofxGgmlWorkspacePatchValidationResult validateUnifiedDiff(
+		const std::string & unifiedDiff,
+		const std::string & workspaceRoot,
+		const std::vector<std::string> & allowedFiles = {}) const;
+	ofxGgmlWorkspaceTransaction beginTransaction(
+		const std::vector<ofxGgmlCodeAssistantPatchOperation> & operations,
+		const std::string & workspaceRoot,
+		const std::vector<std::string> & allowedFiles = {}) const;
+	ofxGgmlWorkspaceTransaction beginUnifiedDiffTransaction(
+		const std::string & unifiedDiff,
+		const std::string & workspaceRoot,
+		const std::vector<std::string> & allowedFiles = {}) const;
+	ofxGgmlWorkspaceApplyResult applyTransaction(
+		ofxGgmlWorkspaceTransaction & transaction,
+		bool dryRun = false) const;
+	bool rollbackTransaction(
+		ofxGgmlWorkspaceTransaction & transaction,
+		std::vector<std::string> * messages = nullptr) const;
+	ofxGgmlWorkspaceApplyResult applyUnifiedDiff(
+		const std::string & unifiedDiff,
+		const std::string & workspaceRoot,
+		const std::vector<std::string> & allowedFiles = {},
+		bool dryRun = false) const;
 
 	ofxGgmlWorkspaceVerificationResult runVerification(
 		const std::vector<ofxGgmlCodeAssistantCommandSuggestion> & commands,
 		const ofxGgmlWorkspaceSettings & settings = {},
 		ofxGgmlWorkspaceCommandRunner commandRunner = nullptr) const;
+	std::vector<ofxGgmlCodeAssistantCommandSuggestion> suggestVerificationCommands(
+		const std::vector<std::string> & changedFiles,
+		const std::string & workspaceRoot) const;
 
 	ofxGgmlWorkspaceResult runTask(
 		const std::string & modelPath,

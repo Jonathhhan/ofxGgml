@@ -12,15 +12,25 @@ All notable changes to `ofxGgml` are documented in this file.
 - Review findings with structured `priority`, `confidence`, `file`, `line`, and fix suggestions in `ofxGgmlCodeAssistant`.
 - Specialized assistant modes for constrained `Edit`, invariant-aware `Refactor`, `FixBuild`, and grounded web/doc requests.
 - Unified diff output support in structured code-assistant responses, plus workspace diff previews.
+- Semantic index building in `ofxGgmlCodeAssistant` for caller-aware symbol lookup across script-source documents.
+- Cursor-aware inline completion helpers in `ofxGgmlCodeAssistant` for editor-style coding assistance.
+- Compiler-output parsing helpers in `ofxGgmlCodeAssistant` for `FixBuild` workflows driven by raw MSVC, Clang, or GCC errors.
+- Transaction and rollback support in `ofxGgmlWorkspaceAssistant`, including backup capture and unified-diff previews.
+- Automatic verification command suggestion in `ofxGgmlWorkspaceAssistant` based on changed files and available test targets.
+- Compile-database-aware semantic retrieval in `ofxGgmlCodeAssistant`, including symbol ranges, qualified names, and caller metadata for local workspaces that expose `compile_commands.json`.
+- Unified-diff parsing and hunk-based apply support in `ofxGgmlWorkspaceAssistant`, with drift-aware validation before edits are written.
 
 ### Changed
 - Structured command parsing is now more tolerant of partially degraded assistant output, which makes Windows-based scripted test and tooling flows more robust.
 - C++ symbol extraction now recognizes scoped definitions such as `Type::method()` more reliably, improving retrieval quality for real codebases.
 - Symbol-aware context building can now expose likely callers and related references instead of only top matching declarations.
 - Workspace patch application can now enforce an allow-list of editable files for constrained edit workflows.
+- Build-fix execution can now derive editable files from compiler output and reuse the same verification/retry loop as other workspace tasks.
+- Workspace patch application now validates replacement operations before apply and can roll back automatically after failed verification.
+- Inline completion prompting now supports a fill-in-the-middle style cursor format for editor integrations.
 
 ### Documentation
-- `README.md` now documents the structured code-assistant workflow, the new workspace helper, and the assistant eval suite as public addon features.
+- `README.md` now documents semantic symbol retrieval, inline completion, transaction-based workspace editing, and the expanded assistant eval suite as public addon features.
 
 ## [1.0.0] - 2026-04-15
 

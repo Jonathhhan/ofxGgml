@@ -143,6 +143,109 @@ TEST_CASE("Workspace assistant enforces allowed file edits", "[workspace_assista
 	REQUIRE(applyResult.messages.front().find("allowed file list") != std::string::npos);
 }
 
+TEST_CASE("Workspace assistant validates, applies, and rolls back transactions", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("transaction");
+	std::filesystem::create_directories(root / "src");
+	{
+		std::ofstream out(root / "src" / "main.txt");
+		out << "before";
+	}
+
+	ofxGgmlWorkspaceAssistant assistant;
+	std::vector<ofxGgmlCodeAssistantPatchOperation> operations;
+	ofxGgmlCodeAssistantPatchOperation replaceOp;
+	replaceOp.kind = ofxGgmlCodeAssistantPatchKind::ReplaceTextOp;
+	replaceOp.filePath = "src/main.txt";
+	replaceOp.summary = "Swap content";
+	replaceOp.searchText = "before";
+	replaceOp.replacementText = "after";
+	operations.push_back(replaceOp);
+
+	const auto validation = assistant.validatePatchOperations(
+		operations,
+		root.string(),
+		{"src/main.txt"});
+	REQUIRE(validation.success);
+	REQUIRE(validation.validatedFiles.size() == 1);
+
+	auto transaction = assistant.beginTransaction(
+		operations,
+		root.string(),
+		{"src/main.txt"});
+	REQUIRE(transaction.validationResult.success);
+	REQUIRE(transaction.backups.size() == 1);
+
+	const auto applyResult = assistant.applyTransaction(transaction, false);
+	REQUIRE(applyResult.success);
+	REQUIRE(readFile(root / "src" / "main.txt") == "after");
+
+	std::vector<std::string> rollbackMessages;
+	REQUIRE(assistant.rollbackTransaction(transaction, &rollbackMessages));
+	REQUIRE(readFile(root / "src" / "main.txt") == "before");
+	REQUIRE_FALSE(rollbackMessages.empty());
+}
+
+TEST_CASE("Workspace assistant validates and applies unified diffs with drift-aware matching", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("unified_diff");
+	std::filesystem::create_directories(root / "src");
+	{
+		std::ofstream out(root / "src" / "main.txt");
+		out << "banner\nheader\nbefore\nfooter\n";
+	}
+
+	const std::string diff =
+		"--- a/src/main.txt\n"
+		"+++ b/src/main.txt\n"
+		"@@ -1,2 +1,2 @@\n"
+		" header\n"
+		"-before\n"
+		"+after\n";
+
+	ofxGgmlWorkspaceAssistant assistant;
+	const auto validation = assistant.validateUnifiedDiff(
+		diff,
+		root.string(),
+		{"src/main.txt"});
+	REQUIRE(validation.success);
+	REQUIRE(validation.validatedFiles.size() == 1);
+
+	auto transaction = assistant.beginUnifiedDiffTransaction(
+		diff,
+		root.string(),
+		{"src/main.txt"});
+	REQUIRE(transaction.validationResult.success);
+	REQUIRE(transaction.usesUnifiedDiff);
+	REQUIRE(transaction.parsedDiffFiles.size() == 1);
+
+	const auto applyResult = assistant.applyTransaction(transaction, false);
+	REQUIRE(applyResult.success);
+	REQUIRE(readFile(root / "src" / "main.txt").find("after") != std::string::npos);
+
+	std::vector<std::string> rollbackMessages;
+	REQUIRE(assistant.rollbackTransaction(transaction, &rollbackMessages));
+	REQUIRE(readFile(root / "src" / "main.txt").find("before") != std::string::npos);
+}
+
+TEST_CASE("Workspace assistant suggests verification commands from changed files", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("suggest");
+	std::filesystem::create_directories(root / "tests" / "build" / "Release");
+	{
+		std::ofstream out(root / "tests" / "build" / "Release" / "ofxGgml-tests.exe");
+		out << "stub";
+	}
+
+	ofxGgmlWorkspaceAssistant assistant;
+	const auto commands = assistant.suggestVerificationCommands(
+		{"src/ofxGgmlCodeAssistant.cpp"},
+		root.string());
+	REQUIRE(commands.size() >= 1);
+	REQUIRE(commands.front().label == "build-tests");
+	const bool hasExpectedAssistantOutcome =
+		commands.back().expectedOutcome.find("assistant tests") != std::string::npos ||
+		commands.back().expectedOutcome.find("full addon test suite") != std::string::npos;
+	REQUIRE(hasExpectedAssistantOutcome);
+}
+
 TEST_CASE("Workspace assistant verification loop can retry with a new structured plan", "[workspace_assistant]") {
 	const auto root = makeWorkspaceTestDir("retry");
 	std::filesystem::create_directories(root / "src");
@@ -226,4 +329,65 @@ TEST_CASE("Workspace assistant verification loop can retry with a new structured
 	REQUIRE(result.verificationResult.success);
 	REQUIRE(result.verificationResult.attempts == 2);
 	REQUIRE(readFile(root / "src" / "app.txt") == "ready");
+}
+
+TEST_CASE("Workspace assistant auto-selects verification commands and can roll back on failure", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("autorollback");
+	std::filesystem::create_directories(root / "src");
+	std::filesystem::create_directories(root / "tests" / "build" / "Release");
+	{
+		std::ofstream out(root / "tests" / "build" / "Release" / "ofxGgml-tests.exe");
+		out << "stub";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(root.string()));
+
+	const std::string modelPath = createWorkspaceDummyModel();
+	const std::string exePath = createWorkspaceExecutable({
+		"GOAL: Update source",
+		"PATCH: write | src/app.txt | create file",
+		"CONTENT: broken"
+	});
+
+	ofxGgmlWorkspaceAssistant assistant;
+	assistant.setCompletionExecutable(exePath);
+
+	ofxGgmlCodeAssistantRequest request;
+	request.action = ofxGgmlCodeAssistantAction::FixBuild;
+	request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+	request.userInput = "Fix the failing code path.";
+	request.buildErrors = "src/app.txt(1): error C2001: broken";
+	request.allowedFiles = {"src/app.txt"};
+
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+
+	ofxGgmlWorkspaceSettings settings;
+	settings.workspaceRoot = root.string();
+	settings.maxVerificationAttempts = 1;
+	settings.rollbackOnVerificationFailure = true;
+
+	auto runner = [](const ofxGgmlCodeAssistantCommandSuggestion & command) {
+		ofxGgmlWorkspaceCommandResult result;
+		result.command = command;
+		result.success = false;
+		result.exitCode = 1;
+		result.output = "forced failure";
+		return result;
+	};
+
+	const auto result = assistant.runTask(
+		modelPath,
+		request,
+		context,
+		settings,
+		{},
+		{},
+		runner,
+		nullptr);
+
+	REQUIRE_FALSE(result.success);
+	REQUIRE(result.applyResult.unifiedDiffPreview.find("+++ b/src/app.txt") != std::string::npos);
+	REQUIRE_FALSE(std::filesystem::exists(root / "src" / "app.txt"));
 }

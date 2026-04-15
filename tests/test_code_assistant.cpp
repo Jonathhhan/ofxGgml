@@ -95,6 +95,17 @@ TEST_CASE("Code assistant prompt preparation includes coding and symbol context"
 		std::ofstream out(sourceDir / "caller.cpp");
 		out << "#include \"helper.h\"\nint useIt() { return runInference(); }\n";
 	}
+	{
+		std::ofstream out(sourceDir / "compile_commands.json");
+		out << "[\n";
+		out << "  {\"directory\": " << std::quoted(sourceDir.string())
+			<< ", \"file\": \"main.cpp\", \"command\": \"cl /c main.cpp\"},\n";
+		out << "  {\"directory\": " << std::quoted(sourceDir.string())
+			<< ", \"file\": \"helper.cpp\", \"command\": \"cl /c helper.cpp\"},\n";
+		out << "  {\"directory\": " << std::quoted(sourceDir.string())
+			<< ", \"file\": \"caller.cpp\", \"command\": \"cl /c caller.cpp\"}\n";
+		out << "]\n";
+	}
 
 	ofxGgmlScriptSource scriptSource;
 	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
@@ -145,6 +156,30 @@ TEST_CASE("Code assistant prompt preparation includes coding and symbol context"
 	REQUIRE(prepared.prompt.find("Preserve the existing public API surface.") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Prefer including a DIFF: entry") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Return a structured plan using one item per line") != std::string::npos);
+
+	const auto semanticIndex = assistant.buildSemanticIndex(context);
+	REQUIRE(semanticIndex.symbols.size() >= 3);
+	REQUIRE(semanticIndex.hasCompilationDatabase);
+	REQUIRE(semanticIndex.backendName.find("compilation_database") != std::string::npos);
+	REQUIRE_FALSE(semanticIndex.callers.empty());
+	const auto qualifiedSymbol = std::find_if(
+		semanticIndex.symbols.begin(),
+		semanticIndex.symbols.end(),
+		[](const ofxGgmlCodeAssistantSymbol & symbol) {
+			return symbol.qualifiedName.find("runInference") != std::string::npos &&
+				symbol.isDefinition;
+		});
+	REQUIRE(qualifiedSymbol != semanticIndex.symbols.end());
+	REQUIRE(qualifiedSymbol->semanticBackend.find("compilation_database") != std::string::npos);
+	const auto preciseCaller = std::find_if(
+		qualifiedSymbol->references.begin(),
+		qualifiedSymbol->references.end(),
+		[](const ofxGgmlCodeAssistantSymbolReference & reference) {
+			return reference.kind == "caller" &&
+				!reference.callerSymbol.empty() &&
+				!reference.targetSymbol.empty();
+		});
+	REQUIRE(preciseCaller != qualifiedSymbol->references.end());
 }
 
 TEST_CASE("Code assistant parser and run path expose structured task results", "[code_assistant]") {
@@ -252,5 +287,44 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		const auto docsPrepared = assistant.preparePrompt(docsRequest, {});
 		REQUIRE(docsPrepared.prompt.find("Grounded web/doc sources requested:") != std::string::npos);
 		REQUIRE(docsPrepared.prompt.find("https://example.com/vulkan-doc") != std::string::npos);
+	}
+
+	SECTION("Build errors are parsed into structured entries") {
+		const std::string errors =
+			"src/main.cpp(42,9): error C2065: unknown_symbol: undeclared identifier\n"
+			"src/helper.cpp:10:3: error: use of undeclared identifier 'x'\n";
+		const auto parsed = ofxGgmlCodeAssistant::parseBuildErrors(errors);
+		REQUIRE(parsed.size() == 2);
+		REQUIRE(parsed.front().filePath.find("main.cpp") != std::string::npos);
+		REQUIRE(parsed.front().line == 42);
+		REQUIRE(parsed.front().code == "C2065");
+		REQUIRE(parsed.back().line == 10);
+	}
+
+	SECTION("Inline completion uses cursor-aware prompt building") {
+		const std::string modelPath = createAssistantDummyModel();
+		const std::string exePath = createAssistantExecutable({
+			"return cachedValue;"
+		});
+
+		ofxGgmlCodeAssistant assistant;
+		assistant.setCompletionExecutable(exePath);
+
+		ofxGgmlCodeAssistantInlineCompletionRequest request;
+		request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+		request.filePath = "src/cache.cpp";
+		request.prefix = "int load() {\n    ";
+		request.suffix = "\n}";
+		request.instruction = "Complete the return statement.";
+		request.singleLine = true;
+
+		const auto prepared = assistant.prepareInlineCompletion(request);
+		REQUIRE(prepared.prompt.find("<PRE>") != std::string::npos);
+		REQUIRE(prepared.prompt.find("<SUF>") != std::string::npos);
+		REQUIRE(prepared.prompt.find("Complete the return statement.") != std::string::npos);
+
+		const auto result = assistant.runInlineCompletion(modelPath, request);
+		REQUIRE(result.inference.success);
+		REQUIRE(result.completion.find("cachedValue") != std::string::npos);
 	}
 }
