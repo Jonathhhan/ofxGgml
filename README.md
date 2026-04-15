@@ -284,6 +284,7 @@ ofxGgmlInferenceSettings s;
 s.maxTokens = 256;
 s.promptCachePath = "chat-cache.bin"; // KV/session reuse
 s.promptCacheAll = true;
+s.autoPromptCache = true; // when promptCachePath is empty, uses a stable temp cache per model
 s.jsonSchema = "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}}}";
 
 auto r = inf.generate("path/to/model.gguf", "Return JSON with an answer.", s);
@@ -307,6 +308,10 @@ auto q = inf.embed("path/to/model.gguf", "What library handles tensors?");
 if (q.success) {
     auto hits = index.search(q.embedding, 1);
 }
+
+// Token counting is cached internally (model + text hash), which
+// reduces repeated tokenizer subprocess calls in iterative workflows.
+int nTok = inf.countPromptTokens("path/to/model.gguf", "Repeated text");
 ```
 
 ### Allocation reuse for stable graphs

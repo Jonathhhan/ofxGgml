@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <numeric>
 #include <random>
@@ -252,6 +253,15 @@ static std::string cleanCompletionOutput(const std::string & raw, const std::str
 
 static std::string cleanStructuredOutput(const std::string & raw) {
 	return trim(stripLeadingRuntimeNoise(stripLlamaWarnings(raw)));
+}
+
+static std::string defaultPromptCachePathForModel(const std::string & modelPath) {
+	if (modelPath.empty()) return {};
+	std::error_code ec;
+	const std::filesystem::path tempDir = std::filesystem::temp_directory_path(ec);
+	if (ec) return {};
+	const size_t modelHash = std::hash<std::string>{}(modelPath);
+	return (tempDir / ("ofxggml_prompt_cache_" + std::to_string(modelHash) + ".bin")).string();
 }
 
 static bool looksLikeCodeOutput(const std::string & text) {
@@ -908,18 +918,22 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 		args.emplace_back("--seed");
 		args.emplace_back(std::to_string(settings.seed));
 	}
-	if (!settings.promptCachePath.empty()) {
-		// Security: Validate cache path if it exists, or allow creation of new file
+	std::string effectivePromptCachePath = settings.promptCachePath;
+	if (effectivePromptCachePath.empty() && settings.autoPromptCache) {
+		effectivePromptCachePath = defaultPromptCachePathForModel(modelPath);
+	}
+	if (!effectivePromptCachePath.empty()) {
+		// Security: Validate cache path if it already exists, or allow creation of a new file.
 		std::error_code ec;
-		std::filesystem::path cachePath(settings.promptCachePath);
+		std::filesystem::path cachePath(effectivePromptCachePath);
 		if (std::filesystem::exists(cachePath, ec)) {
-			if (!isValidFilePath(settings.promptCachePath)) {
-				result.error = "invalid prompt cache path: " + settings.promptCachePath;
+			if (!isValidFilePath(effectivePromptCachePath)) {
+				result.error = "invalid prompt cache path: " + effectivePromptCachePath;
 				return result;
 			}
 		}
 		args.emplace_back("--prompt-cache");
-		args.emplace_back(settings.promptCachePath);
+		args.emplace_back(effectivePromptCachePath);
 		if (settings.promptCacheAll) {
 			args.emplace_back("--prompt-cache-all");
 		}
@@ -1134,6 +1148,16 @@ int ofxGgmlInference::countPromptTokens(
 	const std::string & text) const {
 	if (modelPath.empty() || m_completionExe.empty()) return -1;
 
+	const size_t textHash = std::hash<std::string>{}(text);
+	const std::string cacheKey = modelPath + "|" + std::to_string(text.size()) + "|" + std::to_string(textHash);
+	{
+		std::lock_guard<std::mutex> lock(m_tokenCountCacheMutex);
+		auto it = m_tokenCountCache.find(cacheKey);
+		if (it != m_tokenCountCache.end()) {
+			return it->second;
+		}
+	}
+
 	if (!isValidFilePath(modelPath)) {
 		return -1;
 	}
@@ -1173,7 +1197,15 @@ int ofxGgmlInference::countPromptTokens(
 	}
 
 	raw = cleanStructuredOutput(raw);
-	return parseVerbosePromptTokenCount(raw);
+	const int tokenCount = parseVerbosePromptTokenCount(raw);
+	if (tokenCount >= 0) {
+		std::lock_guard<std::mutex> lock(m_tokenCountCacheMutex);
+		if (m_tokenCountCache.size() > 2000) {
+			m_tokenCountCache.clear();
+		}
+		m_tokenCountCache[cacheKey] = tokenCount;
+	}
+	return tokenCount;
 }
 
 std::vector<std::string> ofxGgmlInference::tokenize(const std::string & text) {

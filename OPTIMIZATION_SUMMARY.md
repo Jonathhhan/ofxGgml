@@ -232,6 +232,12 @@ The following optimizations from the original plan remain to be implemented:
 - **Code Duplication Reduced**: 1 area
 - **Documentation Lines Added**: ~35
 
+**Phase 5 (Addon-level runtime improvements):**
+- **Files Modified**: 2 (`src/ofxGgmlInference.h/.cpp`)
+- **Prompt-cache improvement**: added `autoPromptCache` to `ofxGgmlInferenceSettings` so generation can use a stable per-model cache path even when callers do not specify one explicitly
+- **Tokenizer performance improvement**: added internal token-count cache in `ofxGgmlInference::countPromptTokens()` keyed by model path + text hash
+- **Impact**: lower repeated CLI overhead in iterative chat/review workflows without changing public API usage patterns
+
 ## Testing Recommendations
 
 To validate these fixes:

@@ -4,7 +4,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct ofxGgmlInferenceSettings {
@@ -20,6 +22,7 @@ int seed = -1;
 bool simpleIo = true;
 bool promptCacheAll = true;
 std::string promptCachePath;
+bool autoPromptCache = true;
 std::string jsonSchema;
 std::string grammarPath;
 };
@@ -92,6 +95,9 @@ uint32_t seed = 0);
 private:
 std::string m_completionExe;
 std::string m_embeddingExe;
+
+mutable std::unordered_map<std::string, int> m_tokenCountCache;
+mutable std::mutex m_tokenCountCacheMutex;
 };
 
 /// Lightweight in-memory similarity index for RAG-style retrieval.

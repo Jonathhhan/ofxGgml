@@ -516,6 +516,17 @@ std::string buildCutoffContinuationRequest(const std::string & tailText) {
 		"Tail of previous output:\n" + tailText;
 }
 
+std::string promptCachePathFor(const std::string & modelPath, AiMode mode) {
+	const std::string cacheDir = ofToDataPath("cache", true);
+	std::error_code ec;
+	std::filesystem::create_directories(cacheDir, ec);
+	const size_t modelHash = std::hash<std::string>{}(modelPath);
+	const std::string filename = "prompt_cache_"
+		+ std::to_string(static_cast<int>(mode)) + "_"
+		+ std::to_string(modelHash) + ".bin";
+	return ofFilePath::join(cacheDir, filename);
+}
+
 constexpr size_t kMaxLogMessages = 500;
 constexpr size_t kExePathBufSize = 4096; // buffer for resolving the executable path
 constexpr float kDefaultTemp = 0.7f;
@@ -536,6 +547,21 @@ constexpr size_t kMaxInternetCharsFromSourceUrls = 4500;
 constexpr auto kStreamUiUpdateInterval = std::chrono::milliseconds(50);
 constexpr size_t kStreamUiMinGrowth = 256;
 const char * const kWaitingLabels[] = {"generating", "generating.", "generating..", "generating..."};
+const char * const kChatLanguages[] = {
+	"Auto",
+	"English",
+	"German",
+	"Spanish",
+	"French",
+	"Italian",
+	"Portuguese",
+	"Dutch",
+	"Polish",
+	"Russian",
+	"Japanese",
+	"Chinese"
+};
+constexpr int kChatLanguageCount = static_cast<int>(sizeof(kChatLanguages) / sizeof(kChatLanguages[0]));
 
 // Llama CLI detection state shared between probe and UI.
 // -1 = unknown / needs probe, 0 = probed but not found, 1 = available.
@@ -1550,6 +1576,10 @@ ImGui::Checkbox("Auto-continue cutoffs (Script)", &autoContinueCutoff);
 if (ImGui::IsItemHovered()) {
 	ImGui::SetTooltip("When Script output appears cut off, run one automatic continuation pass.");
 }
+ImGui::Checkbox("Use prompt cache", &usePromptCache);
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Reuse llama prompt cache between requests for faster follow-up responses.");
+}
 ImGui::Checkbox("Offline mode", &strictOfflineMode);
 
 const char * mirostatLabels[] = { "Mirostat: Off", "Mirostat", "Mirostat 2.0" };
@@ -1690,6 +1720,14 @@ ImGui::End();
 void ofApp::drawChatPanel() {
 drawPanelHeader("Chat", "conversation with the ggml engine");
 
+ImGui::Text("Response language:");
+ImGui::SameLine();
+ImGui::SetNextItemWidth(170);
+ImGui::Combo("##ChatLang", &chatLanguageIndex, kChatLanguages, kChatLanguageCount);
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Auto lets the model decide. Choose a language to force chat replies.");
+}
+
 // Message history.
 float inputH = 60.0f;
 ImGui::BeginChild("##ChatHistory", ImVec2(0, -inputH), true);
@@ -1736,13 +1774,6 @@ bool submitted = ImGui::InputText("##ChatIn", chatInput, sizeof(chatInput),
 ImGuiInputTextFlags_EnterReturnsTrue);
 ImGui::SameLine();
 bool sendClicked = ImGui::Button("Send", ImVec2(70, 0));
-ImGui::SameLine();
-ImGui::BeginDisabled(strictOfflineMode);
-ImGui::Checkbox("All modes", &internetContextAllModes);
-if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("When enabled, internet grounding can be applied to non-chat modes too. Chat mode is grounded by default unless Offline mode is enabled.");
-}
-ImGui::EndDisabled();
 if (strictOfflineMode) {
 	ImGui::SameLine();
 	ImGui::TextDisabled("(offline)");
@@ -2554,6 +2585,10 @@ ImGui::Text(" | Model: %s", modelPresets[static_cast<size_t>(selectedModelIndex)
 ImGui::SameLine();
 }
 ImGui::Text(" | Mode: %s", modeLabels[static_cast<int>(activeMode)]);
+if (activeMode == AiMode::Chat && chatLanguageIndex > 0 && chatLanguageIndex < kChatLanguageCount) {
+	ImGui::SameLine();
+	ImGui::Text(" | Chat Lang: %s", kChatLanguages[chatLanguageIndex]);
+}
 if (activeMode == AiMode::Script && !scriptLanguages.empty()) {
 ImGui::SameLine();
 ImGui::Text(" | Lang: %s", scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].name.c_str());
@@ -2708,6 +2743,7 @@ out << "[session_v1]\n";
 
 // Settings.
 out << "mode=" << static_cast<int>(activeMode) << "\n";
+out << "chatLanguage=" << std::clamp(chatLanguageIndex, 0, kChatLanguageCount - 1) << "\n";
 out << "model=" << selectedModelIndex << "\n";
 out << "language=" << selectedLanguageIndex << "\n";
 out << "maxTokens=" << maxTokens << "\n";
@@ -2736,6 +2772,7 @@ out << "mirostatTau=" << ofToString(mirostatTau, 4) << "\n";
 out << "mirostatEta=" << ofToString(mirostatEta, 4) << "\n";
 out << "useModeTokenBudgets=" << (useModeTokenBudgets ? 1 : 0) << "\n";
 out << "autoContinueCutoff=" << (autoContinueCutoff ? 1 : 0) << "\n";
+out << "usePromptCache=" << (usePromptCache ? 1 : 0) << "\n";
 for (int i = 0; i < kModeCount; i++) {
 	out << "modeTokenBudget" << i << "="
 		<< std::clamp(modeMaxTokens[static_cast<size_t>(i)], 32, 4096) << "\n";
@@ -2777,7 +2814,6 @@ out << "summarizeOutput=" << escapeSessionText(summarizeOutput) << "\n";
 out << "writeOutput=" << escapeSessionText(writeOutput) << "\n";
 out << "translateOutput=" << escapeSessionText(translateOutput) << "\n";
 out << "customOutput=" << escapeSessionText(customOutput) << "\n";
-out << "internetContextAllModes=" << (internetContextAllModes ? 1 : 0) << "\n";
 out << "strictOfflineMode=" << (strictOfflineMode ? 1 : 0) << "\n";
 out << "stopAtNaturalBoundary=" << (stopAtNaturalBoundary ? 1 : 0) << "\n";
 
@@ -2841,6 +2877,9 @@ if (key == "mode") {
 	int m = std::clamp(safeStoi(value), 0, kModeCount - 1);
 	activeMode = static_cast<AiMode>(m);
 }
+else if (key == "chatLanguage") {
+	chatLanguageIndex = std::clamp(safeStoi(value), 0, kChatLanguageCount - 1);
+}
 else if (key == "model") {
 	int maxIdx = std::max(0, static_cast<int>(modelPresets.size()) - 1);
 	selectedModelIndex = std::clamp(safeStoi(value), 0, maxIdx);
@@ -2890,6 +2929,7 @@ else if (key == "mirostatTau") mirostatTau = std::clamp(safeStof(value, 5.0f), 0
 else if (key == "mirostatEta") mirostatEta = std::clamp(safeStof(value, 0.1f), 0.0f, 1.0f);
 else if (key == "useModeTokenBudgets") useModeTokenBudgets = (safeStoi(value, 1) != 0);
 else if (key == "autoContinueCutoff") autoContinueCutoff = (safeStoi(value, 0) != 0);
+else if (key == "usePromptCache") usePromptCache = (safeStoi(value, 1) != 0);
 else if (key.rfind("modeTokenBudget", 0) == 0) {
 	try {
 		int idx = std::stoi(key.substr(std::strlen("modeTokenBudget")));
@@ -2938,7 +2978,6 @@ else if (key == "summarizeOutput") summarizeOutput = unescapeSessionText(value);
 else if (key == "writeOutput") writeOutput = unescapeSessionText(value);
 else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
 else if (key == "customOutput") customOutput = unescapeSessionText(value);
-else if (key == "internetContextAllModes") internetContextAllModes = (safeStoi(value, 0) != 0);
 else if (key == "strictOfflineMode") strictOfflineMode = (safeStoi(value, 0) != 0);
 else if (key == "stopAtNaturalBoundary") stopAtNaturalBoundary = (safeStoi(value, 1) != 0);
 else if (key == "msg") {
@@ -3224,6 +3263,35 @@ std::string slidingWindowText(const std::string & content, size_t maxChars) {
 
 int ofApp::countTokensAccurate(const std::string & text, int fallback) {
 	const std::string modelPath = getSelectedModelPath();
+	if (!text.empty()) {
+		const size_t textHash = std::hash<std::string>{}(text);
+		const std::string key = modelPath + "|" + std::to_string(text.size()) + "|" + std::to_string(textHash);
+		{
+			std::lock_guard<std::mutex> lock(tokenCountCacheMutex);
+			auto it = tokenCountCache.find(key);
+			if (it != tokenCountCache.end()) {
+				return it->second;
+			}
+		}
+
+		int tokens = -1;
+		if (!modelPath.empty()) {
+			tokens = scriptReviewInference.countPromptTokens(modelPath, text);
+		}
+		if (tokens < 0) {
+			tokens = (fallback >= 0) ? fallback : static_cast<int>(text.size() / 4 + 1);
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(tokenCountCacheMutex);
+			if (tokenCountCache.size() > 2000) {
+				tokenCountCache.clear();
+			}
+			tokenCountCache[key] = tokens;
+		}
+		return tokens;
+	}
+
 	if (!modelPath.empty()) {
 		int tokens = scriptReviewInference.countPromptTokens(modelPath, text);
 		if (tokens >= 0) return tokens;
@@ -3808,6 +3876,10 @@ std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
 
 	switch (mode) {
 	case AiMode::Chat:
+		if (chatLanguageIndex > 0 && chatLanguageIndex < kChatLanguageCount) {
+			oss << "System: Respond in " << kChatLanguages[chatLanguageIndex]
+				<< ". Keep terminology natural for that language.\n\n";
+		}
 		oss << "User:\n" << userText << "\n\nAssistant:\n";
 		break;
 	case AiMode::Script:
@@ -3907,7 +3979,7 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 
 	auto makeArgs = [&](bool shortFlags) {
 		std::vector<std::string> out;
-		out.reserve(32);
+		out.reserve(40);
 		out.emplace_back(llamaCliCommand);
 		out.emplace_back("-m");
 		out.emplace_back(modelPath);
@@ -3939,6 +4011,14 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 		out.emplace_back(repeatPenaltyStr.str());
 		out.emplace_back(shortFlags ? "-t" : "--threads");
 		out.emplace_back(ofToString(safeThreads));
+		if (usePromptCache) {
+			const std::string cachePath = promptCachePathFor(modelPath, activeGenerationMode);
+			if (!cachePath.empty()) {
+				out.emplace_back("--prompt-cache");
+				out.emplace_back(cachePath);
+				out.emplace_back("--prompt-cache-all");
+			}
+		}
 		out.emplace_back("--no-display-prompt");
 		out.emplace_back("--simple-io");
 		if (seed >= 0) {
@@ -4170,10 +4250,9 @@ workerThread.join();
  const bool preserveLlamaInstructions = (mode == AiMode::Script);
  const bool allowInternet = !strictOfflineMode;
  const bool internetFromChat = (mode == AiMode::Chat);
- const bool internetFromAllModes = (internetContextAllModes && mode != AiMode::Translate);
  const bool internetFromScriptSource =
 	(mode == AiMode::Script && scriptSource.getSourceType() == ofxGgmlScriptSourceType::Internet);
- if (allowInternet && (internetFromChat || internetFromAllModes || internetFromScriptSource)) {
+ if (allowInternet && (internetFromChat || internetFromScriptSource)) {
 	std::string gatheredContext;
 	gatheredContext += buildInternetContextFromText(userText, true);
 

@@ -177,16 +177,17 @@ private:
 	int mirostatMode = 0;                            // 0=off, 1=Mirostat, 2=Mirostat 2.0
 	float mirostatTau = 5.0f;
 	float mirostatEta = 0.1f;
+	int chatLanguageIndex = 0;                       // 0=Auto, otherwise force response language
 	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512};
 	bool useModeTokenBudgets = true;
 	bool autoContinueCutoff = false;
+	bool usePromptCache = true;
 	bool showDeviceInfo = false;
 	bool showLog = false;
 	bool showPerformance = false;
 	ofLogLevel logLevel = OF_LOG_NOTICE;
 	std::deque<std::string> logMessages;
 	std::mutex logMutex;
-	bool internetContextAllModes = false;
 	bool strictOfflineMode = false;
 	bool scriptIncludeRepoContext = true;
 	bool stopAtNaturalBoundary = true;
@@ -194,6 +195,8 @@ private:
 	bool cliSupportsTopK = true;
 	bool cliSupportsMinP = true;
 	bool cliSupportsMirostat = true;
+	std::unordered_map<std::string, int> tokenCountCache;
+	std::mutex tokenCountCacheMutex;
 
 	// -- performance tracking --
 	float lastComputeMs = 0.0f;
