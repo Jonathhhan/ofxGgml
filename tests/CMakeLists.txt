@@ -174,13 +174,18 @@ endif()
 # Link ggml libraries
 if(UNIX AND NOT APPLE)
     # Linux
+    find_package(OpenMP QUIET)
     target_link_libraries(ofxGgml-tests
         ${GGML_BUILD_DIR}/src/libggml.a
         ${GGML_BUILD_DIR}/src/libggml-base.a
         ${GGML_BUILD_DIR}/src/libggml-cpu.a
+        ${GGML_OPTIONAL_LIBS}
         pthread
         dl
     )
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(ofxGgml-tests OpenMP::OpenMP_CXX)
+    endif()
 elseif(APPLE)
     # macOS
     target_link_libraries(ofxGgml-tests
