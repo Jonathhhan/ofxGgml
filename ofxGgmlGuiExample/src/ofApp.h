@@ -228,6 +228,8 @@ private:
 	char scriptSourceBranch[128] = {};               // branch name, default "main"
 	char scriptSourceInternetUrl[1024] = {};         // internet URL input
 	int selectedScriptFileIndex = -1;
+	ofxGgmlInference llmInference;
+	ofxGgmlCodeReview scriptCodeReview;
 	ofxGgmlProjectMemory scriptProjectMemory;
 	std::string lastScriptRequest;
 	ofxGgmlInference scriptReviewInference;
@@ -253,7 +255,7 @@ private:
 	void runInference(AiMode mode, const std::string & userText,
 		const std::string & systemPrompt = "");
 	void runHierarchicalReview();
-	bool runRealInference(const std::string & prompt, std::string & output, std::string & error,
+	bool runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,
 		std::function<void(const std::string &)> onStreamData = nullptr,
 		bool preserveLlamaInstructions = false);
 	std::string buildPromptForMode(AiMode mode, const std::string & userText,

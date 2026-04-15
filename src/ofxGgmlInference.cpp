@@ -1177,6 +1177,9 @@ ofxGgmlInference::ofxGgmlInference()
 
 void ofxGgmlInference::setCompletionExecutable(const std::string & path) {
 	m_completionExe = path;
+	std::lock_guard<std::mutex> lock(m_completionCapabilitiesMutex);
+	m_completionCapabilitiesValid = false;
+	m_completionCapabilities = {};
 }
 
 void ofxGgmlInference::setEmbeddingExecutable(const std::string & path) {
@@ -1189,6 +1192,48 @@ const std::string & ofxGgmlInference::getCompletionExecutable() const {
 
 const std::string & ofxGgmlInference::getEmbeddingExecutable() const {
 	return m_embeddingExe;
+}
+
+ofxGgmlInferenceCapabilities ofxGgmlInference::probeCompletionCapabilities(
+	bool forceRefresh) const {
+	std::lock_guard<std::mutex> lock(m_completionCapabilitiesMutex);
+	if (m_completionCapabilitiesValid && !forceRefresh) {
+		return m_completionCapabilities;
+	}
+
+	m_completionCapabilities = {};
+	if (m_completionExe.empty() || !isValidExecutablePath(m_completionExe)) {
+		m_completionCapabilitiesValid = false;
+		return m_completionCapabilities;
+	}
+
+	std::string helpText;
+	int exitCode = -1;
+	if (!runCommandCapture({m_completionExe, "--help"}, helpText, exitCode, true) ||
+		helpText.empty()) {
+		m_completionCapabilitiesValid = false;
+		return m_completionCapabilities;
+	}
+
+	m_completionCapabilities.probed = true;
+	m_completionCapabilities.helpText = helpText;
+	m_completionCapabilities.supportsTopK =
+		helpText.find("--top-k") != std::string::npos;
+	m_completionCapabilities.supportsMinP =
+		helpText.find("--min-p") != std::string::npos;
+	m_completionCapabilities.supportsMirostat =
+		helpText.find("--mirostat") != std::string::npos &&
+		helpText.find("--mirostat-lr") != std::string::npos &&
+		helpText.find("--mirostat-ent") != std::string::npos;
+	m_completionCapabilities.supportsSingleTurn =
+		helpText.find("--single-turn") != std::string::npos;
+	m_completionCapabilitiesValid = true;
+	return m_completionCapabilities;
+}
+
+ofxGgmlInferenceCapabilities ofxGgmlInference::getCompletionCapabilities() const {
+	std::lock_guard<std::mutex> lock(m_completionCapabilitiesMutex);
+	return m_completionCapabilities;
 }
 
 std::vector<ofxGgmlPromptSource> ofxGgmlInference::fetchUrlSources(
@@ -1367,6 +1412,68 @@ std::string ofxGgmlInference::buildPromptWithSources(
 	return ctx.str();
 }
 
+std::string ofxGgmlInference::clampPromptToContext(
+	const std::string & prompt,
+	size_t contextTokens,
+	bool * trimmed) {
+	bool wasTrimmed = false;
+	if (contextTokens > 0) {
+		const size_t charBudget = std::max<size_t>(512, contextTokens * 3);
+		if (prompt.size() > charBudget) {
+			wasTrimmed = true;
+			const size_t head = std::min<size_t>(2048, charBudget / 4);
+			if (charBudget <= head + 96) {
+				if (trimmed) {
+					*trimmed = true;
+				}
+				return prompt.substr(prompt.size() - charBudget);
+			}
+			const size_t tail = charBudget - head - 32;
+			if (trimmed) {
+				*trimmed = true;
+			}
+			return prompt.substr(0, head) +
+				"\n...[context trimmed to fit window]...\n" +
+				prompt.substr(prompt.size() - tail);
+		}
+	}
+	if (trimmed) {
+		*trimmed = wasTrimmed;
+	}
+	return prompt;
+}
+
+bool ofxGgmlInference::isLikelyCutoffOutput(
+	const std::string & text,
+	bool codeLike) {
+	const std::string trimmedText = trim(text);
+	if (trimmedText.empty()) return false;
+	if (trimmedText.rfind("[Error]", 0) == 0) return false;
+
+	const char last = trimmedText.back();
+	if (codeLike) {
+		if (last == '\n' || last == '}' || last == ')' ||
+			last == ']' || last == ';') {
+			return false;
+		}
+		return trimmedText.size() > 80;
+	}
+
+	if (last == '.' || last == '!' || last == '?' ||
+		last == '"' || last == '\'') {
+		return false;
+	}
+	return trimmedText.size() > 80;
+}
+
+std::string ofxGgmlInference::buildCutoffContinuationRequest(
+	const std::string & tailText) {
+	return
+		"Continue exactly from where the previous answer stopped. "
+		"Do not restart. Finish the incomplete thought/code naturally.\n\n"
+		"Tail of previous output:\n" + tailText;
+}
+
 ofxGgmlInferenceResult ofxGgmlInference::generate(
 const std::string & modelPath,
 const std::string & prompt,
@@ -1394,11 +1501,22 @@ std::function<bool(const std::string&)> onChunk) const {
 		return result;
 	}
 
+	bool promptWasTrimmed = false;
+	std::string effectivePrompt = settings.trimPromptToContext
+		? clampPromptToContext(prompt, static_cast<size_t>(std::max(settings.contextSize, 0)), &promptWasTrimmed)
+		: prompt;
+
 	// Security: Sanitize prompt
-	std::string sanitizedPrompt = sanitizeArgument(prompt);
+	std::string sanitizedPrompt = sanitizeArgument(effectivePrompt);
 	if (sanitizedPrompt.empty() && !prompt.empty()) {
 		result.error = "prompt contains only invalid characters";
 		return result;
+	}
+	result.promptWasTrimmed = promptWasTrimmed;
+
+	ofxGgmlInferenceCapabilities capabilities;
+	if (settings.autoProbeCliCapabilities) {
+		capabilities = probeCompletionCapabilities();
 	}
 
 	const auto t0 = std::chrono::steady_clock::now();
@@ -1409,147 +1527,192 @@ std::function<bool(const std::string&)> onChunk) const {
 		return result;
 	}
 
-	std::vector<std::string> args;
-	args.reserve(32); // Pre-reserve for typical number of arguments
-	args.emplace_back(m_completionExe);
-	args.emplace_back("-m");
-	args.emplace_back(modelPath);
-	args.emplace_back("--file");
-	args.emplace_back(promptPath);
-	args.emplace_back("-n");
-	args.emplace_back(std::to_string(std::clamp(settings.maxTokens, 1, 8192)));
-	args.emplace_back("-c");
-	args.emplace_back(std::to_string(std::clamp(settings.contextSize, 128, 131072)));
-	args.emplace_back("-b");
-	args.emplace_back(std::to_string(std::clamp(settings.batchSize, 1, 8192)));
-	args.emplace_back("-ub");
-	args.emplace_back(std::to_string(std::clamp(settings.ubatchSize, 1, 8192)));
-	args.emplace_back("-ngl");
-	args.emplace_back(std::to_string(std::max(0, settings.gpuLayers)));
-	args.emplace_back("--temp");
-	args.emplace_back(std::to_string(std::clamp(settings.temperature, 0.0f, 3.0f)));
-	args.emplace_back("--top-p");
-	args.emplace_back(std::to_string(std::clamp(settings.topP, 0.0f, 1.0f)));
-	args.emplace_back("--min-p");
-	args.emplace_back(std::to_string(std::clamp(settings.minP, 0.0f, 1.0f)));
-	args.emplace_back("--top-k");
-	args.emplace_back(std::to_string(std::clamp(settings.topK, 0, 100)));
-	args.emplace_back("--presence-penalty");
-	args.emplace_back(std::to_string(std::clamp(settings.presencePenalty, -2.0f, 2.0f)));
-	args.emplace_back("--frequency-penalty");
-	args.emplace_back(std::to_string(std::clamp(settings.frequencyPenalty, -2.0f, 2.0f)));
-	args.emplace_back("--repeat-penalty");
-	args.emplace_back(std::to_string(std::clamp(settings.repeatPenalty, 1.0f, 3.0f)));
-	args.emplace_back("--no-display-prompt");
-	args.emplace_back("--log-disable");
-
-	if (settings.simpleIo) {
-		args.emplace_back("--simple-io");
-	}
-	if (settings.flashAttn) {
-		args.emplace_back("-fa");
-	}
-	if (settings.mlock) {
-		args.emplace_back("--mlock");
-	}
-	if (settings.threads > 0) {
-		args.emplace_back("--threads");
-		args.emplace_back(std::to_string(std::clamp(settings.threads, 1, 256)));
-	}
-	if (settings.threadsBatch > 0) {
-		args.emplace_back("--threads-batch");
-		args.emplace_back(std::to_string(std::clamp(settings.threadsBatch, 1, 256)));
-	}
-	if (settings.seed >= 0) {
-		args.emplace_back("--seed");
-		args.emplace_back(std::to_string(settings.seed));
-	}
-	if (!settings.chatTemplate.empty()) {
-		args.emplace_back("--chat-template");
-		args.emplace_back(settings.chatTemplate);
-	}
 	std::string effectivePromptCachePath = settings.promptCachePath;
 	if (effectivePromptCachePath.empty() && settings.autoPromptCache) {
 		effectivePromptCachePath = defaultPromptCachePathForModel(modelPath);
 	}
 	if (!effectivePromptCachePath.empty()) {
-		// Security: Validate cache path if it already exists, or allow creation of a new file.
 		std::error_code ec;
 		std::filesystem::path cachePath(effectivePromptCachePath);
-		if (std::filesystem::exists(cachePath, ec)) {
-			if (!isValidFilePath(effectivePromptCachePath)) {
-				result.error = "invalid prompt cache path: " + effectivePromptCachePath;
-				return result;
-			}
+		if (std::filesystem::exists(cachePath, ec) &&
+			!isValidFilePath(effectivePromptCachePath)) {
+			result.error = "invalid prompt cache path: " + effectivePromptCachePath;
+			return result;
 		}
-		args.emplace_back("--prompt-cache");
-		args.emplace_back(effectivePromptCachePath);
-		if (settings.promptCacheAll) {
-			args.emplace_back("--prompt-cache-all");
-		}
-	}
-	if (!settings.jsonSchema.empty()) {
-		// Security: Sanitize JSON schema
-		std::string sanitizedSchema = sanitizeArgument(settings.jsonSchema);
-		args.emplace_back("--json-schema");
-		args.emplace_back(std::move(sanitizedSchema));
 	}
 	if (!settings.grammarPath.empty()) {
-		// Security: Validate grammar file path
 		if (!isValidFilePath(settings.grammarPath)) {
 			result.error = "invalid grammar file path: " + settings.grammarPath;
 			return result;
 		}
-		args.emplace_back("--grammar-file");
-		args.emplace_back(settings.grammarPath);
 	}
 
-	std::string raw;
-	int exitCode = -1;
-	const bool started = runCommandCapture(args, raw, exitCode, false, onChunk);
+	int effectiveBatch = std::clamp(settings.batchSize, 1, 8192);
+	if ((!settings.device.empty() || settings.gpuLayers > 0) && effectiveBatch > 256) {
+		effectiveBatch = 256;
+	}
 
-	if (!started) {
+	auto buildArgs = [&](int batchOverride, bool simpleIoEnabled) {
+		std::vector<std::string> args;
+		args.reserve(48);
+		args.emplace_back(m_completionExe);
+		args.emplace_back("-m");
+		args.emplace_back(modelPath);
+		args.emplace_back("--file");
+		args.emplace_back(promptPath);
+		args.emplace_back("-n");
+		args.emplace_back(std::to_string(std::clamp(settings.maxTokens, 1, 8192)));
+		args.emplace_back("-c");
+		args.emplace_back(std::to_string(std::clamp(settings.contextSize, 128, 131072)));
+		args.emplace_back("-b");
+		args.emplace_back(std::to_string(batchOverride));
+		args.emplace_back("-ub");
+		args.emplace_back(std::to_string(std::clamp(settings.ubatchSize, 1, 8192)));
+		args.emplace_back("-ngl");
+		args.emplace_back(std::to_string(std::max(0, settings.gpuLayers)));
+		if (!settings.device.empty()) {
+			args.emplace_back("--device");
+			args.emplace_back(settings.device);
+			args.emplace_back("--split-mode");
+			args.emplace_back("none");
+		}
+		args.emplace_back("--temp");
+		args.emplace_back(std::to_string(std::clamp(settings.temperature, 0.0f, 3.0f)));
+		args.emplace_back("--top-p");
+		args.emplace_back(std::to_string(std::clamp(settings.topP, 0.0f, 1.0f)));
+		if (!capabilities.probed || capabilities.supportsMinP) {
+			args.emplace_back("--min-p");
+			args.emplace_back(std::to_string(std::clamp(settings.minP, 0.0f, 1.0f)));
+		}
+		if (!capabilities.probed || capabilities.supportsTopK) {
+			args.emplace_back("--top-k");
+			args.emplace_back(std::to_string(std::clamp(settings.topK, 0, 100)));
+		}
+		args.emplace_back("--presence-penalty");
+		args.emplace_back(std::to_string(std::clamp(settings.presencePenalty, -2.0f, 2.0f)));
+		args.emplace_back("--frequency-penalty");
+		args.emplace_back(std::to_string(std::clamp(settings.frequencyPenalty, -2.0f, 2.0f)));
+		args.emplace_back("--repeat-penalty");
+		args.emplace_back(std::to_string(std::clamp(settings.repeatPenalty, 1.0f, 3.0f)));
+		args.emplace_back("--no-display-prompt");
+		args.emplace_back("--log-disable");
+
+		if (simpleIoEnabled) {
+			args.emplace_back("--simple-io");
+		}
+		if (settings.singleTurn &&
+			(!capabilities.probed || capabilities.supportsSingleTurn)) {
+			args.emplace_back("--single-turn");
+		}
+		if ((settings.mirostat == 1 || settings.mirostat == 2) &&
+			(!capabilities.probed || capabilities.supportsMirostat)) {
+			args.emplace_back("--mirostat");
+			args.emplace_back(std::to_string(settings.mirostat));
+			args.emplace_back("--mirostat-lr");
+			args.emplace_back(std::to_string(std::clamp(settings.mirostatEta, 0.0f, 1.0f)));
+			args.emplace_back("--mirostat-ent");
+			args.emplace_back(std::to_string(std::clamp(settings.mirostatTau, 0.0f, 20.0f)));
+		}
+		if (settings.flashAttn) {
+			args.emplace_back("-fa");
+		}
+		if (settings.mlock) {
+			args.emplace_back("--mlock");
+		}
+		if (settings.threads > 0) {
+			args.emplace_back("--threads");
+			args.emplace_back(std::to_string(std::clamp(settings.threads, 1, 256)));
+		}
+		if (settings.threadsBatch > 0) {
+			args.emplace_back("--threads-batch");
+			args.emplace_back(std::to_string(std::clamp(settings.threadsBatch, 1, 256)));
+		}
+		if (settings.seed >= 0) {
+			args.emplace_back("--seed");
+			args.emplace_back(std::to_string(settings.seed));
+		}
+		if (!settings.chatTemplate.empty()) {
+			args.emplace_back("--chat-template");
+			args.emplace_back(settings.chatTemplate);
+		}
+		if (!effectivePromptCachePath.empty()) {
+			args.emplace_back("--prompt-cache");
+			args.emplace_back(effectivePromptCachePath);
+			if (settings.promptCacheAll) {
+				args.emplace_back("--prompt-cache-all");
+			}
+		}
+		if (!settings.jsonSchema.empty()) {
+			args.emplace_back("--json-schema");
+			args.emplace_back(sanitizeArgument(settings.jsonSchema));
+		}
+		if (!settings.grammarPath.empty()) {
+			args.emplace_back("--grammar-file");
+			args.emplace_back(settings.grammarPath);
+		}
+		return args;
+	};
+
+	std::string raw;
+	std::string cleaned;
+	int exitCode = -1;
+	auto tryRun = [&](int batchOverride, bool simpleIoEnabled, std::string & passRaw, std::string & passCleaned, int & passExitCode, std::function<bool(const std::string &)> chunkHandler) {
+		const auto args = buildArgs(batchOverride, simpleIoEnabled);
+		const bool started = runCommandCapture(args, passRaw, passExitCode, false, chunkHandler);
+		if (!started) {
+			return false;
+		}
+		passCleaned = cleanCompletionOutput(passRaw, sanitizedPrompt);
+		if (passExitCode != 0 && passCleaned.empty()) {
+			std::string diagRaw;
+			int diagExitCode = -1;
+			if (runCommandCapture(args, diagRaw, diagExitCode, true)) {
+				const std::string diagCleaned = cleanCompletionOutput(diagRaw, sanitizedPrompt);
+				if (!diagCleaned.empty()) {
+					passCleaned = diagCleaned;
+				} else {
+					passRaw = cleanStructuredOutput(diagRaw);
+				}
+			}
+		}
+		if (passExitCode != 0 &&
+			shouldTreatNonZeroExitAsSuccess(passExitCode, !passCleaned.empty(), passRaw)) {
+			passExitCode = 0;
+		}
+		return true;
+	};
+
+	if (!tryRun(effectiveBatch, settings.simpleIo, raw, cleaned, exitCode, onChunk)) {
 		result.error = "failed to start llama completion process";
 		return result;
 	}
 
-	std::string cleaned = cleanCompletionOutput(raw, sanitizedPrompt);
 	if (exitCode == 130 && settings.simpleIo) {
-		std::vector<std::string> retryArgs = args;
-		retryArgs.erase(
-			std::remove(retryArgs.begin(), retryArgs.end(), std::string("--simple-io")),
-			retryArgs.end());
-
 		std::string retryRaw;
+		std::string retryCleaned;
 		int retryExitCode = -1;
-		if (runCommandCapture(retryArgs, retryRaw, retryExitCode, false)) {
-			std::string retryCleaned = cleanCompletionOutput(retryRaw, sanitizedPrompt);
-			if (retryExitCode == 0 && !retryCleaned.empty()) {
-				raw = std::move(retryRaw);
-				cleaned = std::move(retryCleaned);
-				exitCode = 0;
-			} else if (retryCleaned.size() > cleaned.size()) {
+		if (tryRun(effectiveBatch, false, retryRaw, retryCleaned, retryExitCode, nullptr)) {
+			if ((retryExitCode == 0 && !retryCleaned.empty()) ||
+				retryCleaned.size() > cleaned.size()) {
 				raw = std::move(retryRaw);
 				cleaned = std::move(retryCleaned);
 				exitCode = retryExitCode;
 			}
 		}
 	}
-	if (exitCode != 0 && cleaned.empty()) {
-		std::string diagRaw;
-		int diagExitCode = -1;
-		if (runCommandCapture(args, diagRaw, diagExitCode, true)) {
-			const std::string diagCleaned = cleanCompletionOutput(diagRaw, sanitizedPrompt);
-			if (!diagCleaned.empty()) {
-				cleaned = diagCleaned;
-			} else {
-				raw = cleanStructuredOutput(diagRaw);
+
+	if (settings.allowBatchFallback && exitCode != 0 && cleaned.empty() && effectiveBatch > 128) {
+		std::string retryRaw;
+		std::string retryCleaned;
+		int retryExitCode = -1;
+		const int fallbackBatch = std::min(effectiveBatch, 128);
+		if (tryRun(fallbackBatch, settings.simpleIo, retryRaw, retryCleaned, retryExitCode, nullptr)) {
+			if (retryExitCode == 0 || !retryCleaned.empty()) {
+				raw = std::move(retryRaw);
+				cleaned = std::move(retryCleaned);
+				exitCode = retryExitCode;
 			}
 		}
-	}
-
-	if (exitCode != 0 && shouldTreatNonZeroExitAsSuccess(exitCode, !cleaned.empty(), raw)) {
-		exitCode = 0;
 	}
 
 	if (exitCode != 0) {
@@ -1561,7 +1724,35 @@ std::function<bool(const std::string&)> onChunk) const {
 	}
 
 	result.success = true;
-	result.text = trimToNaturalBoundary(cleaned);
+	result.text = settings.stopAtNaturalBoundary
+		? trimToNaturalBoundary(cleaned)
+		: trim(cleaned);
+	result.outputLikelyCutoff = isLikelyCutoffOutput(
+		result.text,
+		looksLikeCodeOutput(result.text));
+
+	if (settings.autoContinueCutoff &&
+		result.outputLikelyCutoff &&
+		!result.text.empty()) {
+		ofxGgmlInferenceSettings continuationSettings = settings;
+		continuationSettings.autoContinueCutoff = false;
+		const size_t tailChars = std::min<size_t>(result.text.size(), 600);
+		const std::string continuationRequest = buildCutoffContinuationRequest(
+			result.text.substr(result.text.size() - tailChars));
+		ofxGgmlInferenceResult continuation = generate(
+			modelPath,
+			continuationRequest,
+			continuationSettings,
+			nullptr);
+		if (continuation.success && !continuation.text.empty()) {
+			result.text += "\n" + continuation.text;
+			result.outputLikelyCutoff = isLikelyCutoffOutput(
+				continuation.text,
+				looksLikeCodeOutput(continuation.text));
+			result.continuationCount = continuation.continuationCount + 1;
+		}
+	}
+
 	const auto t1 = std::chrono::steady_clock::now();
 	result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 	return result;

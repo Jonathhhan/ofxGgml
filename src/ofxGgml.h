@@ -12,6 +12,7 @@
 #include "ofxGgmlTensor.h"
 #include "ofxGgmlGraph.h"
 #include "ofxGgmlInference.h"
+#include "ofxGgmlCodeReview.h"
 #include "ofxGgmlModel.h"
 #include "ofxGgmlProjectMemory.h"
 #include "ofxGgmlScriptSource.h"

@@ -18,6 +18,9 @@ struct ofxGgmlInferenceSettings {
 	float topP = 0.9f;
 	float minP = 0.05f;
 	int topK = 40;
+	int mirostat = 0;
+	float mirostatTau = 5.0f;
+	float mirostatEta = 0.1f;
 	float presencePenalty = 0.0f;
 	float frequencyPenalty = 0.0f;
 	float repeatPenalty = 1.1f;
@@ -32,11 +35,27 @@ struct ofxGgmlInferenceSettings {
 	bool promptCacheAll = true;
 	bool flashAttn = false;
 	bool mlock = false;
+	bool singleTurn = true;
+	bool autoProbeCliCapabilities = true;
+	bool trimPromptToContext = false;
+	bool allowBatchFallback = true;
+	bool autoContinueCutoff = false;
+	bool stopAtNaturalBoundary = true;
 	std::string promptCachePath;
 	bool autoPromptCache = true;
 	std::string jsonSchema;
 	std::string grammarPath;
 	std::string chatTemplate;
+	std::string device;
+};
+
+struct ofxGgmlInferenceCapabilities {
+	bool probed = false;
+	bool supportsTopK = true;
+	bool supportsMinP = true;
+	bool supportsMirostat = true;
+	bool supportsSingleTurn = true;
+	std::string helpText;
 };
 
 struct ofxGgmlPromptSource {
@@ -64,6 +83,9 @@ struct ofxGgmlInferenceResult {
 	float elapsedMs = 0.0f;
 	std::string text;
 	std::string error;
+	bool promptWasTrimmed = false;
+	bool outputLikelyCutoff = false;
+	int continuationCount = 0;
 	std::vector<ofxGgmlPromptSource> sourcesUsed;
 };
 
@@ -94,6 +116,9 @@ public:
 	void setEmbeddingExecutable(const std::string & path);
 	const std::string & getCompletionExecutable() const;
 	const std::string & getEmbeddingExecutable() const;
+	ofxGgmlInferenceCapabilities probeCompletionCapabilities(
+		bool forceRefresh = false) const;
+	ofxGgmlInferenceCapabilities getCompletionCapabilities() const;
 
 	ofxGgmlInferenceResult generate(
 		const std::string & modelPath,
@@ -146,6 +171,15 @@ public:
 		const std::vector<ofxGgmlPromptSource> & sources,
 		const ofxGgmlPromptSourceSettings & sourceSettings = {},
 		std::vector<ofxGgmlPromptSource> * usedSources = nullptr);
+	static std::string clampPromptToContext(
+		const std::string & prompt,
+		size_t contextTokens,
+		bool * trimmed = nullptr);
+	static bool isLikelyCutoffOutput(
+		const std::string & text,
+		bool codeLike = false);
+	static std::string buildCutoffContinuationRequest(
+		const std::string & tailText);
 
 	static std::vector<std::string> tokenize(const std::string & text);
 	static std::string detokenize(const std::vector<std::string> & tokens);
@@ -158,6 +192,9 @@ public:
 private:
 	std::string m_completionExe;
 	std::string m_embeddingExe;
+	mutable bool m_completionCapabilitiesValid = false;
+	mutable ofxGgmlInferenceCapabilities m_completionCapabilities;
+	mutable std::mutex m_completionCapabilitiesMutex;
 
 	mutable std::unordered_map<std::string, int> m_tokenCountCache;
 	mutable std::mutex m_tokenCountCacheMutex;

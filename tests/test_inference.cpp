@@ -197,6 +197,11 @@ TEST_CASE("Inference settings", "[inference]") {
 
 		REQUIRE(settings.maxTokens == 256);
 		REQUIRE(settings.temperature == 0.7f);
+		REQUIRE(settings.topK == 40);
+		REQUIRE(settings.minP == 0.05f);
+		REQUIRE(settings.mirostat == 0);
+		REQUIRE(settings.mirostatTau == 5.0f);
+		REQUIRE(settings.mirostatEta == 0.1f);
 		REQUIRE(settings.topP == 0.9f);
 		REQUIRE(settings.repeatPenalty == 1.1f);
 		REQUIRE(settings.contextSize == 2048);
@@ -207,6 +212,13 @@ TEST_CASE("Inference settings", "[inference]") {
 		REQUIRE(settings.simpleIo == true);
 		REQUIRE(settings.promptCacheAll == true);
 		REQUIRE(settings.autoPromptCache == true);
+		REQUIRE(settings.singleTurn == true);
+		REQUIRE(settings.autoProbeCliCapabilities == true);
+		REQUIRE(settings.trimPromptToContext == false);
+		REQUIRE(settings.allowBatchFallback == true);
+		REQUIRE(settings.autoContinueCutoff == false);
+		REQUIRE(settings.stopAtNaturalBoundary == true);
+		REQUIRE(settings.device.empty());
 		REQUIRE(settings.promptCachePath.empty());
 	}
 
@@ -320,6 +332,41 @@ TEST_CASE("Source-aware prompt building", "[inference]") {
 		REQUIRE(usedSources.size() == 1);
 		REQUIRE(usedSources[0].wasTruncated);
 		REQUIRE(usedSources[0].content.size() <= sourceSettings.maxCharsPerSource);
+	}
+}
+
+TEST_CASE("Inference helper utilities", "[inference]") {
+	SECTION("Prompt clamp keeps head and tail when context is tight") {
+		const std::string prompt(5000, 'a');
+		bool trimmed = false;
+		const std::string clamped = ofxGgmlInference::clampPromptToContext(
+			prompt,
+			256,
+			&trimmed);
+
+		REQUIRE(trimmed);
+		REQUIRE(clamped.size() < prompt.size());
+		REQUIRE(clamped.find("...[context trimmed to fit window]...") != std::string::npos);
+		REQUIRE(clamped.rfind("aaaa") != std::string::npos);
+	}
+
+	SECTION("Cutoff detection distinguishes complete from incomplete output") {
+		REQUIRE_FALSE(ofxGgmlInference::isLikelyCutoffOutput("Finished sentence."));
+		REQUIRE(ofxGgmlInference::isLikelyCutoffOutput(
+			"This answer stops mid-thought and keeps going without punctuation or closure because the model hit a limit"));
+		REQUIRE_FALSE(ofxGgmlInference::isLikelyCutoffOutput(
+			"int main() {\n    return 0;\n}\n",
+			true));
+		REQUIRE(ofxGgmlInference::isLikelyCutoffOutput(
+			"void renderFrame() {\n    if (ready) {\n        processFrame(buffer, width, height, stride);\n        updateState(cachedGraph, currentPrompt, pendingTokens",
+			true));
+	}
+
+	SECTION("Continuation request carries the tail forward explicitly") {
+		const std::string request = ofxGgmlInference::buildCutoffContinuationRequest(
+			"partial tail");
+		REQUIRE(request.find("Continue exactly from where the previous answer stopped.") != std::string::npos);
+		REQUIRE(request.find("partial tail") != std::string::npos);
 	}
 }
 

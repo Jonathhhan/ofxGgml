@@ -3750,6 +3750,82 @@ void ofApp::runHierarchicalReview() {
 				return;
 			}
 
+			scriptCodeReview.setCompletionExecutable(llamaCliCommand);
+			{
+				std::filesystem::path cliPath(llamaCliCommand);
+				std::string embeddingExe;
+				if (cliPath.has_parent_path()) {
+					auto dir = cliPath.parent_path();
+#ifdef _WIN32
+					embeddingExe = (dir / "llama-embedding.exe").string();
+#else
+					embeddingExe = (dir / "llama-embedding").string();
+#endif
+					std::error_code ec;
+					if (!std::filesystem::exists(embeddingExe, ec) || ec) {
+						embeddingExe = "llama-embedding";
+					}
+				} else {
+					embeddingExe = "llama-embedding";
+				}
+				scriptCodeReview.setEmbeddingExecutable(embeddingExe);
+			}
+
+			const std::string effectiveReviewQuery = std::strlen(scriptInput) > 0
+				? std::string(scriptInput)
+				: ofxGgmlCodeReview::defaultReviewQuery();
+
+			ofxGgmlCodeReviewSettings reviewSettings;
+			reviewSettings.maxTokens = maxTokens;
+			reviewSettings.contextSize = contextSize;
+			reviewSettings.batchSize = batchSize;
+			reviewSettings.gpuLayers = gpuLayers;
+			reviewSettings.threads = numThreads;
+			reviewSettings.usePromptCache = usePromptCache;
+			reviewSettings.autoContinueCutoff = autoContinueCutoff;
+			reviewSettings.projectMemory = &scriptProjectMemory;
+
+			const auto reviewResult = scriptCodeReview.reviewScriptSource(
+				modelPath,
+				scriptSource,
+				effectiveReviewQuery,
+				reviewSettings,
+				[this](const ofxGgmlCodeReviewProgress & progress) {
+					{
+						std::lock_guard<std::mutex> lock(streamMutex);
+						streamingOutput = progress.stage;
+						if (progress.total > 0) {
+							streamingOutput += " (" + ofToString(progress.completed) +
+								"/" + ofToString(progress.total) + ")";
+						}
+					}
+					return !cancelRequested.load();
+				});
+			if (!reviewResult.success) {
+				if (reviewResult.error == "cancelled") {
+					setError("[Cancelled] Review cancelled.");
+				} else {
+					setError("[Error] Hierarchical review failed: " + reviewResult.error);
+				}
+				generating.store(false);
+				return;
+			}
+
+			lastScriptReviewStatus = reviewResult.status;
+			lastScriptRequest = effectiveReviewQuery;
+			{
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingOutput = reviewResult.combinedReport;
+				pendingRole = "assistant";
+				pendingMode = AiMode::Script;
+			}
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput.clear();
+			}
+			generating.store(false);
+			return;
+
 		// Keep inference helpers aligned with detected CLI paths.
 			scriptReviewInference.setCompletionExecutable(llamaCliCommand);
 			{
@@ -4020,7 +4096,7 @@ std::string ofApp::buildPromptForMode(AiMode mode, const std::string & userText,
 	return oss.str();
 }
 
-bool ofApp::runRealInference(const std::string & prompt, std::string & output, std::string & error,
+bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,
 	std::function<void(const std::string &)> onStreamData,
 	bool preserveLlamaInstructions) {
 	output.clear();
@@ -4036,6 +4112,109 @@ bool ofApp::runRealInference(const std::string & prompt, std::string & output, s
 		error = "Model file not found: " + modelPath;
 		return false;
 	}
+
+	if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+		probeLlamaCli();
+		if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+			error = "llama-completion/llama-cli/llama not found. Build with scripts/build-llama-cli.sh.";
+			return false;
+		}
+	}
+
+	llmInference.setCompletionExecutable(llamaCliCommand);
+	llmInference.probeCompletionCapabilities(true);
+
+	ofxGgmlInferenceSettings inferenceSettings;
+	inferenceSettings.maxTokens = std::clamp(maxTokens, 1, 8192);
+	inferenceSettings.temperature = std::isfinite(temperature)
+		? std::clamp(temperature, 0.0f, 2.0f)
+		: kDefaultTemp;
+	inferenceSettings.topP = std::isfinite(topP)
+		? std::clamp(topP, 0.0f, 1.0f)
+		: kDefaultTopP;
+	inferenceSettings.topK = std::clamp(topK, 0, 200);
+	inferenceSettings.minP = std::isfinite(minP)
+		? std::clamp(minP, 0.0f, 1.0f)
+		: 0.0f;
+	inferenceSettings.repeatPenalty = std::isfinite(repeatPenalty)
+		? std::clamp(repeatPenalty, 1.0f, 2.0f)
+		: kDefaultRepeatPenalty;
+	inferenceSettings.contextSize = std::clamp(contextSize, 256, 16384);
+	inferenceSettings.batchSize = std::clamp(batchSize, 32, 4096);
+	inferenceSettings.threads = std::clamp(numThreads, 1, 128);
+	inferenceSettings.gpuLayers = std::clamp(gpuLayers, 0, detectedModelLayers > 0 ? detectedModelLayers : 128);
+	inferenceSettings.seed = seed;
+	inferenceSettings.simpleIo = true;
+	inferenceSettings.singleTurn = true;
+	inferenceSettings.autoProbeCliCapabilities = true;
+	inferenceSettings.trimPromptToContext = true;
+	inferenceSettings.allowBatchFallback = true;
+	inferenceSettings.autoContinueCutoff = (mode == AiMode::Script) && autoContinueCutoff;
+	inferenceSettings.stopAtNaturalBoundary = stopAtNaturalBoundary;
+	inferenceSettings.autoPromptCache = usePromptCache;
+	inferenceSettings.promptCachePath = usePromptCache ? promptCachePathFor(modelPath, mode) : std::string();
+	inferenceSettings.mirostat = mirostatMode;
+	inferenceSettings.mirostatTau = mirostatTau;
+	inferenceSettings.mirostatEta = mirostatEta;
+
+	if (!backendNames.empty() &&
+		selectedBackendIndex >= 0 &&
+		selectedBackendIndex < static_cast<int>(backendNames.size())) {
+		const std::string & selected = backendNames[static_cast<size_t>(selectedBackendIndex)];
+		if (selected != "CPU") {
+			inferenceSettings.device = selected;
+		}
+	}
+	if (inferenceSettings.device.empty()) {
+		const std::string backend = ggml.getBackendName();
+		if (!backend.empty() && backend != "CPU" && backend != "none") {
+			inferenceSettings.device = backend;
+		}
+	}
+	if (inferenceSettings.gpuLayers == 0 && inferenceSettings.device != "CPU") {
+		inferenceSettings.gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 999;
+	}
+
+	std::string streamedText;
+	auto chunkBridge = [&](const std::string & chunk) -> bool {
+		if (cancelRequested.load()) {
+			return false;
+		}
+		streamedText += chunk;
+		if (onStreamData) {
+			onStreamData(streamedText);
+		}
+		return true;
+	};
+
+	const ofxGgmlInferenceResult inferenceResult = llmInference.generate(
+		modelPath,
+		prompt,
+		inferenceSettings,
+		chunkBridge);
+	if (!inferenceResult.success) {
+		if (!streamedText.empty() && !preserveLlamaInstructions) {
+			output = cleanChatOutput(streamedText);
+			if (!output.empty()) {
+				logWithLevel(OF_LOG_WARNING,
+					"Generation ended with an error, but streamed output is available; using streamed text.");
+				return true;
+			}
+		}
+		error = inferenceResult.error.empty()
+			? "Inference failed."
+			: inferenceResult.error;
+		return false;
+	}
+
+	output = preserveLlamaInstructions
+		? trim(stripAnsi(streamedText.empty() ? inferenceResult.text : streamedText))
+		: inferenceResult.text;
+	if (output.empty()) {
+		error = "llama-completion returned empty output.";
+		return false;
+	}
+	return true;
 
 	// Probe for llama-completion/llama-cli/llama if not already found.
 	// Unlike earlier revisions this no longer permanently caches a
@@ -4515,7 +4694,7 @@ workerThread.join();
  streamingOutput = cleaned;
  };
 
- if (!runRealInference(prompt, result, error, streamCb, preserveLlamaInstructions)) {
+ if (!runRealInference(mode, prompt, result, error, streamCb, preserveLlamaInstructions)) {
  // If inference failed but streaming already delivered output
  // (e.g. llama-completion crashed during cleanup after producing
  // text), use the streamed data as the result instead of showing
@@ -4589,7 +4768,7 @@ workerThread.join();
 
 		std::string continuationOut;
 		std::string continuationErr;
-		if (runRealInference(continuationPrompt, continuationOut, continuationErr, nullptr, preserveLlamaInstructions) &&
+		if (runRealInference(mode, continuationPrompt, continuationOut, continuationErr, nullptr, preserveLlamaInstructions) &&
 			!continuationOut.empty()) {
 			if (stopAtNaturalBoundary && continuationOut.back() != '\n') {
 				size_t cut = continuationOut.find_last_of('\n');

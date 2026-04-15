@@ -229,6 +229,7 @@
 		<ClCompile Include="src\main.cpp" />
 		<ClCompile Include="src\ofApp.cpp" />
 		<ClCompile Include="..\src\ofxGgmlCore.cpp" />
+		<ClCompile Include="..\src\ofxGgmlCodeReview.cpp" />
 		<ClCompile Include="..\src\ofxGgmlGraph.cpp" />
 		<ClCompile Include="..\src\ofxGgmlInference.cpp" />
 		<ClCompile Include="..\src\ofxGgmlModel.cpp" />
@@ -259,6 +260,7 @@
 		<ClInclude Include="src\ofApp.h" />
 		<ClInclude Include="..\src\ofxGgml.h" />
 		<ClInclude Include="..\src\ofxGgmlCore.h" />
+		<ClInclude Include="..\src\ofxGgmlCodeReview.h" />
 		<ClInclude Include="..\src\ofxGgmlGraph.h" />
 		<ClInclude Include="..\src\ofxGgmlHelpers.h" />
 		<ClInclude Include="..\src\ofxGgmlInference.h" />

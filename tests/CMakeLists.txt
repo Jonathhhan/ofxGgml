@@ -117,7 +117,8 @@ set(ADDON_SOURCES
 if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND ADDON_SOURCES
         ../src/ofxGgmlInference.cpp
-        ../src/ofxGgmlScriptSource.cpp)
+        ../src/ofxGgmlScriptSource.cpp
+        ../src/ofxGgmlCodeReview.cpp)
 endif()
 
 set(TEST_SOURCES
@@ -132,7 +133,9 @@ set(TEST_SOURCES
 )
 
 if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
-    list(APPEND TEST_SOURCES test_inference.cpp)
+    list(APPEND TEST_SOURCES
+        test_inference.cpp
+        test_code_review.cpp)
 endif()
 
 if(OFXGGML_ENABLE_BENCHMARK_TESTS)

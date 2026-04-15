@@ -27,8 +27,8 @@ This addon is released under the [MIT License](LICENSE).
 - runtime backend discovery and selection with CPU fallback
 - `ofxGgmlGraph` fluent graph builder for common ggml operations
 - `ofxGgmlModel` GGUF inspection and backend weight upload
-- `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, structured output flags, and source-grounded prompt building
-- `ofxGgmlProjectMemory` and `ofxGgmlScriptSource` helpers for local coding and review workflows
+- `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, CLI capability probing, cutoff continuation, and source-grounded prompt building
+- `ofxGgmlCodeReview`, `ofxGgmlProjectMemory`, and `ofxGgmlScriptSource` helpers for local coding and multi-pass review workflows
 - async graph submission and explicit synchronization for frame-friendly compute
 - Windows build scripts that refresh Visual Studio linking automatically
 - GUI example for local chat, review, and script-assisted workflows
@@ -44,6 +44,7 @@ Core implementation is split by concern:
 - `src/ofxGgmlCore.*`
 - `src/ofxGgmlGraph.*`
 - `src/ofxGgmlInference.*`
+- `src/ofxGgmlCodeReview.*`
 - `src/ofxGgmlModel.*`
 - `src/ofxGgmlTensor.*`
 - `src/ofxGgmlProjectMemory.*`
@@ -230,6 +231,12 @@ auto result = inference.generateWithUrls(
 ```
 
 The helper normalizes HTML-heavy pages into cleaner text, clips oversized source bodies deterministically, and can ask the model to cite sources as `[Source N]`. For local folders, GitHub repos, or internet-backed script sources, use `generateWithScriptSource(...)` or `collectScriptSourceDocuments(...)`.
+
+## Code Review Helpers
+
+`ofxGgmlCodeReview` lifts the `GuiExample` multi-pass repository review workflow into the addon. It ranks files with lightweight heuristics plus embeddings, produces first-pass file summaries, then aggregates architecture and integration findings through `ofxGgmlInference`.
+
+Use it when an app wants a reusable local code-review pipeline instead of wiring `ofxGgmlScriptSource`, embedding calls, and prompt choreography by hand.
 
 ## Versioning
 
