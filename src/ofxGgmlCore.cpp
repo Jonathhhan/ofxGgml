@@ -4,6 +4,10 @@
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
 #include "ggml-cpu.h"
+#if defined(_WIN32)
+#include "ggml-cuda.h"
+#include "ggml-vulkan.h"
+#endif
 
 #include <chrono>
 #include <csetjmp>
@@ -77,23 +81,6 @@ struct ofxGgml::Impl {
 };
 
 // --------------------------------------------------------------------------
-//  Device validation helper
-// --------------------------------------------------------------------------
-
-/// Returns true when the device reports usable memory (total > 0 and
-/// free > 0).  CPU devices always pass — this check is only meaningful
-/// for GPU / accelerator devices where the driver may enumerate the
-/// device even though it cannot allocate memory.
-static bool isDeviceMemoryAvailable(ggml_backend_dev_t dev) noexcept {
-	if (!dev) return false;
-	const enum ggml_backend_dev_type dt = ggml_backend_dev_type(dev);
-	if (dt == GGML_BACKEND_DEVICE_TYPE_CPU) return true;
-	size_t free = 0, total = 0;
-	ggml_backend_dev_memory(dev, &free, &total);
-	return total > 0 && free > 0;
-}
-
-// --------------------------------------------------------------------------
 //  Abort recovery for ggml calls
 // --------------------------------------------------------------------------
 //
@@ -114,9 +101,9 @@ static thread_local char s_ggmlAbortMsg[256] = {};
 static void ggmlAbortHandler(const char * message) {
 	if (s_ggmlAbortGuardActive) {
 		if (message) {
-			std::strncpy(s_ggmlAbortMsg, message,
-				sizeof(s_ggmlAbortMsg) - 1);
-			s_ggmlAbortMsg[sizeof(s_ggmlAbortMsg) - 1] = '\0';
+			const size_t copyLen = std::min(std::strlen(message), sizeof(s_ggmlAbortMsg) - 1);
+			std::memcpy(s_ggmlAbortMsg, message, copyLen);
+			s_ggmlAbortMsg[copyLen] = '\0';
 		} else {
 			s_ggmlAbortMsg[0] = '\0';
 		}
@@ -186,6 +173,21 @@ static bool hasPrefixIgnoreCase(const char * value, const char * prefix) noexcep
 	return true;
 }
 
+static bool isEnvVarSet(const char * name) {
+	if (!name || *name == '\0') return false;
+#if defined(_WIN32)
+	char * value = nullptr;
+	size_t len = 0;
+	const errno_t err = _dupenv_s(&value, &len, name);
+	const bool isSet = (err == 0 && value != nullptr && len > 0);
+	free(value);
+	return isSet;
+#else
+	const char * value = std::getenv(name);
+	return value != nullptr && *value != '\0';
+#endif
+}
+
 static ggml_backend_dev_t findUsableDeviceByNamePrefix(const char * prefix) {
 	const size_t devCount = ggml_backend_dev_count();
 	for (size_t i = 0; i < devCount; ++i) {
@@ -193,7 +195,6 @@ static ggml_backend_dev_t findUsableDeviceByNamePrefix(const char * prefix) {
 		if (!dev) continue;
 		const char * name = ggml_backend_dev_name(dev);
 		if (!hasPrefixIgnoreCase(name, prefix)) continue;
-		if (!isDeviceMemoryAvailable(dev)) continue;
 		return dev;
 	}
 	return nullptr;
@@ -293,13 +294,12 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	// to pick up any additional runtime-loadable backends, but this is
 	// safe — there is only one copy of libggml-base so no duplicate
 	// static initializer assertions.
-	static bool backendsLoaded = false;
-	if (!backendsLoaded) {
+	static std::once_flag backendLoadOnce;
+	std::call_once(backendLoadOnce, [&]() {
 		guardedGgmlCall([&]() {
 			ggml_backend_load_all();
 		}, "backend loading");
-		backendsLoaded = true;
-	}
+	});
 
 	// Log discovered devices so the user can see what is available.
 	{
@@ -338,29 +338,17 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 
 	// Initialize the preferred backend.
 	//
-	// When a GPU backend is requested we first validate that the device
-	// actually reports usable memory.  Some systems enumerate a GPU
-	// device (e.g. via ggml_backend_load_all()) even though the
-	// underlying driver cannot create a working context – attempting to
-	// initialise such a device can trigger a fatal GGML_ABORT inside
-	// ggml_malloc/ggml_calloc when an internal allocation fails.
-	//
-	// The validation mirrors the approach used by stable-diffusion.cpp:
-	// only attempt GPU init when the device is genuinely available, and
-	// fall back to CPU immediately otherwise.
+	// We attempt backend init directly and rely on guardedGgmlCall() to
+	// catch fatal ggml aborts and continue with fallback selection. This
+	// avoids false negatives on drivers that report memory as 0/0 before
+	// full backend initialization.
 
 	if (!m_impl->backend && !settings.preferredBackendName.empty()) {
-		// Validate the named device before attempting init.
+		// Try the named device first.
 		ggml_backend_dev_t namedDev = ggml_backend_dev_by_name(
 			settings.preferredBackendName.c_str());
 		if (namedDev) {
-			if (isDeviceMemoryAvailable(namedDev)) {
-				m_impl->backend = tryInitBackendDev(namedDev);
-			} else {
-				m_impl->log(GGML_LOG_LEVEL_WARN,
-					"ofxGgml: device \"" + settings.preferredBackendName +
-					"\" reports no usable memory — skipping\n");
-			}
+			m_impl->backend = tryInitBackendDev(namedDev);
 		}
 		if (!m_impl->backend) {
 			m_impl->log(GGML_LOG_LEVEL_WARN,
@@ -386,24 +374,47 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 				ggml_backend_dev_t dev = ggml_backend_dev_get(i);
 				if (!dev) continue;
 				if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU) continue;
-				if (!isDeviceMemoryAvailable(dev)) continue;
 				m_impl->backend = tryInitBackendDev(dev);
 			}
 		}
 	}
 	if (!m_impl->backend &&
 		settings.preferredBackend != ofxGgmlBackendType::Cpu) {
-		// Try the preferred type, but validate the device first.
+		// Try the preferred type.
 		ggml_backend_dev_t typeDev = ggml_backend_dev_by_type(
 			static_cast<enum ggml_backend_dev_type>(settings.preferredBackend));
-		if (typeDev && isDeviceMemoryAvailable(typeDev)) {
+		if (typeDev) {
 			m_impl->backend = tryInitBackendDev(typeDev);
-		} else if (typeDev) {
-			m_impl->log(GGML_LOG_LEVEL_WARN,
-				"ofxGgml: preferred device type reports no usable memory"
-				" - falling back\n");
 		}
 	}
+
+#if defined(_WIN32)
+	if (!m_impl->backend &&
+		settings.preferredBackend != ofxGgmlBackendType::Cpu) {
+		// Fallback when registry/device enumeration only exposes CPU even
+		// though CUDA/Vulkan libraries are linked.
+		const int cudaCount = ggml_backend_cuda_get_device_count();
+		if (cudaCount > 0) {
+			m_impl->log(GGML_LOG_LEVEL_WARN,
+				"ofxGgml: no CUDA device in registry, trying direct CUDA init\n");
+			guardedGgmlCall([&]() {
+				m_impl->backend = ggml_backend_cuda_init(0);
+			}, "direct CUDA backend init");
+		}
+
+		if (!m_impl->backend && !isEnvVarSet("GGML_DISABLE_VULKAN")) {
+			const int vkCount = ggml_backend_vk_get_device_count();
+			if (vkCount > 0) {
+				m_impl->log(GGML_LOG_LEVEL_WARN,
+					"ofxGgml: no Vulkan device in registry, trying direct Vulkan init\n");
+				guardedGgmlCall([&]() {
+					m_impl->backend = ggml_backend_vk_init(0);
+				}, "direct Vulkan backend init");
+			}
+		}
+	}
+#endif
+
 	if (!m_impl->backend) {
 		// Explicit CPU init as a fallback — avoids ggml_backend_init_best()
 		// which would attempt GPU init again and could crash.

@@ -2,6 +2,7 @@
 #include "../src/ofxGgml.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 
 // Note: Model tests that require actual GGUF files are marked [model][requires-file]
@@ -23,9 +24,11 @@ TEST_CASE("Model initialization", "[model]") {
 
 TEST_CASE("Model loading - invalid files", "[model]") {
 	ofxGgmlModel model;
+	namespace fs = std::filesystem;
 
 	SECTION("Load non-existent file fails") {
-		bool ok = model.load("/nonexistent/path/model.gguf");
+		const fs::path missingPath = fs::temp_directory_path() / "ofxGgml-missing-model.gguf";
+		bool ok = model.load(missingPath.string());
 		REQUIRE_FALSE(ok);
 		REQUIRE_FALSE(model.isLoaded());
 	}
@@ -37,8 +40,15 @@ TEST_CASE("Model loading - invalid files", "[model]") {
 	}
 
 	SECTION("Load invalid file format") {
-		// Try loading a non-GGUF file (the test binary itself)
-		bool ok = model.load("/proc/self/exe");
+		const fs::path invalidFile = fs::temp_directory_path() / "ofxGgml-invalid-model.bin";
+		{
+			std::ofstream out(invalidFile, std::ios::binary);
+			REQUIRE(out.good());
+			out << "not a gguf file";
+		}
+		bool ok = model.load(invalidFile.string());
+		std::error_code ec;
+		fs::remove(invalidFile, ec);
 		REQUIRE_FALSE(ok);
 		REQUIRE_FALSE(model.isLoaded());
 	}

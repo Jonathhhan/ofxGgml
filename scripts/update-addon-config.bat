@@ -7,8 +7,8 @@ REM This script scans the built ggml libraries and updates addon_config.mk [vs]
 REM section with the correct library list. Run this after building ggml if you
 REM encounter linker errors about missing ggml libraries.
 REM
-REM When CUDA backend is detected, this script also adds the required CUDA
-REM Toolkit libraries (cublas.lib, cudart.lib, cuda.lib) to fix linker errors.
+REM When GPU backends are detected, this script also adds the required
+REM system/toolkit libraries to fix linker errors.
 REM
 REM Usage:
 REM   scripts\update-addon-config.bat
@@ -83,12 +83,44 @@ if exist "%LIB_DIR%\ggml-cuda\Release\ggml-cuda.lib" (
     echo ==^> Locating CUDA library directory...
 )
 
+REM Check if Vulkan backend is present and add the Vulkan loader library
+set "VULKAN_PRESENT=0"
+set "VULKAN_LIB="
+set "USE_VULKAN_SDK_MACRO=0"
+if exist "%LIB_DIR%\ggml-vulkan\Release\ggml-vulkan.lib" (
+    set "VULKAN_PRESENT=1"
+    echo ==^> Vulkan backend detected - locating vulkan-1.lib
+    if defined VULKAN_SDK (
+        if exist "%VULKAN_SDK%\Lib\vulkan-1.lib" (
+            set "VULKAN_LIB=%VULKAN_SDK%\Lib\vulkan-1.lib"
+            set "USE_VULKAN_SDK_MACRO=1"
+        )
+    )
+    if not defined VULKAN_LIB (
+        if exist "%SystemDrive%\VulkanSDK" (
+            for /f "delims=" %%D in ('dir /b /ad /o-n "%SystemDrive%\VulkanSDK" 2^>nul') do (
+                if not defined VULKAN_LIB (
+                    if exist "%SystemDrive%\VulkanSDK\%%D\Lib\vulkan-1.lib" (
+                        set "VULKAN_LIB=%SystemDrive%\VulkanSDK\%%D\Lib\vulkan-1.lib"
+                    )
+                )
+            )
+        )
+    )
+    if defined VULKAN_LIB (
+        echo ==^> Located Vulkan loader at: !VULKAN_LIB!
+    ) else (
+        echo ==^> Warning: vulkan-1.lib not found automatically
+    )
+)
+
 REM Add CUDA Toolkit libraries if CUDA is present
 REM These libraries are required by ggml-cuda.lib and must be linked by the final application
 set "CUDA_LIB_DIR="
 set "CUDA_CUBLAS="
 set "CUDA_CUDART="
 set "CUDA_DRIVER="
+set "USE_CUDA_PATH_MACRO=0"
 if "%CUDA_PRESENT%"=="1" (
     REM Normalize CUDA environment variables (strip any surrounding quotes)
     set "CUDA_PATH_CLEAN="
@@ -176,6 +208,9 @@ if "%CUDA_PRESENT%"=="1" (
     set "CUDA_CUBLAS=!CUDA_LIB_DIR!\cublas.lib"
     set "CUDA_CUDART=!CUDA_LIB_DIR!\cudart.lib"
     set "CUDA_DRIVER=!CUDA_LIB_DIR!\cuda.lib"
+    if defined CUDA_PATH_CLEAN (
+        set "USE_CUDA_PATH_MACRO=1"
+    )
 )
 
 REM Create temporary file with new content
@@ -202,9 +237,22 @@ set "IN_MARKER_BLOCK=0"
                 )
                 REM Output CUDA Toolkit libraries if present
                 if defined CUDA_CUBLAS (
-                    echo 	ADDON_LIBS += "!CUDA_CUBLAS!"
-                    echo 	ADDON_LIBS += "!CUDA_CUDART!"
-                    echo 	ADDON_LIBS += "!CUDA_DRIVER!"
+                    if "!USE_CUDA_PATH_MACRO!"=="1" (
+                        echo 	ADDON_LIBS += "__CUDA_PATH__\lib\x64\cublas.lib"
+                        echo 	ADDON_LIBS += "__CUDA_PATH__\lib\x64\cudart.lib"
+                        echo 	ADDON_LIBS += "__CUDA_PATH__\lib\x64\cuda.lib"
+                    ) else (
+                        echo 	ADDON_LIBS += "!CUDA_CUBLAS!"
+                        echo 	ADDON_LIBS += "!CUDA_CUDART!"
+                        echo 	ADDON_LIBS += "!CUDA_DRIVER!"
+                    )
+                )
+                if defined VULKAN_LIB (
+                    if "!USE_VULKAN_SDK_MACRO!"=="1" (
+                        echo 	ADDON_LIBS += "__VULKAN_SDK__\Lib\vulkan-1.lib"
+                    ) else (
+                        echo 	ADDON_LIBS += "!VULKAN_LIB!"
+                    )
                 )
                 echo 	# @DIFFUSION_LIBS_END vs
                 REM Skip until end marker
@@ -224,12 +272,22 @@ set "IN_MARKER_BLOCK=0"
     )
 ) > "%TEMP_FILE%"
 
+REM Expand placeholders to Visual Studio/OpenFrameworks-compatible macros.
+powershell -NoProfile -Command "$text = Get-Content '%TEMP_FILE%' -Raw; $text = $text.Replace('__CUDA_PATH__', '$(CUDA_PATH)').Replace('__VULKAN_SDK__', '$(VULKAN_SDK)'); [System.IO.File]::WriteAllText('%TEMP_FILE%', $text)"
+
 REM Replace original file
 move /y "%TEMP_FILE%" "%CONFIG_FILE%" >nul
 
 echo ==^> Updated addon_config.mk [vs] section with %COUNT% libraries
 if "%CUDA_PRESENT%"=="1" (
     echo ==^> Added CUDA libraries: cublas.lib, cudart.lib, cuda.lib
+)
+if defined VULKAN_LIB (
+    if "%USE_VULKAN_SDK_MACRO%"=="1" (
+        echo ==^> Added Vulkan loader library via VULKAN_SDK environment variable
+    ) else (
+        echo ==^> Added Vulkan loader library: !VULKAN_LIB!
+    )
 )
 echo ==^> Rebuild your Visual Studio project to apply changes
 

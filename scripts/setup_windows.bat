@@ -14,6 +14,7 @@ REM   --cpu-only         Build CPU backend only
 REM   --auto             Auto-detect GPU backends (default)
 REM   --gpu, --cuda      Enable CUDA backend
 REM   --vulkan           Enable Vulkan backend
+REM   --with-debug       Also build ggml Debug libraries (default: Release only)
 REM   --skip-ggml        Skip building ggml
 REM   --skip-llama       Skip building llama.cpp CLI tools
 REM   --skip-model       Skip downloading model file(s)
@@ -36,6 +37,7 @@ set "GPU_FLAG=--auto"
 set "LLAMA_GPU_FLAG=--auto"
 set "JOBS_FLAG=--jobs %NUMBER_OF_PROCESSORS%"
 set "CLEAN_FLAG="
+set "DEBUG_FLAG="
 set "MODEL_PRESET="
 set "GGML_BUILD_FAILED=0"
 set "LLAMA_BUILD_FAILED=0"
@@ -69,6 +71,11 @@ if /i "%~1"=="--gpu" (
 if /i "%~1"=="--vulkan" (
     set "GPU_FLAG=--vulkan"
     set "LLAMA_GPU_FLAG=--vulkan"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--with-debug" (
+    set "DEBUG_FLAG=--with-debug"
     shift
     goto parse_args
 )
@@ -133,6 +140,7 @@ echo   --cpu-only         Build CPU backend only
 echo   --auto             Auto-detect GPU backends ^(default^)
 echo   --gpu, --cuda      Enable CUDA backend
 echo   --vulkan           Enable Vulkan backend
+echo   --with-debug       Also build ggml Debug libraries ^(default: Release only^)
 echo   --skip-ggml        Skip building ggml
 echo   --skip-llama       Skip building llama.cpp CLI tools
 echo   --skip-model       Skip downloading model files ^(default^)
@@ -153,7 +161,7 @@ echo.
 
 if "%SKIP_GGML%"=="0" (
     echo [1/3] Building ggml...
-    call "%SCRIPT_DIR%build-ggml.bat" %GPU_FLAG% %JOBS_FLAG% %CLEAN_FLAG%
+    call "%SCRIPT_DIR%build-ggml.bat" %GPU_FLAG% %DEBUG_FLAG% %JOBS_FLAG% %CLEAN_FLAG%
     if errorlevel 1 (
         echo Warning: ggml build failed. Continuing...
         set "GGML_BUILD_FAILED=1"

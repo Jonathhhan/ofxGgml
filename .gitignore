@@ -15,4 +15,12 @@ obj/
 ofxGgmlGuiExample/bin/data/cache/
 ofxGgmlGuiExample/bin/data/models/
 ofxGgmlGuiExample/bin/data/sessions/
+ofxGgmlBasicExample/*.sln
+ofxGgmlBasicExample/*.vcxproj
+ofxGgmlBasicExample/*.vcxproj.filters
+ofxGgmlBasicExample/icon.rc
+ofxGgmlNeuralExample/*.sln
+ofxGgmlNeuralExample/*.vcxproj
+ofxGgmlNeuralExample/*.vcxproj.filters
+ofxGgmlNeuralExample/icon.rc
 

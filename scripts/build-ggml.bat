@@ -16,6 +16,7 @@ REM   --gpu, --cuda  Enable CUDA backend (requires CUDA toolkit)
 REM   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
 REM   --auto         Auto-detect available GPU backends (default)
 REM   --cpu-only     Disable GPU autodetection, build CPU backend only
+REM   --with-debug   Also build Debug libraries (default: Release only)
 REM   --clean        Remove build directory before building
 REM   --jobs N       Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
 REM   --help         Show this help message
@@ -30,6 +31,7 @@ set "ENABLE_CUDA="
 set "ENABLE_VULKAN="
 set "AUTO_DETECT=1"
 set "CLEAN=0"
+set "BUILD_DEBUG=0"
 
 :parse_args
 if "%~1"=="" goto done_args
@@ -68,6 +70,11 @@ if /i "%~1"=="--clean" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--with-debug" (
+    set "BUILD_DEBUG=1"
+    shift
+    goto parse_args
+)
 if /i "%~1"=="--jobs" (
     set "JOBS=%~2"
     shift
@@ -90,6 +97,7 @@ echo   --gpu, --cuda  Enable CUDA backend (requires CUDA installed)
 echo   --vulkan       Enable Vulkan backend (requires Vulkan SDK)
 echo   --auto         Auto-detect available GPU backends (default)
 echo   --cpu-only     Disable GPU autodetection, build CPU backend only
+echo   --with-debug   Also build Debug libraries ^(default: Release only^)
 echo   --clean        Remove build directory before building
 echo   --jobs N       Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
 echo   --help         Show this help message
@@ -169,8 +177,10 @@ REM ---------------------------------------------------------------------------
 
 call :build_config Release
 if errorlevel 1 exit /b 1
-call :build_config Debug
-if errorlevel 1 exit /b 1
+if "%BUILD_DEBUG%"=="1" (
+    call :build_config Debug
+    if errorlevel 1 exit /b 1
+)
 
 REM ---------------------------------------------------------------------------
 REM Verify
@@ -183,10 +193,12 @@ set "LIB_DIR_DBG=%BUILD_DIR%\src\Debug"
 
 call :verify_config Release
 if errorlevel 1 exit /b 1
-call :verify_config Debug
-if errorlevel 2 (
-    echo ==^> Warning: No ggml Debug libraries found in %LIB_DIR_DBG%
-    echo ==^> Debug mode may not work. Only Release configuration will be available.
+if "%BUILD_DEBUG%"=="1" (
+    call :verify_config Debug
+    if errorlevel 2 (
+        echo ==^> Warning: No ggml Debug libraries found in %LIB_DIR_DBG%
+        echo ==^> Debug mode may not work. Only Release configuration will be available.
+    )
 )
 
 REM ---------------------------------------------------------------------------
@@ -202,7 +214,11 @@ if errorlevel 1 (
 
 echo ==^> Done! ggml has been built in %BUILD_DIR%
 echo ==^>   Release libs: %LIB_DIR_REL%
-echo ==^>   Debug libs:   %LIB_DIR_DBG%
+if "%BUILD_DEBUG%"=="1" (
+    echo ==^>   Debug libs:   %LIB_DIR_DBG%
+) else (
+    echo ==^>   Debug libs:   skipped ^(use --with-debug to build them^)
+)
 echo ==^>   addon_config.mk [vs] updated with ggml libraries
 echo ==^>   CUDA builds also add CUDA libs: cublas.lib, cudart.lib
 echo ==^>

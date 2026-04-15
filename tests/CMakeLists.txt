@@ -146,6 +146,7 @@ endif()
 add_executable(ofxGgml-tests ${TEST_SOURCES} ${ADDON_SOURCES})
 
 set(GGML_OPTIONAL_LIBS)
+set(VULKAN_RUNTIME_LIBS)
 if(WIN32)
     file(GLOB GGML_OPTIONAL_LIBS
         "${GGML_BUILD_DIR}/src/Release/ggml-*.lib"
@@ -169,6 +170,15 @@ else()
             list(APPEND GGML_OPTIONAL_LIBS "${_p}")
         endif()
     endforeach()
+endif()
+
+if(GGML_OPTIONAL_LIBS MATCHES "ggml-vulkan")
+    find_package(Vulkan QUIET)
+    if(TARGET Vulkan::Vulkan)
+        list(APPEND VULKAN_RUNTIME_LIBS Vulkan::Vulkan)
+    elseif(DEFINED ENV{VULKAN_SDK} AND EXISTS "$ENV{VULKAN_SDK}/Lib/vulkan-1.lib")
+        list(APPEND VULKAN_RUNTIME_LIBS "$ENV{VULKAN_SDK}/Lib/vulkan-1.lib")
+    endif()
 endif()
 
 # Link ggml libraries
@@ -207,6 +217,7 @@ elseif(WIN32)
             ${GGML_BUILD_DIR}/src/Release/ggml-cpu.lib
             ${GGML_OPTIONAL_LIBS}
             ${CUDA_RUNTIME_LIBS}
+            ${VULKAN_RUNTIME_LIBS}
             ${OF_LIB_RELEASE}
             ws2_32
             Winmm
@@ -219,6 +230,7 @@ elseif(WIN32)
             ${GGML_BUILD_DIR}/src/Release/ggml-cpu.lib
             ${GGML_OPTIONAL_LIBS}
             ${CUDA_RUNTIME_LIBS}
+            ${VULKAN_RUNTIME_LIBS}
         )
     endif()
 endif()
