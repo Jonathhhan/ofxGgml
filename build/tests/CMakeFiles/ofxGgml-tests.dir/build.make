@@ -156,19 +156,19 @@ CMakeFiles/ofxGgml-tests.dir/test_model.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ofxGgml-tests.dir/test_model.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/runner/work/ofxGgml/ofxGgml/tests/test_model.cpp -o CMakeFiles/ofxGgml-tests.dir/test_model.cpp.s
 
-CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
-CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o: /home/runner/work/ofxGgml/ofxGgml/tests/test_inference.cpp
-CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o -MF CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o.d -o CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o -c /home/runner/work/ofxGgml/ofxGgml/tests/test_inference.cpp
+CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
+CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.o: /home/runner/work/ofxGgml/ofxGgml/tests/test_project_memory.cpp
+CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.o: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.o -MF CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.o.d -o CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.o -c /home/runner/work/ofxGgml/ofxGgml/tests/test_project_memory.cpp
 
-CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/runner/work/ofxGgml/ofxGgml/tests/test_inference.cpp > CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.i
+CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/runner/work/ofxGgml/ofxGgml/tests/test_project_memory.cpp > CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.i
 
-CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/runner/work/ofxGgml/ofxGgml/tests/test_inference.cpp -o CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.s
+CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/runner/work/ofxGgml/ofxGgml/tests/test_project_memory.cpp -o CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.s
 
 CMakeFiles/ofxGgml-tests.dir/test_integration.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
 CMakeFiles/ofxGgml-tests.dir/test_integration.cpp.o: /home/runner/work/ofxGgml/ofxGgml/tests/test_integration.cpp
@@ -184,24 +184,10 @@ CMakeFiles/ofxGgml-tests.dir/test_integration.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ofxGgml-tests.dir/test_integration.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/runner/work/ofxGgml/ofxGgml/tests/test_integration.cpp -o CMakeFiles/ofxGgml-tests.dir/test_integration.cpp.s
 
-CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
-CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o: /home/runner/work/ofxGgml/ofxGgml/tests/test_benchmark.cpp
-CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o -MF CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o.d -o CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o -c /home/runner/work/ofxGgml/ofxGgml/tests/test_benchmark.cpp
-
-CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/runner/work/ofxGgml/ofxGgml/tests/test_benchmark.cpp > CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.i
-
-CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/runner/work/ofxGgml/ofxGgml/tests/test_benchmark.cpp -o CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.s
-
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o: /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o -MF CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o.d -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o -c /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp
 
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.i: cmake_force
@@ -215,7 +201,7 @@ CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cp
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o: /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o -MF CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o.d -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o -c /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp
 
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.i: cmake_force
@@ -229,7 +215,7 @@ CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.c
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o: /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o -MF CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o.d -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o -c /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp
 
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.i: cmake_force
@@ -243,7 +229,7 @@ CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o: /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o -MF CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o.d -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o -c /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp
 
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.i: cmake_force
@@ -254,24 +240,10 @@ CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.c
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.s
 
-CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
-CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o: /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp
-CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o -MF CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o.d -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o -c /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp
-
-CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp > CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.i
-
-CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.s
-
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o: /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o -MF CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o.d -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o -c /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp
 
 CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.i: cmake_force
@@ -282,20 +254,6 @@ CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProject
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.s
 
-CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o: CMakeFiles/ofxGgml-tests.dir/flags.make
-CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o: /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp
-CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building CXX object CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o -MF CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o.d -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o -c /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp
-
-CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp > CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.i
-
-CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp -o CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.s
-
 # Object files for target ofxGgml-tests
 ofxGgml__tests_OBJECTS = \
 "CMakeFiles/ofxGgml-tests.dir/test_main.cpp.o" \
@@ -304,16 +262,13 @@ ofxGgml__tests_OBJECTS = \
 "CMakeFiles/ofxGgml-tests.dir/test_result.cpp.o" \
 "CMakeFiles/ofxGgml-tests.dir/test_core.cpp.o" \
 "CMakeFiles/ofxGgml-tests.dir/test_model.cpp.o" \
-"CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o" \
+"CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.o" \
 "CMakeFiles/ofxGgml-tests.dir/test_integration.cpp.o" \
-"CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o" \
 "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o" \
 "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o" \
 "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o" \
 "CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o" \
-"CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o" \
-"CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o" \
-"CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o"
+"CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o"
 
 # External object files for target ofxGgml-tests
 ofxGgml__tests_EXTERNAL_OBJECTS =
@@ -324,23 +279,20 @@ ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/test_graph.cpp.o
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/test_result.cpp.o
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/test_core.cpp.o
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/test_model.cpp.o
-ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o
+ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.o
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/test_integration.cpp.o
-ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/test_benchmark.cpp.o
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o
-ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlInference.cpp.o
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o
-ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlScriptSource.cpp.o
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/build.make
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/compiler_depend.ts
 ofxGgml-tests: /home/runner/work/ofxGgml/ofxGgml/tests/../libs/ggml/build/src/libggml.a
 ofxGgml-tests: /home/runner/work/ofxGgml/ofxGgml/tests/../libs/ggml/build/src/libggml-base.a
 ofxGgml-tests: /home/runner/work/ofxGgml/ofxGgml/tests/../libs/ggml/build/src/libggml-cpu.a
 ofxGgml-tests: CMakeFiles/ofxGgml-tests.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Linking CXX executable ofxGgml-tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/runner/work/ofxGgml/ofxGgml/build/tests/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Linking CXX executable ofxGgml-tests"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/ofxGgml-tests.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
