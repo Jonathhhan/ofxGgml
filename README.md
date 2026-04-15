@@ -57,6 +57,7 @@ Supporting areas:
 
 - `libs/ggml/`
 - `scripts/`
+- `docs/`
 - `tests/`
 - `ofxGgmlBasicExample/`
 - `ofxGgmlGuiExample/`
@@ -180,13 +181,31 @@ Common options:
 
 ## Examples
 
-- `ofxGgmlBasicExample`: core runtime and graph usage
+- `ofxGgmlBasicExample`: interactive matrix demo plus steady-state matmul benchmark
 - `ofxGgmlGuiExample`: local chat, review, and script workflow UI
-- `ofxGgmlNeuralExample`: model- and inference-oriented example flow
+- `ofxGgmlNeuralExample`: reusable inference graph with live class bars and latency view
+
+Both lightweight examples are now keyboard-driven so you can rerun compute and benchmark paths without restarting the app.
 
 ## Tests
 
 The test suite lives in `tests/` and covers core runtime behavior, model loading, inference helpers, and project memory support. When you change backend setup, Windows linking, or inference command assembly, it is worth rerunning the tests or at least rebuilding one example project.
+
+## Performance
+
+`ofxGgml` now ships with explicit benchmark entry points instead of burying performance checks only inside `tests/`.
+
+Run the benchmark suite with:
+
+```bash
+./scripts/benchmark-addon.sh
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\benchmark-addon.ps1
+```
+
+These wrappers configure the test suite with `OFXGGML_ENABLE_BENCHMARK_TESTS=ON`, build `ofxGgml-tests`, and run the stable benchmark set (`[benchmark]~[manual]`) by default. For tuning guidance and recommended measurement workflow, see `docs/PERFORMANCE.md`.
 
 ## Versioning
 

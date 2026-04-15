@@ -1,33 +1,65 @@
 #include "ofApp.h"
 
+#include <algorithm>
+#include <chrono>
+#include <limits>
+#include <random>
 #include <sstream>
 
 void ofApp::setup() {
-	ofSetWindowTitle("ofxGgml — Matrix Multiplication");
-	ofBackground(30);
+	ofSetWindowTitle("ofxGgml - Basic Example");
+	ofBackground(18, 22, 28);
+	ofSetFrameRate(60);
 
-	// Initialize ggml with default settings (prefers GPU if available).
 	ofxGgmlSettings settings;
 	settings.threads = 4;
 	if (!ggml.setup(settings)) {
-		logLines.push_back("ERROR: failed to initialize ggml");
+		infoLines.push_back("ERROR: failed to initialize ggml");
 		return;
 	}
 
-	logLines.push_back("Backend: " + ggml.getBackendName());
+	appendDeviceSummary();
+	runMatrixDemo();
+	runBenchmark();
+}
 
-	// List discovered devices.
-	auto devices = ggml.listDevices();
-	for (auto & d : devices) {
-		logLines.push_back("  Device: " + d.name + " (" + d.description + ") "
-			+ ofxGgmlHelpers::formatBytes(d.memoryTotal));
+void ofApp::appendDeviceSummary() {
+	infoLines.clear();
+	infoLines.push_back("Backend: " + ggml.getBackendName());
+	infoLines.push_back("Controls: SPACE reruns matrix demo, B reruns benchmark.");
+
+	const auto devices = ggml.listDevices();
+	if (devices.empty()) {
+		infoLines.push_back("Devices: no backend devices reported by ggml.");
+		return;
 	}
-	logLines.push_back("");
 
-	// Build a computation graph: result = A * B^T
-	// A is 4x2, B is 3x2 (ggml stores col-major, ggml_mul_mat does A * B^T).
-	const int rowsA = 4, colsA = 2;
-	const int rowsB = 3, colsB = 2;
+	for (const auto & device : devices) {
+		std::string line = "Device: " + device.name + " (" + device.description + ")";
+		if (device.memoryTotal > 0) {
+			line += "  " + ofxGgmlHelpers::formatBytes(device.memoryTotal);
+		}
+		infoLines.push_back(line);
+	}
+}
+
+void ofApp::runMatrixDemo() {
+	matrixLines.clear();
+
+	const int rowsA = 4;
+	const int colsA = 2;
+	const int rowsB = 3;
+	const int colsB = 2;
+
+	std::uniform_real_distribution<float> dist(-2.5f, 2.5f);
+	std::vector<float> matA(static_cast<size_t>(rowsA * colsA));
+	std::vector<float> matB(static_cast<size_t>(rowsB * colsB));
+	for (float & value : matA) {
+		value = dist(rng);
+	}
+	for (float & value : matB) {
+		value = dist(rng);
+	}
 
 	ofxGgmlGraph graph;
 	auto a = graph.newTensor2d(ofxGgmlType::F32, colsA, rowsA);
@@ -37,54 +69,160 @@ void ofApp::setup() {
 	graph.setInput(a);
 	graph.setInput(b);
 
-	auto result = graph.matMul(a, b);
-	result.setName("result");
-	graph.setOutput(result);
-	graph.build(result);
+	auto resultTensor = graph.matMul(a, b);
+	resultTensor.setName("result");
+	graph.setOutput(resultTensor);
+	graph.build(resultTensor);
 
-	// Allocate backend buffers before setting tensor data.
-	ggml.allocGraph(graph);
+	if (!ggml.allocGraph(graph)) {
+		matrixLines.push_back("Matrix demo failed: graph allocation failed.");
+		return;
+	}
 
-	// Set data.
-	float matA[] = { 2, 8, 5, 1, 4, 2, 8, 6 };
-	float matB[] = { 10, 5, 9, 9, 5, 4 };
-	ggml.setTensorData(a, matA, sizeof(matA));
-	ggml.setTensorData(b, matB, sizeof(matB));
+	ggml.setTensorData(a, matA.data(), matA.size() * sizeof(float));
+	ggml.setTensorData(b, matB.data(), matB.size() * sizeof(float));
 
-	// Compute.
-	auto r = ggml.computeGraph(graph);
+	const auto result = ggml.computeGraph(graph);
+	if (!result.success) {
+		matrixLines.push_back("Matrix demo failed: " + result.error);
+		return;
+	}
 
-	if (r.success) {
-		logLines.push_back("Compute OK (" + ofToString(r.elapsedMs, 2) + " ms)");
+	std::vector<float> output(static_cast<size_t>(resultTensor.getNumElements()));
+	ggml.getTensorData(resultTensor, output.data(), output.size() * sizeof(float));
 
-		std::vector<float> out(static_cast<size_t>(result.getNumElements()));
-		ggml.getTensorData(result, out.data(), out.size() * sizeof(float));
+	const int outCols = static_cast<int>(resultTensor.getDimSize(0));
+	const int outRows = static_cast<int>(resultTensor.getDimSize(1));
+	matrixLines.push_back("Matrix demo latency: " + ofxGgmlHelpers::formatDurationMs(result.elapsedMs));
+	matrixLines.push_back("Result shape: " + ofToString(outRows) + " x " + ofToString(outCols));
 
-		// Pretty-print the result matrix.
-		const int outCols = static_cast<int>(result.getDimSize(0));
-		const int outRows = static_cast<int>(result.getDimSize(1));
-		logLines.push_back("Result (" + ofToString(outRows) + " x " + ofToString(outCols) + "):");
-
-		for (int row = 0; row < outRows; row++) {
-			std::ostringstream line;
-			line << "  [";
-			for (int col = 0; col < outCols; col++) {
-				if (col > 0) line << ", ";
-				line << ofToString(out[static_cast<size_t>(row * outCols + col)], 1);
+	for (int row = 0; row < outRows; ++row) {
+		std::ostringstream line;
+		line << "[";
+		for (int col = 0; col < outCols; ++col) {
+			if (col > 0) {
+				line << ", ";
 			}
-			line << "]";
-			logLines.push_back(line.str());
+			line << ofToString(output[static_cast<size_t>(row * outCols + col)], 2);
 		}
-	} else {
-		logLines.push_back("Compute FAILED: " + r.error);
+		line << "]";
+		matrixLines.push_back(line.str());
+	}
+}
+
+void ofApp::runBenchmark() {
+	benchmarkSamples.clear();
+
+	for (int size : {64, 128, 256}) {
+		ofxGgmlGraph graph;
+		auto a = graph.newTensor2d(ofxGgmlType::F32, size, size);
+		auto b = graph.newTensor2d(ofxGgmlType::F32, size, size);
+		graph.setInput(a);
+		graph.setInput(b);
+		auto c = graph.matMul(a, b);
+		graph.setOutput(c);
+		graph.build(c);
+
+		if (!ggml.allocGraph(graph)) {
+			continue;
+		}
+
+		std::vector<float> data(static_cast<size_t>(size * size), 1.0f);
+		ggml.setTensorData(a, data.data(), data.size() * sizeof(float));
+		ggml.setTensorData(b, data.data(), data.size() * sizeof(float));
+
+		ggml.computeGraph(graph);
+
+		double totalMs = 0.0;
+		double minMs = std::numeric_limits<double>::max();
+		double maxMs = 0.0;
+		const int iterations = 8;
+
+		for (int i = 0; i < iterations; ++i) {
+			const auto result = ggml.computeGraph(graph);
+			if (!result.success) {
+				minMs = 0.0;
+				maxMs = 0.0;
+				totalMs = 0.0;
+				break;
+			}
+
+			const double measuredMs = result.elapsedMs;
+			totalMs += measuredMs;
+			minMs = std::min(minMs, measuredMs);
+			maxMs = std::max(maxMs, measuredMs);
+		}
+
+		if (totalMs <= 0.0) {
+			continue;
+		}
+
+		const double avgMs = totalMs / static_cast<double>(iterations);
+		const double flopsPerSecond =
+			(2.0 * static_cast<double>(size) * static_cast<double>(size) * static_cast<double>(size)) /
+			(avgMs / 1000.0);
+
+		benchmarkSamples.push_back({ size, avgMs, minMs, maxMs, flopsPerSecond / 1e9 });
 	}
 }
 
 void ofApp::draw() {
-	ofSetColor(220);
-	float y = 30;
-	for (auto & line : logLines) {
-		ofDrawBitmapString(line, 20, y);
-		y += 16;
+	ofBackgroundGradient(ofColor(16, 20, 26), ofColor(8, 10, 14), OF_GRADIENT_CIRCULAR);
+
+	ofSetColor(245);
+	ofDrawBitmapStringHighlight("ofxGgml Basic Example", 24, 28);
+
+	float y = 60.0f;
+	for (const auto & line : infoLines) {
+		ofSetColor(220);
+		ofDrawBitmapString(line, 24, y);
+		y += 18.0f;
+	}
+
+	ofSetColor(32, 40, 52, 220);
+	ofDrawRectangle(20, 150, 420, 180);
+	ofDrawRectangle(460, 150, 460, 220);
+
+	ofSetColor(240);
+	ofDrawBitmapStringHighlight("Latest Matrix Result", 28, 172);
+	y = 198.0f;
+	for (const auto & line : matrixLines) {
+		ofSetColor(225);
+		ofDrawBitmapString(line, 28, y);
+		y += 18.0f;
+	}
+
+	ofSetColor(240);
+	ofDrawBitmapStringHighlight("MatMul Benchmark", 468, 172);
+	ofSetColor(205);
+	ofDrawBitmapString("size      avg          min          max          throughput", 468, 198);
+
+	y = 224.0f;
+	for (const auto & sample : benchmarkSamples) {
+		std::ostringstream line;
+		line << sample.size << "x" << sample.size
+			 << "   "
+			 << ofxGgmlHelpers::formatDurationMs(sample.avgMs)
+			 << "   "
+			 << ofxGgmlHelpers::formatDurationMs(sample.minMs)
+			 << "   "
+			 << ofxGgmlHelpers::formatDurationMs(sample.maxMs)
+			 << "   "
+			 << ofToString(sample.gflops, 2) << " GFLOP/s";
+		ofDrawBitmapString(line.str(), 468, y);
+		y += 20.0f;
+	}
+
+	ofSetColor(170);
+	ofDrawBitmapString(
+		"The benchmark reuses an allocated graph so the numbers reflect steady-state compute rather than setup cost.",
+		24, 364);
+}
+
+void ofApp::keyPressed(int key) {
+	if (key == ' ') {
+		runMatrixDemo();
+	} else if (key == 'b' || key == 'B') {
+		runBenchmark();
 	}
 }

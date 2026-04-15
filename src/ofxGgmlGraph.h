@@ -160,6 +160,9 @@ public:
 	/// Fetch a graph node by index. Negative indices count from the end.
 	ofxGgmlTensor getNode(int index) const;
 
+	/// Monotonic token that changes whenever the builder is recreated.
+	uint64_t cacheToken() const { return m_cacheToken; }
+
 private:
 	void ensureContext();
 
@@ -167,4 +170,5 @@ private:
 	struct ggml_cgraph * m_graph = nullptr;
 	std::vector<uint8_t> m_buf;
 	size_t m_maxNodes;
+	uint64_t m_cacheToken = 0;
 };

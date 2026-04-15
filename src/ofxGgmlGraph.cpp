@@ -2,6 +2,7 @@
 
 #include "ggml.h"
 
+#include <atomic>
 #include <cstdio>
 #include <stdexcept>
 
@@ -9,8 +10,14 @@
 // Lifecycle
 // ---------------------------------------------------------------------------
 
+static uint64_t nextGraphCacheToken() {
+	static std::atomic<uint64_t> counter { 1 };
+	return counter.fetch_add(1, std::memory_order_relaxed);
+}
+
 ofxGgmlGraph::ofxGgmlGraph(size_t maxNodes)
-	: m_maxNodes(maxNodes) {
+	: m_maxNodes(maxNodes)
+	, m_cacheToken(nextGraphCacheToken()) {
 	ensureContext();
 }
 
@@ -28,6 +35,7 @@ void ofxGgmlGraph::reset() {
 	}
 	m_graph = nullptr;
 	m_buf.clear();
+	m_cacheToken = nextGraphCacheToken();
 	ensureContext();
 }
 

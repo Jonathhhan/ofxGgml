@@ -4,8 +4,8 @@
 int main() {
 	ofGLFWWindowSettings settings;
 	settings.setGLVersion(3, 3);
-	settings.setSize(800, 600);
-	settings.title = "ofxGgml — Basic Example";
+	settings.setSize(960, 420);
+	settings.title = "ofxGgml - Basic Example";
 	auto window = ofCreateWindow(settings);
 	ofRunApp(window, std::make_shared<ofApp>());
 	ofRunMainLoop();

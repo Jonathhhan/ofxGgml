@@ -2,6 +2,7 @@
 
 #include "ofxGgmlTypes.h"
 
+#include <cstdio>
 #include <string>
 
 namespace ofxGgmlHelpers {
@@ -86,6 +87,41 @@ inline std::string formatBytes(size_t bytes) {
 	char buf[64];
 	snprintf(buf, sizeof(buf), "%.2f %s", size, units[idx]);
 	return buf;
+}
+
+/// Format a duration using ms or us depending on the value range.
+inline std::string formatDurationMs(double milliseconds, int decimals = 2) {
+	char buf[64];
+	if (milliseconds > 0.0 && milliseconds < 1.0) {
+		snprintf(buf, sizeof(buf), "%.*f us", decimals, milliseconds * 1000.0);
+	} else {
+		snprintf(buf, sizeof(buf), "%.*f ms", decimals, milliseconds);
+	}
+	return buf;
+}
+
+/// Format a rate with SI prefixes.
+inline std::string formatRate(double value, const char * unit, int decimals = 2) {
+	const char * prefixes[] = { "", "K", "M", "G", "T" };
+	size_t idx = 0;
+	double scaled = value;
+	while (scaled >= 1000.0 && idx < 4) {
+		scaled /= 1000.0;
+		++idx;
+	}
+	char buf[64];
+	snprintf(buf, sizeof(buf), "%.*f %s%s", decimals, scaled, prefixes[idx], unit ? unit : "");
+	return buf;
+}
+
+/// Format a floating-point throughput value in FLOP/s.
+inline std::string formatFlops(double flopsPerSecond, int decimals = 2) {
+	return formatRate(flopsPerSecond, "FLOP/s", decimals);
+}
+
+/// Format a generic operations-per-second value.
+inline std::string formatOpsPerSecond(double opsPerSecond, int decimals = 2) {
+	return formatRate(opsPerSecond, "ops/s", decimals);
 }
 
 } // namespace ofxGgmlHelpers

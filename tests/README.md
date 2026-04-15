@@ -156,6 +156,16 @@ To run benchmarks:
 ./build/tests/ofxGgml-tests "[benchmark]"
 ```
 
+From the addon root you can also use the dedicated wrappers:
+
+```bash
+./scripts/benchmark-addon.sh
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\benchmark-addon.ps1
+```
+
 Benchmarks measure:
 - **Performance**: Tensor operations, matrix multiplication (with GFLOPS calculation)
 - **Throughput**: Data transfer bandwidth
@@ -163,6 +173,8 @@ Benchmarks measure:
 - **Comparison**: Sync vs async execution
 
 Benchmark results are printed with timing statistics and throughput metrics.
+
+Benchmarks tagged `[manual]` are intentionally excluded by the wrapper scripts because they exercise heavier teardown/reinit paths or require manual interpretation.
 
 ### Writing New Tests
 
