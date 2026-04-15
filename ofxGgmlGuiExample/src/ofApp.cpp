@@ -98,6 +98,32 @@ static constexpr TokenLiteral kTrailingArtifacts[] = {
 	{"<|endoftext|>", 13},
 };
 
+std::string getEnvVarString(const char * name) {
+	if (!name || *name == '\0') return {};
+#ifdef _WIN32
+	char * value = nullptr;
+	size_t len = 0;
+	const errno_t err = _dupenv_s(&value, &len, name);
+	if (err != 0 || value == nullptr || len == 0) {
+		free(value);
+		return {};
+	}
+	std::string result(value);
+	free(value);
+	return result;
+#else
+	const char * value = std::getenv(name);
+	return value ? std::string(value) : std::string();
+#endif
+}
+
+void copyStringToBuffer(char * buffer, size_t bufferSize, const std::string & value) {
+	if (!buffer || bufferSize == 0) return;
+	const size_t copyLen = std::min(bufferSize - 1, value.size());
+	std::memcpy(buffer, value.data(), copyLen);
+	buffer[copyLen] = '\0';
+}
+
 void setVulkanRuntimeDisabled(bool disabled) {
 #ifdef _WIN32
 	_putenv_s("GGML_DISABLE_VULKAN", disabled ? "1" : "");
@@ -113,8 +139,7 @@ void setVulkanRuntimeDisabled(bool disabled) {
 bool shouldDisableVulkanForCurrentSelection(
 	const std::vector<std::string> & names,
 	int selectedIndex) {
-	const char * forceDisable = std::getenv("OFXGGML_DISABLE_VULKAN");
-	if (forceDisable && std::string(forceDisable) == "1") {
+	if (getEnvVarString("OFXGGML_DISABLE_VULKAN") == "1") {
 		return true;
 	}
 	if (selectedIndex >= 0 && selectedIndex < static_cast<int>(names.size())) {
@@ -997,14 +1022,14 @@ static void probeLlamaCliImpl(
 
 #ifdef _WIN32
 		// On Windows, also check common Program Files locations.
-		const char * progFiles = std::getenv("ProgramFiles");
-		if (progFiles) {
-			searchDirs.push_back(std::string(progFiles) + "\\llama.cpp");
-			searchDirs.push_back(std::string(progFiles) + "\\LlamaCpp");
+		const std::string progFiles = getEnvVarString("ProgramFiles");
+		if (!progFiles.empty()) {
+			searchDirs.push_back(progFiles + "\\llama.cpp");
+			searchDirs.push_back(progFiles + "\\LlamaCpp");
 		}
-		const char * localAppData = std::getenv("LOCALAPPDATA");
-		if (localAppData) {
-			searchDirs.push_back(std::string(localAppData) + "\\llama.cpp");
+		const std::string localAppData = getEnvVarString("LOCALAPPDATA");
+		if (!localAppData.empty()) {
+			searchDirs.push_back(localAppData + "\\llama.cpp");
 		}
 #else
 		// Common POSIX install directories that may not be in PATH
@@ -1014,9 +1039,9 @@ static void probeLlamaCliImpl(
 #ifdef __APPLE__
 		searchDirs.push_back("/opt/homebrew/bin");
 #endif
-		const char * home = std::getenv("HOME");
-		if (home) {
-			searchDirs.push_back(std::string(home) + "/.local/bin");
+		const std::string home = getEnvVarString("HOME");
+		if (!home.empty()) {
+			searchDirs.push_back(home + "/.local/bin");
 		}
 		searchDirs.push_back("/snap/bin");
 #endif
@@ -1313,8 +1338,7 @@ if (!scriptLanguages.empty()) {
 }
 
 // Default branch for GitHub.
-std::strncpy(scriptSourceBranch, "main", sizeof(scriptSourceBranch) - 1);
-scriptSourceBranch[sizeof(scriptSourceBranch) - 1] = '\0';
+copyStringToBuffer(scriptSourceBranch, sizeof(scriptSourceBranch), "main");
 
 // Session directory.
 sessionDir = ofToDataPath("sessions", true);
@@ -1384,8 +1408,10 @@ detectModelLayers();
 
 // Pre-fill example system prompt only if not restored from session.
 if (customSystemPrompt[0] == '\0') {
-std::strncpy(customSystemPrompt,
-"You are a helpful assistant. Respond concisely.", sizeof(customSystemPrompt) - 1);
+copyStringToBuffer(
+	customSystemPrompt,
+	sizeof(customSystemPrompt),
+	"You are a helpful assistant. Respond concisely.");
 }
 
 // Apply default theme.
@@ -2264,9 +2290,7 @@ if (ImGui::CollapsingHeader("Tools & Memory")) {
 	
 	if (ImGui::Button("Reuse Last Task", ImVec2(120, 0))) {
 		if (hasLastTask) {
-			size_t maxLen = sizeof(scriptInput) - 1;
-			std::strncpy(scriptInput, lastScriptRequest.c_str(), maxLen);
-			scriptInput[maxLen] = '\0';
+			copyStringToBuffer(scriptInput, sizeof(scriptInput), lastScriptRequest);
 		}
 	}
 	ImGui::EndDisabled();
@@ -2590,8 +2614,7 @@ bool sel = (selectedPromptTemplateIndex == i);
 if (ImGui::Selectable(promptTemplates[static_cast<size_t>(i)].name.c_str(), sel)) {
 selectedPromptTemplateIndex = i;
 const auto & sp = promptTemplates[static_cast<size_t>(i)].systemPrompt;
-std::strncpy(customSystemPrompt, sp.c_str(), sizeof(customSystemPrompt) - 1);
-customSystemPrompt[sizeof(customSystemPrompt) - 1] = '\0';
+copyStringToBuffer(customSystemPrompt, sizeof(customSystemPrompt), sp);
 }
 if (sel) ImGui::SetItemDefaultFocus();
 }
@@ -2929,8 +2952,7 @@ bool legacyVerboseSeen = false;
 
 auto copyToBuf = [this](char * buf, size_t bufSize, const std::string & value) {
 std::string text = unescapeSessionText(value);
-std::strncpy(buf, text.c_str(), bufSize - 1);
-buf[bufSize - 1] = '\0';
+copyStringToBuffer(buf, bufSize, text);
 };
 
 // Safe integer/float parsers — return default on invalid input.
