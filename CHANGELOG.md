@@ -4,6 +4,8 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-15
+
 ### Added
 - `ofxGgmlInferenceSettings::autoPromptCache` (default: `true`) to enable automatic per-model prompt-cache path selection when `promptCachePath` is not set.
 - Internal token count cache in `ofxGgmlInference::countPromptTokens()` keyed by model path + text hash to reduce repeated tokenizer subprocess calls.
