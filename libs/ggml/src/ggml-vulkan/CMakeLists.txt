@@ -61,23 +61,6 @@ if (Vulkan_FOUND)
 
     set(VULKAN_SHADER_GEN_CMAKE_ARGS "")
 
-    if (NOT CMAKE_CROSSCOMPILING)
-        # Ensure the external shader generator reuses the parent compiler/toolset (fixes
-        # missing MSVC compiler detection in Visual Studio multi-config builds).
-        if (CMAKE_C_COMPILER)
-            list(APPEND VULKAN_SHADER_GEN_CMAKE_ARGS "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}")
-        endif()
-        if (CMAKE_CXX_COMPILER)
-            list(APPEND VULKAN_SHADER_GEN_CMAKE_ARGS "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}")
-        endif()
-        if (CMAKE_GENERATOR_TOOLSET)
-            list(APPEND VULKAN_SHADER_GEN_CMAKE_ARGS "-DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}")
-        endif()
-        if (CMAKE_GENERATOR_INSTANCE)
-            list(APPEND VULKAN_SHADER_GEN_CMAKE_ARGS "-DCMAKE_GENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}")
-        endif()
-    endif()
-
     # Test all shader extensions
     test_shader_extension_support(
         "GL_KHR_cooperative_matrix"
@@ -163,18 +146,18 @@ if (Vulkan_FOUND)
         message(STATUS "vulkan-shaders-gen toolchain file: ${HOST_CMAKE_TOOLCHAIN_FILE}")
     endif()
 
-    # Use a short prefix for the external project to avoid hitting Windows
-    # MAX_PATH limits in deeply nested build directories.
-    set(_ggml_vk_ext_prefix "${CMAKE_BINARY_DIR}/vsg")
+    # Keep the helper project paths short on Windows to avoid MSBuild's
+    # legacy path-length limits during TryCompile/configure steps.
+    set(_ggml_vk_ep_root "${CMAKE_BINARY_DIR}/vkgen")
 
     ExternalProject_Add(
         vulkan-shaders-gen
-        PREFIX ${_ggml_vk_ext_prefix}
-        BINARY_DIR ${_ggml_vk_ext_prefix}/build
-        STAMP_DIR ${_ggml_vk_ext_prefix}/stamp
-        TMP_DIR ${_ggml_vk_ext_prefix}/tmp
-        DOWNLOAD_DIR ${_ggml_vk_ext_prefix}/download
+        PREFIX ${_ggml_vk_ep_root}
+        TMP_DIR ${_ggml_vk_ep_root}/tmp
+        STAMP_DIR ${_ggml_vk_ep_root}/stamp
         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vulkan-shaders
+        BINARY_DIR ${_ggml_vk_ep_root}/build
+        INSTALL_DIR ${_ggml_vk_ep_root}/install
         CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/$<CONFIG>
                    -DCMAKE_INSTALL_BINDIR=.
                    -DCMAKE_BUILD_TYPE=$<CONFIG>
