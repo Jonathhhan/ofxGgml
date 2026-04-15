@@ -1,4 +1,5 @@
 #include "ofxGgmlInference.h"
+#include "ofxGgmlScriptSource.h"
 
 #include <algorithm>
 #include <array>
@@ -53,6 +54,8 @@ static constexpr TokenLiteral kTrailingArtifacts[] = {
 	{ "Interrupted by user", 19 },
 };
 
+static constexpr size_t kMaxSourceLabelChars = 96;
+
 static std::string trim(const std::string & s) {
 	size_t b = 0;
 	while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b])))
@@ -92,6 +95,245 @@ static std::string getEnvVarString(const char * name) {
 	const char * value = std::getenv(name);
 	return value ? std::string(value) : std::string();
 #endif
+}
+
+static std::string clipTextWithMarker(
+	const std::string & text,
+	size_t maxChars,
+	bool * wasTruncated = nullptr) {
+	if (wasTruncated) {
+		*wasTruncated = false;
+	}
+	if (maxChars == 0) {
+		if (wasTruncated) {
+			*wasTruncated = !text.empty();
+		}
+		return {};
+	}
+	if (text.size() <= maxChars) {
+		return text;
+	}
+	if (wasTruncated) {
+		*wasTruncated = true;
+	}
+	static constexpr const char * kMarker = "\n...[truncated]";
+	const size_t markerLen = std::char_traits<char>::length(kMarker);
+	if (maxChars <= markerLen) {
+		return std::string(kMarker, kMarker + maxChars);
+	}
+	return text.substr(0, maxChars - markerLen) + kMarker;
+}
+
+static std::string stripHtmlComments(const std::string & html) {
+	std::string out;
+	out.reserve(html.size());
+	size_t pos = 0;
+	while (pos < html.size()) {
+		const size_t commentStart = html.find("<!--", pos);
+		if (commentStart == std::string::npos) {
+			out.append(html, pos, std::string::npos);
+			break;
+		}
+		out.append(html, pos, commentStart - pos);
+		const size_t commentEnd = html.find("-->", commentStart + 4);
+		if (commentEnd == std::string::npos) {
+			break;
+		}
+		pos = commentEnd + 3;
+	}
+	return out;
+}
+
+static std::string stripHtmlBlocks(
+	const std::string & html,
+	const std::string & tagName) {
+	if (html.empty() || tagName.empty()) {
+		return html;
+	}
+	std::string lowerHtml = html;
+	std::transform(lowerHtml.begin(), lowerHtml.end(), lowerHtml.begin(),
+		[](unsigned char c) {
+			return static_cast<char>(std::tolower(c));
+		});
+
+	std::string out;
+	out.reserve(html.size());
+	const std::string openTag = "<" + tagName;
+	const std::string closeTag = "</" + tagName;
+	size_t pos = 0;
+	while (pos < html.size()) {
+		const size_t start = lowerHtml.find(openTag, pos);
+		if (start == std::string::npos) {
+			out.append(html, pos, std::string::npos);
+			break;
+		}
+		out.append(html, pos, start - pos);
+		const size_t close = lowerHtml.find(closeTag, start + openTag.size());
+		if (close == std::string::npos) {
+			break;
+		}
+		const size_t closeEnd = lowerHtml.find('>', close + closeTag.size());
+		if (closeEnd == std::string::npos) {
+			break;
+		}
+		pos = closeEnd + 1;
+	}
+	return out;
+}
+
+static std::string decodeBasicHtmlEntities(const std::string & text) {
+	std::string out;
+	out.reserve(text.size());
+	for (size_t i = 0; i < text.size(); ++i) {
+		if (text[i] != '&') {
+			out.push_back(text[i]);
+			continue;
+		}
+		if (text.compare(i, 5, "&amp;") == 0) {
+			out.push_back('&');
+			i += 4;
+		} else if (text.compare(i, 4, "&lt;") == 0) {
+			out.push_back('<');
+			i += 3;
+		} else if (text.compare(i, 4, "&gt;") == 0) {
+			out.push_back('>');
+			i += 3;
+		} else if (text.compare(i, 6, "&quot;") == 0) {
+			out.push_back('"');
+			i += 5;
+		} else if (text.compare(i, 5, "&#39;") == 0) {
+			out.push_back('\'');
+			i += 4;
+		} else if (text.compare(i, 6, "&nbsp;") == 0) {
+			out.push_back(' ');
+			i += 5;
+		} else {
+			out.push_back(text[i]);
+		}
+	}
+	return out;
+}
+
+static bool looksLikeHtmlDocument(const std::string & text) {
+	if (text.empty()) {
+		return false;
+	}
+	std::string sample = text.substr(0, std::min<size_t>(text.size(), 2048));
+	std::transform(sample.begin(), sample.end(), sample.begin(),
+		[](unsigned char c) {
+			return static_cast<char>(std::tolower(c));
+		});
+	return sample.find("<html") != std::string::npos ||
+		sample.find("<body") != std::string::npos ||
+		sample.find("<article") != std::string::npos ||
+		sample.find("<main") != std::string::npos ||
+		sample.find("<p") != std::string::npos ||
+		sample.find("<div") != std::string::npos ||
+		sample.find("<!doctype html") != std::string::npos;
+}
+
+static std::string extractPlainTextFromHtml(const std::string & html) {
+	std::string cleaned = stripHtmlComments(html);
+	for (const char * tag : { "script", "style", "svg", "noscript", "head" }) {
+		cleaned = stripHtmlBlocks(cleaned, tag);
+	}
+
+	std::string text;
+	text.reserve(cleaned.size());
+	bool inTag = false;
+	for (size_t i = 0; i < cleaned.size(); ++i) {
+		const char c = cleaned[i];
+		if (c == '<') {
+			inTag = true;
+			size_t j = i + 1;
+			while (j < cleaned.size() &&
+				std::isspace(static_cast<unsigned char>(cleaned[j]))) {
+				++j;
+			}
+			if (j < cleaned.size()) {
+				const char tagLead = static_cast<char>(
+					std::tolower(static_cast<unsigned char>(cleaned[j])));
+				if (tagLead == 'p' || tagLead == 'b' || tagLead == 'd' ||
+					tagLead == 'h' || tagLead == 'l' || tagLead == 'u' ||
+					tagLead == 't') {
+					text.append("\n\n");
+				} else if (tagLead == 's') {
+					text.push_back('\n');
+				}
+			}
+			continue;
+		}
+		if (c == '>') {
+			inTag = false;
+			continue;
+		}
+		if (!inTag) {
+			text.push_back(c);
+		}
+	}
+
+	text = decodeBasicHtmlEntities(text);
+
+	std::string collapsed;
+	collapsed.reserve(text.size());
+	bool lastWasSpace = false;
+	int newlineRun = 0;
+	for (char c : text) {
+		if (c == '\r') {
+			continue;
+		}
+		if (c == '\n') {
+			if (newlineRun < 2) {
+				collapsed.push_back('\n');
+				++newlineRun;
+			}
+			lastWasSpace = false;
+			continue;
+		}
+		if (std::isspace(static_cast<unsigned char>(c))) {
+			if (!lastWasSpace && newlineRun == 0) {
+				collapsed.push_back(' ');
+				lastWasSpace = true;
+			}
+			continue;
+		}
+		newlineRun = 0;
+		lastWasSpace = false;
+		collapsed.push_back(c);
+	}
+
+	return trim(collapsed);
+}
+
+static std::string normalizeSourceContent(
+	const ofxGgmlPromptSource & source,
+	const ofxGgmlPromptSourceSettings & settings) {
+	std::string content = trim(source.content);
+	if (content.empty()) {
+		return {};
+	}
+	if (settings.normalizeWebText && source.isWebSource && looksLikeHtmlDocument(content)) {
+		content = extractPlainTextFromHtml(content);
+	}
+	return trim(content);
+}
+
+static std::string formatSourceLabel(const ofxGgmlPromptSource & source) {
+	std::string label = trim(source.label);
+	if (label.empty()) {
+		label = trim(source.uri);
+	}
+	if (label.empty()) {
+		label = "Source";
+	}
+	if (label.size() > kMaxSourceLabelChars) {
+		label = label.substr(0, kMaxSourceLabelChars - 3) + "...";
+	}
+	return label;
+}
+
+static bool isLikelyWebUri(const std::string & uri) {
+	return uri.rfind("http://", 0) == 0 || uri.rfind("https://", 0) == 0;
 }
 
 static bool isRuntimeNoiseLine(std::string_view trimmedLine);
@@ -949,6 +1191,182 @@ const std::string & ofxGgmlInference::getEmbeddingExecutable() const {
 	return m_embeddingExe;
 }
 
+std::vector<ofxGgmlPromptSource> ofxGgmlInference::fetchUrlSources(
+	const std::vector<std::string> & urls,
+	const ofxGgmlPromptSourceSettings & sourceSettings) {
+	std::vector<ofxGgmlPromptSource> sources;
+	if (urls.empty() || sourceSettings.maxSources == 0 ||
+		sourceSettings.maxCharsPerSource == 0 ||
+		sourceSettings.maxTotalChars == 0) {
+		return sources;
+	}
+
+	sources.reserve(std::min(urls.size(), sourceSettings.maxSources));
+	size_t usedChars = 0;
+	for (const std::string & url : urls) {
+		if (sources.size() >= sourceSettings.maxSources ||
+			usedChars >= sourceSettings.maxTotalChars) {
+			break;
+		}
+
+		ofHttpResponse response = ofLoadURL(url);
+		if (response.status < 200 || response.status >= 300) {
+			continue;
+		}
+
+		ofxGgmlPromptSource source;
+		source.uri = url;
+		source.label = url;
+		source.isWebSource = true;
+		source.content = response.data.getText();
+		source.content = normalizeSourceContent(source, sourceSettings);
+		if (source.content.empty()) {
+			continue;
+		}
+
+		size_t remainingChars = sourceSettings.maxTotalChars - usedChars;
+		const size_t sourceLimit = std::min(sourceSettings.maxCharsPerSource, remainingChars);
+		source.content = clipTextWithMarker(source.content, sourceLimit, &source.wasTruncated);
+		if (source.content.empty()) {
+			continue;
+		}
+
+		usedChars += source.content.size();
+		sources.push_back(std::move(source));
+	}
+
+	return sources;
+}
+
+std::vector<ofxGgmlPromptSource> ofxGgmlInference::collectScriptSourceDocuments(
+	ofxGgmlScriptSource & scriptSource,
+	const ofxGgmlPromptSourceSettings & sourceSettings) {
+	std::vector<ofxGgmlPromptSource> sources;
+	if (sourceSettings.maxSources == 0 ||
+		sourceSettings.maxCharsPerSource == 0 ||
+		sourceSettings.maxTotalChars == 0) {
+		return sources;
+	}
+
+	const auto entries = scriptSource.getFiles();
+	if (entries.empty()) {
+		return sources;
+	}
+
+	sources.reserve(std::min(entries.size(), sourceSettings.maxSources));
+	size_t usedChars = 0;
+	for (size_t i = 0; i < entries.size(); ++i) {
+		if (sources.size() >= sourceSettings.maxSources ||
+			usedChars >= sourceSettings.maxTotalChars) {
+			break;
+		}
+
+		const auto & entry = entries[i];
+		if (entry.isDirectory) {
+			continue;
+		}
+
+		std::string content;
+		if (!scriptSource.loadFileContent(static_cast<int>(i), content)) {
+			continue;
+		}
+
+		ofxGgmlPromptSource source;
+		source.label = entry.name;
+		source.uri = entry.fullPath;
+		source.isWebSource = isLikelyWebUri(entry.fullPath);
+		source.content = std::move(content);
+		source.content = normalizeSourceContent(source, sourceSettings);
+		if (source.content.empty()) {
+			continue;
+		}
+
+		const size_t remainingChars = sourceSettings.maxTotalChars - usedChars;
+		const size_t sourceLimit = std::min(sourceSettings.maxCharsPerSource, remainingChars);
+		source.content = clipTextWithMarker(source.content, sourceLimit, &source.wasTruncated);
+		if (source.content.empty()) {
+			continue;
+		}
+
+		usedChars += source.content.size();
+		sources.push_back(std::move(source));
+	}
+
+	return sources;
+}
+
+std::string ofxGgmlInference::buildPromptWithSources(
+	const std::string & prompt,
+	const std::vector<ofxGgmlPromptSource> & sources,
+	const ofxGgmlPromptSourceSettings & sourceSettings,
+	std::vector<ofxGgmlPromptSource> * usedSources) {
+	if (usedSources) {
+		usedSources->clear();
+	}
+
+	if (sources.empty() || sourceSettings.maxSources == 0 ||
+		sourceSettings.maxCharsPerSource == 0 ||
+		sourceSettings.maxTotalChars == 0) {
+		return prompt;
+	}
+
+	std::ostringstream ctx;
+	std::vector<ofxGgmlPromptSource> normalizedSources;
+	normalizedSources.reserve(std::min(sources.size(), sourceSettings.maxSources));
+	size_t usedChars = 0;
+
+	for (const auto & inputSource : sources) {
+		if (normalizedSources.size() >= sourceSettings.maxSources ||
+			usedChars >= sourceSettings.maxTotalChars) {
+			break;
+		}
+
+		ofxGgmlPromptSource source = inputSource;
+		source.content = normalizeSourceContent(source, sourceSettings);
+		if (source.content.empty()) {
+			continue;
+		}
+
+		const size_t remainingChars = sourceSettings.maxTotalChars - usedChars;
+		const size_t sourceLimit = std::min(sourceSettings.maxCharsPerSource, remainingChars);
+		source.content = clipTextWithMarker(source.content, sourceLimit, &source.wasTruncated);
+		if (source.content.empty()) {
+			continue;
+		}
+
+		usedChars += source.content.size();
+		normalizedSources.push_back(std::move(source));
+	}
+
+	if (normalizedSources.empty()) {
+		return prompt;
+	}
+
+	ctx << prompt << "\n\n";
+	ctx << sourceSettings.heading << ":\n";
+	ctx << "Use these sources as supporting context. Prefer the sources over guesses.\n";
+	if (sourceSettings.requestCitations) {
+		ctx << sourceSettings.citationHint << "\n";
+	}
+
+	for (size_t i = 0; i < normalizedSources.size(); ++i) {
+		const auto & source = normalizedSources[i];
+		ctx << "\n[Source " << (i + 1) << "]";
+		if (sourceSettings.includeSourceHeaders) {
+			ctx << " " << formatSourceLabel(source);
+			if (!trim(source.uri).empty() && trim(source.uri) != formatSourceLabel(source)) {
+				ctx << "\nURI: " << trim(source.uri);
+			}
+		}
+		ctx << "\n" << source.content << "\n";
+	}
+
+	if (usedSources) {
+		*usedSources = std::move(normalizedSources);
+	}
+	return ctx.str();
+}
+
 ofxGgmlInferenceResult ofxGgmlInference::generate(
 const std::string & modelPath,
 const std::string & prompt,
@@ -1147,6 +1565,63 @@ std::function<bool(const std::string&)> onChunk) const {
 	const auto t1 = std::chrono::steady_clock::now();
 	result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 	return result;
+}
+
+ofxGgmlInferenceResult ofxGgmlInference::generateWithSources(
+	const std::string & modelPath,
+	const std::string & prompt,
+	const std::vector<ofxGgmlPromptSource> & sources,
+	const ofxGgmlInferenceSettings & settings,
+	const ofxGgmlPromptSourceSettings & sourceSettings,
+	std::function<bool(const std::string &)> onChunk) const {
+	std::vector<ofxGgmlPromptSource> usedSources;
+	const std::string promptWithSources = buildPromptWithSources(
+		prompt,
+		sources,
+		sourceSettings,
+		&usedSources);
+
+	ofxGgmlInferenceResult result = generate(
+		modelPath,
+		promptWithSources,
+		settings,
+		onChunk);
+	result.sourcesUsed = std::move(usedSources);
+	return result;
+}
+
+ofxGgmlInferenceResult ofxGgmlInference::generateWithUrls(
+	const std::string & modelPath,
+	const std::string & prompt,
+	const std::vector<std::string> & urls,
+	const ofxGgmlInferenceSettings & settings,
+	const ofxGgmlPromptSourceSettings & sourceSettings,
+	std::function<bool(const std::string &)> onChunk) const {
+	const auto sources = fetchUrlSources(urls, sourceSettings);
+	return generateWithSources(
+		modelPath,
+		prompt,
+		sources,
+		settings,
+		sourceSettings,
+		onChunk);
+}
+
+ofxGgmlInferenceResult ofxGgmlInference::generateWithScriptSource(
+	const std::string & modelPath,
+	const std::string & prompt,
+	ofxGgmlScriptSource & scriptSource,
+	const ofxGgmlInferenceSettings & settings,
+	const ofxGgmlPromptSourceSettings & sourceSettings,
+	std::function<bool(const std::string &)> onChunk) const {
+	const auto sources = collectScriptSourceDocuments(scriptSource, sourceSettings);
+	return generateWithSources(
+		modelPath,
+		prompt,
+		sources,
+		settings,
+		sourceSettings,
+		onChunk);
 }
 
 ofxGgmlEmbeddingResult ofxGgmlInference::embed(

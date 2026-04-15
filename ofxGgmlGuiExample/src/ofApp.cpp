@@ -312,24 +312,20 @@ std::string buildInternetContextFromUrls(
 	const std::string & heading) {
 	if (urls.empty() || maxUrls == 0 || maxTotalChars == 0) return {};
 
+	ofxGgmlPromptSourceSettings sourceSettings;
+	sourceSettings.maxSources = maxUrls;
+	sourceSettings.maxCharsPerSource = maxCharsPerUrl;
+	sourceSettings.maxTotalChars = maxTotalChars;
+	sourceSettings.requestCitations = false;
+	sourceSettings.heading = heading;
+
+	const auto sources = ofxGgmlInference::fetchUrlSources(urls, sourceSettings);
+	if (sources.empty()) return {};
+
 	std::ostringstream ctx;
-	size_t used = 0;
-	size_t fetched = 0;
-
-	for (size_t i = 0; i < urls.size() && fetched < maxUrls; i++) {
-		const std::string content = fetchUrlContentLimited(urls[i], maxCharsPerUrl);
-		if (content.empty()) continue;
-		std::string clipped = content;
-		if (used + clipped.size() > maxTotalChars) {
-			clipped = clipped.substr(0, maxTotalChars - used) + "\n...[truncated]";
-		}
-		ctx << "\nURL: " << urls[i] << "\n" << clipped << "\n";
-		used += clipped.size();
-		fetched++;
-		if (used >= maxTotalChars) break;
+	for (const auto & source : sources) {
+		ctx << "\nURL: " << source.uri << "\n" << source.content << "\n";
 	}
-
-	if (used == 0) return {};
 	return "\n\n" + heading + ":" + ctx.str();
 }
 

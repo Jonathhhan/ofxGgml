@@ -27,7 +27,7 @@ This addon is released under the [MIT License](LICENSE).
 - runtime backend discovery and selection with CPU fallback
 - `ofxGgmlGraph` fluent graph builder for common ggml operations
 - `ofxGgmlModel` GGUF inspection and backend weight upload
-- `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, and structured output flags
+- `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, structured output flags, and source-grounded prompt building
 - `ofxGgmlProjectMemory` and `ofxGgmlScriptSource` helpers for local coding and review workflows
 - async graph submission and explicit synchronization for frame-friendly compute
 - Windows build scripts that refresh Visual Studio linking automatically
@@ -206,6 +206,30 @@ powershell -ExecutionPolicy Bypass -File .\scripts\benchmark-addon.ps1
 ```
 
 These wrappers configure the test suite with `OFXGGML_ENABLE_BENCHMARK_TESTS=ON`, build `ofxGgml-tests`, and run the stable benchmark set (`[benchmark]~[manual]`) by default. For tuning guidance and recommended measurement workflow, see `docs/PERFORMANCE.md`.
+
+## Source-grounded generation
+
+`ofxGgmlInference` can now build source-aware prompts directly from URLs or an `ofxGgmlScriptSource` instance, so apps do not need to hand-roll HTML fetching and context assembly on top of the addon.
+
+```cpp
+ofxGgmlInference inference;
+ofxGgmlPromptSourceSettings sourceSettings;
+sourceSettings.maxSources = 3;
+sourceSettings.maxCharsPerSource = 1800;
+sourceSettings.maxTotalChars = 5000;
+
+auto result = inference.generateWithUrls(
+    modelPath,
+    "Summarize the linked material and cite the supporting sources.",
+    {
+        "https://example.com/post-1",
+        "https://example.com/post-2"
+    },
+    {},
+    sourceSettings);
+```
+
+The helper normalizes HTML-heavy pages into cleaner text, clips oversized source bodies deterministically, and can ask the model to cite sources as `[Source N]`. For local folders, GitHub repos, or internet-backed script sources, use `generateWithScriptSource(...)` or `collectScriptSourceDocuments(...)`.
 
 ## Versioning
 

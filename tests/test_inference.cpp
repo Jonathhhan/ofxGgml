@@ -248,6 +248,7 @@ TEST_CASE("Inference result structure", "[inference]") {
 		REQUIRE(result.elapsedMs == 0.0f);
 		REQUIRE(result.text.empty());
 		REQUIRE(result.error.empty());
+		REQUIRE(result.sourcesUsed.empty());
 	}
 
 	SECTION("Result with data") {
@@ -255,10 +256,70 @@ TEST_CASE("Inference result structure", "[inference]") {
 		result.success = true;
 		result.elapsedMs = 123.45f;
 		result.text = "generated text";
+		result.sourcesUsed.push_back({"Doc", "https://example.com", "context", true, false});
 
 		REQUIRE(result.success == true);
 		REQUIRE(result.elapsedMs == 123.45f);
 		REQUIRE(result.text == "generated text");
+		REQUIRE(result.sourcesUsed.size() == 1);
+	}
+}
+
+TEST_CASE("Source-aware prompt building", "[inference]") {
+	SECTION("Web sources are normalized into cleaner prompt context") {
+		ofxGgmlPromptSourceSettings sourceSettings;
+		sourceSettings.maxSources = 2;
+		sourceSettings.maxCharsPerSource = 400;
+		sourceSettings.maxTotalChars = 400;
+
+		std::vector<ofxGgmlPromptSource> sources = {{
+			"Example article",
+			"https://example.com/post",
+			"<html><body><h1>Headline</h1><p>Hello &amp; world.</p><script>ignore()</script></body></html>",
+			true,
+			false
+		}};
+		std::vector<ofxGgmlPromptSource> usedSources;
+		const std::string prompt = ofxGgmlInference::buildPromptWithSources(
+			"Summarize the source.",
+			sources,
+			sourceSettings,
+			&usedSources);
+
+		REQUIRE(prompt.find("Summarize the source.") != std::string::npos);
+		REQUIRE(prompt.find("[Source 1]") != std::string::npos);
+		REQUIRE(prompt.find("Example article") != std::string::npos);
+		REQUIRE(prompt.find("Hello & world.") != std::string::npos);
+		REQUIRE(prompt.find("ignore()") == std::string::npos);
+		REQUIRE(prompt.find("<html") == std::string::npos);
+		REQUIRE(usedSources.size() == 1);
+		REQUIRE(usedSources[0].content.find("Hello & world.") != std::string::npos);
+	}
+
+	SECTION("Source limits clip large context deterministically") {
+		ofxGgmlPromptSourceSettings sourceSettings;
+		sourceSettings.maxSources = 1;
+		sourceSettings.maxCharsPerSource = 32;
+		sourceSettings.maxTotalChars = 32;
+
+		std::vector<ofxGgmlPromptSource> sources = {{
+			"Large source",
+			"https://example.com/large",
+			"This is a long body that should be clipped before reaching the model.",
+			true,
+			false
+		}};
+		std::vector<ofxGgmlPromptSource> usedSources;
+		const std::string prompt = ofxGgmlInference::buildPromptWithSources(
+			"Answer carefully.",
+			sources,
+			sourceSettings,
+			&usedSources);
+
+		REQUIRE(prompt.find("...[truncated]") != std::string::npos);
+		REQUIRE(usedSources.size() == 1);
+		REQUIRE(usedSources[0].wasTruncated);
+		REQUIRE(usedSources[0].content.size() <= sourceSettings.maxCharsPerSource);
 	}
 }
 
@@ -373,6 +434,79 @@ exit 0
 	REQUIRE(result.text.find("ofxGgml [INFO]") == std::string::npos);
 	REQUIRE(result.text.find("warning: no usable GPU found") == std::string::npos);
 	REQUIRE(result.text.find("Device 0:") == std::string::npos);
+}
+
+TEST_CASE("Source-aware generation returns source metadata", "[inference]") {
+	const std::string modelPath = createDummyModel();
+	const std::string completionScript = createExecutableScript("echo sourced-answer");
+
+	ofxGgmlInference inf;
+	inf.setCompletionExecutable(completionScript);
+
+	ofxGgmlPromptSourceSettings sourceSettings;
+	sourceSettings.maxSources = 2;
+	std::vector<ofxGgmlPromptSource> sources = {{
+		"Source doc",
+		"https://example.com/source",
+		"Important supporting fact.",
+		true,
+		false
+	}};
+
+	auto result = inf.generateWithSources(
+		modelPath,
+		"Use the source.",
+		sources,
+		{},
+		sourceSettings);
+
+	REQUIRE(result.success);
+	REQUIRE(result.text.find("sourced-answer") != std::string::npos);
+	REQUIRE(result.sourcesUsed.size() == 1);
+	REQUIRE(result.sourcesUsed[0].label == "Source doc");
+	REQUIRE(result.sourcesUsed[0].uri == "https://example.com/source");
+}
+
+TEST_CASE("ScriptSource documents can be attached to generation", "[inference]") {
+	const auto sourceDir = makeUniqueTestDir("script_source");
+	{
+		std::ofstream cpp(sourceDir / "context.cpp");
+		cpp << "int add(int a, int b) { return a + b; }\n";
+	}
+	{
+		std::ofstream py(sourceDir / "helper.py");
+		py << "def greet(name):\n    return f'hello {name}'\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	ofxGgmlPromptSourceSettings sourceSettings;
+	sourceSettings.maxSources = 1;
+	sourceSettings.maxCharsPerSource = 128;
+	const auto collected = ofxGgmlInference::collectScriptSourceDocuments(
+		scriptSource,
+		sourceSettings);
+	REQUIRE(collected.size() == 1);
+	REQUIRE_FALSE(collected[0].content.empty());
+
+	const std::string modelPath = createDummyModel();
+	const std::string completionScript = createExecutableScript("echo script-source-answer");
+	ofxGgmlInference inf;
+	inf.setCompletionExecutable(completionScript);
+
+	auto result = inf.generateWithScriptSource(
+		modelPath,
+		"Review the loaded source.",
+		scriptSource,
+		{},
+		sourceSettings);
+
+	REQUIRE(result.success);
+	REQUIRE(result.text.find("script-source-answer") != std::string::npos);
+	REQUIRE(result.sourcesUsed.size() == 1);
+	REQUIRE_FALSE(result.sourcesUsed[0].label.empty());
+	REQUIRE_FALSE(result.sourcesUsed[0].content.empty());
 }
 
 TEST_CASE("Inference embedding - without executable", "[inference]") {

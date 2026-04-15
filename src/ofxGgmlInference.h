@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+class ofxGgmlScriptSource;
+
 struct ofxGgmlInferenceSettings {
 	int maxTokens = 256;
 	float temperature = 0.7f;
@@ -37,11 +39,32 @@ struct ofxGgmlInferenceSettings {
 	std::string chatTemplate;
 };
 
+struct ofxGgmlPromptSource {
+	std::string label;
+	std::string uri;
+	std::string content;
+	bool isWebSource = false;
+	bool wasTruncated = false;
+};
+
+struct ofxGgmlPromptSourceSettings {
+	size_t maxSources = 3;
+	size_t maxCharsPerSource = 2000;
+	size_t maxTotalChars = 6000;
+	bool normalizeWebText = true;
+	bool includeSourceHeaders = true;
+	bool requestCitations = true;
+	std::string heading = "Reference sources";
+	std::string citationHint =
+		"When you rely on a source, cite it inline as [Source N].";
+};
+
 struct ofxGgmlInferenceResult {
 	bool success = false;
 	float elapsedMs = 0.0f;
 	std::string text;
 	std::string error;
+	std::vector<ofxGgmlPromptSource> sourcesUsed;
 };
 
 struct ofxGgmlEmbeddingSettings {
@@ -78,6 +101,30 @@ public:
 		const ofxGgmlInferenceSettings & settings = {},
 		std::function<bool(const std::string &)> onChunk = nullptr) const;
 
+	ofxGgmlInferenceResult generateWithSources(
+		const std::string & modelPath,
+		const std::string & prompt,
+		const std::vector<ofxGgmlPromptSource> & sources,
+		const ofxGgmlInferenceSettings & settings = {},
+		const ofxGgmlPromptSourceSettings & sourceSettings = {},
+		std::function<bool(const std::string &)> onChunk = nullptr) const;
+
+	ofxGgmlInferenceResult generateWithUrls(
+		const std::string & modelPath,
+		const std::string & prompt,
+		const std::vector<std::string> & urls,
+		const ofxGgmlInferenceSettings & settings = {},
+		const ofxGgmlPromptSourceSettings & sourceSettings = {},
+		std::function<bool(const std::string &)> onChunk = nullptr) const;
+
+	ofxGgmlInferenceResult generateWithScriptSource(
+		const std::string & modelPath,
+		const std::string & prompt,
+		ofxGgmlScriptSource & scriptSource,
+		const ofxGgmlInferenceSettings & settings = {},
+		const ofxGgmlPromptSourceSettings & sourceSettings = {},
+		std::function<bool(const std::string &)> onChunk = nullptr) const;
+
 	ofxGgmlEmbeddingResult embed(
 		const std::string & modelPath,
 		const std::string & text,
@@ -87,6 +134,18 @@ public:
 	int countPromptTokens(
 		const std::string & modelPath,
 		const std::string & text) const;
+
+	static std::vector<ofxGgmlPromptSource> fetchUrlSources(
+		const std::vector<std::string> & urls,
+		const ofxGgmlPromptSourceSettings & sourceSettings = {});
+	static std::vector<ofxGgmlPromptSource> collectScriptSourceDocuments(
+		ofxGgmlScriptSource & scriptSource,
+		const ofxGgmlPromptSourceSettings & sourceSettings = {});
+	static std::string buildPromptWithSources(
+		const std::string & prompt,
+		const std::vector<ofxGgmlPromptSource> & sources,
+		const ofxGgmlPromptSourceSettings & sourceSettings = {},
+		std::vector<ofxGgmlPromptSource> * usedSources = nullptr);
 
 	static std::vector<std::string> tokenize(const std::string & text);
 	static std::string detokenize(const std::vector<std::string> & tokens);
