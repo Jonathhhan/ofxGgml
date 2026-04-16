@@ -1,4 +1,5 @@
 #include "ofxGgmlVideoInference.h"
+#include "ofxGgmlVisionInference.h"
 
 #include <algorithm>
 #include <chrono>

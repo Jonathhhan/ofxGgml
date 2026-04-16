@@ -44,8 +44,8 @@ const char * ofApp::modeLabels[kModeCount] = {
 };
 
 const char * const kTextBackendLabels[] = {
-	"CLI fallback (optional local llama-completion)",
-	"llama-server (persistent, recommended)"
+	"CLI fallback",
+	"llama-server"
 };
 
 const char * const kDefaultTextServerUrl = "http://127.0.0.1:8080";
@@ -66,6 +66,15 @@ void drawPanelHeader(const char * title, const char * subtitle) {
 	ImGui::SameLine();
 	ImGui::TextDisabled("(%s)", subtitle);
 	ImGui::Separator();
+}
+
+void drawWrappedDisabledText(const std::string & text) {
+	if (text.empty()) {
+		return;
+	}
+	ImGui::PushTextWrapPos(0.0f);
+	ImGui::TextDisabled("%s", text.c_str());
+	ImGui::PopTextWrapPos();
 }
 
 static const std::array<LogLevelOption, 5> kLogLevelOptions = {{
@@ -2162,13 +2171,13 @@ if (!modelPresets.empty()) {
 	if (!modelPath.empty()) {
 		std::error_code modelEc;
 		if (std::filesystem::exists(modelPath, modelEc) && !modelEc) {
-			ImGui::TextDisabled("File: %s", modelPath.c_str());
+			drawWrappedDisabledText("File: " + modelPath);
 			if (useServerBackend) {
-				ImGui::TextDisabled("Server mode active: this local GGUF remains useful for reviews/embeddings.");
+				drawWrappedDisabledText("Server mode active: this local GGUF remains useful for reviews and embeddings.");
 			}
 		} else if (useServerBackend) {
-			ImGui::TextDisabled("Server mode active: local GGUF is optional for normal text generation.");
-			ImGui::TextDisabled("Suggested local file: %s", modelPath.c_str());
+			drawWrappedDisabledText("Server mode active: a local GGUF is optional for normal text generation.");
+			drawWrappedDisabledText("Suggested local file: " + modelPath);
 			ImGui::BeginDisabled(selectedPreset.url.empty());
 			if (ImGui::SmallButton("Download in browser")) {
 				ofLaunchBrowser(selectedPreset.url);
@@ -2180,7 +2189,7 @@ if (!modelPresets.empty()) {
 		} else {
 			ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.3f, 1.0f),
 				"Model missing: %s", ofFilePath::getFileName(modelPath).c_str());
-			ImGui::TextDisabled("Place file at: %s", modelPath.c_str());
+			drawWrappedDisabledText("Place file at: " + modelPath);
 			ImGui::BeginDisabled(selectedPreset.url.empty());
 			if (ImGui::SmallButton("Download in browser")) {
 				ofLaunchBrowser(selectedPreset.url);
@@ -2222,13 +2231,13 @@ if (ImGui::Combo("##TextBackend", &textBackendIndex,
 }
 ImGui::EndDisabled();
 if (modeSupportsTextBackend) {
-	ImGui::TextDisabled("Stored separately per text mode. Switching tabs restores that mode's backend.");
+	drawWrappedDisabledText("Stored separately per text mode. Switching tabs restores that mode's backend.");
 } else {
-	ImGui::TextDisabled("Vision and Speech use their own pipelines. Switch to a text mode to change its backend.");
+	drawWrappedDisabledText("Vision and Speech use their own pipelines. Switch to a text mode to change its backend.");
 }
 if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 	const bool serverUrlChanged = ImGui::InputText("Server URL", textServerUrl, sizeof(textServerUrl));
-	ImGui::InputText("Server model (optional)", textServerModel, sizeof(textServerModel));
+	ImGui::InputText("Server model", textServerModel, sizeof(textServerModel));
 	if (serverUrlChanged) {
 		textServerStatus = ServerStatusState::Unknown;
 		textServerStatusMessage.clear();
@@ -2237,16 +2246,16 @@ if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 			false,
 			shouldManageLocalTextServer(effectiveTextServerUrl(textServerUrl)));
 	}
-	ImGui::TextDisabled("Uses a warm OpenAI-compatible llama-server for Chat/Script/Text modes.");
-	ImGui::TextDisabled("Leave Server model empty to use the model already loaded by the server.");
-	ImGui::TextDisabled("Server-friendly defaults are applied automatically, and the app starts the local server during setup.");
-	ImGui::TextDisabled("CLI binaries are optional now and only used as a local fallback path.");
+	drawWrappedDisabledText("Uses a warm OpenAI-compatible llama-server for Chat, Script, and text modes.");
+	drawWrappedDisabledText("Leave Server model empty to use the model already loaded by the server.");
+	drawWrappedDisabledText("Server-friendly defaults are applied automatically, and the app starts the local server during setup.");
+	drawWrappedDisabledText("CLI binaries are optional and only used as a local fallback path.");
 	const std::string localServerExe = findLocalTextServerExecutable();
 	if (!localServerExe.empty()) {
-		ImGui::TextDisabled("Local server executable: %s", ofFilePath::getFileName(localServerExe).c_str());
+		drawWrappedDisabledText("Local server executable: " + ofFilePath::getFileName(localServerExe));
 	} else {
 		ImGui::TextColored(ImVec4(0.9f, 0.45f, 0.35f, 1.0f), "Local server executable not found.");
-		ImGui::TextDisabled("Build it with scripts/build-llama-server.ps1 when you want a managed local server.");
+		drawWrappedDisabledText("Build it with scripts/build-llama-server.ps1 when you want a managed local server.");
 	}
 	if (textServerStatus != ServerStatusState::Unknown && !textServerStatusMessage.empty()) {
 		const ImVec4 statusColor =
@@ -2255,14 +2264,14 @@ if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 				: ImVec4(0.9f, 0.45f, 0.35f, 1.0f);
 		ImGui::TextColored(statusColor, "%s", textServerStatusMessage.c_str());
 		if (!textServerCapabilityHint.empty()) {
-			ImGui::TextDisabled("%s", textServerCapabilityHint.c_str());
+			drawWrappedDisabledText(textServerCapabilityHint);
 		}
 	}
 } else {
 	if (llamaCliState.load(std::memory_order_relaxed) == 1) {
-		ImGui::TextDisabled("Optional CLI fallback detected: %s", llamaCliCommand.c_str());
+		drawWrappedDisabledText("Optional CLI fallback detected: " + llamaCliCommand);
 	} else {
-		ImGui::TextDisabled("Optional CLI fallback is not installed. Build it only if you want a local non-server fallback.");
+		drawWrappedDisabledText("Optional CLI fallback is not installed. Build it only if you want a local non-server fallback.");
 	}
 }
 
