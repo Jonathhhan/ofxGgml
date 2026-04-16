@@ -116,8 +116,249 @@ TEST_CASE("Code review reports blank aggregate passes explicitly", "[code_review
 		settings);
 
 	REQUIRE(result.success);
-	REQUIRE(result.firstPassSummary.find("[warning] First-pass review for main.cpp returned no findings.") != std::string::npos);
-	REQUIRE(result.architectureReview.find("[warning] Architecture review returned no findings.") != std::string::npos);
-	REQUIRE(result.integrationReview.find("[warning] Integration review returned no findings.") != std::string::npos);
-	REQUIRE(result.combinedReport.find("Second pass - architecture issues:\n[warning]") != std::string::npos);
+	const bool firstPassReported =
+		result.firstPassSummary.find("[warning] First-pass review for main.cpp returned no findings.") != std::string::npos ||
+		result.firstPassSummary.find("[error] llama completion returned empty output") != std::string::npos;
+	const bool architectureReported =
+		result.architectureReview.find("[warning] Architecture review returned no findings.") != std::string::npos ||
+		result.architectureReview.find("[error] llama completion returned empty output") != std::string::npos;
+	const bool integrationReported =
+		result.integrationReview.find("[warning] Integration review returned no findings.") != std::string::npos ||
+		result.integrationReview.find("[error] llama completion returned empty output") != std::string::npos;
+	const bool combinedReported =
+		result.combinedReport.find("Second pass - architecture issues:\n[warning]") != std::string::npos ||
+		result.combinedReport.find("Second pass - architecture issues:\n[error]") != std::string::npos;
+	REQUIRE(firstPassReported);
+	REQUIRE(architectureReported);
+	REQUIRE(integrationReported);
+	REQUIRE(combinedReported);
+}
+
+TEST_CASE("Code review can recover with a fallback generator", "[code_review]") {
+	const auto sourceDir = makeUniqueCodeReviewDir("fallback_sections");
+	{
+		std::ofstream file(sourceDir / "main.cpp");
+		file << "int main() { return 0; }\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	ofxGgmlCodeReview review;
+#ifdef _WIN32
+	review.setCompletionExecutable(createCodeReviewExecutable("echo."));
+#else
+	review.setCompletionExecutable(createCodeReviewExecutable("printf '\\n'"));
+#endif
+	review.setEmbeddingExecutable(createCodeReviewExecutable("echo [0.1, 0.2, 0.3]"));
+	review.setGenerationFallback([](
+		const std::string &,
+		const std::string & prompt,
+		const ofxGgmlInferenceSettings &) {
+		ofxGgmlInferenceResult result;
+		result.success = true;
+		if (prompt.find("Architecture review") != std::string::npos ||
+			prompt.find("Architectural review") != std::string::npos) {
+			result.text = "- Architecture fallback";
+		} else if (prompt.find("Cross-file integration review") != std::string::npos ||
+			prompt.find("Third pass: Cross-file dependency and integration analysis.") != std::string::npos) {
+			result.text = "- Integration fallback";
+		} else {
+			result.text =
+				"Summary: main entry point\n"
+				"Findings:\n"
+				"- Example supported finding. Evidence: `int main() { return 0; }`\n"
+				"Tests:\n"
+				"- Add a smoke test for `main()` startup.\n";
+		}
+		return result;
+	});
+
+	ofxGgmlCodeReviewSettings settings;
+	settings.maxTokens = 128;
+	settings.contextSize = 1024;
+	settings.maxEmbedParallelTasks = 1;
+	settings.maxSummaryParallelTasks = 1;
+
+	const auto result = review.reviewScriptSource(
+		createCodeReviewDummyModel(),
+		scriptSource,
+		"Recover empty review output.",
+		settings);
+
+	REQUIRE(result.success);
+	REQUIRE(result.firstPassSummary.find("Example supported finding") != std::string::npos);
+	REQUIRE(result.architectureReview.find("fallback") != std::string::npos);
+	REQUIRE(result.architectureReview.find("empty output") == std::string::npos);
+	REQUIRE(result.integrationReview.find("Integration fallback") != std::string::npos);
+}
+
+TEST_CASE("Code review collapses low-signal filler into no-findings text", "[code_review]") {
+	const auto sourceDir = makeUniqueCodeReviewDir("low_signal_sections");
+	{
+		std::ofstream file(sourceDir / "main.cpp");
+		file << "int main() { return 0; }\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	ofxGgmlCodeReview review;
+	review.setCompletionExecutable(createCodeReviewExecutable(
+		"echo Summary: This file is a simple OpenFrameworks entry point.\r\n"
+		"echo Findings: - The main function sets up a window. - There are no specific tests provided. - The file has no fan-in or fan-out metrics.\r\n"
+		"echo Tests: None specific to this file."));
+	review.setEmbeddingExecutable(createCodeReviewExecutable("echo [0.1, 0.2, 0.3]"));
+
+	ofxGgmlCodeReviewSettings settings;
+	settings.maxTokens = 128;
+	settings.contextSize = 1024;
+	settings.maxEmbedParallelTasks = 1;
+	settings.maxSummaryParallelTasks = 1;
+
+	const auto result = review.reviewScriptSource(
+		createCodeReviewDummyModel(),
+		scriptSource,
+		"Look for real bugs only.",
+		settings);
+
+	REQUIRE(result.success);
+	REQUIRE(result.firstPassSummary.find("No material findings in this file.") != std::string::npos);
+	REQUIRE(result.architectureReview == "No material architecture findings.");
+	REQUIRE(result.integrationReview == "No material integration findings.");
+}
+
+TEST_CASE("Code review drops unsupported findings without file evidence", "[code_review]") {
+	const auto sourceDir = makeUniqueCodeReviewDir("unsupported_findings");
+	{
+		std::ofstream file(sourceDir / "main.cpp");
+		file << "int main() { return 0; }\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	ofxGgmlCodeReview review;
+	review.setCompletionExecutable(createCodeReviewExecutable(
+		"echo Summary: This file starts the app.\r\n"
+		"echo Findings:\r\n"
+		"echo - std::array is used without proper initialization.\r\n"
+		"echo - backendTypeName is called without error handling.\r\n"
+		"echo Tests:\r\n"
+		"echo - Add tests for the unsupported findings."));
+	review.setEmbeddingExecutable(createCodeReviewExecutable("echo [0.1, 0.2, 0.3]"));
+
+	ofxGgmlCodeReviewSettings settings;
+	settings.maxTokens = 128;
+	settings.contextSize = 1024;
+	settings.maxEmbedParallelTasks = 1;
+	settings.maxSummaryParallelTasks = 1;
+
+	const auto result = review.reviewScriptSource(
+		createCodeReviewDummyModel(),
+		scriptSource,
+		"Only keep evidence-backed findings.",
+		settings);
+
+	REQUIRE(result.success);
+	REQUIRE(result.firstPassSummary.find("No material findings in this file.") != std::string::npos);
+	REQUIRE(result.firstPassSummary.find("backendTypeName") == std::string::npos);
+	REQUIRE(result.firstPassSummary.find("std::array") == std::string::npos);
+}
+
+TEST_CASE("Code review ignores fenced or filename-only summaries", "[code_review]") {
+	const auto sourceDir = makeUniqueCodeReviewDir("trivial_summary");
+	{
+		std::ofstream file(sourceDir / "main.cpp");
+		file << "int main() { return 0; }\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	ofxGgmlCodeReview review;
+	review.setCompletionExecutable(createCodeReviewExecutable(
+		"echo Summary: ```cpp\r\n"
+		"echo Findings: No material findings in this file.\r\n"
+		"echo Tests: None beyond current coverage."));
+	review.setEmbeddingExecutable(createCodeReviewExecutable("echo [0.1, 0.2, 0.3]"));
+
+	ofxGgmlCodeReviewSettings settings;
+	settings.maxTokens = 128;
+	settings.contextSize = 1024;
+	settings.maxEmbedParallelTasks = 1;
+	settings.maxSummaryParallelTasks = 1;
+
+	const auto result = review.reviewScriptSource(
+		createCodeReviewDummyModel(),
+		scriptSource,
+		"Reject broken summaries.",
+		settings);
+
+	REQUIRE(result.success);
+	REQUIRE(result.firstPassSummary.find("Summary: main.cpp") != std::string::npos);
+	REQUIRE(result.firstPassSummary.find("```cpp") == std::string::npos);
+}
+
+TEST_CASE("Aggregate no-findings sections drop trailing recommendations", "[code_review]") {
+	const auto sourceDir = makeUniqueCodeReviewDir("aggregate_cleanup");
+	{
+		std::ofstream file(sourceDir / "main.cpp");
+		file << "int main() { return 0; }\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	ofxGgmlCodeReview review;
+#ifdef _WIN32
+	review.setCompletionExecutable(createCodeReviewExecutable("echo."));
+#else
+	review.setCompletionExecutable(createCodeReviewExecutable("printf '\\n'"));
+#endif
+	review.setEmbeddingExecutable(createCodeReviewExecutable("echo [0.1, 0.2, 0.3]"));
+	review.setGenerationFallback([](
+		const std::string &,
+		const std::string & prompt,
+		const ofxGgmlInferenceSettings &) {
+		ofxGgmlInferenceResult result;
+		result.success = true;
+		if (prompt.find("Architecture review") != std::string::npos ||
+			prompt.find("Architectural review") != std::string::npos) {
+			result.text =
+				"No material architecture findings.\n"
+				"Recommendations:\n"
+				"- Add more tests anyway.";
+		} else if (prompt.find("Cross-file integration review") != std::string::npos ||
+			prompt.find("Third pass: Cross-file dependency and integration analysis.") != std::string::npos) {
+			result.text =
+				"No material integration findings.\n"
+				"Recommendations:\n"
+				"- Review dependencies just in case.";
+		} else {
+			result.text =
+				"Summary: main entry point\n"
+				"Findings:\n"
+				"- Example supported finding. Evidence: `int main() { return 0; }`\n"
+				"Tests:\n"
+				"- Add a smoke test for `main()` startup.\n";
+		}
+		return result;
+	});
+
+	ofxGgmlCodeReviewSettings settings;
+	settings.maxTokens = 128;
+	settings.contextSize = 1024;
+	settings.maxEmbedParallelTasks = 1;
+	settings.maxSummaryParallelTasks = 1;
+
+	const auto result = review.reviewScriptSource(
+		createCodeReviewDummyModel(),
+		scriptSource,
+		"Trim aggregate no-findings noise.",
+		settings);
+
+	REQUIRE(result.success);
+	REQUIRE(result.architectureReview == "No material architecture findings.");
+	REQUIRE(result.integrationReview == "No material integration findings.");
 }

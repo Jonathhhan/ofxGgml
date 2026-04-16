@@ -69,8 +69,15 @@ struct ofxGgmlCodeReviewResult {
 /// ofxGgmlInference, ofxGgmlScriptSource, and embeddings.
 class ofxGgmlCodeReview {
 public:
+	using GenerateFallback = std::function<ofxGgmlInferenceResult(
+		const std::string & modelPath,
+		const std::string & prompt,
+		const ofxGgmlInferenceSettings & settings)>;
+
 	void setCompletionExecutable(const std::string & path);
 	void setEmbeddingExecutable(const std::string & path);
+	void setGenerationFallback(GenerateFallback fallback);
+	void clearGenerationFallback();
 	ofxGgmlInference & getInference();
 	const ofxGgmlInference & getInference() const;
 
@@ -85,4 +92,5 @@ public:
 
 private:
 	ofxGgmlInference m_inference;
+	GenerateFallback m_generationFallback;
 };

@@ -141,6 +141,32 @@ std::string createExecutableScript(const std::string & body) {
 	return exe.string();
 }
 
+std::string createCompletionFlagSensitiveExecutable(const std::string & flag, const std::string & output) {
+	const auto dir = makeUniqueTestDir("flag_sensitive_exec");
+#ifdef _WIN32
+	const auto exe = dir / "fake_llama_flag_sensitive.bat";
+	std::ofstream out(exe);
+	out << "@echo off\r\n";
+	out << "set \"args=%*\"\r\n";
+	out << "echo %args% | findstr /C:\"" << flag << "\" >nul\r\n";
+	out << "if %errorlevel%==0 exit /b 0\r\n";
+	out << "echo " << escapeBatchEcho(output) << "\r\n";
+	out << "exit /b 0\r\n";
+	out.close();
+#else
+	const auto exe = dir / "fake_llama_flag_sensitive.sh";
+	std::ofstream out(exe);
+	out << "#!/usr/bin/env bash\nset -euo pipefail\n";
+	out << "case \" $* \" in\n";
+	out << "  *\" " << flag << " \"*) exit 0 ;;\n";
+	out << "esac\n";
+	out << "echo \"" << output << "\"\n";
+	out.close();
+	::chmod(exe.c_str(), 0755);
+#endif
+	return exe.string();
+}
+
 void setEnvVar(const std::string & key, const std::string & value) {
 #ifdef _WIN32
 	_putenv_s(key.c_str(), value.c_str());
@@ -560,10 +586,11 @@ esac
 		REQUIRE(result.error.find("exit code 1") != std::string::npos);
 	}
 
-	SECTION("completion: SIGINT (130) with empty output is treated as benign") {
+	SECTION("completion: SIGINT (130) with empty output still fails when no text is recoverable") {
 		ScopedEnvVar mode("OFXGGML_EXIT_TEST_MODE", "sigint-empty");
 		auto result = inf.generate(modelPath, "hello");
-		REQUIRE(result.success);
+		REQUIRE_FALSE(result.success);
+		REQUIRE(result.error.find("empty output") != std::string::npos);
 	}
 
 	SECTION("embedding: nonzero with non-empty output still fails") {
@@ -578,6 +605,40 @@ esac
 		auto result = inf.embed(modelPath, "hello");
 		REQUIRE_FALSE(result.success);
 		REQUIRE(result.error.find("exit code 1") != std::string::npos);
+	}
+}
+
+TEST_CASE("Inference retries empty successful completions with safer flags", "[inference]") {
+	const std::string modelPath = createDummyModel();
+
+	SECTION("simple-io empty success retries without simple-io") {
+		ofxGgmlInference inf;
+		inf.setCompletionExecutable(createCompletionFlagSensitiveExecutable(
+			"--simple-io",
+			"recovered-output"));
+
+		ofxGgmlInferenceSettings settings;
+		settings.autoPromptCache = false;
+
+		auto result = inf.generate(modelPath, "hello", settings);
+		REQUIRE(result.success);
+		REQUIRE(result.text.find("recovered-output") != std::string::npos);
+	}
+
+	SECTION("prompt-cache empty success retries without prompt cache") {
+		ofxGgmlInference inf;
+		inf.setCompletionExecutable(createCompletionFlagSensitiveExecutable(
+			"--prompt-cache",
+			"cacheless-output"));
+
+		ofxGgmlInferenceSettings settings;
+		settings.autoPromptCache = true;
+		settings.promptCachePath.clear();
+		settings.simpleIo = false;
+
+		auto result = inf.generate(modelPath, "hello", settings);
+		REQUIRE(result.success);
+		REQUIRE(result.text.find("cacheless-output") != std::string::npos);
 	}
 }
 

@@ -2249,11 +2249,37 @@ std::function<bool(const std::string&)> onChunk) const {
 		}
 	}
 
+	if (exitCode == 0 && cleaned.empty() &&
+		(settings.simpleIo || !effectivePromptCachePath.empty())) {
+		const std::string originalPromptCachePath = effectivePromptCachePath;
+		std::string retryRaw;
+		std::string retryCleaned;
+		int retryExitCode = -1;
+
+		// Some model / CLI combinations return an empty success when simple-io or
+		// prompt-cache reuse is enabled. Retry once with the more conservative path.
+		effectivePromptCachePath.clear();
+		if (tryRun(effectiveBatch, false, retryRaw, retryCleaned, retryExitCode, nullptr)) {
+			if ((retryExitCode == 0 && !retryCleaned.empty()) ||
+				retryCleaned.size() > cleaned.size()) {
+				raw = std::move(retryRaw);
+				cleaned = std::move(retryCleaned);
+				exitCode = retryExitCode;
+			}
+		}
+		effectivePromptCachePath = originalPromptCachePath;
+	}
+
 	if (exitCode != 0) {
 		result.error = !raw.empty() ? trim(raw) : cleaned;
 		if (result.error.empty()) {
 			result.error = "llama completion failed with exit code " + std::to_string(exitCode);
 		}
+		return result;
+	}
+
+	if (cleaned.empty()) {
+		result.error = "llama completion returned empty output";
 		return result;
 	}
 

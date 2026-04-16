@@ -174,6 +174,281 @@ std::string toFixedString(float value, int decimals = 2) {
 	return oss.str();
 }
 
+std::string toLowerCopy(std::string value) {
+	std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+		return static_cast<char>(std::tolower(c));
+	});
+	return value;
+}
+
+bool containsAny(const std::string & haystack, std::initializer_list<const char *> needles) {
+	for (const auto * needle : needles) {
+		if (haystack.find(needle) != std::string::npos) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool containsConcreteIssueSignal(const std::string & text) {
+	const std::string lower = toLowerCopy(text);
+	return containsAny(lower, {
+		"bug", "crash", "race", "deadlock", "leak", "unsafe", "invalid", "incorrect",
+		"wrong", "mismatch", "fragile", "hardcoded", "cleanup", "stale", "overflow",
+		"underflow", "missing check", "missing validation", "null", "nullptr", "out-of-bounds",
+		"use-after", "regression", "break", "fails", "failure", "risk:", "risk ", "vulnerability"
+	});
+}
+
+bool looksLikeLowSignalReviewText(const std::string & text) {
+	const std::string lower = toLowerCopy(text);
+	if (containsAny(lower, {
+		"no material findings in this file",
+		"no material architecture findings",
+		"no material integration findings"
+	})) {
+		return false;
+	}
+	if (containsConcreteIssueSignal(lower)) {
+		return false;
+	}
+
+	int genericHits = 0;
+	if (containsAny(lower, {"this file is", "the provided code snippet", "this file contains"})) ++genericHits;
+	if (containsAny(lower, {"fan-in", "fan-out", "recency score", "importance score", "complexity of"})) ++genericHits;
+	if (containsAny(lower, {"there are no specific tests", "none specific to this file", "no specific tests provided"})) ++genericHits;
+	if (containsAny(lower, {"well-organized", "easy to read", "clear separation of concerns"})) ++genericHits;
+	if (containsAny(lower, {"the file contains", "the solution file", "the project references"})) ++genericHits;
+	if (containsAny(lower, {"findings:\n- the ", "findings:\n1. the ", "findings: 1. the "} )) ++genericHits;
+	if (containsAny(lower, {"tests: - there are no", "tests: - none", "tests: none"})) ++genericHits;
+
+	return genericHits >= 2;
+}
+
+bool looksLikeTrivialSummary(const std::string & summary) {
+	const std::string trimmed = trimCopy(summary);
+	if (trimmed.empty()) return true;
+	if (trimmed.rfind("```", 0) == 0) return true;
+	if (trimmed.find('\n') != std::string::npos) return true;
+
+	const std::string lower = toLowerCopy(trimmed);
+	if (containsAny(lower, {"```", "summary:", "findings:", "tests:"})) {
+		return true;
+	}
+
+	const size_t slashPos = trimmed.find_last_of("/\\");
+	const std::string basename = slashPos == std::string::npos
+		? trimmed
+		: trimmed.substr(slashPos + 1);
+	if (!basename.empty() && basename == trimmed) {
+		const size_t dotPos = basename.find('.');
+		if (dotPos != std::string::npos && dotPos > 0 && dotPos < basename.size() - 1) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+std::string extractSingleLineSummary(const std::string & text) {
+	std::istringstream iss(text);
+	std::string line;
+	while (std::getline(iss, line)) {
+		const std::string trimmed = trimCopy(line);
+		if (trimmed.empty()) continue;
+		if (trimmed.rfind("Summary:", 0) == 0) {
+			const std::string summary = trimCopy(trimmed.substr(std::string("Summary:").size()));
+			if (!looksLikeTrivialSummary(summary)) {
+				return summary;
+			}
+			continue;
+		}
+		if (trimmed[0] != '-' && trimmed[0] != '#' && !looksLikeTrivialSummary(trimmed)) {
+			return trimmed;
+		}
+	}
+	return {};
+}
+
+std::vector<std::string> extractSectionBullets(
+	const std::string & text,
+	const std::string & header,
+	const std::string & nextHeader = {}) {
+	std::vector<std::string> bullets;
+	const std::string lower = toLowerCopy(text);
+	const std::string headerLower = toLowerCopy(header);
+	const size_t headerPos = lower.find(headerLower);
+	if (headerPos == std::string::npos) {
+		return bullets;
+	}
+
+	size_t sectionStart = text.find('\n', headerPos);
+	if (sectionStart == std::string::npos) {
+		return bullets;
+	}
+	++sectionStart;
+
+	size_t sectionEnd = text.size();
+	if (!nextHeader.empty()) {
+		const size_t nextPos = lower.find(toLowerCopy(nextHeader), sectionStart);
+		if (nextPos != std::string::npos) {
+			sectionEnd = nextPos;
+		}
+	}
+
+	std::istringstream iss(text.substr(sectionStart, sectionEnd - sectionStart));
+	std::string line;
+	while (std::getline(iss, line)) {
+		const std::string trimmed = trimCopy(line);
+		if (trimmed.empty()) continue;
+		if (trimmed[0] == '-' || trimmed[0] == '*' ||
+			(std::isdigit(static_cast<unsigned char>(trimmed[0])) &&
+			 trimmed.size() > 2 && trimmed[1] == '.')) {
+			bullets.push_back(trimmed);
+		}
+	}
+	return bullets;
+}
+
+std::vector<std::string> extractEvidenceAnchors(const std::string & text) {
+	std::vector<std::string> anchors;
+	auto addAnchor = [&](std::string anchor) {
+		anchor = trimCopy(anchor);
+		if (anchor.size() >= 2 &&
+			((anchor.front() == '`' && anchor.back() == '`') ||
+			 (anchor.front() == '"' && anchor.back() == '"') ||
+			 (anchor.front() == '\'' && anchor.back() == '\''))) {
+			anchor = anchor.substr(1, anchor.size() - 2);
+		}
+		anchor = trimCopy(anchor);
+		if (anchor.size() >= 2 && anchor.size() <= 120) {
+			anchors.push_back(anchor);
+		}
+	};
+
+	size_t pos = 0;
+	while ((pos = text.find("Evidence:", pos)) != std::string::npos) {
+		size_t start = pos + std::string("Evidence:").size();
+		size_t end = text.find_first_of("\r\n", start);
+		addAnchor(text.substr(start, end == std::string::npos ? std::string::npos : end - start));
+		pos = start;
+	}
+
+	pos = 0;
+	while ((pos = text.find('`', pos)) != std::string::npos) {
+		const size_t end = text.find('`', pos + 1);
+		if (end == std::string::npos) break;
+		addAnchor(text.substr(pos, end - pos + 1));
+		pos = end + 1;
+	}
+
+	return anchors;
+}
+
+bool contentContainsAnchor(
+	const std::string & content,
+	const std::string & fileName,
+	const std::string & anchor) {
+	if (anchor.empty()) return false;
+	if (content.find(anchor) != std::string::npos) return true;
+	return fileName.find(anchor) != std::string::npos;
+}
+
+std::string normalizeFirstPassReviewSection(
+	const std::string & text,
+	const ofxGgmlCodeReviewFileInfo & file) {
+	if (looksLikeLowSignalReviewText(text)) {
+		const std::string summary = extractSingleLineSummary(text);
+		if (!summary.empty()) {
+			return "Summary: " + summary +
+				"\nFindings: No material findings in this file.\nTests: None beyond current coverage.";
+		}
+		return "No material findings in this file.";
+	}
+
+	const std::string summary = extractSingleLineSummary(text);
+	const auto rawFindings = extractSectionBullets(text, "Findings:", "Tests:");
+	std::vector<std::string> supportedFindings;
+	for (const auto & bullet : rawFindings) {
+		const auto anchors = extractEvidenceAnchors(bullet);
+		bool supported = false;
+		for (const auto & anchor : anchors) {
+			if (contentContainsAnchor(file.truncatedContent, file.name, anchor) ||
+				contentContainsAnchor(file.content, file.name, anchor)) {
+				supported = true;
+				break;
+			}
+		}
+		if (supported) {
+			supportedFindings.push_back(bullet);
+		}
+	}
+
+	std::string normalized = summary.empty()
+		? "Summary: " + file.name
+		: "Summary: " + summary;
+
+	if (supportedFindings.empty()) {
+		normalized += "\nFindings: No material findings in this file.";
+		normalized += "\nTests: None beyond current coverage.";
+		return normalized;
+	}
+
+	normalized += "\nFindings:";
+	for (const auto & bullet : supportedFindings) {
+		normalized += "\n" + bullet;
+	}
+
+	const auto testBullets = extractSectionBullets(text, "Tests:");
+	if (testBullets.empty()) {
+		normalized += "\nTests: Add coverage for the supported findings above.";
+	} else {
+		normalized += "\nTests:";
+		for (const auto & bullet : testBullets) {
+			normalized += "\n" + bullet;
+		}
+	}
+	return normalized;
+}
+
+std::string normalizeLowSignalReviewSection(
+	const std::string & text,
+	const std::string & passLabel) {
+	if (!looksLikeLowSignalReviewText(text)) {
+		return text;
+	}
+
+	if (passLabel == "Architecture review") {
+		return "No material architecture findings.";
+	}
+	if (passLabel == "Integration review") {
+		return "No material integration findings.";
+	}
+
+	const std::string summary = extractSingleLineSummary(text);
+	if (!summary.empty()) {
+		return "Summary: " + summary +
+			"\nFindings: No material findings in this file.\nTests: None beyond current coverage.";
+	}
+	return "No material findings in this file.";
+}
+
+std::string normalizeAggregateReviewSection(
+	const std::string & text,
+	const std::string & passLabel) {
+	const std::string normalized = normalizeLowSignalReviewSection(text, passLabel);
+	const std::string lower = toLowerCopy(normalized);
+	if (passLabel == "Architecture review" &&
+		lower.find("no material architecture findings") != std::string::npos) {
+		return "No material architecture findings.";
+	}
+	if (passLabel == "Integration review" &&
+		lower.find("no material integration findings") != std::string::npos) {
+		return "No material integration findings.";
+	}
+	return normalized;
+}
+
 bool reportProgress(
 	const std::function<bool(const ofxGgmlCodeReviewProgress &)> & onProgress,
 	const std::string & stage,
@@ -185,13 +460,17 @@ bool reportProgress(
 
 std::string finalizedReviewSection(
 	const ofxGgmlInferenceResult & inferenceResult,
-	const std::string & passLabel) {
+	const std::string & passLabel,
+	const ofxGgmlCodeReviewFileInfo * fileInfo = nullptr) {
 	if (!inferenceResult.success) {
 		return "[error] " + inferenceResult.error;
 	}
 	const std::string text = trimCopy(inferenceResult.text);
 	if (!text.empty()) {
-		return text;
+		if (fileInfo != nullptr) {
+			return normalizeFirstPassReviewSection(text, *fileInfo);
+		}
+		return normalizeAggregateReviewSection(text, passLabel);
 	}
 	return "[warning] " + passLabel +
 		" returned no findings. The model produced an empty response.";
@@ -199,18 +478,33 @@ std::string finalizedReviewSection(
 
 ofxGgmlInferenceResult generateReviewPassWithRetry(
 	ofxGgmlInference & inference,
+	const ofxGgmlCodeReview::GenerateFallback & fallback,
 	const std::string & modelPath,
 	const std::string & primaryPrompt,
 	const std::string & retryPrompt,
 	const ofxGgmlInferenceSettings & settings) {
-	auto result = inference.generate(modelPath, primaryPrompt, settings);
+	auto runPass = [&](const std::string & prompt, const ofxGgmlInferenceSettings & passSettings) {
+		auto result = inference.generate(modelPath, prompt, passSettings);
+		if ((!result.success || trimCopy(result.text).empty()) && fallback) {
+			auto fallbackResult = fallback(modelPath, prompt, passSettings);
+			if (fallbackResult.success && !trimCopy(fallbackResult.text).empty()) {
+				return fallbackResult;
+			}
+			if (!result.success && !fallbackResult.error.empty()) {
+				return fallbackResult;
+			}
+		}
+		return result;
+	};
+
+	auto result = runPass(primaryPrompt, settings);
 	if (!result.success || !trimCopy(result.text).empty() || retryPrompt.empty()) {
 		return result;
 	}
 
 	auto retrySettings = settings;
 	retrySettings.maxTokens = std::max(96, settings.maxTokens / 2);
-	return inference.generate(modelPath, retryPrompt, retrySettings);
+	return runPass(retryPrompt, retrySettings);
 }
 
 } // namespace
@@ -221,6 +515,14 @@ void ofxGgmlCodeReview::setCompletionExecutable(const std::string & path) {
 
 void ofxGgmlCodeReview::setEmbeddingExecutable(const std::string & path) {
 	m_inference.setEmbeddingExecutable(path);
+}
+
+void ofxGgmlCodeReview::setGenerationFallback(GenerateFallback fallback) {
+	m_generationFallback = std::move(fallback);
+}
+
+void ofxGgmlCodeReview::clearGenerationFallback() {
+	m_generationFallback = nullptr;
 }
 
 ofxGgmlInference & ofxGgmlCodeReview::getInference() {
@@ -448,8 +750,8 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 		inferenceSettings.batchSize = settings.batchSize;
 		inferenceSettings.gpuLayers = settings.gpuLayers;
 		inferenceSettings.threads = settings.threads;
-		inferenceSettings.simpleIo = true;
-		inferenceSettings.autoPromptCache = settings.usePromptCache;
+		inferenceSettings.simpleIo = false;
+		inferenceSettings.autoPromptCache = false;
 		inferenceSettings.autoContinueCutoff = settings.autoContinueCutoff;
 		inferenceSettings.trimPromptToContext = true;
 		return inferenceSettings;
@@ -469,8 +771,11 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 			inferenceSettings.maxTokens = std::max(96, std::min(responseReserve, settings.maxTokens));
 
 			std::ostringstream prompt;
-			prompt << "First pass: Review this single file in isolation. "
-				"Return a concise summary plus concrete issues (bugs, security, tests, readability).\n";
+			prompt << "First pass: Review this single file in isolation as a senior code reviewer.\n";
+			prompt << "Use only the provided content. Do not invent vulnerabilities, architecture problems, "
+				"or tests without evidence in the file.\n";
+			prompt << "If there are no concrete issues, say exactly: No material findings in this file.\n";
+			prompt << "Every finding must cite exact evidence copied verbatim from the file using backticks.\n";
 			prompt << "Requested focus: " << effectiveQuery << "\n";
 			prompt << "File: " << file.name << "\n";
 			prompt << "Metrics: LOC=" << file.loc
@@ -483,24 +788,31 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 				prompt << "Note: content truncated with a sliding window to fit context.\n";
 			}
 			prompt << "\nContent:\n" << file.truncatedContent << "\n";
-			prompt << "\nFormat:\n- Summary\n- Risks\n- Tests to add\n";
+			prompt << "\nFormat:\n"
+				<< "- Summary: one sentence about what this file does\n"
+				<< "- Findings: 0-3 bullets, each tied to concrete code in this file with `exact evidence`\n"
+				<< "- Tests: only file-specific tests that would catch the listed findings\n";
 
 			std::ostringstream retryPrompt;
 			retryPrompt << "Review this file and return exactly three bullets.\n";
-			retryPrompt << "- Summary\n- Risks\n- Tests to add\n";
+			retryPrompt << "- Summary: one sentence\n";
+			retryPrompt << "- Findings: concrete issue with `exact evidence`, or 'No material findings in this file.'\n";
+			retryPrompt << "- Tests: file-specific test or 'None needed beyond current coverage.'\n";
 			retryPrompt << "Request: " << effectiveQuery << "\n";
 			retryPrompt << "File: " << file.name << "\n";
 			retryPrompt << "Content:\n" << file.truncatedContent << "\n";
 
 			const auto summary = generateReviewPassWithRetry(
 				m_inference,
+				m_generationFallback,
 				modelPath,
 				prompt.str(),
 				retryPrompt.str(),
 				inferenceSettings);
 			file.summary = finalizedReviewSection(
 				summary,
-				"First-pass review for " + file.name);
+				"First-pass review for " + file.name,
+				&file);
 			++summarizedCount;
 		}));
 		if (summaryTasks.size() >= maxSummaryParallel) {
@@ -536,18 +848,23 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 	}
 	{
 		std::string prompt = "Second pass: Architectural review using only the summaries below.\n";
+		prompt += "Do not repeat file summaries. Only report cross-cutting architecture or layering issues "
+			"that are supported by the provided summaries.\n";
+		prompt += "If no concrete architecture issues are evident, say exactly: No material architecture findings.\n";
 		prompt += "Request: " + effectiveQuery + "\n\n";
 		prompt += result.repoTree + "\n";
 		prompt += "File summaries:\n" + summaryList;
 		prompt += "\nIdentify architecture, layering, and dependency issues. "
 			"Highlight risky boundaries, missing invariants, and testing gaps. "
-			"Keep output concise and actionable.\n";
+			"Keep output concise, evidence-based, and repository-specific.\n";
 		std::string retryPrompt =
-			"Architecture review. Return 3-5 concise bullets covering layering, "
-			"dependency boundaries, risky shared state, and missing tests.\n"
+			"Architecture review. Return 3-5 concise bullets covering only concrete layering, "
+			"dependency-boundary, shared-state, or testing issues visible in these summaries.\n"
+			"If none are evident, say: No material architecture findings.\n"
 			"Request: " + effectiveQuery + "\n\nSummaries:\n" + summaryList;
 		const auto architecture = generateReviewPassWithRetry(
 			m_inference,
+			m_generationFallback,
 			modelPath,
 			prompt,
 			retryPrompt,
@@ -563,6 +880,9 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 	}
 	{
 		std::string prompt = "Third pass: Cross-file dependency and integration analysis.\n";
+		prompt += "Only report mismatches or integration risks that are supported by the provided per-file findings.\n";
+		prompt += "Do not give generic cleanup advice. If no concrete integration issue is evident, "
+			"say exactly: No material integration findings.\n";
 		prompt += "Request: " + effectiveQuery + "\n\n";
 		prompt += result.repoTree + "\nPer-file findings:\n";
 		for (size_t i = 0; i < result.selectedFileIndices.size() && i < 24; ++i) {
@@ -573,10 +893,11 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 		}
 		prompt += "\nFocus on contract mismatches, API misuse, inconsistent assumptions, "
 			"shared state, and missing integration tests. "
-			"Propose cross-file actions and dependency trims.\n";
+			"Propose cross-file actions only when grounded in the summaries.\n";
 		std::string retryPrompt =
-			"Cross-file integration review. Return 3-5 concise bullets covering "
-			"interface mismatches, shared-state risks, and missing integration tests.\n"
+			"Cross-file integration review. Return 3-5 concise bullets covering only concrete "
+			"interface mismatches, shared-state risks, or missing integration tests.\n"
+			"If none are evident, say: No material integration findings.\n"
 			"Request: " + effectiveQuery + "\n\nFindings:\n";
 		for (size_t i = 0; i < result.selectedFileIndices.size() && i < 12; ++i) {
 			const auto & file = result.files[result.selectedFileIndices[i]];
@@ -584,6 +905,7 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 		}
 		const auto integration = generateReviewPassWithRetry(
 			m_inference,
+			m_generationFallback,
 			modelPath,
 			prompt,
 			retryPrompt,

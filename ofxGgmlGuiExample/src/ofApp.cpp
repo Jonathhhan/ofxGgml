@@ -2229,7 +2229,7 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 		}
 		maxTokens = std::max(maxTokens, 1536);
 		contextSize = std::max(contextSize, 8192);
-		batchSize = std::max(batchSize, 1024);
+		batchSize = 256;
 		temperature = 0.2f;
 		topP = 0.9f;
 		topK = std::max(topK, 50);
@@ -4041,14 +4041,90 @@ void ofApp::runHierarchicalReview() {
 			ofxGgmlCodeReviewSettings reviewSettings;
 			reviewSettings.maxTokens = std::max(maxTokens, 1536);
 			reviewSettings.contextSize = std::max(contextSize, 8192);
-			reviewSettings.batchSize = std::max(batchSize, 1024);
+			reviewSettings.batchSize = std::clamp(batchSize, 128, 256);
 			reviewSettings.gpuLayers = gpuLayers;
 			reviewSettings.threads = numThreads;
 			reviewSettings.maxEmbedParallelTasks = 2;
-			reviewSettings.maxSummaryParallelTasks = 2;
-			reviewSettings.usePromptCache = true;
+			reviewSettings.maxSummaryParallelTasks = 1;
+			reviewSettings.usePromptCache = false;
 			reviewSettings.autoContinueCutoff = true;
 			reviewSettings.projectMemory = &scriptProjectMemory;
+
+			std::mutex reviewFallbackMutex;
+			scriptCodeReview.setGenerationFallback(
+				[this, &reviewFallbackMutex](
+					const std::string & /*fallbackModelPath*/,
+					const std::string & prompt,
+					const ofxGgmlInferenceSettings & inferenceSettings) {
+					std::lock_guard<std::mutex> lock(reviewFallbackMutex);
+
+					const int savedMaxTokens = maxTokens;
+					const int savedContextSize = contextSize;
+					const int savedBatchSize = batchSize;
+					const int savedGpuLayers = gpuLayers;
+					const int savedNumThreads = numThreads;
+					const int savedTopK = topK;
+					const int savedMirostatMode = mirostatMode;
+					const float savedTemperature = temperature;
+					const float savedTopP = topP;
+					const float savedMinP = minP;
+					const float savedRepeatPenalty = repeatPenalty;
+					const float savedMirostatTau = mirostatTau;
+					const float savedMirostatEta = mirostatEta;
+					const bool savedUsePromptCache = usePromptCache;
+					const bool savedAutoContinueCutoff = autoContinueCutoff;
+
+					maxTokens = inferenceSettings.maxTokens;
+					contextSize = inferenceSettings.contextSize;
+					batchSize = inferenceSettings.batchSize;
+					gpuLayers = inferenceSettings.gpuLayers;
+					if (inferenceSettings.threads > 0) {
+						numThreads = inferenceSettings.threads;
+					}
+					temperature = inferenceSettings.temperature;
+					topP = inferenceSettings.topP;
+					topK = inferenceSettings.topK;
+					minP = inferenceSettings.minP;
+					repeatPenalty = inferenceSettings.repeatPenalty;
+					mirostatMode = inferenceSettings.mirostat;
+					mirostatTau = inferenceSettings.mirostatTau;
+					mirostatEta = inferenceSettings.mirostatEta;
+					usePromptCache = false;
+					autoContinueCutoff = inferenceSettings.autoContinueCutoff;
+
+					std::string output;
+					std::string error;
+					const bool success = runRealInference(
+						AiMode::Script,
+						prompt,
+						output,
+						error,
+						nullptr,
+						false,
+						true);
+
+					maxTokens = savedMaxTokens;
+					contextSize = savedContextSize;
+					batchSize = savedBatchSize;
+					gpuLayers = savedGpuLayers;
+					numThreads = savedNumThreads;
+					topK = savedTopK;
+					mirostatMode = savedMirostatMode;
+					temperature = savedTemperature;
+					topP = savedTopP;
+					minP = savedMinP;
+					repeatPenalty = savedRepeatPenalty;
+					mirostatTau = savedMirostatTau;
+					mirostatEta = savedMirostatEta;
+					usePromptCache = savedUsePromptCache;
+					autoContinueCutoff = savedAutoContinueCutoff;
+
+					ofxGgmlInferenceResult result;
+					result.success = success;
+					result.text = output;
+					result.error = error;
+					return result;
+				});
 
 			const auto reviewResult = scriptCodeReview.reviewScriptSource(
 				modelPath,
@@ -4066,6 +4142,7 @@ void ofApp::runHierarchicalReview() {
 					}
 					return !cancelRequested.load();
 				});
+			scriptCodeReview.clearGenerationFallback();
 			if (!reviewResult.success) {
 				if (reviewResult.error == "cancelled") {
 					setError("[Cancelled] Review cancelled.");
@@ -4344,7 +4421,8 @@ void ofApp::runSpeechInference() {
 
 bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,
 	std::function<void(const std::string &)> onStreamData,
-	bool preserveLlamaInstructions) {
+	bool preserveLlamaInstructions,
+	bool suppressFallbackWarning) {
 	output.clear();
 	error.clear();
 
@@ -4469,7 +4547,7 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 		error = "llama-completion returned empty output.";
 		useLegacyFallback = true;
 	}
-	if (shouldLog(OF_LOG_WARNING)) {
+	if (!suppressFallbackWarning && shouldLog(OF_LOG_WARNING)) {
 		logWithLevel(OF_LOG_WARNING,
 			"Modern inference path produced no usable output; falling back to legacy CLI execution.");
 	}
@@ -4743,7 +4821,7 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 	if (shouldLog(OF_LOG_NOTICE)) {
 		logWithLevel(OF_LOG_NOTICE,
 			"llama-completion run: " + ofToString(cliElapsedMs, 1) +
-			" ms, output " + ofToString(trim(stripAnsi(raw)).size()) + " chars");
+				" ms, output " + ofToString(trim(stripAnsi(raw)).size()) + " chars");
 	}
 
 	output = trim(stripAnsi(raw));
@@ -4754,23 +4832,7 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 		}
 		return true;
 	}
-
-	// Strip the prompt echo from the output — llama-cli may echo the
-	// prompt before the generated text.  Return only the generated part.
-	{
-		const std::string trimmedPrompt = trim(prompt);
-		if (!trimmedPrompt.empty() && output.size() >= trimmedPrompt.size()) {
-			if (output.compare(0, trimmedPrompt.size(), trimmedPrompt) == 0) {
-				output = trim(output.substr(trimmedPrompt.size()));
-			} else {
-				const size_t pos = output.find(trimmedPrompt);
-				if (pos != std::string::npos &&
-					(pos + trimmedPrompt.size()) < output.size()) {
-					output = trim(output.substr(pos + trimmedPrompt.size()));
-				}
-			}
-		}
-	}
+	output = ofxGgmlInference::sanitizeGeneratedText(output, prompt);
 
 	if (output.empty()) {
 		error = llamaCliCommand + " returned empty output.";

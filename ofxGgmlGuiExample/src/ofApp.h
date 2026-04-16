@@ -270,7 +270,8 @@ private:
 	void runSpeechInference();
 	bool runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,
 		std::function<void(const std::string &)> onStreamData = nullptr,
-		bool preserveLlamaInstructions = false);
+		bool preserveLlamaInstructions = false,
+		bool suppressFallbackWarning = false);
 	std::string getSelectedModelPath() const;
 	void detectModelLayers();
 	void applyPendingOutput();
