@@ -42,6 +42,8 @@ struct ofxGgmlSpeechResult {
 	std::string backendName;
 	std::string rawOutput;
 	std::string transcriptPath;
+	std::string srtPath;
+	std::string vttPath;
 	std::string detectedLanguage;
 	std::vector<ofxGgmlSpeechSegment> segments;
 };
@@ -67,6 +69,10 @@ public:
 		const ofxGgmlSpeechRequest & request,
 		const std::string & outputBase) const;
 	std::string expectedTranscriptPath(const std::string & outputBase) const;
+	std::string expectedSrtPath(const std::string & outputBase) const;
+	std::string expectedVttPath(const std::string & outputBase) const;
+	static std::vector<ofxGgmlSpeechSegment> parseSrtSegments(
+		const std::string & srtText);
 	ofxGgmlSpeechResult transcribe(
 		const ofxGgmlSpeechRequest & request) const override;
 

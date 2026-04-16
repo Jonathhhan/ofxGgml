@@ -59,7 +59,7 @@ TEST_CASE("Vision inference encodes image files and builds server payloads", "[v
 	profile.modelRepoHint = "unsloth/Qwen3.5-4B-GGUF";
 
 	ofxGgmlVisionRequest request;
-	request.task = ofxGgmlVisionTask::Ask;
+	request.task = ofxGgmlVisionTask::Ocr;
 	request.prompt = "What is visible in this screenshot?";
 	request.images.push_back({imagePath, "Screenshot", ""});
 
@@ -71,6 +71,8 @@ TEST_CASE("Vision inference encodes image files and builds server payloads", "[v
 	REQUIRE(payload.find("data:image/png;base64,") != std::string::npos);
 	REQUIRE(payload.find("What is visible in this screenshot?") != std::string::npos);
 	REQUIRE(payload.find("unsloth/Qwen3.5-4B-GGUF") != std::string::npos);
+	REQUIRE(payload.find("Image 1: Screenshot") != std::string::npos);
+	REQUIRE(payload.find("\"detail\":\"high\"") != std::string::npos);
 }
 
 TEST_CASE("Vision inference normalizes llama-server URLs", "[vision_inference]") {

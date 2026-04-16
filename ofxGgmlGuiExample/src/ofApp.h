@@ -97,6 +97,7 @@ public:
 	void draw();
 	void exit();
 	void keyPressed(int key);
+	void audioIn(ofSoundBuffer & input);
 
 private:
 	// -- ggml engine --
@@ -128,10 +129,12 @@ private:
 	char textServerModel[256] = {};
 	char visionPrompt[4096] = {};
 	char visionImagePath[1024] = {};
+	char visionVideoPath[1024] = {};
 	char visionModelPath[1024] = {};
 	char visionServerUrl[256] = "http://127.0.0.1:8080";
 	char visionSystemPrompt[1024] = {};
 	int visionTaskIndex = 0;
+	int visionVideoMaxFrames = 6;
 	char speechAudioPath[1024] = {};
 	char speechExecutable[256] = "whisper-cli";
 	char speechModelPath[1024] = {};
@@ -150,6 +153,18 @@ private:
 	std::string customOutput;
 	std::string visionOutput;
 	std::string speechOutput;
+	std::string speechDetectedLanguage;
+	std::string speechTranscriptPath;
+	std::string speechSrtPath;
+	int speechSegmentCount = 0;
+	std::string speechRecordedTempPath;
+	bool speechRecording = false;
+	int speechInputSampleRate = 16000;
+	int speechInputChannels = 1;
+	int speechInputBufferSize = 512;
+	ofSoundStream speechInputStream;
+	std::vector<float> speechRecordedSamples;
+	std::mutex speechRecordMutex;
 
 	// -- generation state --
 	std::atomic<bool> generating{false};
@@ -160,6 +175,10 @@ private:
 	std::string pendingOutput;
 	std::string pendingRole;
 	AiMode pendingMode = AiMode::Chat;
+	std::string pendingSpeechDetectedLanguage;
+	std::string pendingSpeechTranscriptPath;
+	std::string pendingSpeechSrtPath;
+	int pendingSpeechSegmentCount = 0;
 	AiMode activeGenerationMode = AiMode::Chat;
 	float generationStartTime = 0.0f;
 	std::string streamingOutput;
@@ -264,6 +283,7 @@ private:
 	ofxGgmlWorkspaceAssistant scriptWorkspaceAssistant;
 	ofxGgmlTextAssistant textAssistant;
 	ofxGgmlVisionInference visionInference;
+	ofxGgmlVideoInference videoInference;
 	ofxGgmlSpeechInference speechInference;
 	ofxGgmlInference llmInference;
 	ofxGgmlCodeReview scriptCodeReview;
@@ -298,7 +318,11 @@ private:
 		bool enableAutoLiveContext = false) const;
 	void runHierarchicalReview(const std::string & overrideQuery = std::string());
 	void runVisionInference();
+	void runVideoInference();
 	void runSpeechInference();
+	bool startSpeechRecording();
+	void stopSpeechRecording(bool keepBufferedAudio = true);
+	std::string flushSpeechRecordingToTempWav();
 	bool runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,
 		std::function<void(const std::string &)> onStreamData = nullptr,
 		bool preserveLlamaInstructions = false,

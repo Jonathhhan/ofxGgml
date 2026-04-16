@@ -48,8 +48,11 @@ TEST_CASE("Video inference builds frame-aware prompts", "[video_inference]") {
 
 	const std::string prompt = ofxGgmlVideoInference::buildFrameAwarePrompt(request, frames);
 	REQUIRE(prompt.find("What happens in the clip?") != std::string::npos);
+	REQUIRE(prompt.find("Sample count: 2 frame(s).") != std::string::npos);
 	REQUIRE(prompt.find("Frame 1 at 0:00") != std::string::npos);
 	REQUIRE(prompt.find("Frame 2 at 0:04") != std::string::npos);
+	REQUIRE(prompt.find("Opening frame") != std::string::npos);
+	REQUIRE(prompt.find("Closing frame") != std::string::npos);
 }
 
 TEST_CASE("Video inference formats timestamps", "[video_inference]") {

@@ -52,6 +52,26 @@ ofxGgmlVisionTask toVisionTask(ofxGgmlVideoTask task) {
 	return ofxGgmlVisionTask::Describe;
 }
 
+std::string describeFramePosition(size_t index, size_t count) {
+	if (count <= 1) {
+		return "Only sampled frame";
+	}
+	if (index == 0) {
+		return "Opening frame";
+	}
+	if (index + 1 == count) {
+		return "Closing frame";
+	}
+	const double ratio = static_cast<double>(index) / static_cast<double>(count - 1);
+	if (ratio < 0.34) {
+		return "Early frame";
+	}
+	if (ratio > 0.66) {
+		return "Late frame";
+	}
+	return "Middle frame";
+}
+
 } // namespace
 
 ofxGgmlVideoInference::ofxGgmlVideoInference()
@@ -70,11 +90,11 @@ const char * ofxGgmlVideoInference::taskLabel(ofxGgmlVideoTask task) {
 std::string ofxGgmlVideoInference::defaultPromptForTask(ofxGgmlVideoTask task) {
 	switch (task) {
 	case ofxGgmlVideoTask::Summarize:
-		return "Summarize the video from the sampled frames. Describe the main actions, scene changes, visible text, and what happens over time.";
+		return "Summarize the video from the sampled frames. Describe the main actions, scene changes, visible text, and what changes over time. Use a concise timeline when it helps.";
 	case ofxGgmlVideoTask::Ocr:
-		return "Extract visible on-screen text from the sampled frames. Group the text by timestamp and avoid inventing unreadable content.";
+		return "Extract visible on-screen text from the sampled frames. Group the text by timestamp, preserve useful line breaks, and avoid inventing unreadable content.";
 	case ofxGgmlVideoTask::Ask:
-		return "Answer the user's question about the sampled video frames. Use temporal order when it matters.";
+		return "Answer the user's question about the sampled video frames. Use temporal order when it matters and mention if the answer may depend on unsampled gaps.";
 	}
 	return {};
 }
@@ -82,11 +102,11 @@ std::string ofxGgmlVideoInference::defaultPromptForTask(ofxGgmlVideoTask task) {
 std::string ofxGgmlVideoInference::defaultSystemPromptForTask(ofxGgmlVideoTask task) {
 	switch (task) {
 	case ofxGgmlVideoTask::Summarize:
-		return "You are a precise video understanding assistant. Infer only what is supported by the sampled frames and mention uncertainty when the clip may contain unseen gaps.";
+		return "You are a precise video understanding assistant. Infer only what is supported by the sampled frames and mention uncertainty when unseen gaps could matter.";
 	case ofxGgmlVideoTask::Ocr:
-		return "You are a video OCR assistant. Extract text faithfully from sampled frames and preserve useful timestamp structure.";
+		return "You are a video OCR assistant. Extract text faithfully from sampled frames, preserve useful timestamp structure, and avoid guessing unreadable characters.";
 	case ofxGgmlVideoTask::Ask:
-		return "You are a grounded video assistant. Answer only from the sampled frames and use timestamps when helpful.";
+		return "You are a grounded video assistant. Answer only from the sampled frames, use timestamps when helpful, and say when coverage is incomplete.";
 	}
 	return {};
 }
@@ -167,17 +187,34 @@ std::string ofxGgmlVideoInference::buildFrameAwarePrompt(
 
 	prompt << userPrompt;
 	prompt << "\n\nThese are sampled frames from a video, ordered from earlier to later.";
+	prompt << "\nSample count: " << frames.size() << " frame(s).";
+	if (request.startSeconds > 0.0 || request.endSeconds > 0.0) {
+		prompt << "\nRequested clip window: "
+			<< formatTimestamp(request.startSeconds) << " to "
+			<< (request.endSeconds > 0.0 ? formatTimestamp(request.endSeconds) : std::string("end"));
+	}
 	if (request.includeTimestamps && !frames.empty()) {
 		prompt << "\nTimeline:";
 		for (size_t i = 0; i < frames.size(); ++i) {
 			prompt << "\n- Frame " << (i + 1) << " at "
-				<< formatTimestamp(frames[i].timestampSeconds);
+				<< formatTimestamp(frames[i].timestampSeconds)
+				<< " [" << describeFramePosition(i, frames.size()) << "]";
 			if (!trimCopy(frames[i].label).empty()) {
 				prompt << " (" << frames[i].label << ")";
 			}
 		}
 	}
-	prompt << "\nUse the frame order and timestamps to reason about what changes over time.";
+	switch (request.task) {
+	case ofxGgmlVideoTask::Summarize:
+		prompt << "\nUse the frame order and timestamps to explain what changes over time. Prefer a professional summary with a brief timeline or bullet sequence when useful.";
+		break;
+	case ofxGgmlVideoTask::Ocr:
+		prompt << "\nGroup extracted text by frame and timestamp. Ignore unreadable regions instead of inventing missing words.";
+		break;
+	case ofxGgmlVideoTask::Ask:
+		prompt << "\nAnswer from the sampled evidence only. If the question depends on unseen moments between frames, say so explicitly.";
+		break;
+	}
 	return prompt.str();
 }
 
@@ -282,7 +319,8 @@ ofxGgmlVideoBackendSampleResult ofxGgmlSampledFramesVideoBackend::sampleFrames(
 		ofxGgmlSampledVideoFrame frame;
 		frame.imagePath = framePath.string();
 		frame.timestampSeconds = timestamp;
-		frame.label = "Sample at " + ofxGgmlVideoInference::formatTimestamp(timestamp);
+		frame.label = describeFramePosition(i, timeline.size()) +
+			" at " + ofxGgmlVideoInference::formatTimestamp(timestamp);
 		frames.push_back(frame);
 	}
 

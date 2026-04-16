@@ -1,6 +1,6 @@
 # ofxGgml
 
-`ofxGgml` is an openFrameworks wrapper around [ggml](https://github.com/ggml-org/ggml) with backend selection, graph execution, GGUF model loading, llama.cpp CLI and `llama-server` inference helpers, prompt-memory utilities, and a GUI example aimed at local AI workflows.
+`ofxGgml` is an openFrameworks wrapper around [ggml](https://github.com/ggml-org/ggml) with backend selection, graph execution, GGUF model loading, server-first `llama-server` plus optional llama.cpp CLI inference helpers, prompt-memory utilities, and a GUI example aimed at local AI workflows.
 
 The main public header is:
 
@@ -126,9 +126,10 @@ Linux and macOS:
 ```bash
 ./scripts/setup_linux_macos.sh
 ./scripts/setup_linux_macos.sh --cuda
-./scripts/setup_linux_macos.sh --skip-llama --skip-model
 ./scripts/setup_linux_macos.sh --skip-model
-./scripts/setup_linux_macos.sh --skip-ggml --skip-llama --model-preset 2
+./scripts/setup_linux_macos.sh --with-llama-cli --skip-model
+./scripts/setup_linux_macos.sh --skip-model
+./scripts/setup_linux_macos.sh --skip-ggml --model-preset 2
 ```
 
 Windows:
@@ -137,10 +138,13 @@ Windows:
 scripts\setup_windows.bat
 scripts\setup_windows.bat --cuda
 scripts\setup_windows.bat --skip-model
+scripts\setup_windows.bat --with-llama-cli --skip-model
 scripts\setup_windows.bat --skip-ggml --model-preset 2
 ```
 
 `download-model` covers the text GGUF presets used by chat/script/write flows. Speech (`Whisper`) and multimodal `Vision` models are configured separately in the addon and GUI example because they use different runtimes and file layouts. The current Vision defaults favor EU-safe llama-server profiles such as `LFM2.5-VL` for general image understanding and `GLM-OCR` for OCR-heavy work.
+
+`setup_windows.bat` and `setup_linux_macos.sh` now follow the server-first path by default: they build `ggml`, leave CLI fallback binaries optional, and let you opt into legacy `llama-cli` / `llama-completion` builds with `--with-llama-cli` only when you want them.
 
 ### ggml only
 
@@ -188,6 +192,12 @@ By default the script:
 - installs `llama-server.exe` and the required DLLs into `libs\llama\bin`
 
 That install location matches the GUI example's local server discovery, so `Start Local Server` can reuse the freshly built binary without extra configuration.
+
+If you still want the old one-shot CLI fallback tools, build them explicitly instead of relying on setup defaults:
+
+```bash
+./scripts/build-llama-cli.sh --auto
+```
 
 To launch the local server manually after building it:
 
@@ -241,6 +251,8 @@ When the server backend is selected, the GUI exposes:
 - `Check Server` to probe reachability and fetch model/capability hints
 - `Start Local Server` / `Stop Local Server` for an app-managed local `llama-server`
 - `Tune For Server` to apply lower-latency settings for the active mode
+
+When the CLI backend is selected, it is treated as an optional fallback path rather than a required default. The sidebar now makes that explicit and keeps the missing-CLI state informational instead of presenting it as a broken primary setup.
 
 Text-heavy modes also ship with server-friendly quick actions so the warm backend is useful outside of coding:
 
@@ -367,17 +379,47 @@ Use it when an app wants translation or writing-assistant features without hardc
 
 Use it when an app wants local `Transcribe` / `Translate` audio workflows without hardcoding command-line assembly in its UI layer. The `GuiExample` exposes executable path, model path, profile selection, language hint, prompt, and transcript output as a first-class panel.
 
+When the backend supports it, the speech path now keeps richer artifacts:
+
+- detected language hints from Whisper output
+- `.srt` / `.vtt` subtitle artifacts when timestamp mode is enabled
+- parsed timestamp segments surfaced back into the GUI through the same lightweight SRT parser style already used in `ofxVlc4`
+- temporary microphone capture to WAV, so the Speech panel can record and immediately transcribe or translate from the default input device
+
+The Speech panel now supports a simple microphone workflow directly in the GUI:
+
+- `Start Mic Recording` captures from the default input device
+- `Stop + Run` writes a temporary WAV and runs the current speech task immediately
+- `Use Last Recording` lets you retry the same captured audio after changing prompt, language hint, or `Transcribe` / `Translate` task settings
+
 ## Vision Helpers
 
 `ofxGgmlVisionInference` adds multimodal image-to-text support for `llama-server`-compatible endpoints. It prepares task-specific prompts for `Describe`, `OCR`, and `Ask`, handles local image encoding as data URLs, and includes curated profile hints for families such as `LFM2.5-VL`, `Qwen VL`, `GLM OCR`, and `Llama 3.2 Vision`.
 
 The GUI example now recommends `LFM2.5-VL` first for general vision tasks, keeps `GLM-OCR` available for OCR-focused flows, and labels Meta `Llama 3.2 Vision` as EU-restricted because the official Hugging Face download is currently blocked from the European Union.
 
+The vision path is now more purpose-built too:
+
+- better task-specific prompt defaults for scene description, OCR, and grounded image Q&A
+- broader OpenAI-compatible response parsing for more server response shapes
+- image labels are injected into multimodal payloads, which improves grounding when a request uses more than one image
+- OCR requests now ask for higher-detail image handling when the server understands that hint
+
+The GUI example’s Vision panel also includes one-click quick actions such as `Scene Describe`, `Screenshot Review`, and `Document OCR` so common workflows feel less like raw prompting.
+
 Use it when an app wants OCR, screenshot understanding, document extraction, or image-grounded prompting without rebuilding OpenAI-style request payloads manually.
 
 ## Video Helpers
 
 `ofxGgmlVideoInference` adds a backend-driven video layer on top of the vision stack. The default backend samples frames and reuses the multimodal image path, while keeping the API open for future specialized backends such as dedicated video-language servers.
+
+The sampled-frame workflow is now more structured:
+
+- frame labels distinguish opening, middle, and closing samples
+- prompts include sample count, clip-window hints, and clearer timestamp-aware instructions
+- summaries and OCR requests are phrased to be more professional and to call out unsampled gaps when they may matter
+
+The GUI example now exposes this path directly from the Vision panel with an optional video file input and configurable sampled-frame count, so you can route short local clips through the same stable `llama-server` vision profile.
 
 Use it when an app wants practical local video understanding today, but still wants a clean path to stronger temporal backends later.
 

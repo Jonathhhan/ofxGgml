@@ -8,15 +8,22 @@ All notable changes to `ofxGgml` are documented in this file.
 - `ofxGgmlInference` live grounding now groups specialized sources under domain providers and keeps generic search as a separate fallback path.
 - Script mode now supports higher-level slash commands and quick actions such as `/review`, `/reviewfix`, `/nextedit`, `/summary`, and `Change Summary`.
 - Text-focused GUI modes now expose additional professional one-click actions, including executive briefs, action items, meeting notes, email replies, release notes, commit messages, and structured JSON replies.
+- The Speech panel now supports temporary microphone capture, including `Start Mic Recording`, `Stop + Run`, and `Use Last Recording` for direct transcribe / translate workflows from the default input device.
+- The Vision panel now includes quick actions such as `Scene Describe`, `Screenshot Review`, and `Document OCR`, plus an optional sampled-video path that reuses the stable multimodal server backend directly from the GUI.
 
 ### Changed
 - `ofxGgmlGuiExample` replaces the old online/offline toggle with four `Live context` policies: `Offline`, `LoadedSourcesOnly`, `LiveContext`, and `LiveContextStrictCitations`.
 - GUI live-source controls now use the more general `Live context` / `sources` wording instead of mixed `online` / `realtime` labels.
 - Local workspaces now keep `.github` available during script-source scans so repository instruction files can shape assistant and review prompts.
 - `ofxGgmlCodeAssistant` and `ofxGgmlCodeReview` now read local `AGENTS.md` and `.github` instruction files directly from the workspace for server-first coding and review flows.
+- Setup scripts now follow the faster server-first path by default: `ggml` still builds automatically, while `llama-cli` / `llama-completion` are opt-in via `--with-llama-cli` instead of being built on every `--auto` setup.
+- The GUI now presents `llama-server` as the recommended text backend and frames `llama-completion` as an optional local fallback instead of a required default component.
+- Whisper timestamp handling now preserves `.srt` / `.vtt` artifacts, surfaces parsed segments in the GUI, and reuses the same lightweight SRT parsing approach we already trust in `ofxVlc4`.
+- Vision response handling now accepts more OpenAI-compatible response shapes, adds stronger task-specific prompting, and labels multimodal image parts more explicitly for better grounding.
+- Video analysis now uses more structured sampled-frame prompts with frame-position labels, sample-count context, and clearer timeline guidance.
 
 ### Documentation
-- `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, and repository instruction-file support.
+- `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, repository instruction-file support, the new optional CLI build behavior, the microphone-driven speech workflow, and the upgraded vision / sampled-video workflows.
 
 ## [1.0.2] - 2026-04-16
 

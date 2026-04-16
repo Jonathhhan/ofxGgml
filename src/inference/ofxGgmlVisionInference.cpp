@@ -96,11 +96,44 @@ std::string extractTextFromOpenAiResponse(const std::string & responseJson) {
 #else
 	try {
 		const ofJson parsed = ofJson::parse(responseJson);
+		if (parsed.contains("output_text") && parsed["output_text"].is_string()) {
+			return parsed["output_text"].get<std::string>();
+		}
+		if (parsed.contains("output") && parsed["output"].is_array()) {
+			std::ostringstream joined;
+			for (const auto & item : parsed["output"]) {
+				if (!item.is_object()) {
+					continue;
+				}
+				if (item.contains("content") && item["content"].is_array()) {
+					for (const auto & contentItem : item["content"]) {
+						if (!contentItem.is_object()) {
+							continue;
+						}
+						if (contentItem.value("type", std::string()) == "output_text") {
+							const std::string text = contentItem.value("text", std::string());
+							if (!text.empty()) {
+								if (joined.tellp() > 0) {
+									joined << "\n";
+								}
+								joined << text;
+							}
+						}
+					}
+				}
+			}
+			if (joined.tellp() > 0) {
+				return joined.str();
+			}
+		}
 		if (!parsed.contains("choices") || !parsed["choices"].is_array() ||
 			parsed["choices"].empty()) {
 			return {};
 		}
 		const auto & choice = parsed["choices"][0];
+		if (choice.contains("text") && choice["text"].is_string()) {
+			return choice["text"].get<std::string>();
+		}
 		if (!choice.contains("message")) {
 			return {};
 		}
@@ -122,7 +155,10 @@ std::string extractTextFromOpenAiResponse(const std::string & responseJson) {
 					joined << item.get<std::string>();
 				} else if (item.is_object() &&
 					item.value("type", std::string()) == "text") {
-					const std::string text = item.value("text", std::string());
+					std::string text = item.value("text", std::string());
+					if (text.empty() && item.contains("text") && item["text"].is_object()) {
+						text = item["text"].value("value", std::string());
+					}
 					if (!text.empty()) {
 						if (joined.tellp() > 0) {
 							joined << "\n";
@@ -206,11 +242,11 @@ const char * ofxGgmlVisionInference::taskLabel(ofxGgmlVisionTask task) {
 std::string ofxGgmlVisionInference::defaultPromptForTask(ofxGgmlVisionTask task) {
 	switch (task) {
 	case ofxGgmlVisionTask::Describe:
-		return "Describe the image clearly and concretely. Mention the main subjects, visible text, layout, and notable details.";
+		return "Describe the image clearly and concretely. Focus on the main subjects, visible text, layout, state, and notable details. Use short sections when that improves readability.";
 	case ofxGgmlVisionTask::Ocr:
-		return "Extract all readable text from the image. Preserve line breaks where helpful and mark uncertain regions briefly.";
+		return "Extract all readable text from the image. Preserve useful line breaks, keep obvious headings together, and mark uncertain regions briefly instead of inventing characters.";
 	case ofxGgmlVisionTask::Ask:
-		return "Answer the user's question about the image.";
+		return "Answer the user's question about the image. Cite visible evidence from the image when helpful.";
 	}
 	return {};
 }
@@ -218,11 +254,11 @@ std::string ofxGgmlVisionInference::defaultPromptForTask(ofxGgmlVisionTask task)
 std::string ofxGgmlVisionInference::defaultSystemPromptForTask(ofxGgmlVisionTask task) {
 	switch (task) {
 	case ofxGgmlVisionTask::Describe:
-		return "You are a precise multimodal assistant. Describe only what is visually supported by the image.";
+		return "You are a precise multimodal assistant. Describe only what is visually supported by the image and avoid speculation.";
 	case ofxGgmlVisionTask::Ocr:
-		return "You are an OCR assistant. Extract text faithfully from the image and avoid inventing missing characters.";
+		return "You are an OCR assistant. Extract text faithfully from the image, preserve reading order when possible, and avoid inventing missing characters.";
 	case ofxGgmlVisionTask::Ask:
-		return "You are a grounded multimodal assistant. Answer using only information visible in the provided image.";
+		return "You are a grounded multimodal assistant. Answer using only information visible in the provided image and say when the image is insufficient.";
 	}
 	return {};
 }
@@ -304,7 +340,8 @@ std::string ofxGgmlVisionInference::buildChatCompletionsJson(
 		<< "\"text\":\"" << jsonEscape(prepared.userPrompt) << "\""
 		<< "}";
 
-	for (const auto & image : request.images) {
+	for (size_t imageIndex = 0; imageIndex < request.images.size(); ++imageIndex) {
+		const auto & image = request.images[imageIndex];
 		const std::string path = trimCopy(image.path);
 		if (path.empty()) {
 			continue;
@@ -316,11 +353,23 @@ std::string ofxGgmlVisionInference::buildChatCompletionsJson(
 		if (encoded.empty()) {
 			continue;
 		}
+		const std::string imageLabel = trimCopy(image.label);
+		if (!imageLabel.empty()) {
+			json << ",{"
+				<< "\"type\":\"text\","
+				<< "\"text\":\""
+				<< jsonEscape("Image " + std::to_string(imageIndex + 1) + ": " + imageLabel)
+				<< "\""
+				<< "}";
+		}
 		json << ",{"
 			<< "\"type\":\"image_url\","
 			<< "\"image_url\":{"
-			<< "\"url\":\"data:" << jsonEscape(mimeType) << ";base64," << encoded << "\""
-			<< "}"
+			<< "\"url\":\"data:" << jsonEscape(mimeType) << ";base64," << encoded << "\"";
+		if (request.task == ofxGgmlVisionTask::Ocr) {
+			json << ",\"detail\":\"high\"";
+		}
+		json << "}"
 			<< "}";
 	}
 

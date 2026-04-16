@@ -1,5 +1,6 @@
 #include "ofxGgmlSpeechInference.h"
 #include "core/ofxGgmlWindowsUtf8.h"
+#include "support/ofxGgmlSimpleSrtSubtitleParser.h"
 
 #include <algorithm>
 #include <array>
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <regex>
 #include <sstream>
 
 #ifdef _WIN32
@@ -63,6 +65,17 @@ std::string readTextFile(const std::string & path) {
 	std::ostringstream buffer;
 	buffer << input.rdbuf();
 	return buffer.str();
+}
+
+std::string detectLanguageFromOutput(const std::string & text) {
+	static const std::regex langRe(
+		R"((?:language|lang)[^a-zA-Z0-9]+([a-z]{2,3}(?:[-_][a-z]{2,3})?))",
+		std::regex::icase);
+	std::smatch match;
+	if (std::regex_search(text, match, langRe)) {
+		return trimCopy(match[1].str());
+	}
+	return {};
 }
 
 std::string makeTempOutputBase(const char * prefix) {
@@ -409,6 +422,10 @@ std::vector<std::string> ofxGgmlWhisperCliSpeechBackend::buildCommandArguments(
 	args.push_back("-f");
 	args.push_back(request.audioPath);
 	args.push_back("-otxt");
+	if (request.returnTimestamps) {
+		args.push_back("-osrt");
+		args.push_back("-ovtt");
+	}
 	args.push_back("-of");
 	args.push_back(outputBase);
 	if (!trimCopy(request.languageHint).empty() &&
@@ -432,6 +449,42 @@ std::string ofxGgmlWhisperCliSpeechBackend::expectedTranscriptPath(
 	return outputBase + ".txt";
 }
 
+std::string ofxGgmlWhisperCliSpeechBackend::expectedSrtPath(
+	const std::string & outputBase) const {
+	return outputBase + ".srt";
+}
+
+std::string ofxGgmlWhisperCliSpeechBackend::expectedVttPath(
+	const std::string & outputBase) const {
+	return outputBase + ".vtt";
+}
+
+std::vector<ofxGgmlSpeechSegment> ofxGgmlWhisperCliSpeechBackend::parseSrtSegments(
+	const std::string & srtText) {
+	std::vector<ofxGgmlSimpleSrtCue> cues;
+	std::string error;
+	const bool ok = ofxGgmlSimpleSrtSubtitleParser::parseText(
+		srtText,
+		cues,
+		error);
+	if (!ok) {
+		return {};
+	}
+
+	std::vector<ofxGgmlSpeechSegment> segments;
+	segments.reserve(cues.size());
+	for (const auto & cue : cues) {
+		ofxGgmlSpeechSegment segment;
+		segment.startSeconds = static_cast<double>(cue.startMs) / 1000.0;
+		segment.endSeconds = static_cast<double>(cue.endMs) / 1000.0;
+		segment.text = trimCopy(cue.text);
+		if (!segment.text.empty()) {
+			segments.push_back(std::move(segment));
+		}
+	}
+	return segments;
+}
+
 ofxGgmlSpeechResult ofxGgmlWhisperCliSpeechBackend::transcribe(
 	const ofxGgmlSpeechRequest & request) const {
 	ofxGgmlSpeechResult result;
@@ -451,6 +504,8 @@ ofxGgmlSpeechResult ofxGgmlWhisperCliSpeechBackend::transcribe(
 
 	const std::string outputBase = makeTempOutputBase("ofxggml_whisper");
 	result.transcriptPath = expectedTranscriptPath(outputBase);
+	result.srtPath = expectedSrtPath(outputBase);
+	result.vttPath = expectedVttPath(outputBase);
 	const auto args = buildCommandArguments(request, outputBase);
 
 	const auto t0 = std::chrono::steady_clock::now();
@@ -463,6 +518,13 @@ ofxGgmlSpeechResult ofxGgmlWhisperCliSpeechBackend::transcribe(
 	result.text = trimCopy(readTextFile(result.transcriptPath));
 	if (result.text.empty()) {
 		result.text = trimCopy(result.rawOutput);
+	}
+	result.detectedLanguage = detectLanguageFromOutput(result.rawOutput);
+	if (request.returnTimestamps) {
+		const std::string srtText = readTextFile(result.srtPath);
+		if (!srtText.empty()) {
+			result.segments = parseSrtSegments(srtText);
+		}
 	}
 	result.elapsedMs = std::chrono::duration<float, std::milli>(
 		std::chrono::steady_clock::now() - t0).count();

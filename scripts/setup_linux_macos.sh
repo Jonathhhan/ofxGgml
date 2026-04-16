@@ -2,8 +2,8 @@
 # ---------------------------------------------------------------------------
 # setup_linux_macos.sh — One-command setup for the ofxGgml addon (Linux/macOS).
 #
-# Builds ggml (auto-detect GPU backends by default) and installs the
-# llama.cpp CLI tools. Model download is optional and disabled by default.
+# Builds ggml (auto-detect GPU backends by default) and keeps the
+# llama.cpp CLI tools optional. Model download is optional and disabled by default.
 #
 # Use --cpu-only to force CPU-only builds, or --cuda / --vulkan / --metal
 # to force a specific backend.
@@ -20,7 +20,8 @@
 #   --prefix DIR       Install prefix for llama tools
 #                      (default: /usr/local on Linux, /usr/local on macOS)
 #   --skip-ggml        Skip building ggml (if already built)
-#   --skip-llama       Skip building llama.cpp CLI tools
+#   --with-llama-cli   Build optional llama.cpp CLI fallback tools
+#   --skip-llama       Skip building llama.cpp CLI tools (legacy no-op)
 #   --skip-model       Skip downloading the text model file (default)
 #   --download-model   Download the text model file(s)
 #   --model-preset N   Download a specific text model preset (default: both)
@@ -34,7 +35,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SKIP_GGML=0
-SKIP_LLAMA=0
+SKIP_LLAMA=1
 SKIP_MODEL=1
 GPU_FLAG="--auto"
 LLAMA_GPU_FLAG="--auto"
@@ -113,6 +114,10 @@ while [[ $# -gt 0 ]]; do
 			SKIP_GGML=1
 			shift
 			;;
+		--with-llama-cli)
+			SKIP_LLAMA=0
+			shift
+			;;
 		--skip-llama)
 			SKIP_LLAMA=1
 			shift
@@ -182,7 +187,7 @@ fi
 # ---------------------------------------------------------------------------
 
 if [[ "$SKIP_LLAMA" -eq 0 ]]; then
-	write_step "Step 2/3: Building llama.cpp CLI tools..."
+	write_step "Step 2/3: Building optional llama.cpp CLI fallback tools..."
 	LLAMA_ARGS=()
 	if [[ -n "$LLAMA_GPU_FLAG" ]]; then
 		LLAMA_ARGS+=("$LLAMA_GPU_FLAG")
@@ -197,9 +202,9 @@ if [[ "$SKIP_LLAMA" -eq 0 ]]; then
 		LLAMA_ARGS+=(--clean)
 	fi
 	"$SCRIPT_DIR/build-llama-cli.sh" "${LLAMA_ARGS[@]}"
-	write_ok "llama.cpp tools built successfully."
+	write_ok "Optional llama.cpp CLI tools built successfully."
 else
-	write_warn "Skipping llama.cpp build (--skip-llama)."
+	write_warn "Skipping optional llama.cpp CLI tools (server-first default)."
 fi
 
 # ---------------------------------------------------------------------------
@@ -231,6 +236,8 @@ echo "  Next steps:"
 echo "    1. Open your OF project and add ofxGgml to addons.make"
 echo "    2. Include <ofxGgml.h> in your source files"
 echo "    3. Build and run!"
+echo "    4. Use --with-llama-cli if you want legacy local CLI fallback tools"
+echo "    5. Build llama-server separately when you want a local persistent server"
 echo ""
 echo "  Examples:"
 echo "    ofxGgmlBasicExample/   — matrix multiplication"
