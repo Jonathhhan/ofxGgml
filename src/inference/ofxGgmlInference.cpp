@@ -1885,7 +1885,7 @@ std::vector<ofxGgmlPromptSource> ofxGgmlInference::fetchRealtimeSources(
 		return sources;
 	}
 
-	if (realtimeSettings.allowWeatherLookup && looksLikeWeatherQuery(query)) {
+	if (realtimeSettings.allowDomainProviders && looksLikeWeatherQuery(query)) {
 		ofxGgmlPromptSource weather = fetchWeatherSource(query, sourceSettings);
 		if (!trim(weather.content).empty()) {
 			sources.push_back(std::move(weather));
@@ -1893,7 +1893,7 @@ std::vector<ofxGgmlPromptSource> ofxGgmlInference::fetchRealtimeSources(
 		}
 	}
 
-	if (realtimeSettings.allowNewsLookup && looksLikeNewsQuery(query)) {
+	if (realtimeSettings.allowDomainProviders && looksLikeNewsQuery(query)) {
 		ofxGgmlPromptSource news = fetchNewsSource(query, sourceSettings);
 		if (!trim(news.content).empty()) {
 			sources.push_back(std::move(news));
@@ -1901,7 +1901,7 @@ std::vector<ofxGgmlPromptSource> ofxGgmlInference::fetchRealtimeSources(
 		}
 	}
 
-	if (realtimeSettings.allowSearchFallback) {
+	if (realtimeSettings.allowGenericSearch) {
 		ofxGgmlPromptSource snippet = fetchSearchSnippetSource(query, sourceSettings);
 		if (!trim(snippet.content).empty()) {
 			sources.push_back(std::move(snippet));

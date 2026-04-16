@@ -180,9 +180,8 @@ private:
 	std::mutex logMutex;
 	LiveContextMode liveContextMode = LiveContextMode::Offline;
 	bool liveContextAllowPromptUrls = true;
-	bool liveContextAllowNews = true;
-	bool liveContextAllowWeather = true;
-	bool liveContextAllowSearch = true;
+	bool liveContextAllowDomainProviders = true;
+	bool liveContextAllowGenericSearch = true;
 	bool scriptIncludeRepoContext = true;
 	bool stopAtNaturalBoundary = true;
 	bool cliCapabilitiesProbed = false;

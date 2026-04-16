@@ -1421,9 +1421,8 @@ const bool autoLiveLookupsEnabled =
 	liveContextMode == LiveContextMode::LiveContextStrictCitations;
 ImGui::BeginDisabled(!autoLiveLookupsEnabled);
 ImGui::Checkbox("Allow prompt URLs", &liveContextAllowPromptUrls);
-ImGui::Checkbox("Allow news lookup", &liveContextAllowNews);
-ImGui::Checkbox("Allow weather lookup", &liveContextAllowWeather);
-ImGui::Checkbox("Allow search fallback", &liveContextAllowSearch);
+ImGui::Checkbox("Allow domain providers", &liveContextAllowDomainProviders);
+ImGui::Checkbox("Allow generic search", &liveContextAllowGenericSearch);
 ImGui::EndDisabled();
 
 const char * mirostatLabels[] = { "Mirostat: Off", "Mirostat", "Mirostat 2.0" };
@@ -3445,9 +3444,8 @@ out << "visionOutput=" << escapeSessionText(visionOutput) << "\n";
 out << "speechOutput=" << escapeSessionText(speechOutput) << "\n";
 out << "liveContextMode=" << static_cast<int>(liveContextMode) << "\n";
 out << "liveContextAllowPromptUrls=" << (liveContextAllowPromptUrls ? 1 : 0) << "\n";
-out << "liveContextAllowNews=" << (liveContextAllowNews ? 1 : 0) << "\n";
-out << "liveContextAllowWeather=" << (liveContextAllowWeather ? 1 : 0) << "\n";
-out << "liveContextAllowSearch=" << (liveContextAllowSearch ? 1 : 0) << "\n";
+out << "liveContextAllowDomainProviders=" << (liveContextAllowDomainProviders ? 1 : 0) << "\n";
+out << "liveContextAllowGenericSearch=" << (liveContextAllowGenericSearch ? 1 : 0) << "\n";
 out << "stopAtNaturalBoundary=" << (stopAtNaturalBoundary ? 1 : 0) << "\n";
 
 // Chat messages.
@@ -3640,9 +3638,8 @@ else if (key == "liveContextMode") {
 	liveContextMode = static_cast<LiveContextMode>(std::clamp(safeStoi(value, 0), 0, 3));
 }
 else if (key == "liveContextAllowPromptUrls") liveContextAllowPromptUrls = (safeStoi(value, 1) != 0);
-else if (key == "liveContextAllowNews") liveContextAllowNews = (safeStoi(value, 1) != 0);
-else if (key == "liveContextAllowWeather") liveContextAllowWeather = (safeStoi(value, 1) != 0);
-else if (key == "liveContextAllowSearch") liveContextAllowSearch = (safeStoi(value, 1) != 0);
+else if (key == "liveContextAllowDomainProviders") liveContextAllowDomainProviders = (safeStoi(value, 1) != 0);
+else if (key == "liveContextAllowGenericSearch") liveContextAllowGenericSearch = (safeStoi(value, 1) != 0);
 else if (key == "stopAtNaturalBoundary") stopAtNaturalBoundary = (safeStoi(value, 1) != 0);
 else if (key == "msg") {
 // Parse: role|timestamp|text
@@ -4650,9 +4647,8 @@ ofxGgmlRealtimeInfoSettings ofApp::buildLiveContextSettings(
 	settings.heading = heading;
 	settings.explicitUrls = extractHttpUrls(rawUrls);
 	settings.allowPromptUrlFetch = liveContextAllowPromptUrls;
-	settings.allowNewsLookup = liveContextAllowNews;
-	settings.allowWeatherLookup = liveContextAllowWeather;
-	settings.allowSearchFallback = liveContextAllowSearch;
+	settings.allowDomainProviders = liveContextAllowDomainProviders;
+	settings.allowGenericSearch = liveContextAllowGenericSearch;
 
 	switch (liveContextMode) {
 	case LiveContextMode::Offline:
@@ -4660,17 +4656,15 @@ ofxGgmlRealtimeInfoSettings ofApp::buildLiveContextSettings(
 		settings.explicitUrls.clear();
 		settings.requestCitations = false;
 		settings.allowPromptUrlFetch = false;
-		settings.allowNewsLookup = false;
-		settings.allowWeatherLookup = false;
-		settings.allowSearchFallback = false;
+		settings.allowDomainProviders = false;
+		settings.allowGenericSearch = false;
 		break;
 	case LiveContextMode::LoadedSourcesOnly:
 		settings.enabled = false;
 		settings.requestCitations = true;
 		settings.allowPromptUrlFetch = false;
-		settings.allowNewsLookup = false;
-		settings.allowWeatherLookup = false;
-		settings.allowSearchFallback = false;
+		settings.allowDomainProviders = false;
+		settings.allowGenericSearch = false;
 		break;
 	case LiveContextMode::LiveContext:
 		settings.enabled = enableAutoLiveContext;
@@ -4735,9 +4729,8 @@ workerThread.join();
 	effectiveRealtimeSettings.heading = "Context fetched from loaded sources";
 	effectiveRealtimeSettings.explicitUrls = scriptSource.getInternetUrls();
 	effectiveRealtimeSettings.allowPromptUrlFetch = false;
-	effectiveRealtimeSettings.allowNewsLookup = false;
-	effectiveRealtimeSettings.allowWeatherLookup = false;
-	effectiveRealtimeSettings.allowSearchFallback = false;
+	effectiveRealtimeSettings.allowDomainProviders = false;
+	effectiveRealtimeSettings.allowGenericSearch = false;
 	effectiveRealtimeSettings.enabled =
 		(liveContextMode == LiveContextMode::LiveContext ||
 		 liveContextMode == LiveContextMode::LiveContextStrictCitations);

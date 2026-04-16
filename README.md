@@ -28,7 +28,7 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlGraph` fluent graph builder for common ggml operations
 - `ofxGgmlModel` GGUF inspection and backend weight upload
 - `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, CLI capability probing, cutoff continuation, and source-grounded prompt building
-- addon-level `Live context` support for loaded sources, live web/news/weather/search grounding, and stricter citation-oriented response modes
+- addon-level `Live context` support for loaded sources, domain-provider grounding, generic search fallback, and stricter citation-oriented response modes
 - `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
 - `ofxGgmlVideoInference` for backend-driven video understanding, starting with sampled-frame analysis and room for future specialized video backends
@@ -226,7 +226,7 @@ These wrappers configure the test suite with `OFXGGML_ENABLE_BENCHMARK_TESTS=ON`
 - `LiveContext`
 - `LiveContextStrictCitations`
 
-These modes let you decide whether the assistant should stay fully local, rely only on explicitly loaded source URLs, or use broader live grounding such as source URLs, news, weather, and search snippets. The strict-citation mode keeps the same live lookup behavior but biases responses toward grounded source usage.
+These modes let you decide whether the assistant should stay fully local, rely only on explicitly loaded source URLs, or use broader live grounding such as loaded sources, domain providers, and generic search. The strict-citation mode keeps the same live lookup behavior but biases responses toward grounded source usage.
 
 ```cpp
 ofxGgmlInference inference;
