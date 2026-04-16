@@ -552,6 +552,35 @@ TEST_CASE("Inference generation - without executable", "[inference]") {
 	}
 }
 
+TEST_CASE("Inference streaming callback receives deltas rather than cumulative text", "[inference]") {
+	const std::string modelPath = createDummyModel();
+	const std::string completionScript = createExecutableScript(
+		"echo Hel\n"
+		"echo lo");
+
+	ofxGgmlInference inf;
+	inf.setCompletionExecutable(completionScript);
+
+	std::vector<std::string> chunks;
+	const auto result = inf.generate(
+		modelPath,
+		"hello",
+		{},
+		[&chunks](const std::string & chunk) {
+			chunks.push_back(chunk);
+			return true;
+		});
+
+	REQUIRE(result.success);
+	REQUIRE(chunks.size() == 2);
+	REQUIRE(trimCopy(chunks[0]) == "Hel");
+	REQUIRE(trimCopy(chunks[1]) == "lo");
+	const auto resultLines = splitLines(result.text);
+	REQUIRE(resultLines.size() == 2);
+	REQUIRE(resultLines[0] == "Hel");
+	REQUIRE(resultLines[1] == "lo");
+}
+
 TEST_CASE("Inference server backend bypasses local model validation", "[inference]") {
 	ofxGgmlInference inf;
 	ofxGgmlInferenceSettings settings;

@@ -27,6 +27,7 @@ All notable changes to `ofxGgml` are documented in this file.
 - Vision response handling now accepts more OpenAI-compatible response shapes, adds stronger task-specific prompting, and labels multimodal image parts more explicitly for better grounding.
 - Vision profile download hints can now use explicit direct URLs, and the default `LFM2.5-VL` GUI action now targets the correct `LFM2.5-VL-1.6B-Q4_0.gguf` file instead of a broken guessed link.
 - Video analysis now uses more structured sampled-frame prompts with frame-position labels, sample-count context, and clearer timeline guidance.
+- Streamed text generation now treats server chunks as deltas consistently across the inference and GUI layers, so live `llama-server` output no longer duplicates partial prefixes in Chat or Script mode.
 
 ### Documentation
 - `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, repository instruction-file support, the new optional CLI build behavior, the microphone-driven speech workflow, the optional speech-server backend, `whisper-server` helper scripts, the upgraded vision / sampled-video workflows, and the optional temporal sidecar contract for video action / emotion analysis.

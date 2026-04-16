@@ -2670,7 +2670,7 @@ std::function<bool(const std::string&)> onChunk) const {
 							continue;
 						}
 						accumulated += delta;
-						if (onChunk && !onChunk(accumulated)) {
+						if (onChunk && !onChunk(delta)) {
 							closeHandle(request);
 							closeHandle(connect);
 							closeHandle(session);
