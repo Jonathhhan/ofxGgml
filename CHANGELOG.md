@@ -2,6 +2,18 @@
 
 All notable changes to `ofxGgml` are documented in this file.
 
+## [Unreleased]
+
+### Added
+- `ofxGgmlInference` realtime grounding now includes an opt-in news lookup path in addition to loaded URLs, weather, and search fallback sources.
+
+### Changed
+- `ofxGgmlGuiExample` replaces the old online/offline toggle with four `Live context` policies: `Offline`, `LoadedSourcesOnly`, `LiveContext`, and `LiveContextStrictCitations`.
+- GUI live-source controls now use the more general `Live context` / `sources` wording instead of mixed `online` / `realtime` labels.
+
+### Documentation
+- `README.md` now documents the `Live context` policies and clarifies that source grounding can range from explicit loaded URLs to broader live web/news/weather/search context.
+
 ## [1.0.1] - 2026-04-16
 
 ### Added

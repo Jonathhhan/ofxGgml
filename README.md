@@ -28,6 +28,7 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlGraph` fluent graph builder for common ggml operations
 - `ofxGgmlModel` GGUF inspection and backend weight upload
 - `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, CLI capability probing, cutoff continuation, and source-grounded prompt building
+- addon-level `Live context` support for loaded sources, live web/news/weather/search grounding, and stricter citation-oriented response modes
 - `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
 - `ofxGgmlVideoInference` for backend-driven video understanding, starting with sampled-frame analysis and room for future specialized video backends
@@ -189,7 +190,7 @@ Common options:
 ## Examples
 
 - `ofxGgmlBasicExample`: interactive matrix demo plus steady-state matmul benchmark
-- `ofxGgmlGuiExample`: local chat, review, script, speech, and multimodal workflow UI backed by addon helpers
+- `ofxGgmlGuiExample`: local chat, review, script, speech, multimodal, and `Live context` workflow UI backed by addon helpers
 - `ofxGgmlNeuralExample`: reusable inference graph with live class bars and latency view
 
 Both lightweight examples are now keyboard-driven so you can rerun compute and benchmark paths without restarting the app.
@@ -217,6 +218,15 @@ These wrappers configure the test suite with `OFXGGML_ENABLE_BENCHMARK_TESTS=ON`
 ## Source-grounded generation
 
 `ofxGgmlInference` can now build source-aware prompts directly from URLs or an `ofxGgmlScriptSource` instance, so apps do not need to hand-roll HTML fetching and context assembly on top of the addon.
+
+`ofxGgmlGuiExample` now exposes this through `Live context` policies:
+
+- `Offline`
+- `LoadedSourcesOnly`
+- `LiveContext`
+- `LiveContextStrictCitations`
+
+These modes let you decide whether the assistant should stay fully local, rely only on explicitly loaded source URLs, or use broader live grounding such as source URLs, news, weather, and search snippets. The strict-citation mode keeps the same live lookup behavior but biases responses toward grounded source usage.
 
 ```cpp
 ofxGgmlInference inference;
