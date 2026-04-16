@@ -56,6 +56,8 @@ struct TokenLiteral {
 	size_t len;
 };
 
+bool gConsoleAnsiEnabled = false;
+
 struct LogLevelOption {
 	const char * label;
 	ofLogLevel level;
@@ -510,6 +512,72 @@ std::string formatConsoleLogText(const std::string & text, bool chatLike = false
 	}
 
 	return trim(flattened);
+}
+
+bool enableConsoleAnsiFormatting() {
+#ifdef _WIN32
+	HANDLE handle = GetStdHandle(STD_ERROR_HANDLE);
+	if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+	DWORD mode = 0;
+	if (!GetConsoleMode(handle, &mode)) {
+		return false;
+	}
+	if ((mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0) {
+		return true;
+	}
+	return SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
+#else
+	return ::isatty(fileno(stderr)) != 0;
+#endif
+}
+
+std::string styleConsoleText(const std::string & text, const char * ansiCode) {
+	if (!gConsoleAnsiEnabled || text.empty() || ansiCode == nullptr || *ansiCode == '\0') {
+		return text;
+	}
+	return std::string("\x1b[") + ansiCode + "m" + text + "\x1b[0m";
+}
+
+const char * consoleRoleAnsiCode(const std::string & role) {
+	if (role == "user" || role == "You") return "1;32";
+	if (role == "assistant" || role == "AI") return "1;36";
+	if (role == "system" || role == "System") return "1;90";
+	return "1;37";
+}
+
+const char * consoleChannelAnsiCode(const std::string & channel) {
+	if (channel == "ChatWindow") return "90";
+	if (channel == "Script") return "95";
+	if (channel == "Summarize") return "94";
+	if (channel == "Write") return "35";
+	if (channel == "Translate") return "96";
+	if (channel == "Custom") return "37";
+	if (channel == "Vision") return "93";
+	if (channel == "Speech") return "92";
+	return "90";
+}
+
+const char * consoleBodyAnsiCode(const std::string & text) {
+	const std::string trimmed = trim(text);
+	if (trimmed.rfind("[Error]", 0) == 0) return "1;31";
+	if (trimmed.rfind("[warning]", 0) == 0 || trimmed.rfind("[warn]", 0) == 0) return "33";
+	return "";
+}
+
+std::string formatConsoleLogLine(
+	const std::string & channel,
+	const std::string & roleLabel,
+	const std::string & text,
+	bool chatLike = false) {
+	const std::string formattedText = formatConsoleLogText(text, chatLike);
+	const std::string prefix = "[" + channel + "]";
+	const std::string role = roleLabel + ":";
+	const std::string styledPrefix = styleConsoleText(prefix, consoleChannelAnsiCode(channel));
+	const std::string styledRole = styleConsoleText(role, consoleRoleAnsiCode(roleLabel));
+	const std::string styledText = styleConsoleText(formattedText, consoleBodyAnsiCode(formattedText));
+	return styledPrefix + " " + styledRole + " " + styledText;
 }
 
 // Translate well-known process crash/error exit codes into a short
@@ -1881,9 +1949,10 @@ promptTemplates.push_back({
 // ---------------------------------------------------------------------------
 
 void ofApp::setup() {
-ofSetWindowTitle("ofxGgml AI Studio");
-ofSetFrameRate(60);
-ofSetBackgroundColor(ofColor(30, 30, 34));
+	gConsoleAnsiEnabled = enableConsoleAnsiFormatting();
+	ofSetWindowTitle("ofxGgml AI Studio");
+	ofSetFrameRate(60);
+	ofSetBackgroundColor(ofColor(30, 30, 34));
 
 gui.setup(nullptr, true, ImGuiConfigFlags_None, true);
 ImGui::GetIO().IniFilename = "imgui_ggml_studio.ini";
@@ -2676,7 +2745,7 @@ if (ImGui::IsItemHovered()) {
 	if ((submitted || sendClicked || sendWithSourcesClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
 std::string userText(chatInput);
 chatMessages.push_back({"user", userText, ofGetElapsedTimef()});
-fprintf(stderr, "[ChatWindow] You: %s\n", userText.c_str());
+fprintf(stderr, "%s\n", formatConsoleLogLine("ChatWindow", "You", userText, true).c_str());
 std::memset(chatInput, 0, sizeof(chatInput));
 ofxGgmlRealtimeInfoSettings realtimeSettings = buildLiveContextSettings(
 	"",
@@ -7212,7 +7281,7 @@ if (pendingOutput.empty()) return;
 switch (pendingMode) {
 case AiMode::Chat:
 chatMessages.push_back({"assistant", pendingOutput, ofGetElapsedTimef()});
-fprintf(stderr, "[ChatWindow] AI: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
+fprintf(stderr, "%s\n", formatConsoleLogLine("ChatWindow", "AI", pendingOutput, true).c_str());
 break;
 case AiMode::Script:
 scriptOutput = pendingOutput;
@@ -7220,27 +7289,27 @@ scriptMessages.push_back({"assistant", pendingOutput, ofGetElapsedTimef()});
 if (pendingOutput.rfind("[Error]", 0) != 0) {
 scriptProjectMemory.addInteraction(lastScriptRequest, pendingOutput);
 }
-fprintf(stderr, "[ChatWindow] Script: %s\n", formatConsoleLogText(pendingOutput).c_str());
+fprintf(stderr, "%s\n", formatConsoleLogLine("Script", "AI", pendingOutput).c_str());
 break;
 case AiMode::Summarize:
 summarizeOutput = pendingOutput;
-fprintf(stderr, "[ChatWindow] Summarize: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
+fprintf(stderr, "%s\n", formatConsoleLogLine("Summarize", "AI", pendingOutput, true).c_str());
 break;
 case AiMode::Write:
 writeOutput = pendingOutput;
-fprintf(stderr, "[ChatWindow] Write: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
+fprintf(stderr, "%s\n", formatConsoleLogLine("Write", "AI", pendingOutput, true).c_str());
 break;
 case AiMode::Translate:
 translateOutput = pendingOutput;
-fprintf(stderr, "[ChatWindow] Translate: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
+fprintf(stderr, "%s\n", formatConsoleLogLine("Translate", "AI", pendingOutput, true).c_str());
 break;
 case AiMode::Custom:
 customOutput = pendingOutput;
-fprintf(stderr, "[ChatWindow] Custom: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
+fprintf(stderr, "%s\n", formatConsoleLogLine("Custom", "AI", pendingOutput, true).c_str());
 break;
 case AiMode::Vision:
 visionOutput = pendingOutput;
-fprintf(stderr, "[ChatWindow] Vision: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
+fprintf(stderr, "%s\n", formatConsoleLogLine("Vision", "AI", pendingOutput, true).c_str());
 break;
 case AiMode::Speech:
 speechOutput = pendingOutput;
@@ -7248,7 +7317,7 @@ speechDetectedLanguage = pendingSpeechDetectedLanguage;
 speechTranscriptPath = pendingSpeechTranscriptPath;
 speechSrtPath = pendingSpeechSrtPath;
 speechSegmentCount = pendingSpeechSegmentCount;
-fprintf(stderr, "[ChatWindow] Speech: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
+fprintf(stderr, "%s\n", formatConsoleLogLine("Speech", "AI", pendingOutput, true).c_str());
 break;
 }
 pendingOutput.clear();
