@@ -84,10 +84,21 @@ ofxGgmlChatAssistantResult ofxGgmlChatAssistant::run(
 	std::function<bool(const std::string &)> onChunk) const {
 	ofxGgmlChatAssistantResult result;
 	result.prepared = preparePrompt(request);
-	result.inference = m_inference.generate(
-		modelPath,
-		result.prepared.prompt,
-		settings,
-		onChunk);
+	const bool useRealtimeInfo =
+		request.realtimeInfo.enabled ||
+		!request.realtimeInfo.explicitUrls.empty();
+	result.inference = useRealtimeInfo
+		? m_inference.generateWithRealtimeInfo(
+			modelPath,
+			result.prepared.prompt,
+			request.userText,
+			settings,
+			request.realtimeInfo,
+			onChunk)
+		: m_inference.generate(
+			modelPath,
+			result.prepared.prompt,
+			settings,
+			onChunk);
 	return result;
 }

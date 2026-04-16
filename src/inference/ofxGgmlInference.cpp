@@ -12,12 +12,14 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <limits>
 #include <numeric>
 #include <random>
 #include <regex>
 #include <sstream>
 #include <string_view>
+#include <unordered_set>
 
 #ifdef _WIN32
 	#ifndef NOMINMAX
@@ -383,6 +385,141 @@ static std::string formatSourceLabel(const ofxGgmlPromptSource & source) {
 
 static bool isLikelyWebUri(const std::string & uri) {
 	return uri.rfind("http://", 0) == 0 || uri.rfind("https://", 0) == 0;
+}
+
+static std::vector<std::string> extractHttpUrls(const std::string & text) {
+	static const std::regex urlRegex(R"(https?://[^\s<>\"]+)", std::regex::icase);
+	std::vector<std::string> urls;
+	std::unordered_set<std::string> seen;
+	for (std::sregex_iterator it(text.begin(), text.end(), urlRegex), end;
+		it != end;
+		++it) {
+		const std::string url = trim(it->str());
+		if (!url.empty() && seen.insert(url).second) {
+			urls.push_back(url);
+		}
+	}
+	return urls;
+}
+
+static std::string urlEncode(const std::string & value) {
+	std::ostringstream escaped;
+	escaped.fill('0');
+	escaped << std::hex;
+	for (unsigned char c : value) {
+		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+			escaped << c;
+		} else {
+			escaped << '%' << std::setw(2) << std::uppercase << int(c);
+		}
+	}
+	return escaped.str();
+}
+
+static bool looksLikeWeatherQuery(const std::string & text) {
+	std::string lowered = text;
+	std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+		[](unsigned char c) {
+			return static_cast<char>(std::tolower(c));
+		});
+	return lowered.find("weather") != std::string::npos ||
+		lowered.find("temperature") != std::string::npos ||
+		lowered.find("forecast") != std::string::npos ||
+		lowered.find("rain") != std::string::npos;
+}
+
+static std::string detectWeatherLocation(const std::string & text) {
+	static const std::regex weatherLocRegex(
+		R"(weather\s+(?:in|for)\s+([A-Za-z0-9 ,._-]+))",
+		std::regex::icase);
+	std::smatch match;
+	if (std::regex_search(text, match, weatherLocRegex) && match.size() >= 2) {
+		std::string location = trim(match[1].str());
+		if (location.size() > 64) {
+			location = location.substr(0, 64);
+		}
+		return location;
+	}
+	return "home";
+}
+
+static ofxGgmlPromptSourceSettings toPromptSourceSettings(
+	const ofxGgmlRealtimeInfoSettings & realtimeSettings) {
+	ofxGgmlPromptSourceSettings sourceSettings;
+	sourceSettings.maxSources = realtimeSettings.maxSources;
+	sourceSettings.maxCharsPerSource = realtimeSettings.maxCharsPerSource;
+	sourceSettings.maxTotalChars = realtimeSettings.maxTotalChars;
+	sourceSettings.requestCitations = realtimeSettings.requestCitations;
+	sourceSettings.heading = realtimeSettings.heading;
+	return sourceSettings;
+}
+
+static void appendUniqueUrls(
+	std::vector<std::string> & urls,
+	const std::vector<std::string> & candidates) {
+	std::unordered_set<std::string> seen(urls.begin(), urls.end());
+	for (const auto & candidate : candidates) {
+		const std::string url = trim(candidate);
+		if (!url.empty() && seen.insert(url).second) {
+			urls.push_back(url);
+		}
+	}
+}
+
+static ofxGgmlPromptSource fetchWeatherSource(
+	const std::string & query,
+	const ofxGgmlPromptSourceSettings & sourceSettings) {
+	ofxGgmlPromptSource source;
+	const std::string location = detectWeatherLocation(query);
+	const std::string url = "https://wttr.in/" + urlEncode(location) + "?format=3";
+	const ofHttpResponse response = ofLoadURL(url);
+	if (response.status < 200 || response.status >= 300) {
+		return {};
+	}
+
+	source.label = "Live weather";
+	source.uri = url;
+	source.isWebSource = true;
+	source.content = clipTextWithMarker(
+		trim(response.data.getText()),
+		sourceSettings.maxCharsPerSource,
+		&source.wasTruncated);
+	return source;
+}
+
+static ofxGgmlPromptSource fetchSearchSnippetSource(
+	const std::string & query,
+	const ofxGgmlPromptSourceSettings & sourceSettings) {
+	ofxGgmlPromptSource source;
+	if (trim(query).empty()) {
+		return source;
+	}
+
+	const std::string url = "https://lite.duckduckgo.com/lite/?q=" + urlEncode(query);
+	const ofHttpResponse response = ofLoadURL(url);
+	if (response.status < 200 || response.status >= 300) {
+		return source;
+	}
+
+	static const std::regex snippetRe(
+		R"(<td[^>]*class=\"result-snippet\"[^>]*>([\s\S]*?)</td>)",
+		std::regex::icase);
+	std::smatch match;
+	const std::string body = response.data.getText();
+	if (!std::regex_search(body, match, snippetRe) || match.size() < 2) {
+		return source;
+	}
+
+	source.label = "Web search snippet";
+	source.uri = url;
+	source.isWebSource = true;
+	source.content = trim(match[1].str());
+	source.content = normalizeSourceContent(source, sourceSettings);
+	source.content = clipTextWithMarker(
+		source.content,
+		sourceSettings.maxCharsPerSource,
+		&source.wasTruncated);
+	return source;
 }
 
 static bool isRuntimeNoiseLine(std::string_view trimmedLine);
@@ -1611,6 +1748,71 @@ std::string ofxGgmlInference::buildPromptWithSources(
 	return ctx.str();
 }
 
+std::vector<ofxGgmlPromptSource> ofxGgmlInference::fetchRealtimeSources(
+	const std::string & queryOrPrompt,
+	const ofxGgmlRealtimeInfoSettings & realtimeSettings) {
+	std::vector<ofxGgmlPromptSource> sources;
+	if ((!realtimeSettings.enabled && realtimeSettings.explicitUrls.empty()) ||
+		realtimeSettings.maxSources == 0 ||
+		realtimeSettings.maxCharsPerSource == 0 ||
+		realtimeSettings.maxTotalChars == 0) {
+		return sources;
+	}
+
+	const std::string query = trim(
+		realtimeSettings.queryOverride.empty()
+			? queryOrPrompt
+			: realtimeSettings.queryOverride);
+	const ofxGgmlPromptSourceSettings sourceSettings =
+		toPromptSourceSettings(realtimeSettings);
+
+	std::vector<std::string> urls = realtimeSettings.explicitUrls;
+	if (realtimeSettings.allowPromptUrlFetch) {
+		appendUniqueUrls(urls, extractHttpUrls(queryOrPrompt));
+	}
+
+	sources = fetchUrlSources(urls, sourceSettings);
+	if (!sources.empty() || !realtimeSettings.enabled) {
+		return sources;
+	}
+
+	if (realtimeSettings.allowWeatherLookup && looksLikeWeatherQuery(query)) {
+		ofxGgmlPromptSource weather = fetchWeatherSource(query, sourceSettings);
+		if (!trim(weather.content).empty()) {
+			sources.push_back(std::move(weather));
+			return sources;
+		}
+	}
+
+	if (realtimeSettings.allowSearchFallback) {
+		ofxGgmlPromptSource snippet = fetchSearchSnippetSource(query, sourceSettings);
+		if (!trim(snippet.content).empty()) {
+			sources.push_back(std::move(snippet));
+		}
+	}
+
+	return sources;
+}
+
+std::string ofxGgmlInference::buildPromptWithRealtimeInfo(
+	const std::string & prompt,
+	const std::string & queryOrPrompt,
+	const ofxGgmlRealtimeInfoSettings & realtimeSettings,
+	std::vector<ofxGgmlPromptSource> * usedSources) {
+	const auto sources = fetchRealtimeSources(queryOrPrompt, realtimeSettings);
+	if (sources.empty()) {
+		if (usedSources) {
+			usedSources->clear();
+		}
+		return prompt;
+	}
+	return buildPromptWithSources(
+		prompt,
+		sources,
+		toPromptSourceSettings(realtimeSettings),
+		usedSources);
+}
+
 std::string ofxGgmlInference::clampPromptToContext(
 	const std::string & prompt,
 	size_t contextTokens,
@@ -2031,6 +2233,28 @@ ofxGgmlInferenceResult ofxGgmlInference::generateWithScriptSource(
 		settings,
 		sourceSettings,
 		onChunk);
+}
+
+ofxGgmlInferenceResult ofxGgmlInference::generateWithRealtimeInfo(
+	const std::string & modelPath,
+	const std::string & prompt,
+	const std::string & queryOrPrompt,
+	const ofxGgmlInferenceSettings & settings,
+	const ofxGgmlRealtimeInfoSettings & realtimeSettings,
+	std::function<bool(const std::string &)> onChunk) const {
+	std::vector<ofxGgmlPromptSource> usedSources;
+	const std::string promptWithSources = buildPromptWithRealtimeInfo(
+		prompt,
+		queryOrPrompt,
+		realtimeSettings,
+		&usedSources);
+	ofxGgmlInferenceResult result = generate(
+		modelPath,
+		promptWithSources,
+		settings,
+		onChunk);
+	result.sourcesUsed = std::move(usedSources);
+	return result;
 }
 
 ofxGgmlEmbeddingResult ofxGgmlInference::embed(

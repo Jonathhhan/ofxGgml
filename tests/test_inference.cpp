@@ -469,6 +469,25 @@ TEST_CASE("Inference helper utilities", "[inference]") {
 			"hello");
 		REQUIRE(cleaned == "hello! How can I assist you today?");
 	}
+
+	SECTION("Realtime prompt helper is a no-op when disabled") {
+		ofxGgmlRealtimeInfoSettings realtimeSettings;
+		realtimeSettings.enabled = false;
+		realtimeSettings.allowPromptUrlFetch = false;
+		realtimeSettings.allowSearchFallback = false;
+		realtimeSettings.allowWeatherLookup = false;
+
+		std::vector<ofxGgmlPromptSource> usedSources;
+		const std::string prompt = "Answer the user.";
+		const std::string grounded = ofxGgmlInference::buildPromptWithRealtimeInfo(
+			prompt,
+			"hello",
+			realtimeSettings,
+			&usedSources);
+
+		REQUIRE(grounded == prompt);
+		REQUIRE(usedSources.empty());
+	}
 }
 
 TEST_CASE("Embedding result structure", "[inference]") {

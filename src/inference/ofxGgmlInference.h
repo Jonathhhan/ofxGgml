@@ -78,6 +78,20 @@ struct ofxGgmlPromptSourceSettings {
 		"When you rely on a source, cite it inline as [Source N].";
 };
 
+struct ofxGgmlRealtimeInfoSettings {
+	bool enabled = false;
+	bool allowPromptUrlFetch = true;
+	bool allowSearchFallback = true;
+	bool allowWeatherLookup = true;
+	size_t maxSources = 4;
+	size_t maxCharsPerSource = 1800;
+	size_t maxTotalChars = 6000;
+	bool requestCitations = true;
+	std::string heading = "Realtime and web context";
+	std::string queryOverride;
+	std::vector<std::string> explicitUrls;
+};
+
 struct ofxGgmlInferenceResult {
 	bool success = false;
 	float elapsedMs = 0.0f;
@@ -150,6 +164,14 @@ public:
 		const ofxGgmlPromptSourceSettings & sourceSettings = {},
 		std::function<bool(const std::string &)> onChunk = nullptr) const;
 
+	ofxGgmlInferenceResult generateWithRealtimeInfo(
+		const std::string & modelPath,
+		const std::string & prompt,
+		const std::string & queryOrPrompt,
+		const ofxGgmlInferenceSettings & settings = {},
+		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {},
+		std::function<bool(const std::string &)> onChunk = nullptr) const;
+
 	ofxGgmlEmbeddingResult embed(
 		const std::string & modelPath,
 		const std::string & text,
@@ -170,6 +192,14 @@ public:
 		const std::string & prompt,
 		const std::vector<ofxGgmlPromptSource> & sources,
 		const ofxGgmlPromptSourceSettings & sourceSettings = {},
+		std::vector<ofxGgmlPromptSource> * usedSources = nullptr);
+	static std::vector<ofxGgmlPromptSource> fetchRealtimeSources(
+		const std::string & queryOrPrompt,
+		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {});
+	static std::string buildPromptWithRealtimeInfo(
+		const std::string & prompt,
+		const std::string & queryOrPrompt,
+		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {},
 		std::vector<ofxGgmlPromptSource> * usedSources = nullptr);
 	static std::string clampPromptToContext(
 		const std::string & prompt,

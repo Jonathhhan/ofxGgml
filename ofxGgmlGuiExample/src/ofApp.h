@@ -155,6 +155,7 @@ private:
 	std::deque<std::string> logMessages;
 	std::mutex logMutex;
 	bool strictOfflineMode = false;
+	bool allowRealtimeInternet = false;
 	bool scriptIncludeRepoContext = true;
 	bool stopAtNaturalBoundary = true;
 	bool cliCapabilitiesProbed = false;
@@ -226,7 +227,8 @@ private:
 	void syncSelectedBackendIndex();
 	void runInference(AiMode mode, const std::string & userText,
 		const std::string & systemPrompt = "",
-		const std::string & overridePrompt = "");
+		const std::string & overridePrompt = "",
+		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {});
 	void runHierarchicalReview();
 	bool runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,
 		std::function<void(const std::string &)> onStreamData = nullptr,

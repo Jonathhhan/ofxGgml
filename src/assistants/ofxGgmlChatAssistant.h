@@ -15,6 +15,7 @@ struct ofxGgmlChatAssistantRequest {
 	std::string systemPrompt;
 	std::string responseLanguage;
 	std::string labelOverride;
+	ofxGgmlRealtimeInfoSettings realtimeInfo;
 };
 
 struct ofxGgmlChatAssistantPreparedPrompt {

@@ -203,158 +203,15 @@ std::vector<std::string> extractHttpUrls(const std::string & text) {
 	return urls;
 }
 
-std::string fetchUrlContentLimited(const std::string & url, size_t maxChars) {
-	if (url.empty()) return "";
-	ofHttpResponse resp = ofLoadURL(url);
-	if (resp.status < 200 || resp.status >= 300) return "";
-	std::string body = resp.data.getText();
-	if (body.size() > maxChars) {
-		body = body.substr(0, maxChars) + "\n...[truncated]";
-	}
-	return body;
-}
-
-std::string urlEncode(const std::string & value) {
-	std::ostringstream escaped;
-	escaped.fill('0');
-	escaped << std::hex;
-	for (unsigned char c : value) {
-		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-			escaped << c;
-		} else {
-			escaped << '%' << std::setw(2) << std::uppercase << int(c);
-		}
-	}
-	return escaped.str();
-}
-
-std::string fetchWeatherContext(const std::string & userText, size_t maxChars) {
-	static const std::regex weatherLocRegex(
-		R"(weather\s+(in|for)\s+([A-Za-z0-9 ,._-]+))",
-		std::regex::icase);
-	std::string location = "home";
-	std::smatch m;
-	if (std::regex_search(userText, m, weatherLocRegex) && m.size() >= 3) {
-		location = trim(m[2].str());
-		if (location.size() > 64) location = location.substr(0, 64);
-	}
-	const std::string url = "https://wttr.in/" + urlEncode(location) + "?format=3";
-	return fetchUrlContentLimited(url, maxChars);
-}
-
-std::string stripHtmlTags(const std::string & html) {
-	std::string out;
-	out.reserve(html.size());
-	bool inTag = false;
-	for (char c : html) {
-		if (c == '<') {
-			inTag = true;
-		} else if (c == '>') {
-			inTag = false;
-			out.push_back(' ');
-		} else if (!inTag) {
-			out.push_back(c);
-		}
-	}
-	return out;
-}
-
-std::string fetchSearchSnippet(const std::string & query, size_t maxChars) {
-	if (query.empty()) return "";
-	const std::string url = "https://lite.duckduckgo.com/lite/?q=" + urlEncode(query);
-	ofHttpResponse resp = ofLoadURL(url);
-	if (resp.status < 200 || resp.status >= 300) return "";
-	const std::string body = resp.data.getText();
-	std::regex snippetRe(R"(<td[^>]*class=\"result-snippet\"[^>]*>([\s\S]*?)</td>)",
-		std::regex::icase);
-	std::smatch m;
-	if (std::regex_search(body, m, snippetRe) && m.size() >= 2) {
-		std::string snippet = stripHtmlTags(m[1].str());
-		if (snippet.size() > maxChars) {
-			snippet = snippet.substr(0, maxChars) + "\n...[truncated]";
-		}
-		return trim(snippet);
-	}
-	return "";
-}
-
-std::string buildInternetContextFromUrls(
-	const std::vector<std::string> & urls,
-	size_t maxUrls,
-	size_t maxCharsPerUrl,
-	size_t maxTotalChars,
-	const std::string & heading) {
-	if (urls.empty() || maxUrls == 0 || maxTotalChars == 0) return {};
-
-	ofxGgmlPromptSourceSettings sourceSettings;
-	sourceSettings.maxSources = maxUrls;
-	sourceSettings.maxCharsPerSource = maxCharsPerUrl;
-	sourceSettings.maxTotalChars = maxTotalChars;
-	sourceSettings.requestCitations = false;
-	sourceSettings.heading = heading;
-
-	const auto sources = ofxGgmlInference::fetchUrlSources(urls, sourceSettings);
-	if (sources.empty()) return {};
-
-	std::ostringstream ctx;
-	for (const auto & source : sources) {
-		ctx << "\nURL: " << source.uri << "\n" << source.content << "\n";
-	}
-	return "\n\n" + heading + ":" + ctx.str();
-}
-
-std::string buildGroundedPromptFromInputUrls(
-	const std::string & prompt,
+ofxGgmlRealtimeInfoSettings buildRealtimeInfoSettingsFromUrls(
 	const std::string & rawUrls,
 	const std::string & heading,
-	bool requestCitations = true) {
-	const auto urls = extractHttpUrls(rawUrls);
-	if (urls.empty()) {
-		return prompt;
-	}
-
-	ofxGgmlPromptSourceSettings sourceSettings;
-	sourceSettings.maxSources = 4;
-	sourceSettings.maxCharsPerSource = 1800;
-	sourceSettings.maxTotalChars = 6000;
-	sourceSettings.heading = heading;
-	sourceSettings.requestCitations = requestCitations;
-
-	const auto sources = ofxGgmlInference::fetchUrlSources(urls, sourceSettings);
-	if (sources.empty()) {
-		return prompt;
-	}
-	return ofxGgmlInference::buildPromptWithSources(prompt, sources, sourceSettings);
-}
-
-std::string buildInternetContextFromText(const std::string & userText, bool allowSearchFallback) {
-	static constexpr size_t kMaxUrls = 3;
-	static constexpr size_t kMaxCharsPerUrl = 2000;
-	static constexpr size_t kMaxTotalChars = 6000;
-
-	const auto urls = extractHttpUrls(userText);
-	std::string context = buildInternetContextFromUrls(
-		urls,
-		kMaxUrls,
-		kMaxCharsPerUrl,
-		kMaxTotalChars,
-		"Context fetched from URLs in your message");
-	if (!context.empty() || !allowSearchFallback) {
-		return context;
-	}
-
-	std::string lowered = userText;
-	std::transform(lowered.begin(), lowered.end(), lowered.begin(),
-		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	std::string autoContext;
-	if (lowered.find("weather") != std::string::npos) {
-		autoContext = fetchWeatherContext(userText, 512);
-	}
-	if (autoContext.empty()) {
-		autoContext = fetchSearchSnippet(userText, 1200);
-	}
-	if (autoContext.empty()) return {};
-	return "\n\nInternet context:\n" + autoContext + "\n";
+	bool enableAutoRealtime = false) {
+	ofxGgmlRealtimeInfoSettings settings;
+	settings.enabled = enableAutoRealtime;
+	settings.heading = heading;
+	settings.explicitUrls = extractHttpUrls(rawUrls);
+	return settings;
 }
 
 // Strip common chat-template role markers and prompt artefacts that
@@ -482,9 +339,6 @@ constexpr float kSpinnerInterval = 0.15f;       // seconds per spinner frame
 constexpr float kDotsAnimationSpeed = 3.0f;     // dots cycle speed multiplier
 constexpr size_t kMaxScriptContextFiles = 50;
 constexpr size_t kMaxFocusedFileSnippetChars = 2000;
-constexpr size_t kMaxInternetSourceUrls = 3;
-constexpr size_t kMaxInternetCharsPerSourceUrl = 1500;
-constexpr size_t kMaxInternetCharsFromSourceUrls = 4500;
 constexpr auto kStreamUiUpdateInterval = std::chrono::milliseconds(50);
 constexpr size_t kStreamUiMinGrowth = 256;
 const char * const kWaitingLabels[] = {"generating", "generating.", "generating..", "generating..."};
@@ -1554,6 +1408,13 @@ if (ImGui::IsItemHovered()) {
 	ImGui::SetTooltip("Reuse llama prompt cache between requests for faster follow-up responses.");
 }
 ImGui::Checkbox("Offline mode", &strictOfflineMode);
+ImGui::SameLine();
+ImGui::BeginDisabled(strictOfflineMode);
+ImGui::Checkbox("Realtime web access", &allowRealtimeInternet);
+ImGui::EndDisabled();
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Allow the assistant to fetch optional internet and realtime context for prompts.");
+}
 
 const char * mirostatLabels[] = { "Mirostat: Off", "Mirostat", "Mirostat 2.0" };
 ImGui::SetNextItemWidth(-1);
@@ -1789,26 +1650,15 @@ std::string userText(chatInput);
 chatMessages.push_back({"user", userText, ofGetElapsedTimef()});
 fprintf(stderr, "[ChatWindow] You: %s\n", userText.c_str());
 std::memset(chatInput, 0, sizeof(chatInput));
+ofxGgmlRealtimeInfoSettings realtimeSettings;
+realtimeSettings.enabled = allowRealtimeInternet && !strictOfflineMode;
 if (sendWithSourcesClicked) {
-	ofxGgmlChatAssistantRequest request;
-	request.userText = userText;
-	if (chatLanguageIndex > 0 &&
-		chatLanguageIndex < static_cast<int>(chatLanguages.size())) {
-		request.responseLanguage =
-			chatLanguages[static_cast<size_t>(chatLanguageIndex)].name;
-	}
-	const auto prepared = chatAssistant.preparePrompt(request);
-	runInference(
-		AiMode::Chat,
-		userText,
-		"",
-		buildGroundedPromptFromInputUrls(
-			prepared.prompt,
-			sourceUrlsInput,
-			"Reference URLs for this chat reply"));
-} else {
-	runInference(AiMode::Chat, userText);
+	realtimeSettings = buildRealtimeInfoSettingsFromUrls(
+		sourceUrlsInput,
+		"Reference URLs for this chat reply",
+		realtimeSettings.enabled);
 }
+runInference(AiMode::Chat, userText, "", "", realtimeSettings);
 }
 
 // Copy / Clear / Export row.
@@ -2726,14 +2576,15 @@ if (ImGui::Button("Summarize URLs", ImVec2(150, 0))) {
 		? std::string(summarizeInput)
 		: "Summarize the reference sources.";
 	const auto prepared = textAssistant.preparePrompt(request);
+	const auto realtimeSettings = buildRealtimeInfoSettingsFromUrls(
+		sourceUrlsInput,
+		"Reference URLs for summarization");
 	runInference(
 		AiMode::Summarize,
 		request.inputText,
 		"",
-		buildGroundedPromptFromInputUrls(
-			prepared.prompt,
-			sourceUrlsInput,
-			"Reference URLs for summarization"));
+		prepared.prompt,
+		realtimeSettings);
 }
 ImGui::EndDisabled();
 
@@ -3001,14 +2852,15 @@ if (ImGui::Button("Run with Sources", ImVec2(150, 0))) {
 	request.inputText = customInput;
 	request.systemPrompt = customSystemPrompt;
 	const auto prepared = textAssistant.preparePrompt(request);
+	const auto realtimeSettings = buildRealtimeInfoSettingsFromUrls(
+		sourceUrlsInput,
+		"Reference URLs for this custom task");
 	runInference(
 		AiMode::Custom,
 		request.inputText,
 		customSystemPrompt,
-		buildGroundedPromptFromInputUrls(
-			prepared.prompt,
-			sourceUrlsInput,
-			"Reference URLs for this custom task"));
+		prepared.prompt,
+		realtimeSettings);
 }
 ImGui::EndDisabled();
 
@@ -3077,6 +2929,9 @@ ImGui::Text(" | Tokens: %d  Temp: %.2f  Top-P: %.2f  Top-K: %d  Min-P: %.2f",
 if (strictOfflineMode) {
 	ImGui::SameLine();
 	ImGui::TextDisabled(" | Offline");
+} else if (allowRealtimeInternet) {
+	ImGui::SameLine();
+	ImGui::TextDisabled(" | Realtime web");
 }
 if (gpuLayers > 0) {
 ImGui::SameLine();
@@ -3296,6 +3151,7 @@ out << "writeOutput=" << escapeSessionText(writeOutput) << "\n";
 out << "translateOutput=" << escapeSessionText(translateOutput) << "\n";
 out << "customOutput=" << escapeSessionText(customOutput) << "\n";
 out << "strictOfflineMode=" << (strictOfflineMode ? 1 : 0) << "\n";
+out << "allowRealtimeInternet=" << (allowRealtimeInternet ? 1 : 0) << "\n";
 out << "stopAtNaturalBoundary=" << (stopAtNaturalBoundary ? 1 : 0) << "\n";
 
 // Chat messages.
@@ -3468,6 +3324,7 @@ else if (key == "writeOutput") writeOutput = unescapeSessionText(value);
 else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
 else if (key == "customOutput") customOutput = unescapeSessionText(value);
 else if (key == "strictOfflineMode") strictOfflineMode = (safeStoi(value, 0) != 0);
+else if (key == "allowRealtimeInternet") allowRealtimeInternet = (safeStoi(value, 0) != 0);
 else if (key == "stopAtNaturalBoundary") stopAtNaturalBoundary = (safeStoi(value, 1) != 0);
 else if (key == "msg") {
 // Parse: role|timestamp|text
@@ -4227,7 +4084,8 @@ void ofApp::syncSelectedBackendIndex() {
 
 void ofApp::runInference(AiMode mode, const std::string & userText,
 	const std::string & systemPrompt,
-	const std::string & overridePrompt) {
+	const std::string & overridePrompt,
+	const ofxGgmlRealtimeInfoSettings & realtimeSettings) {
 if (generating.load() || !engineReady) return;
 if (mode == AiMode::Script) {
 lastScriptRequest = userText;
@@ -4258,35 +4116,21 @@ if (workerThread.joinable()) {
 workerThread.join();
 }
 
-	workerThread = std::thread([this, mode, userText, systemPrompt, overridePrompt,
+	workerThread = std::thread([this, mode, userText, systemPrompt, overridePrompt, realtimeSettings,
 		chatLanguageIndexSnapshot, selectedLanguageIndexSnapshot,
 		translateSourceLangSnapshot, translateTargetLangSnapshot,
 		selectedScriptFileIndexSnapshot, scriptIncludeRepoContextSnapshot,
 		chatLanguagesSnapshot, scriptLanguagesSnapshot, translateLanguagesSnapshot]() {
  try {
- std::string userTextWithInternet = userText;
  const bool preserveLlamaInstructions = (mode == AiMode::Script);
- const bool allowInternet = !strictOfflineMode;
- const bool internetFromChat = (mode == AiMode::Chat);
- const bool internetFromScriptSource =
-	(mode == AiMode::Script && scriptSource.getSourceType() == ofxGgmlScriptSourceType::Internet);
- if (allowInternet && (internetFromChat || internetFromScriptSource)) {
-	std::string gatheredContext;
-	gatheredContext += buildInternetContextFromText(userText, true);
-
-	if (internetFromScriptSource) {
-		const auto sourceUrls = scriptSource.getInternetUrls();
-		gatheredContext += buildInternetContextFromUrls(
-			sourceUrls,
-			kMaxInternetSourceUrls,
-			kMaxInternetCharsPerSourceUrl,
-			kMaxInternetCharsFromSourceUrls,
-			"Context fetched from loaded internet sources");
-	}
-
-	if (!gatheredContext.empty()) {
-		userTextWithInternet += gatheredContext;
-	}
+ ofxGgmlRealtimeInfoSettings effectiveRealtimeSettings = realtimeSettings;
+ if (strictOfflineMode) {
+	effectiveRealtimeSettings.enabled = false;
+	effectiveRealtimeSettings.explicitUrls.clear();
+ } else if (mode == AiMode::Script &&
+	scriptSource.getSourceType() == ofxGgmlScriptSourceType::Internet) {
+	effectiveRealtimeSettings.heading = "Context fetched from loaded internet sources";
+	effectiveRealtimeSettings.explicitUrls = scriptSource.getInternetUrls();
  }
 
  auto buildPromptForCurrentMode = [&](const std::string & text) {
@@ -4363,8 +4207,14 @@ workerThread.join();
  };
 
  std::string prompt = overridePrompt.empty()
-	? buildPromptForCurrentMode(userTextWithInternet)
+	? buildPromptForCurrentMode(userText)
 	: overridePrompt;
+ if (effectiveRealtimeSettings.enabled || !effectiveRealtimeSettings.explicitUrls.empty()) {
+	prompt = ofxGgmlInference::buildPromptWithRealtimeInfo(
+		prompt,
+		userText,
+		effectiveRealtimeSettings);
+ }
  std::string result;
  std::string error;
 

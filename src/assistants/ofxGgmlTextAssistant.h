@@ -37,6 +37,7 @@ struct ofxGgmlTextAssistantRequest {
 	std::string sourceLanguage;
 	std::string targetLanguage;
 	std::string labelOverride;
+	ofxGgmlRealtimeInfoSettings realtimeInfo;
 };
 
 struct ofxGgmlTextAssistantPreparedPrompt {
