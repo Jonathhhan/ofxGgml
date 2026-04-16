@@ -705,6 +705,46 @@ TEST_CASE("Code review rejects code-fragment summaries and weak anchored finding
 	REQUIRE(result.integrationReview == "No material integration findings.");
 }
 
+TEST_CASE("Code review rejects generic startup error-handling claims on tiny entry points", "[code_review]") {
+	const auto sourceDir = makeUniqueCodeReviewDir("startup_error_handling_cleanup");
+	{
+		std::ofstream file(sourceDir / "main.cpp");
+		file << "int main() {\n";
+		file << "    auto window = ofCreateWindow(settings);\n";
+		file << "    ofRunApp(window, std::make_shared<ofApp>());\n";
+		file << "}\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	ofxGgmlCodeReview review;
+	review.setCompletionExecutable(createCodeReviewExecutable(
+		"echo Summary: Application entry point that boots the OpenFrameworks app.\r\n"
+		"echo Findings:\r\n"
+		"echo - There is no error handling around the creation of the window and application. If `ofCreateWindow` fails, the program will crash without any indication.\r\n"
+		"echo Tests:\r\n"
+		"echo - Add coverage for the supported findings above."));
+	review.setEmbeddingExecutable(createCodeReviewExecutable("echo [0.1, 0.2, 0.3]"));
+
+	ofxGgmlCodeReviewSettings settings;
+	settings.maxTokens = 128;
+	settings.contextSize = 1024;
+	settings.maxEmbedParallelTasks = 1;
+	settings.maxSummaryParallelTasks = 1;
+
+	const auto result = review.reviewScriptSource(
+		createCodeReviewDummyModel(),
+		scriptSource,
+		"Reject startup boilerplate findings unless they are concrete and evidenced.",
+		settings);
+
+	REQUIRE(result.success);
+	REQUIRE(result.firstPassSummary.find("No material findings in this file.") != std::string::npos);
+	REQUIRE(result.firstPassSummary.find("no error handling around") == std::string::npos);
+	REQUIRE(result.firstPassSummary.find("ofCreateWindow") == std::string::npos);
+}
+
 TEST_CASE("Code review replaces snippet-like summaries with professional fallbacks", "[code_review]") {
 	const auto sourceDir = makeUniqueCodeReviewDir("snippet_summary_cleanup");
 	{
@@ -836,4 +876,89 @@ TEST_CASE("Code review falls back to lexical ranking when embeddings are unavail
 	const auto & firstSelected = result.files[result.selectedFileIndices.front()];
 	REQUIRE(firstSelected.name == "icon.rc");
 	REQUIRE(firstSelected.similarityScore > 0.0f);
+}
+
+TEST_CASE("Code review injects repository instructions into review prompts", "[code_review]") {
+	const auto sourceDir = makeUniqueCodeReviewDir("repo_instructions");
+	std::filesystem::create_directories(sourceDir / ".github" / "instructions");
+	{
+		std::ofstream file(sourceDir / "main.cpp");
+		file << "int main() { return 0; }\n";
+	}
+	{
+		std::ofstream file(sourceDir / ".github" / "copilot-instructions.md");
+		file << "Prefer concise evidence-backed review findings.\n";
+	}
+	{
+		std::ofstream file(sourceDir / ".github" / "instructions" / "cpp.instructions.md");
+		file << "---\n";
+		file << "applyTo: main.cpp\n";
+		file << "---\n";
+		file << "Treat startup code as low-risk unless a concrete failure path is visible.\n";
+	}
+	{
+		std::ofstream file(sourceDir / "AGENTS.md");
+		file << "Keep suggested follow-up work small and pragmatic.\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	bool firstPassSawInstructions = false;
+	int repoInstructionPromptCount = 0;
+
+	ofxGgmlCodeReview review;
+#ifdef _WIN32
+	review.setCompletionExecutable(createCodeReviewExecutable("echo."));
+#else
+	review.setCompletionExecutable(createCodeReviewExecutable("printf '\\n'"));
+#endif
+	review.setEmbeddingExecutable(createCodeReviewExecutable("echo [0.1, 0.2, 0.3]"));
+	review.setGenerationFallback([&](
+		const std::string &,
+		const std::string & prompt,
+		const ofxGgmlInferenceSettings &) {
+		if (prompt.find("Repository instructions:") != std::string::npos &&
+			prompt.find("Keep suggested follow-up work small and pragmatic.") != std::string::npos) {
+			++repoInstructionPromptCount;
+			if (prompt.find("File:") != std::string::npos ||
+				prompt.find("Review this file") != std::string::npos) {
+				firstPassSawInstructions = true;
+			}
+		}
+
+		ofxGgmlInferenceResult result;
+		result.success = true;
+		if (prompt.find("Architecture review") != std::string::npos ||
+			prompt.find("Architectural review") != std::string::npos) {
+			result.text = "No material architecture findings.";
+		} else if (prompt.find("Cross-file integration review") != std::string::npos ||
+			prompt.find("Third pass: Cross-file dependency and integration analysis.") != std::string::npos) {
+			result.text = "No material integration findings.";
+		} else {
+			result.text =
+				"Summary: Application entry point that boots the OpenFrameworks app.\n"
+				"Findings:\n"
+				"- Startup behavior is minimal. Evidence: `int main() { return 0; }`\n"
+				"Tests:\n"
+				"- Add a smoke test for the entry point.\n";
+		}
+		return result;
+	});
+
+	ofxGgmlCodeReviewSettings settings;
+	settings.maxTokens = 128;
+	settings.contextSize = 1024;
+	settings.maxEmbedParallelTasks = 1;
+	settings.maxSummaryParallelTasks = 1;
+
+	const auto result = review.reviewScriptSource(
+		createCodeReviewDummyModel(),
+		scriptSource,
+		"Respect repository instructions during review.",
+		settings);
+
+	REQUIRE(result.success);
+	REQUIRE(firstPassSawInstructions);
+	REQUIRE(repoInstructionPromptCount >= 1);
 }

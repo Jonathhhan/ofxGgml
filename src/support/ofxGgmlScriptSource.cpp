@@ -106,6 +106,12 @@ std::string normalizeRelativePath(
 	return path.lexically_normal().generic_string();
 }
 
+bool shouldSkipRecursiveDirectoryName(const std::string & filename) {
+	return !filename.empty() &&
+		filename[0] == '.' &&
+		filename != ".github";
+}
+
 std::string readTextFile(const std::filesystem::path & path) {
 	std::ifstream in(path, std::ios::binary);
 	if (!in.is_open()) {
@@ -1457,8 +1463,9 @@ std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::scanLocalFolderEn
 		const auto& entry = *it;
 		std::string filename = entry.path().filename().string();
 
-		// Skip hidden folders like .git to significantly speed up indexing
-		if (entry.is_directory(ec) && !filename.empty() && filename[0] == '.') {
+		// Skip heavy hidden folders like .git, but keep .github so repo
+		// instructions can participate in assistant and review prompts.
+		if (entry.is_directory(ec) && shouldSkipRecursiveDirectoryName(filename)) {
 			it.disable_recursion_pending();
 			continue;
 		}
@@ -1528,7 +1535,7 @@ uint64_t ofxGgmlScriptSource::computeLocalWorkspaceFingerprint(
 		const auto & entry = *it;
 		const std::string filename = entry.path().filename().string();
 		if (entry.is_directory(ec)) {
-			if (!filename.empty() && filename[0] == '.') {
+			if (shouldSkipRecursiveDirectoryName(filename)) {
 				it.disable_recursion_pending();
 			}
 			ec.clear();
@@ -1604,7 +1611,7 @@ ofxGgmlScriptSourceWorkspaceInfo ofxGgmlScriptSource::buildWorkspaceInfoForFolde
 		const auto entryPath = entry.path();
 		const std::string filename = normalizeLower(entryPath.filename().string());
 		if (entry.is_directory(ec)) {
-			if (!filename.empty() && filename[0] == '.') {
+			if (shouldSkipRecursiveDirectoryName(filename)) {
 				it.disable_recursion_pending();
 			}
 			ec.clear();

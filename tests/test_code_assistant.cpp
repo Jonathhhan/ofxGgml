@@ -194,6 +194,77 @@ TEST_CASE("Code assistant prompt preparation includes coding and symbol context"
 	REQUIRE(codeMap.entries.front().role.size() > 0);
 }
 
+TEST_CASE("Code assistant prompt preparation includes repository instructions and specialized action guidance", "[code_assistant]") {
+	const auto sourceDir = makeAssistantTestDir("instructions");
+	std::filesystem::create_directories(sourceDir / ".github" / "instructions");
+	{
+		std::ofstream out(sourceDir / "main.cpp");
+		out << "int main() { return 0; }\n";
+	}
+	{
+		std::ofstream out(sourceDir / ".github" / "copilot-instructions.md");
+		out << "Use concise, reviewer-ready language.\n";
+	}
+	{
+		std::ofstream out(sourceDir / ".github" / "instructions" / "ui.instructions.md");
+		out << "---\n";
+		out << "applyTo: main.cpp\n";
+		out << "---\n";
+		out << "Prefer practical UI wording over generic cleanup advice.\n";
+	}
+	{
+		std::ofstream out(sourceDir / "AGENTS.md");
+		out << "Keep generated patches small and safe by default.\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	int focusedFileIndex = -1;
+	const auto files = scriptSource.getFiles();
+	for (int i = 0; i < static_cast<int>(files.size()); ++i) {
+		if (!files[static_cast<size_t>(i)].isDirectory &&
+			files[static_cast<size_t>(i)].name == "main.cpp") {
+			focusedFileIndex = i;
+			break;
+		}
+	}
+	REQUIRE(focusedFileIndex >= 0);
+
+	ofxGgmlCodeAssistant assistant;
+	auto languages = ofxGgmlCodeAssistant::defaultLanguagePresets();
+	REQUIRE_FALSE(languages.empty());
+
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+	context.focusedFileIndex = focusedFileIndex;
+
+	ofxGgmlCodeAssistantRequest nextEditRequest;
+	nextEditRequest.action = ofxGgmlCodeAssistantAction::NextEdit;
+	nextEditRequest.language = languages.front();
+	nextEditRequest.userInput = "Polish the startup flow.";
+	nextEditRequest.requestStructuredResult = true;
+	nextEditRequest.requestUnifiedDiff = true;
+
+	const auto nextEditPrepared = assistant.preparePrompt(nextEditRequest, context);
+	REQUIRE(nextEditPrepared.prompt.find("Repository instructions:") != std::string::npos);
+	REQUIRE(nextEditPrepared.prompt.find("Use concise, reviewer-ready language.") != std::string::npos);
+	REQUIRE(nextEditPrepared.prompt.find("Prefer practical UI wording over generic cleanup advice.") != std::string::npos);
+	REQUIRE(nextEditPrepared.prompt.find("Keep generated patches small and safe by default.") != std::string::npos);
+	REQUIRE(nextEditPrepared.prompt.find("Keep the answer tightly scoped to one likely next edit.") != std::string::npos);
+
+	ofxGgmlCodeAssistantRequest summaryRequest;
+	summaryRequest.action = ofxGgmlCodeAssistantAction::SummarizeChanges;
+	summaryRequest.language = languages.front();
+	summaryRequest.userInput =
+		"Diff:\n--- a/src/main.cpp\n+++ b/src/main.cpp\n@@\n-int main() { return 0; }\n+int main() { return 1; }\n";
+
+	const auto summaryPrepared = assistant.preparePrompt(summaryRequest, context);
+	REQUIRE(summaryPrepared.body.find("Summarize the provided code changes professionally") != std::string::npos);
+	REQUIRE(summaryPrepared.prompt.find("Write for a human reviewer.") != std::string::npos);
+	REQUIRE(summaryPrepared.requestLabel.find("Summarize local changes.") != std::string::npos);
+}
+
 TEST_CASE("Code assistant parser and run path expose structured task results", "[code_assistant]") {
 	SECTION("Structured parser understands files, patches, diffs, findings, and commands") {
 		const std::string text =

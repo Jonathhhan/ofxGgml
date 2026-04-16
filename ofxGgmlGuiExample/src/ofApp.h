@@ -188,8 +188,8 @@ private:
 	float mirostatEta = 0.1f;
 	int chatLanguageIndex = 0;                       // 0=Auto, otherwise force response language
 	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 384, 512};
-	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 0, 0, 0, 1, 0, 0};
-	TextInferenceBackend textInferenceBackend = TextInferenceBackend::Cli;
+	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 1, 1, 1, 1, 0, 0};
+	TextInferenceBackend textInferenceBackend = TextInferenceBackend::LlamaServer;
 	ServerStatusState textServerStatus = ServerStatusState::Unknown;
 	std::string textServerStatusMessage;
 	std::string textServerCapabilityHint;
@@ -296,7 +296,7 @@ private:
 		const std::string & rawUrls,
 		const std::string & heading,
 		bool enableAutoLiveContext = false) const;
-	void runHierarchicalReview();
+	void runHierarchicalReview(const std::string & overrideQuery = std::string());
 	void runVisionInference();
 	void runSpeechInference();
 	bool runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,
@@ -315,6 +315,7 @@ private:
 	void rememberTextBackendForMode(AiMode mode, TextInferenceBackend backend);
 	void syncTextBackendForActiveMode(bool announce = false);
 	void checkTextServerStatus(bool logResult = true);
+	bool ensureTextServerReady(bool logResult = false, bool allowLaunch = true);
 	std::string findLocalTextServerExecutable() const;
 	bool isManagedTextServerRunning();
 	void startLocalTextServer();

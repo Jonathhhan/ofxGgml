@@ -18,6 +18,8 @@ enum class ofxGgmlCodeAssistantAction {
 	Edit,
 	Refactor,
 	Review,
+	NextEdit,
+	SummarizeChanges,
 	FixBuild,
 	GroundedDocs,
 	ContinueTask,

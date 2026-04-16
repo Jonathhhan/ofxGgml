@@ -18,6 +18,7 @@
 #include <regex>
 #include <random>
 #include <sstream>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -43,7 +44,7 @@ const char * ofApp::modeLabels[kModeCount] = {
 };
 
 const char * const kTextBackendLabels[] = {
-	"CLI (local llama-completion)",
+	"CLI fallback (local llama-completion)",
 	"llama-server (persistent)"
 };
 
@@ -201,6 +202,28 @@ std::string trim(const std::string & s) {
 std::string effectiveTextServerUrl(const char * buffer) {
 	const std::string value = trim(buffer ? std::string(buffer) : std::string());
 	return value.empty() ? std::string(kDefaultTextServerUrl) : value;
+}
+
+std::string buildStructuredTextPrompt(
+	const std::string & systemPrompt,
+	const std::string & instruction,
+	const std::string & inputHeading,
+	const std::string & inputText,
+	const std::string & outputHeading) {
+	std::ostringstream prompt;
+	const std::string system = trim(systemPrompt);
+	if (!system.empty()) {
+		prompt << "System:\n" << system << "\n\n";
+	}
+	prompt << trim(instruction) << "\n";
+	if (!trim(inputHeading).empty()) {
+		prompt << trim(inputHeading) << ":\n";
+	}
+	prompt << inputText << "\n\n";
+	if (!trim(outputHeading).empty()) {
+		prompt << trim(outputHeading) << ":\n";
+	}
+	return prompt.str();
 }
 
 std::string serverBaseUrlFromConfiguredUrl(const std::string & configuredUrl) {
@@ -682,6 +705,174 @@ bool runProcessCapture(const std::vector<std::string> & args, std::string & outp
 #endif
 }
 
+enum class ScriptSlashCommandKind {
+	None = 0,
+	Help,
+	ReviewAll,
+	ReviewFix,
+	NextEdit,
+	SummarizeChanges,
+	Tests,
+	FixPlan,
+	Explain,
+	Docs
+};
+
+struct ScriptSlashCommand {
+	ScriptSlashCommandKind kind = ScriptSlashCommandKind::None;
+	std::string argument;
+};
+
+struct WorkspaceDiffSnapshot {
+	bool success = false;
+	bool hasChanges = false;
+	std::string workspaceRoot;
+	std::string repoRoot;
+	std::string statusText;
+	std::string diffText;
+	std::string error;
+};
+
+std::string normalizeSlashCommandName(const std::string & raw) {
+	std::string normalized;
+	normalized.reserve(raw.size());
+	for (char ch : raw) {
+		if (ch == '-' || ch == '_') {
+			continue;
+		}
+		normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+	}
+	return normalized;
+}
+
+ScriptSlashCommand parseScriptSlashCommand(const std::string & rawInput) {
+	const std::string trimmedInput = trim(rawInput);
+	if (trimmedInput.size() < 2 || trimmedInput.front() != '/') {
+		return {};
+	}
+
+	const size_t splitPos = trimmedInput.find_first_of(" \t\r\n");
+	const std::string commandName = normalizeSlashCommandName(
+		trimmedInput.substr(1, splitPos == std::string::npos
+			? std::string::npos
+			: splitPos - 1));
+	const std::string argument = splitPos == std::string::npos
+		? std::string()
+		: trim(trimmedInput.substr(splitPos + 1));
+
+	ScriptSlashCommand command;
+	command.argument = argument;
+	if (commandName == "help" || commandName == "commands") {
+		command.kind = ScriptSlashCommandKind::Help;
+	} else if (commandName == "review" || commandName == "reviewall") {
+		command.kind = ScriptSlashCommandKind::ReviewAll;
+	} else if (commandName == "reviewfix" || commandName == "fixreview") {
+		command.kind = ScriptSlashCommandKind::ReviewFix;
+	} else if (commandName == "nextedit" || commandName == "next") {
+		command.kind = ScriptSlashCommandKind::NextEdit;
+	} else if (commandName == "summary" || commandName == "summarize" ||
+		commandName == "changes" || commandName == "prsummary") {
+		command.kind = ScriptSlashCommandKind::SummarizeChanges;
+	} else if (commandName == "tests" || commandName == "testplan") {
+		command.kind = ScriptSlashCommandKind::Tests;
+	} else if (commandName == "fix" || commandName == "edit") {
+		command.kind = ScriptSlashCommandKind::FixPlan;
+	} else if (commandName == "explain") {
+		command.kind = ScriptSlashCommandKind::Explain;
+	} else if (commandName == "docs") {
+		command.kind = ScriptSlashCommandKind::Docs;
+	}
+	return command;
+}
+
+std::string buildScriptCommandHelpText() {
+	return
+		"Slash commands:\n"
+		"- /review [focus] -> hierarchical workspace review\n"
+		"- /reviewfix [focus] -> review with an actionable fix plan\n"
+		"- /nextedit [focus] -> predict the most likely next change\n"
+		"- /summary [focus] -> summarize local git changes for reviewers\n"
+		"- /tests [focus] -> propose the highest-value tests\n"
+		"- /fix [focus] -> produce a structured fix/edit plan\n"
+		"- /explain [focus] -> explain code or architecture\n"
+		"- /docs [focus] -> answer with grounded docs\n";
+}
+
+std::string truncatePromptPayload(const std::string & text, size_t maxChars) {
+	if (text.size() <= maxChars) {
+		return text;
+	}
+	return text.substr(0, maxChars) +
+		"\n...[truncated " + std::to_string(text.size() - maxChars) + " chars]";
+}
+
+WorkspaceDiffSnapshot captureWorkspaceDiffSnapshot(const std::string & workspaceRoot) {
+	WorkspaceDiffSnapshot snapshot;
+	snapshot.workspaceRoot = trim(workspaceRoot);
+	if (snapshot.workspaceRoot.empty()) {
+		snapshot.error = "Workspace change summary requires a loaded local folder.";
+		return snapshot;
+	}
+
+	std::string output;
+	int exitCode = -1;
+	if (!runProcessCapture(
+			{"git", "-C", snapshot.workspaceRoot, "rev-parse", "--show-toplevel"},
+			output,
+			exitCode) ||
+		exitCode != 0) {
+		snapshot.error =
+			"Workspace change summary requires a local Git repository.";
+		return snapshot;
+	}
+	snapshot.repoRoot = trim(stripAnsi(output));
+	if (snapshot.repoRoot.empty()) {
+		snapshot.error = "Unable to determine the Git repository root for this workspace.";
+		return snapshot;
+	}
+
+	output.clear();
+	exitCode = -1;
+	if (!runProcessCapture(
+			{"git", "-C", snapshot.repoRoot, "status", "--short", "--branch"},
+			output,
+			exitCode) ||
+		exitCode != 0) {
+		snapshot.error = "Failed to read Git status for the current workspace.";
+		return snapshot;
+	}
+	snapshot.statusText = trim(stripAnsi(output));
+
+	output.clear();
+	exitCode = -1;
+	const bool diffOk = runProcessCapture(
+		{"git", "-C", snapshot.repoRoot, "diff", "--no-ext-diff", "--minimal", "HEAD", "--"},
+		output,
+		exitCode);
+	if (diffOk && exitCode == 0) {
+		snapshot.diffText = trim(stripAnsi(output));
+	} else {
+		output.clear();
+		exitCode = -1;
+		if (runProcessCapture(
+				{"git", "-C", snapshot.repoRoot, "diff", "--no-ext-diff", "--minimal", "--"},
+				output,
+				exitCode) &&
+			exitCode == 0) {
+			snapshot.diffText = trim(stripAnsi(output));
+		}
+	}
+
+	snapshot.hasChanges =
+		(snapshot.statusText.find("##") != std::string::npos &&
+			snapshot.statusText.find('\n') != std::string::npos) ||
+		(!snapshot.statusText.empty() &&
+			snapshot.statusText.rfind("##", 0) != 0) ||
+		!snapshot.diffText.empty();
+	snapshot.success = true;
+	return snapshot;
+}
+
 }
 
 
@@ -928,7 +1119,7 @@ void ofApp::announceTextBackendChange() {
 		: std::string("Text backend switched to ");
 	std::string message = useServerBackend
 		? modePrefix + "llama-server (persistent)."
-		: modePrefix + "CLI (local llama-completion).";
+		: modePrefix + "CLI fallback (local llama-completion).";
 	if (useServerBackend) {
 		const std::string serverUrl = effectiveTextServerUrl(textServerUrl);
 		message += " Server: " + serverUrl + ".";
@@ -946,7 +1137,7 @@ void ofApp::announceTextBackendChange() {
 	}
 
 	if (useServerBackend) {
-		checkTextServerStatus(false);
+		ensureTextServerReady(false, true);
 	} else {
 		textServerStatus = ServerStatusState::Unknown;
 		textServerStatusMessage.clear();
@@ -979,7 +1170,7 @@ void ofApp::syncTextBackendForActiveMode(bool announce) {
 			if (trim(textServerUrl).empty()) {
 				copyStringToBuffer(textServerUrl, sizeof(textServerUrl), kDefaultTextServerUrl);
 			}
-			checkTextServerStatus(false);
+			ensureTextServerReady(false, true);
 		}
 		return;
 	}
@@ -991,7 +1182,7 @@ void ofApp::syncTextBackendForActiveMode(bool announce) {
 	if (announce) {
 		announceTextBackendChange();
 	} else if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
-		checkTextServerStatus(false);
+		ensureTextServerReady(false, true);
 	} else {
 		textServerStatus = ServerStatusState::Unknown;
 		textServerStatusMessage.clear();
@@ -1027,6 +1218,47 @@ void ofApp::checkTextServerStatus(bool logResult) {
 	if (logResult) {
 		logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
 	}
+}
+
+bool ofApp::ensureTextServerReady(bool logResult, bool allowLaunch) {
+	if (textInferenceBackend != TextInferenceBackend::LlamaServer) {
+		return true;
+	}
+
+	checkTextServerStatus(logResult);
+	if (textServerStatus == ServerStatusState::Reachable) {
+		return true;
+	}
+
+	if (!allowLaunch) {
+		return false;
+	}
+
+	const std::string serverExe = findLocalTextServerExecutable();
+	const std::string modelPath = getSelectedModelPath();
+	if (serverExe.empty() || modelPath.empty() || !std::filesystem::exists(modelPath)) {
+		return false;
+	}
+
+	if (!isManagedTextServerRunning()) {
+		startLocalTextServer();
+	}
+
+	for (int attempt = 0; attempt < 20; ++attempt) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(150));
+		checkTextServerStatus(false);
+		if (textServerStatus == ServerStatusState::Reachable) {
+			if (logResult) {
+				logWithLevel(OF_LOG_NOTICE, textServerStatusMessage);
+			}
+			return true;
+		}
+	}
+
+	if (logResult && !textServerStatusMessage.empty()) {
+		logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
+	}
+	return false;
 }
 
 std::string ofApp::findLocalTextServerExecutable() const {
@@ -2141,11 +2373,18 @@ ImGui::End();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawChatPanel() {
-drawPanelHeader("Chat", "conversation with the ggml engine");
+	drawPanelHeader("Chat", "conversation with the ggml engine");
+	if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
+		if (!textServerCapabilityHint.empty()) {
+			ImGui::TextDisabled("%s", textServerCapabilityHint.c_str());
+		} else {
+			ImGui::TextDisabled("Server-backed chat is active.");
+		}
+	}
 
-if (chatLanguages.empty()) {
-	chatLanguages = ofxGgmlChatAssistant::defaultResponseLanguages();
-}
+	if (chatLanguages.empty()) {
+		chatLanguages = ofxGgmlChatAssistant::defaultResponseLanguages();
+	}
 chatLanguageIndex = std::clamp(
 	chatLanguageIndex,
 	0,
@@ -2237,7 +2476,7 @@ if (ImGui::IsItemHovered()) {
 	ImGui::SetTooltip("Optional source URLs for grounded answers in Chat, Summarize, and Custom.");
 }
 
-if ((submitted || sendClicked || sendWithSourcesClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
+	if ((submitted || sendClicked || sendWithSourcesClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
 std::string userText(chatInput);
 chatMessages.push_back({"user", userText, ofGetElapsedTimef()});
 fprintf(stderr, "[ChatWindow] You: %s\n", userText.c_str());
@@ -2253,30 +2492,48 @@ if (sendWithSourcesClicked) {
 		true);
 }
 runInference(AiMode::Chat, userText, "", "", realtimeSettings);
-}
+	}
 
-// Copy / Clear / Export row.
-if (!chatMessages.empty()) {
-if (ImGui::SmallButton("Copy Chat")) {
-std::string all;
-for (const auto & m : chatMessages) {
-all += m.role + ": " + m.text + "\n\n";
-}
+	// Copy / Clear / Export row.
+	if (!chatMessages.empty()) {
+		if (ImGui::SmallButton("Summarize Chat")) {
+			std::ostringstream transcript;
+			size_t included = 0;
+			for (auto it = chatMessages.rbegin(); it != chatMessages.rend() && included < 8; ++it, ++included) {
+				transcript << it->role << ": " << it->text << "\n";
+			}
+			runInference(
+				AiMode::Chat,
+				"Summarize the recent conversation.",
+				"",
+				buildStructuredTextPrompt(
+					"You are a concise conversation analyst.",
+					"Summarize the recent conversation into decisions, open questions, and next actions.",
+					"Recent transcript",
+					transcript.str(),
+					"Summary"));
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Copy Chat")) {
+			std::string all;
+			for (const auto & m : chatMessages) {
+				all += m.role + ": " + m.text + "\n\n";
+			}
 copyToClipboard(all);
-}
-ImGui::SameLine();
-if (ImGui::SmallButton("Clear Chat")) {
-chatMessages.clear();
-}
-ImGui::SameLine();
-if (ImGui::SmallButton("Export Chat")) {
-ofFileDialogResult result = ofSystemSaveDialog(
-"chat_export.md", "Export Chat History");
-if (result.bSuccess) {
-exportChatHistory(result.getPath());
-}
-}
-}
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Clear Chat")) {
+			chatMessages.clear();
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Export Chat")) {
+			ofFileDialogResult result = ofSystemSaveDialog(
+				"chat_export.md", "Export Chat History");
+			if (result.bSuccess) {
+				exportChatHistory(result.getPath());
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2683,6 +2940,167 @@ auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 	}
 };
 
+auto summarizeLocalChanges = [&](const std::string & focusText) {
+	if (sourceType != ofxGgmlScriptSourceType::LocalFolder ||
+		scriptSource.getLocalFolderPath().empty()) {
+		appendScriptAssistantOutput(
+			"Summarize local changes",
+			"Local change summaries require a loaded local folder workspace.");
+		return;
+	}
+
+	const auto snapshot = captureWorkspaceDiffSnapshot(scriptSource.getLocalFolderPath());
+	if (!snapshot.success) {
+		appendScriptAssistantOutput("Summarize local changes", snapshot.error);
+		return;
+	}
+	if (!snapshot.hasChanges) {
+		appendScriptAssistantOutput(
+			"Summarize local changes",
+			"No local Git changes were detected in the current workspace.");
+		return;
+	}
+
+	std::ostringstream body;
+	body << "Summarize the following local Git changes professionally for reviewers. "
+		<< "Focus on user-visible impact, important files, notable risks, and verification notes.\n";
+	if (!trim(focusText).empty()) {
+		body << "Review focus: " << trim(focusText) << "\n";
+	}
+	body << "\nRepository root: " << snapshot.repoRoot << "\n";
+	if (!snapshot.statusText.empty()) {
+		body << "\nGit status:\n"
+			<< truncatePromptPayload(snapshot.statusText, 2000) << "\n";
+	}
+	if (!snapshot.diffText.empty()) {
+		body << "\nUnified diff:\n"
+			<< truncatePromptPayload(snapshot.diffText, 12000) << "\n";
+	}
+
+	submitScriptRequest(
+		ofxGgmlCodeAssistantAction::SummarizeChanges,
+		focusText,
+		body.str(),
+		"Summarize local changes.",
+		false);
+};
+
+auto executeScriptSlashCommand = [&](const ScriptSlashCommand & command) {
+	switch (command.kind) {
+	case ScriptSlashCommandKind::Help:
+		appendScriptAssistantOutput("Slash command help", buildScriptCommandHelpText());
+		return true;
+	case ScriptSlashCommandKind::ReviewAll: {
+		if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
+			const std::string reviewQuery = trim(command.argument).empty()
+				? ofxGgmlCodeReview::defaultReviewQuery()
+				: trim(command.argument);
+			scriptMessages.push_back({
+				"user",
+				"Review all files in loaded " +
+					std::string(sourceType == ofxGgmlScriptSourceType::LocalFolder ? "folder" : "repo") +
+					". Focus: " + reviewQuery,
+				ofGetElapsedTimef()});
+			runHierarchicalReview(reviewQuery);
+			return true;
+		}
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::Review,
+			command.argument,
+			"",
+			"",
+			false);
+		return true;
+	}
+	case ScriptSlashCommandKind::ReviewFix: {
+		std::ostringstream body;
+		body << "Review the current workspace and return an actionable fix plan. "
+			<< "Only include concrete, evidence-backed issues. "
+			<< "Prefer a structured plan with a unified diff when a clear next fix is visible.";
+		if (!trim(command.argument).empty()) {
+			body << "\n\nFocus: " << trim(command.argument);
+		}
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::Review,
+			command.argument,
+			body.str(),
+			"Review with fix plan.",
+			false,
+			true,
+			true,
+			"",
+			buildWorkspaceAllowedFiles());
+		return true;
+	}
+	case ScriptSlashCommandKind::NextEdit:
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::NextEdit,
+			command.argument,
+			"",
+			"",
+			false,
+			true,
+			true,
+			"",
+			buildWorkspaceAllowedFiles());
+		return true;
+	case ScriptSlashCommandKind::SummarizeChanges:
+		summarizeLocalChanges(command.argument);
+		return true;
+	case ScriptSlashCommandKind::Tests: {
+		std::ostringstream body;
+		body << "Propose the highest-value tests for this workspace and request. "
+			<< "Prefer concrete test names, likely files, and verification commands. "
+			<< "If no additional tests are needed, say so clearly.";
+		if (!trim(command.argument).empty()) {
+			body << "\n\nFocus: " << trim(command.argument);
+		}
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::Generate,
+			command.argument,
+			body.str(),
+			"Plan tests.",
+			false,
+			true,
+			false,
+			"",
+			buildWorkspaceAllowedFiles());
+		return true;
+	}
+	case ScriptSlashCommandKind::FixPlan:
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::Edit,
+			command.argument,
+			"",
+			"",
+			false,
+			true,
+			true,
+			"",
+			buildWorkspaceAllowedFiles());
+		return true;
+	case ScriptSlashCommandKind::Explain:
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::Explain,
+			command.argument,
+			"",
+			"",
+			false);
+		return true;
+	case ScriptSlashCommandKind::Docs:
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::GroundedDocs,
+			command.argument,
+			"",
+			"",
+			false);
+		return true;
+	case ScriptSlashCommandKind::None:
+	default:
+		return false;
+	}
+};
+
 struct ScriptActionSpec {
 	const char * label;
 	ImVec2 size;
@@ -2695,20 +3113,30 @@ const ScriptActionSpec actionSpecs[] = {
 	{ "Debug", ImVec2(100, 0), ofxGgmlCodeAssistantAction::Debug },
 	{ "Optimize", ImVec2(100, 0), ofxGgmlCodeAssistantAction::Optimize },
 	{ "Refactor", ImVec2(100, 0), ofxGgmlCodeAssistantAction::Refactor },
+	{ "Next Edit", ImVec2(100, 0), ofxGgmlCodeAssistantAction::NextEdit },
 	{ "Review Mode", ImVec2(100, 0), ofxGgmlCodeAssistantAction::Review },
 };
 
 bool canSendScriptChat = !generating.load() && hasUserInput;
+const ScriptSlashCommand slashCommand = hasUserInput
+	? parseScriptSlashCommand(scriptInput)
+	: ScriptSlashCommand{};
 
 ImGui::BeginDisabled(generating.load());
 if (canSendScriptChat) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.3f, 1.0f));
 if ((ImGui::Button("Send to Chat", ImVec2(110, 0)) || scriptChatSubmitted) && canSendScriptChat) {
-	submitScriptRequest(
-		ofxGgmlCodeAssistantAction::Ask,
-		scriptInput,
-		"",
-		"",
-		true);
+	if (slashCommand.kind != ScriptSlashCommandKind::None) {
+		if (executeScriptSlashCommand(slashCommand)) {
+			std::memset(scriptInput, 0, sizeof(scriptInput));
+		}
+	} else {
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::Ask,
+			scriptInput,
+			"",
+			"",
+			true);
+	}
 }
 if (canSendScriptChat) ImGui::PopStyleColor();
 ImGui::SameLine();
@@ -2739,6 +3167,28 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 	}
 	if (ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("Run embedding-powered, multi-pass review over the loaded folder/repository.\nRecommended: use the Script-mode recommended model plus Review Preset.");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Review Fix Plan", ImVec2(120, 0))) {
+		std::ostringstream body;
+		body << "Review the current workspace and return an actionable fix plan. "
+			<< "Only include concrete, evidence-backed issues. Prefer a structured plan and unified diff.";
+		if (hasUserInput) {
+			body << "\n\nFocus: " << trim(scriptInput);
+		}
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::Review,
+			scriptInput,
+			body.str(),
+			"Review with fix plan.",
+			true,
+			true,
+			true,
+			"",
+			buildWorkspaceAllowedFiles());
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Review the loaded workspace and return an actionable fix plan with structured edits.");
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Review Preset", ImVec2(110, 0))) {
@@ -2783,20 +3233,49 @@ ImGui::EndDisabled();
 
 ImGui::Spacing();
 ImGui::TextDisabled("Quick Actions:");
+ImGui::TextDisabled("%s", "Tip: /review /reviewfix /nextedit /summary /tests /fix /docs");
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("%s", buildScriptCommandHelpText().c_str());
+}
 ImGui::BeginDisabled(generating.load() || (!hasUserInput && !hasSelectedFile));
 for (size_t i = 0; i < std::size(actionSpecs); i++) {
 	const auto & spec = actionSpecs[i];
 	if (ImGui::Button(spec.label, spec.size)) {
-		submitScriptRequest(
-			spec.action,
-			scriptInput,
-			"",
-			"",
-			true);
+		if (spec.action == ofxGgmlCodeAssistantAction::NextEdit) {
+			submitScriptRequest(
+				spec.action,
+				scriptInput,
+				"",
+				"",
+				true,
+				true,
+				true,
+				"",
+				buildWorkspaceAllowedFiles());
+		} else {
+			submitScriptRequest(
+				spec.action,
+				scriptInput,
+				"",
+				"",
+				true);
+		}
 	}
 	if (i + 1 < std::size(actionSpecs)) {
 		ImGui::SameLine();
 	}
+}
+ImGui::EndDisabled();
+ImGui::BeginDisabled(
+	generating.load() ||
+	sourceType != ofxGgmlScriptSourceType::LocalFolder ||
+	scriptSource.getLocalFolderPath().empty());
+if (ImGui::Button("Change Summary", ImVec2(120, 0))) {
+	summarizeLocalChanges(scriptInput);
+	std::memset(scriptInput, 0, sizeof(scriptInput));
+}
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Summarize local Git changes professionally for reviewers.");
 }
 ImGui::EndDisabled();
 
@@ -3161,23 +3640,48 @@ return "generated_" + ofToString(ms) + ext;
 // ---------------------------------------------------------------------------
 
 void ofApp::drawSummarizePanel() {
-drawPanelHeader("Summarize", "condense text into key points");
+	drawPanelHeader("Summarize", "condense text into key points");
+	if (textInferenceBackend == TextInferenceBackend::LlamaServer && !textServerCapabilityHint.empty()) {
+		ImGui::TextDisabled("%s", textServerCapabilityHint.c_str());
+	}
 
-ImGui::Text("Paste text to summarize:");
-ImGui::InputTextMultiline("##SumIn", summarizeInput, sizeof(summarizeInput),
-ImVec2(-1, 150));
+	ImGui::Text("Paste text to summarize:");
+	ImGui::InputTextMultiline("##SumIn", summarizeInput, sizeof(summarizeInput),
+		ImVec2(-1, 150));
 
-auto submitTextTask = [&](ofxGgmlTextTask task) {
-	ofxGgmlTextAssistantRequest request;
-	request.task = task;
-	request.inputText = summarizeInput;
-	const auto prepared = textAssistant.preparePrompt(request);
-	runInference(AiMode::Summarize, request.inputText, "", prepared.prompt);
-};
+	auto submitTextTask = [&](ofxGgmlTextTask task) {
+		ofxGgmlTextAssistantRequest request;
+		request.task = task;
+		request.inputText = summarizeInput;
+		const auto prepared = textAssistant.preparePrompt(request);
+		runInference(AiMode::Summarize, request.inputText, "", prepared.prompt);
+	};
+	auto submitSummaryPrompt = [&](const std::string & label,
+		const std::string & instruction,
+		const std::string & outputHeading,
+		bool useLoadedSources = false) {
+		const std::string inputText = std::strlen(summarizeInput) > 0
+			? std::string(summarizeInput)
+			: std::string("Use the provided loaded sources.");
+		const auto realtimeSettings = useLoadedSources
+			? buildLiveContextSettings(sourceUrlsInput, "Loaded sources for summarization")
+			: ofxGgmlRealtimeInfoSettings{};
+		runInference(
+			AiMode::Summarize,
+			inputText,
+			"",
+			buildStructuredTextPrompt(
+				"You are a precise analyst who writes crisp, professional summaries.",
+				instruction,
+				"Material",
+				inputText,
+				outputHeading),
+			realtimeSettings);
+	};
 
-const bool hasSummarizeInput = std::strlen(summarizeInput) > 0;
-const bool hasSummarizeUrls = !trim(sourceUrlsInput).empty();
-ImGui::BeginDisabled(generating.load() || (!hasSummarizeInput && !hasSummarizeUrls));
+	const bool hasSummarizeInput = std::strlen(summarizeInput) > 0;
+	const bool hasSummarizeUrls = !trim(sourceUrlsInput).empty();
+	ImGui::BeginDisabled(generating.load() || (!hasSummarizeInput && !hasSummarizeUrls));
 if (ImGui::Button("Summarize", ImVec2(140, 0))) {
 submitTextTask(ofxGgmlTextTask::Summarize);
 }
@@ -3190,7 +3694,7 @@ if (ImGui::Button("TL;DR", ImVec2(140, 0))) {
 submitTextTask(ofxGgmlTextTask::TlDr);
 }
 ImGui::SameLine();
-if (ImGui::Button("Summarize URLs", ImVec2(150, 0))) {
+	if (ImGui::Button("Summarize URLs", ImVec2(150, 0))) {
 	ofxGgmlTextAssistantRequest request;
 	request.task = ofxGgmlTextTask::Summarize;
 	request.inputText = std::strlen(summarizeInput) > 0
@@ -3206,11 +3710,41 @@ if (ImGui::Button("Summarize URLs", ImVec2(150, 0))) {
 		"",
 		prepared.prompt,
 		realtimeSettings);
-}
-ImGui::EndDisabled();
+	}
+	ImGui::EndDisabled();
+	ImGui::BeginDisabled(generating.load() || (!hasSummarizeInput && !hasSummarizeUrls));
+	if (ImGui::Button("Executive Brief", ImVec2(140, 0))) {
+		submitSummaryPrompt(
+			"Executive brief",
+			"Write an executive brief with headline, what matters, risks, and recommended next step.",
+			"Executive brief");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Action Items", ImVec2(140, 0))) {
+		submitSummaryPrompt(
+			"Action items",
+			"Extract concrete action items with owners or placeholders, dependencies, and urgency.",
+			"Action items");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Meeting Notes", ImVec2(140, 0))) {
+		submitSummaryPrompt(
+			"Meeting notes",
+			"Turn the material into professional meeting notes with decisions, blockers, and follow-ups.",
+			"Meeting notes");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Source Brief", ImVec2(140, 0))) {
+		submitSummaryPrompt(
+			"Source brief",
+			"Summarize the loaded material into a source-backed brief with key claims and supporting context.",
+			"Source brief",
+			hasSummarizeUrls);
+	}
+	ImGui::EndDisabled();
 
-ImGui::Separator();
-ImGui::Text("Summary:");
+	ImGui::Separator();
+	ImGui::Text("Summary:");
 if (!summarizeOutput.empty()) {
 ImGui::SameLine();
 if (ImGui::SmallButton("Copy##SumCopy")) copyToClipboard(summarizeOutput);
@@ -3245,21 +3779,38 @@ ImGui::EndChild();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawWritePanel() {
-drawPanelHeader("Writing Assistant", "rewrite, expand, polish text");
+	drawPanelHeader("Writing Assistant", "rewrite, expand, polish text");
+	if (textInferenceBackend == TextInferenceBackend::LlamaServer && !textServerCapabilityHint.empty()) {
+		ImGui::TextDisabled("%s", textServerCapabilityHint.c_str());
+	}
 
-ImGui::Text("Enter your text:");
-ImGui::InputTextMultiline("##WriteIn", writeInput, sizeof(writeInput),
-ImVec2(-1, 120));
+	ImGui::Text("Enter your text:");
+	ImGui::InputTextMultiline("##WriteIn", writeInput, sizeof(writeInput),
+		ImVec2(-1, 120));
 
-auto submitTextTask = [&](ofxGgmlTextTask task) {
-	ofxGgmlTextAssistantRequest request;
-	request.task = task;
-	request.inputText = writeInput;
-	const auto prepared = textAssistant.preparePrompt(request);
-	runInference(AiMode::Write, request.inputText, "", prepared.prompt);
-};
+	auto submitTextTask = [&](ofxGgmlTextTask task) {
+		ofxGgmlTextAssistantRequest request;
+		request.task = task;
+		request.inputText = writeInput;
+		const auto prepared = textAssistant.preparePrompt(request);
+		runInference(AiMode::Write, request.inputText, "", prepared.prompt);
+	};
+	auto submitWritePrompt = [&](const std::string & userText,
+		const std::string & instruction,
+		const std::string & outputHeading) {
+		runInference(
+			AiMode::Write,
+			userText,
+			"",
+			buildStructuredTextPrompt(
+				"You are a strong professional editor.",
+				instruction,
+				"Text",
+				userText,
+				outputHeading));
+	};
 
-ImGui::BeginDisabled(generating.load() || std::strlen(writeInput) == 0);
+	ImGui::BeginDisabled(generating.load() || std::strlen(writeInput) == 0);
 if (ImGui::Button("Rewrite", ImVec2(110, 0))) {
 submitTextTask(ofxGgmlTextTask::Rewrite);
 }
@@ -3280,13 +3831,42 @@ if (ImGui::Button("Fix Grammar", ImVec2(110, 0))) {
 submitTextTask(ofxGgmlTextTask::FixGrammar);
 }
 ImGui::SameLine();
-if (ImGui::Button("Polish", ImVec2(110, 0))) {
-	submitTextTask(ofxGgmlTextTask::Polish);
-}
-ImGui::EndDisabled();
+	if (ImGui::Button("Polish", ImVec2(110, 0))) {
+		submitTextTask(ofxGgmlTextTask::Polish);
+	}
+	ImGui::EndDisabled();
+	ImGui::BeginDisabled(generating.load() || std::strlen(writeInput) == 0);
+	if (ImGui::Button("Shorten", ImVec2(110, 0))) {
+		submitWritePrompt(
+			writeInput,
+			"Shorten this text while preserving meaning, key details, and professional tone.",
+			"Shortened version");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Email Reply", ImVec2(110, 0))) {
+		submitWritePrompt(
+			writeInput,
+			"Draft a professional email reply using the provided material. Keep it clear, tactful, and ready to send.",
+			"Email reply");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Release Notes", ImVec2(110, 0))) {
+		submitWritePrompt(
+			writeInput,
+			"Turn this material into concise release notes with highlights, fixes, and any user-facing caveats.",
+			"Release notes");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Commit Message", ImVec2(110, 0))) {
+		submitWritePrompt(
+			writeInput,
+			"Write a professional commit message with a short subject and a useful body when justified.",
+			"Commit message");
+	}
+	ImGui::EndDisabled();
 
-ImGui::Separator();
-ImGui::Text("Output:");
+  ImGui::Separator();
+  ImGui::Text("Output:");
 if (!writeOutput.empty()) {
 ImGui::SameLine();
 if (ImGui::SmallButton("Copy##WriteCopy")) copyToClipboard(writeOutput);
@@ -3317,7 +3897,10 @@ ImGui::EndChild();
 }
 
 void ofApp::drawTranslatePanel() {
-drawPanelHeader("Translate", "translate text between languages");
+	drawPanelHeader("Translate", "translate text between languages");
+	if (textInferenceBackend == TextInferenceBackend::LlamaServer && !textServerCapabilityHint.empty()) {
+		ImGui::TextDisabled("%s", textServerCapabilityHint.c_str());
+	}
 
 if (translateLanguages.empty()) {
 	translateLanguages = ofxGgmlTextAssistant::defaultTranslateLanguages();
@@ -3367,9 +3950,25 @@ ImGui::Text("Enter text to translate:");
 ImGui::InputTextMultiline("##TransIn", translateInput, sizeof(translateInput),
 ImVec2(-1, 120));
 
-bool hasInput = std::strlen(translateInput) > 0;
-ImGui::BeginDisabled(generating.load() || !hasInput);
-if (ImGui::Button("Translate", ImVec2(110, 0))) {
+	bool hasInput = std::strlen(translateInput) > 0;
+	auto submitTranslatePrompt = [&](const std::string & instruction, const std::string & outputHeading) {
+		const std::string sourceLanguage =
+			translateLanguages[static_cast<size_t>(translateSourceLang)].name;
+		const std::string targetLanguage =
+			translateLanguages[static_cast<size_t>(translateTargetLang)].name;
+		runInference(
+			AiMode::Translate,
+			translateInput,
+			"",
+			buildStructuredTextPrompt(
+				"You are a careful translator.",
+				instruction + " Source language: " + sourceLanguage + ". Target language: " + targetLanguage + ".",
+				"Text",
+				translateInput,
+				outputHeading));
+	};
+	ImGui::BeginDisabled(generating.load() || !hasInput);
+	if (ImGui::Button("Translate", ImVec2(110, 0))) {
 	ofxGgmlTextAssistantRequest request;
 	request.task = ofxGgmlTextTask::Translate;
 	request.inputText = translateInput;
@@ -3379,17 +3978,36 @@ if (ImGui::Button("Translate", ImVec2(110, 0))) {
 	runInference(AiMode::Translate, request.inputText, "", prepared.prompt);
 }
 ImGui::SameLine();
-if (ImGui::Button("Detect Language", ImVec2(140, 0))) {
+	if (ImGui::Button("Detect Language", ImVec2(140, 0))) {
 	ofxGgmlTextAssistantRequest request;
 	request.task = ofxGgmlTextTask::DetectLanguage;
 	request.inputText = translateInput;
 	const auto prepared = textAssistant.preparePrompt(request);
 	runInference(AiMode::Translate, request.inputText, "", prepared.prompt);
-}
-ImGui::EndDisabled();
+	}
+	ImGui::EndDisabled();
+	ImGui::BeginDisabled(generating.load() || !hasInput);
+	if (ImGui::Button("Natural", ImVec2(110, 0))) {
+		submitTranslatePrompt(
+			"Translate naturally and fluently for a native speaker while preserving intent and tone.",
+			"Natural translation");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Literal", ImVec2(110, 0))) {
+		submitTranslatePrompt(
+			"Translate as literally as possible while remaining grammatical.",
+			"Literal translation");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Detect + Translate", ImVec2(140, 0))) {
+		submitTranslatePrompt(
+			"Detect the source language first, then translate to the target language and mention the detected source language briefly.",
+			"Detected translation");
+	}
+	ImGui::EndDisabled();
 
-ImGui::Separator();
-ImGui::Text("Translation:");
+	ImGui::Separator();
+	ImGui::Text("Translation:");
 if (!translateOutput.empty()) {
 ImGui::SameLine();
 if (ImGui::SmallButton("Copy##TransCopy")) copyToClipboard(translateOutput);
@@ -3424,7 +4042,10 @@ ImGui::EndChild();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawCustomPanel() {
-drawPanelHeader("Custom Prompt", "configure system prompt + user input");
+	drawPanelHeader("Custom Prompt", "configure system prompt + user input");
+	if (textInferenceBackend == TextInferenceBackend::LlamaServer && !textServerCapabilityHint.empty()) {
+		ImGui::TextDisabled("%s", textServerCapabilityHint.c_str());
+	}
 
 // Prompt template selector.
 if (!promptTemplates.empty()) {
@@ -3457,17 +4078,17 @@ ImGui::Text("Your input:");
 ImGui::InputTextMultiline("##CustIn", customInput, sizeof(customInput),
 ImVec2(-1, 100));
 
-ImGui::BeginDisabled(generating.load() || std::strlen(customInput) == 0);
-if (ImGui::Button("Run", ImVec2(100, 0))) {
+	ImGui::BeginDisabled(generating.load() || std::strlen(customInput) == 0);
+	if (ImGui::Button("Run", ImVec2(100, 0))) {
 	ofxGgmlTextAssistantRequest request;
 	request.task = ofxGgmlTextTask::Custom;
 	request.inputText = customInput;
 	request.systemPrompt = customSystemPrompt;
 	const auto prepared = textAssistant.preparePrompt(request);
 	runInference(AiMode::Custom, request.inputText, customSystemPrompt, prepared.prompt);
-}
-ImGui::SameLine();
-if (ImGui::Button("Run with Sources", ImVec2(150, 0))) {
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Run with Sources", ImVec2(150, 0))) {
 	ofxGgmlTextAssistantRequest request;
 	request.task = ofxGgmlTextTask::Custom;
 	request.inputText = customInput;
@@ -3482,8 +4103,35 @@ if (ImGui::Button("Run with Sources", ImVec2(150, 0))) {
 		customSystemPrompt,
 		prepared.prompt,
 		realtimeSettings);
-}
-ImGui::EndDisabled();
+	}
+	ImGui::EndDisabled();
+	ImGui::BeginDisabled(generating.load() || std::strlen(customInput) == 0);
+	if (ImGui::Button("JSON Reply", ImVec2(100, 0))) {
+		const std::string customPrompt = buildStructuredTextPrompt(
+			std::string(customSystemPrompt) +
+				(std::strlen(customSystemPrompt) > 0 ? "\n" : "") +
+				"Return valid JSON only.",
+			"Answer the user request with valid minified JSON only.",
+			"User request",
+			customInput,
+			"JSON");
+		runInference(AiMode::Custom, customInput, customSystemPrompt, customPrompt);
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Professional Tone", ImVec2(130, 0))) {
+		const std::string system = trim(customSystemPrompt).empty()
+			? "You are a professional assistant. Be concise, concrete, and businesslike."
+			: std::string(customSystemPrompt) +
+				"\nPrefer concise, professional, high-signal answers.";
+		const auto prompt = buildStructuredTextPrompt(
+			system,
+			"Answer the user request clearly and professionally.",
+			"User request",
+			customInput,
+			"Answer");
+		runInference(AiMode::Custom, customInput, system, prompt);
+	}
+	ImGui::EndDisabled();
 
 ImGui::Separator();
 ImGui::Text("Output:");
@@ -4532,7 +5180,7 @@ void ofApp::detectModelLayers() {
 	model.close();
 }
 
-void ofApp::runHierarchicalReview() {
+void ofApp::runHierarchicalReview(const std::string & overrideQuery) {
 	if (generating.load() || !engineReady) return;
 
 	generating.store(true);
@@ -4549,7 +5197,7 @@ void ofApp::runHierarchicalReview() {
 		workerThread.join();
 	}
 
-	workerThread = std::thread([this]() {
+	workerThread = std::thread([this, overrideQuery]() {
 		auto setError = [this](const std::string & msg) {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingOutput = msg;
@@ -4592,9 +5240,11 @@ void ofApp::runHierarchicalReview() {
 				scriptCodeReview.setEmbeddingExecutable(embeddingExe);
 			}
 
-			const std::string effectiveReviewQuery = std::strlen(scriptInput) > 0
-				? std::string(scriptInput)
-				: ofxGgmlCodeReview::defaultReviewQuery();
+			const std::string effectiveReviewQuery = !trim(overrideQuery).empty()
+				? trim(overrideQuery)
+				: (std::strlen(scriptInput) > 0
+					? std::string(scriptInput)
+					: ofxGgmlCodeReview::defaultReviewQuery());
 
 			ofxGgmlCodeReviewSettings reviewSettings;
 			reviewSettings.maxTokens = std::clamp(maxTokens, 384, 768);
@@ -5013,30 +5663,63 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 	output.clear();
 	error.clear();
 
-	const bool useServerBackend =
+	const bool preferredServerBackend =
 		(textInferenceBackend == TextInferenceBackend::LlamaServer);
 	const std::string modelPath = getSelectedModelPath();
-	if (!useServerBackend && modelPath.empty()) {
-		error = "No model preset selected.";
-		return false;
-	}
-
-	if (!useServerBackend && !std::filesystem::exists(modelPath)) {
-		error = "Model file not found: " + modelPath;
-		return false;
-	}
-
-	if (!useServerBackend) {
+	bool useServerBackend = preferredServerBackend;
+	auto prepareCliBackend = [&](std::string * cliError = nullptr) -> bool {
+		std::string localError;
+		if (modelPath.empty()) {
+			localError = "No model preset selected.";
+		} else if (!std::filesystem::exists(modelPath)) {
+			localError = "Model file not found: " + modelPath;
+		}
+		if (!localError.empty()) {
+			if (cliError) {
+				*cliError = localError;
+			} else {
+				error = localError;
+			}
+			return false;
+		}
 		if (llamaCliState.load(std::memory_order_relaxed) != 1) {
 			probeLlamaCli();
 			if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-				error = "llama-completion/llama-cli/llama not found. Build with scripts/build-llama-cli.sh.";
+				localError = "llama-completion/llama-cli/llama not found. Build with scripts/build-llama-cli.sh.";
+				if (cliError) {
+					*cliError = localError;
+				} else {
+					error = localError;
+				}
 				return false;
 			}
 		}
-
 		llmInference.setCompletionExecutable(llamaCliCommand);
 		llmInference.probeCompletionCapabilities(true);
+		return true;
+	};
+	if (useServerBackend && !ensureTextServerReady(false, true)) {
+		const std::string serverError = !textServerStatusMessage.empty()
+			? textServerStatusMessage
+			: "Server-backed inference is not ready.";
+		std::string cliError;
+		if (prepareCliBackend(&cliError)) {
+			useServerBackend = false;
+			if (shouldLog(OF_LOG_NOTICE)) {
+				logWithLevel(
+					OF_LOG_NOTICE,
+					"Server-backed inference is unavailable; falling back to local llama-completion for this request.");
+			}
+		} else {
+			error = serverError;
+			if (!cliError.empty()) {
+				error += " CLI fallback unavailable: " + cliError;
+			}
+			return false;
+		}
+	}
+	if (!useServerBackend && !prepareCliBackend()) {
+		return false;
 	}
 
 	ofxGgmlInferenceSettings inferenceSettings;
@@ -5130,7 +5813,7 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 		error = inferenceResult.error.empty()
 			? "Inference failed."
 			: inferenceResult.error;
-		useLegacyFallback = !useServerBackend;
+		useLegacyFallback = true;
 	}
 	if (!useLegacyFallback) {
 		if (preserveLlamaInstructions) {
@@ -5148,14 +5831,16 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 				? "llama-server returned empty output."
 				: "llama-completion returned empty output.";
 		}
-		useLegacyFallback = !useServerBackend;
+		useLegacyFallback = true;
 		if (!useLegacyFallback) {
 			return false;
 		}
 	}
 	if (!suppressFallbackWarning && shouldLog(OF_LOG_WARNING)) {
 		logWithLevel(OF_LOG_WARNING,
-			"Modern inference path produced no usable output; falling back to legacy CLI execution.");
+			useServerBackend
+				? "Server-backed inference produced no usable output; falling back to local llama-completion."
+				: "Modern inference path produced no usable output; falling back to legacy CLI execution.");
 	}
 
 	// Probe for llama-completion/llama-cli/llama if not already found.
@@ -5163,12 +5848,8 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 	// "not-found" result so the user can install the tools without
 	// restarting the app.
 
-	if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-		probeLlamaCli();
-		if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-			error = "llama-completion/llama-cli/llama not found. Build with scripts/build-llama-cli.sh.";
-			return false;
-		}
+	if (!prepareCliBackend()) {
+		return false;
 	}
 	probeCliCapabilities();
 

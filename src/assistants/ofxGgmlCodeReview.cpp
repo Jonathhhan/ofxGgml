@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <iomanip>
 #include <mutex>
@@ -183,6 +184,433 @@ std::string toLowerCopy(std::string value) {
 	return value;
 }
 
+std::string normalizePathForMatch(const std::string & value) {
+	std::string normalized = std::filesystem::path(value).generic_string();
+	std::replace(normalized.begin(), normalized.end(), '\\', '/');
+	return toLowerCopy(normalized);
+}
+
+bool hasSuffix(const std::string & value, const std::string & suffix) {
+	return value.size() >= suffix.size() &&
+		value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+std::string normalizeLineEndings(const std::string & text) {
+	std::string out;
+	out.reserve(text.size());
+	for (size_t i = 0; i < text.size(); ++i) {
+		if (text[i] == '\r') {
+			if (i + 1 < text.size() && text[i + 1] == '\n') {
+				continue;
+			}
+			out.push_back('\n');
+			continue;
+		}
+		out.push_back(text[i]);
+	}
+	return out;
+}
+
+std::vector<std::string> splitLines(const std::string & text) {
+	std::vector<std::string> lines;
+	std::istringstream stream(text);
+	std::string line;
+	while (std::getline(stream, line)) {
+		lines.push_back(line);
+	}
+	return lines;
+}
+
+std::vector<std::string> splitCommaSeparatedValues(const std::string & text) {
+	std::vector<std::string> values;
+	std::string current;
+	bool inQuotes = false;
+	char quoteChar = '\0';
+	for (char c : text) {
+		if ((c == '"' || c == '\'') && (!inQuotes || c == quoteChar)) {
+			if (inQuotes && c == quoteChar) {
+				inQuotes = false;
+				quoteChar = '\0';
+			} else if (!inQuotes) {
+				inQuotes = true;
+				quoteChar = c;
+			}
+			continue;
+		}
+		if (c == ',' && !inQuotes) {
+			const std::string trimmed = trimCopy(current);
+			if (!trimmed.empty()) {
+				values.push_back(trimmed);
+			}
+			current.clear();
+			continue;
+		}
+		current.push_back(c);
+	}
+	const std::string trimmed = trimCopy(current);
+	if (!trimmed.empty()) {
+		values.push_back(trimmed);
+	}
+	return values;
+}
+
+std::string stripMatchingQuotes(const std::string & text) {
+	const std::string trimmed = trimCopy(text);
+	if (trimmed.size() >= 2 &&
+		((trimmed.front() == '"' && trimmed.back() == '"') ||
+		 (trimmed.front() == '\'' && trimmed.back() == '\''))) {
+		return trimmed.substr(1, trimmed.size() - 2);
+	}
+	return trimmed;
+}
+
+std::vector<std::string> parseInstructionApplyToGlobs(const std::string & content) {
+	std::vector<std::string> globs;
+	const std::string normalized = normalizeLineEndings(content);
+	if (normalized.rfind("---\n", 0) != 0) {
+		return globs;
+	}
+	const size_t fenceEnd = normalized.find("\n---\n", 4);
+	if (fenceEnd == std::string::npos) {
+		return globs;
+	}
+	const std::string frontMatter = normalized.substr(4, fenceEnd - 4);
+	for (const auto & rawLine : splitLines(frontMatter)) {
+		const std::string line = trimCopy(rawLine);
+		if (line.rfind("applyTo:", 0) != 0) {
+			continue;
+		}
+		std::string value = trimCopy(line.substr(std::string("applyTo:").size()));
+		if (value.empty()) {
+			continue;
+		}
+		if (value.front() == '[' && value.back() == ']') {
+			value = value.substr(1, value.size() - 2);
+			for (const auto & item : splitCommaSeparatedValues(value)) {
+				const std::string glob = stripMatchingQuotes(item);
+				if (!glob.empty()) {
+					globs.push_back(normalizePathForMatch(glob));
+				}
+			}
+		} else {
+			const std::string glob = stripMatchingQuotes(value);
+			if (!glob.empty()) {
+				globs.push_back(normalizePathForMatch(glob));
+			}
+		}
+	}
+	return globs;
+}
+
+std::string stripInstructionFrontMatter(const std::string & content) {
+	const std::string normalized = normalizeLineEndings(content);
+	if (normalized.rfind("---\n", 0) != 0) {
+		return trimCopy(normalized);
+	}
+	const size_t fenceEnd = normalized.find("\n---\n", 4);
+	if (fenceEnd == std::string::npos) {
+		return trimCopy(normalized);
+	}
+	return trimCopy(normalized.substr(fenceEnd + 5));
+}
+
+bool globMatchesPathRecursive(
+	const std::string & pattern,
+	size_t patternIndex,
+	const std::string & path,
+	size_t pathIndex) {
+	if (patternIndex >= pattern.size()) {
+		return pathIndex >= path.size();
+	}
+	if (pattern[patternIndex] == '*') {
+		const bool doubleStar =
+			patternIndex + 1 < pattern.size() && pattern[patternIndex + 1] == '*';
+		if (doubleStar) {
+			for (size_t i = pathIndex; i <= path.size(); ++i) {
+				if (globMatchesPathRecursive(pattern, patternIndex + 2, path, i)) {
+					return true;
+				}
+			}
+			return false;
+		}
+		for (size_t i = pathIndex; i <= path.size(); ++i) {
+			if (i > pathIndex && path[i - 1] == '/') {
+				break;
+			}
+			if (globMatchesPathRecursive(pattern, patternIndex + 1, path, i)) {
+				return true;
+			}
+		}
+		return false;
+	}
+	if (pathIndex >= path.size()) {
+		return false;
+	}
+	if (pattern[patternIndex] == '?') {
+		return path[pathIndex] != '/' &&
+			globMatchesPathRecursive(pattern, patternIndex + 1, path, pathIndex + 1);
+	}
+	if (pattern[patternIndex] != path[pathIndex]) {
+		return false;
+	}
+	return globMatchesPathRecursive(pattern, patternIndex + 1, path, pathIndex + 1);
+}
+
+bool globMatchesPath(const std::string & pattern, const std::string & path) {
+	return globMatchesPathRecursive(
+		normalizePathForMatch(pattern),
+		0,
+		normalizePathForMatch(path),
+		0);
+}
+
+struct RepoInstructionSnippet {
+	std::string path;
+	std::string content;
+	int priority = 0;
+};
+
+std::vector<RepoInstructionSnippet> collectRepoInstructionSnippets(
+	ofxGgmlScriptSource & scriptSource,
+	const std::string & targetPath,
+	bool includePathSpecific) {
+	std::vector<RepoInstructionSnippet> snippets;
+	const auto files = scriptSource.getFiles();
+	const std::string normalizedTarget = normalizePathForMatch(targetPath);
+	const auto targetDirectory = normalizedTarget.empty()
+		? std::string()
+		: normalizePathForMatch(std::filesystem::path(normalizedTarget).parent_path().generic_string());
+
+	int bestAgentPriority = -1;
+	if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder &&
+		!trimCopy(scriptSource.getLocalFolderPath()).empty()) {
+		const std::filesystem::path workspaceRoot(scriptSource.getLocalFolderPath());
+		auto relativePathFromRoot = [&](const std::filesystem::path & path) {
+			std::error_code ec;
+			const auto relative = std::filesystem::relative(path, workspaceRoot, ec);
+			return (!ec && !relative.empty())
+				? relative.generic_string()
+				: path.filename().generic_string();
+		};
+		auto readFileText = [](const std::filesystem::path & path) -> std::string {
+			std::ifstream in(path, std::ios::binary);
+			if (!in.is_open()) {
+				return std::string();
+			}
+			return std::string(
+				(std::istreambuf_iterator<char>(in)),
+				std::istreambuf_iterator<char>());
+		};
+		auto addSnippet = [&](const std::filesystem::path & path, int priority, bool isAgentsFile) {
+			std::error_code ec;
+			if (!std::filesystem::exists(path, ec) || ec || std::filesystem::is_directory(path, ec)) {
+				return;
+			}
+
+			std::string content = stripInstructionFrontMatter(readFileText(path));
+			if (trimCopy(content).empty()) {
+				return;
+			}
+
+			const std::string relativePath = relativePathFromRoot(path);
+			if (isAgentsFile) {
+				if (priority < bestAgentPriority) {
+					return;
+				}
+				if (priority > bestAgentPriority) {
+					snippets.erase(
+						std::remove_if(
+							snippets.begin(),
+							snippets.end(),
+							[](const RepoInstructionSnippet & snippet) {
+								return normalizePathForMatch(snippet.path) == "agents.md" ||
+									hasSuffix(normalizePathForMatch(snippet.path), "/agents.md");
+							}),
+						snippets.end());
+					bestAgentPriority = priority;
+				}
+			}
+
+			snippets.push_back({relativePath, std::move(content), priority});
+		};
+
+		addSnippet(workspaceRoot / ".github" / "copilot-instructions.md", 260, false);
+
+		if (includePathSpecific) {
+			const std::filesystem::path instructionDir =
+				workspaceRoot / ".github" / "instructions";
+			std::error_code ec;
+			auto it = std::filesystem::recursive_directory_iterator(
+				instructionDir,
+				std::filesystem::directory_options::skip_permission_denied,
+				ec);
+			const auto end = std::filesystem::recursive_directory_iterator();
+			for (; !ec && it != end; it.increment(ec)) {
+				if (ec || !it->is_regular_file()) {
+					continue;
+				}
+				const std::string relativePath = relativePathFromRoot(it->path());
+				const std::string normalizedPath = normalizePathForMatch(relativePath);
+				if (normalizedPath.find(".github/instructions/") == std::string::npos ||
+					!hasSuffix(normalizedPath, ".instructions.md")) {
+					continue;
+				}
+				std::string content = stripInstructionFrontMatter(readFileText(it->path()));
+				if (trimCopy(content).empty()) {
+					continue;
+				}
+				const auto globs = parseInstructionApplyToGlobs(content);
+				bool matches = globs.empty();
+				for (const auto & glob : globs) {
+					if (globMatchesPath(glob, normalizedTarget)) {
+						matches = true;
+						break;
+					}
+				}
+				if (matches) {
+					snippets.push_back({relativePath, std::move(content), 220});
+				}
+			}
+		}
+
+		addSnippet(workspaceRoot / "AGENTS.md", 120, true);
+		if (!targetDirectory.empty()) {
+			std::filesystem::path relativeDir = std::filesystem::path(targetDirectory);
+			while (!relativeDir.empty() && relativeDir != ".") {
+				const std::filesystem::path candidate = workspaceRoot / relativeDir / "AGENTS.md";
+				const int priority = 180 + static_cast<int>(
+					normalizePathForMatch(relativeDir.generic_string()).size());
+				addSnippet(candidate, priority, true);
+				relativeDir = relativeDir.parent_path();
+			}
+		}
+		if (!snippets.empty()) {
+			std::sort(
+				snippets.begin(),
+				snippets.end(),
+				[](const RepoInstructionSnippet & a, const RepoInstructionSnippet & b) {
+					if (a.priority != b.priority) {
+						return a.priority > b.priority;
+					}
+					return a.path < b.path;
+				});
+			if (snippets.size() > 4) {
+				snippets.resize(4);
+			}
+			return snippets;
+		}
+	}
+
+	for (size_t index = 0; index < files.size(); ++index) {
+		const auto & file = files[index];
+		const std::string normalizedPath = normalizePathForMatch(file.name);
+		const bool isCopilotInstructions =
+			normalizedPath == ".github/copilot-instructions.md";
+		const bool isPathInstructions =
+			normalizedPath.find(".github/instructions/") != std::string::npos &&
+			hasSuffix(normalizedPath, ".instructions.md");
+		const bool isAgentsFile =
+			normalizedPath == "agents.md" || hasSuffix(normalizedPath, "/agents.md");
+		if (!isCopilotInstructions && !isPathInstructions && !isAgentsFile) {
+			continue;
+		}
+
+		std::string content;
+		if (!scriptSource.loadFileContent(static_cast<int>(index), content)) {
+			continue;
+		}
+		content = stripInstructionFrontMatter(content);
+		if (trimCopy(content).empty()) {
+			continue;
+		}
+
+		if (isPathInstructions) {
+			if (!includePathSpecific || normalizedTarget.empty()) {
+				continue;
+			}
+			const auto globs = parseInstructionApplyToGlobs(content);
+			bool matches = globs.empty();
+			for (const auto & glob : globs) {
+				if (globMatchesPath(glob, normalizedTarget)) {
+					matches = true;
+					break;
+				}
+			}
+			if (!matches) {
+				continue;
+			}
+			snippets.push_back({file.name, content, 220});
+			continue;
+		}
+
+		if (isAgentsFile) {
+			int priority = 120;
+			if (!targetDirectory.empty()) {
+				const std::string agentDir =
+					normalizePathForMatch(std::filesystem::path(normalizedPath).parent_path().generic_string());
+				if (!agentDir.empty() && targetDirectory.rfind(agentDir, 0) == 0) {
+					priority = 180 + static_cast<int>(agentDir.size());
+				}
+			}
+			if (priority < bestAgentPriority) {
+				continue;
+			}
+			if (priority > bestAgentPriority) {
+				snippets.erase(
+					std::remove_if(
+						snippets.begin(),
+						snippets.end(),
+						[](const RepoInstructionSnippet & snippet) {
+							return normalizePathForMatch(snippet.path) == "agents.md" ||
+								hasSuffix(normalizePathForMatch(snippet.path), "/agents.md");
+						}),
+					snippets.end());
+				bestAgentPriority = priority;
+			}
+			snippets.push_back({file.name, content, priority});
+			continue;
+		}
+
+		snippets.push_back({file.name, content, 260});
+	}
+
+	std::sort(
+		snippets.begin(),
+		snippets.end(),
+		[](const RepoInstructionSnippet & a, const RepoInstructionSnippet & b) {
+			if (a.priority != b.priority) {
+				return a.priority > b.priority;
+			}
+			return a.path < b.path;
+		});
+	if (snippets.size() > 4) {
+		snippets.resize(4);
+	}
+	return snippets;
+}
+
+std::string buildRepoInstructionContext(
+	ofxGgmlScriptSource & scriptSource,
+	const std::string & targetPath,
+	bool includePathSpecific) {
+	const auto snippets = collectRepoInstructionSnippets(
+		scriptSource,
+		targetPath,
+		includePathSpecific);
+	if (snippets.empty()) {
+		return {};
+	}
+
+	std::ostringstream prompt;
+	prompt << "Repository instructions:\n";
+	for (const auto & snippet : snippets) {
+		prompt << "- " << snippet.path << ":\n"
+			<< slidingWindowText(snippet.content, 700) << "\n";
+	}
+	prompt << "\n";
+	return prompt.str();
+}
+
 std::vector<std::string> tokenizeSearchTerms(const std::string & text) {
 	std::vector<std::string> tokens;
 	std::string current;
@@ -339,6 +767,7 @@ bool looksLikeCodeFragmentSummary(const std::string & summary) {
 		(trimmed.back() == ',' || trimmed.find(')') == std::string::npos)) {
 		return true;
 	}
+	if (trimmed.find('(') != std::string::npos && trimmed.find(',') != std::string::npos) return true;
 	if (trimmed.rfind('#', 0) == 0) return true;
 	if (containsAny(lower, {
 		"case ",
@@ -397,6 +826,10 @@ bool looksLikeTrivialSummary(const std::string & summary) {
 
 std::string fallbackSummaryForFile(const ofxGgmlCodeReviewFileInfo & file) {
 	const std::string lowerName = toLowerCopy(file.name);
+	const auto hasSuffix = [&](const std::string & suffix) {
+		return lowerName.size() >= suffix.size() &&
+			lowerName.compare(lowerName.size() - suffix.size(), suffix.size(), suffix) == 0;
+	};
 	if (lowerName.find("main.cpp") != std::string::npos ||
 		lowerName.find("main.cxx") != std::string::npos) {
 		return "Application entry point that boots the OpenFrameworks app.";
@@ -404,20 +837,19 @@ std::string fallbackSummaryForFile(const ofxGgmlCodeReviewFileInfo & file) {
 	if (lowerName.find("ofapp.cpp") != std::string::npos) {
 		return "Main application implementation containing UI, state management, and runtime behavior.";
 	}
-	if (lowerName.size() >= 11 && lowerName.compare(lowerName.size() - 11, 11, ".vcxproj") == 0) {
+	if (hasSuffix(".vcxproj")) {
 		return "Visual Studio project definition for the example application and its build settings.";
 	}
-	if (lowerName.size() >= 19 && lowerName.compare(lowerName.size() - 19, 19, ".vcxproj.filters") == 0) {
+	if (hasSuffix(".vcxproj.filters")) {
 		return "Visual Studio filters file that organizes source and header files in the IDE.";
 	}
-	if (lowerName.size() >= 4 && lowerName.compare(lowerName.size() - 4, 4, ".sln") == 0) {
+	if (hasSuffix(".sln")) {
 		return "Visual Studio solution file that ties the example project and dependencies together.";
 	}
-	if (lowerName.size() >= 3 && lowerName.compare(lowerName.size() - 3, 3, ".rc") == 0) {
+	if (hasSuffix(".rc")) {
 		return "Windows resource script that selects the application icon for debug and release builds.";
 	}
-	if (lowerName == "addons.make" || lowerName.size() >= 11 &&
-		lowerName.compare(lowerName.size() - 11, 11, "addons.make") == 0) {
+	if (lowerName == "addons.make" || hasSuffix("addons.make")) {
 		return "Addon manifest listing the OpenFrameworks addons required by the example.";
 	}
 
@@ -544,6 +976,16 @@ bool contentContainsAnchor(
 
 bool looksLikeWeakFindingClaim(const std::string & bullet) {
 	const std::string lower = toLowerCopy(bullet);
+	if (containsAny(lower, {
+		"no error handling around",
+		"there is no error handling around",
+		"if `ofcreatewindow` fails",
+		"if ofcreatewindow fails",
+		"if `ofrunapp` fails",
+		"if ofrunapp fails"
+	})) {
+		return true;
+	}
 	int weakHits = 0;
 	if (containsAny(lower, {
 		"could be a security risk",
@@ -555,6 +997,12 @@ bool looksLikeWeakFindingClaim(const std::string & bullet) {
 		"depending on the requirements",
 		"depending on the hardware",
 		"could be improved",
+		"no error handling around",
+		"there is no error handling around",
+		"if `ofcreatewindow` fails",
+		"if ofcreatewindow fails",
+		"if `ofrunapp` fails",
+		"if ofrunapp fails",
 		"ensure that this macro is consistently defined",
 		"common practice",
 		"no specific tests are required"
@@ -1127,6 +1575,13 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 				"or tests without evidence in the file.\n";
 			prompt << "If there are no concrete issues, say exactly: No material findings in this file.\n";
 			prompt << "Every finding must cite exact evidence copied verbatim from the file using backticks.\n";
+			const std::string instructionContext = buildRepoInstructionContext(
+				scriptSource,
+				file.name,
+				true);
+			if (!instructionContext.empty()) {
+				prompt << instructionContext;
+			}
 			prompt << "Requested focus: " << effectiveQuery << "\n";
 			prompt << "File: " << file.name << "\n";
 			prompt << "Metrics: LOC=" << file.loc
@@ -1149,6 +1604,9 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 			retryPrompt << "- Summary: one sentence\n";
 			retryPrompt << "- Findings: concrete issue with `exact evidence`, or 'No material findings in this file.'\n";
 			retryPrompt << "- Tests: file-specific test or 'None needed beyond current coverage.'\n";
+			if (!instructionContext.empty()) {
+				retryPrompt << instructionContext;
+			}
 			retryPrompt << "Request: " << effectiveQuery << "\n";
 			retryPrompt << "File: " << file.name << "\n";
 			retryPrompt << "Content:\n" << file.truncatedContent << "\n";
@@ -1214,6 +1672,13 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 			prompt += "Do not repeat file summaries. Only report cross-cutting architecture or layering issues "
 				"that are supported by the provided summaries.\n";
 			prompt += "If no concrete architecture issues are evident, say exactly: No material architecture findings.\n";
+			const std::string instructionContext = buildRepoInstructionContext(
+				scriptSource,
+				std::string(),
+				false);
+			if (!instructionContext.empty()) {
+				prompt += instructionContext;
+			}
 			prompt += "Request: " + effectiveQuery + "\n\n";
 			prompt += result.repoTree + "\n";
 			prompt += "File summaries:\n" + summaryList;
@@ -1224,7 +1689,8 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 				"Architecture review. Return 3-5 concise bullets covering only concrete layering, "
 				"dependency-boundary, shared-state, or testing issues visible in these summaries.\n"
 				"If none are evident, say: No material architecture findings.\n"
-				"Request: " + effectiveQuery + "\n\nSummaries:\n" + summaryList;
+				+ (instructionContext.empty() ? std::string() : instructionContext)
+				+ "Request: " + effectiveQuery + "\n\nSummaries:\n" + summaryList;
 			const auto architecture = generateReviewPassWithRetry(
 				m_inference,
 				m_generationFallback,
@@ -1246,6 +1712,13 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 			prompt += "Only report mismatches or integration risks that are supported by the provided per-file findings.\n";
 			prompt += "Do not give generic cleanup advice. If no concrete integration issue is evident, "
 				"say exactly: No material integration findings.\n";
+			const std::string instructionContext = buildRepoInstructionContext(
+				scriptSource,
+				std::string(),
+				false);
+			if (!instructionContext.empty()) {
+				prompt += instructionContext;
+			}
 			prompt += "Request: " + effectiveQuery + "\n\n";
 			prompt += result.repoTree + "\nPer-file findings:\n";
 			for (size_t i = 0; i < result.selectedFileIndices.size() && i < 24; ++i) {
@@ -1261,7 +1734,8 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 				"Cross-file integration review. Return 3-5 concise bullets covering only concrete "
 				"interface mismatches, shared-state risks, or missing integration tests.\n"
 				"If none are evident, say: No material integration findings.\n"
-				"Request: " + effectiveQuery + "\n\nFindings:\n";
+				+ (instructionContext.empty() ? std::string() : instructionContext)
+				+ "Request: " + effectiveQuery + "\n\nFindings:\n";
 			for (size_t i = 0; i < result.selectedFileIndices.size() && i < 12; ++i) {
 				const auto & file = result.files[result.selectedFileIndices[i]];
 				retryPrompt += "- " + file.name + ": " + file.summary + "\n";

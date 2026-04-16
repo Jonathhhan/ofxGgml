@@ -6,13 +6,17 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ### Added
 - `ofxGgmlInference` live grounding now groups specialized sources under domain providers and keeps generic search as a separate fallback path.
+- Script mode now supports higher-level slash commands and quick actions such as `/review`, `/reviewfix`, `/nextedit`, `/summary`, and `Change Summary`.
+- Text-focused GUI modes now expose additional professional one-click actions, including executive briefs, action items, meeting notes, email replies, release notes, commit messages, and structured JSON replies.
 
 ### Changed
 - `ofxGgmlGuiExample` replaces the old online/offline toggle with four `Live context` policies: `Offline`, `LoadedSourcesOnly`, `LiveContext`, and `LiveContextStrictCitations`.
 - GUI live-source controls now use the more general `Live context` / `sources` wording instead of mixed `online` / `realtime` labels.
+- Local workspaces now keep `.github` available during script-source scans so repository instruction files can shape assistant and review prompts.
+- `ofxGgmlCodeAssistant` and `ofxGgmlCodeReview` now read local `AGENTS.md` and `.github` instruction files directly from the workspace for server-first coding and review flows.
 
 ### Documentation
-- `README.md` now documents the `Live context` policies and clarifies that source grounding can range from explicit loaded URLs to broader domain-provider and generic-search context.
+- `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, and repository instruction-file support.
 
 ## [1.0.2] - 2026-04-16
 

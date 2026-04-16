@@ -157,6 +157,8 @@ std::string normalizePathForMatch(const std::string & value) {
 	return toLowerCopy(normalized);
 }
 
+std::string normalizeLineEndings(const std::string & text);
+
 void addUniqueString(std::vector<std::string> * values, const std::string & value) {
 	if (values == nullptr || trimCopy(value).empty()) {
 		return;
@@ -164,6 +166,408 @@ void addUniqueString(std::vector<std::string> * values, const std::string & valu
 	if (std::find(values->begin(), values->end(), value) == values->end()) {
 		values->push_back(value);
 	}
+}
+
+bool hasSuffix(const std::string & value, const std::string & suffix) {
+	return value.size() >= suffix.size() &&
+		value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+std::vector<std::string> splitCommaSeparatedValues(const std::string & text) {
+	std::vector<std::string> values;
+	std::string current;
+	bool inQuotes = false;
+	char quoteChar = '\0';
+	for (char c : text) {
+		if ((c == '"' || c == '\'') && (!inQuotes || c == quoteChar)) {
+			if (inQuotes && c == quoteChar) {
+				inQuotes = false;
+				quoteChar = '\0';
+			} else if (!inQuotes) {
+				inQuotes = true;
+				quoteChar = c;
+			}
+			continue;
+		}
+		if (c == ',' && !inQuotes) {
+			const std::string trimmed = trimCopy(current);
+			if (!trimmed.empty()) {
+				values.push_back(trimmed);
+			}
+			current.clear();
+			continue;
+		}
+		current.push_back(c);
+	}
+	const std::string trimmed = trimCopy(current);
+	if (!trimmed.empty()) {
+		values.push_back(trimmed);
+	}
+	return values;
+}
+
+std::string stripMatchingQuotes(const std::string & text) {
+	const std::string trimmed = trimCopy(text);
+	if (trimmed.size() >= 2 &&
+		((trimmed.front() == '"' && trimmed.back() == '"') ||
+		 (trimmed.front() == '\'' && trimmed.back() == '\''))) {
+		return trimmed.substr(1, trimmed.size() - 2);
+	}
+	return trimmed;
+}
+
+std::vector<std::string> parseInstructionApplyToGlobs(const std::string & content) {
+	std::vector<std::string> globs;
+	const std::string normalized = normalizeLineEndings(content);
+	if (normalized.rfind("---\n", 0) != 0) {
+		return globs;
+	}
+	const size_t fenceEnd = normalized.find("\n---\n", 4);
+	if (fenceEnd == std::string::npos) {
+		return globs;
+	}
+	const std::string frontMatter = normalized.substr(4, fenceEnd - 4);
+	for (const auto & rawLine : splitLines(frontMatter)) {
+		const std::string line = trimCopy(rawLine);
+		if (line.rfind("applyTo:", 0) != 0) {
+			continue;
+		}
+		std::string value = trimCopy(line.substr(std::string("applyTo:").size()));
+		if (value.empty()) {
+			continue;
+		}
+		if (value.front() == '[' && value.back() == ']') {
+			value = value.substr(1, value.size() - 2);
+			for (const auto & item : splitCommaSeparatedValues(value)) {
+				const std::string glob = stripMatchingQuotes(item);
+				if (!glob.empty()) {
+					globs.push_back(normalizePathForMatch(glob));
+				}
+			}
+		} else {
+			const std::string glob = stripMatchingQuotes(value);
+			if (!glob.empty()) {
+				globs.push_back(normalizePathForMatch(glob));
+			}
+		}
+	}
+	return globs;
+}
+
+std::string stripInstructionFrontMatter(const std::string & content) {
+	const std::string normalized = normalizeLineEndings(content);
+	if (normalized.rfind("---\n", 0) != 0) {
+		return trimCopy(normalized);
+	}
+	const size_t fenceEnd = normalized.find("\n---\n", 4);
+	if (fenceEnd == std::string::npos) {
+		return trimCopy(normalized);
+	}
+	return trimCopy(normalized.substr(fenceEnd + 5));
+}
+
+bool globMatchesPathRecursive(
+	const std::string & pattern,
+	size_t patternIndex,
+	const std::string & path,
+	size_t pathIndex) {
+	if (patternIndex >= pattern.size()) {
+		return pathIndex >= path.size();
+	}
+	if (pattern[patternIndex] == '*') {
+		const bool doubleStar =
+			patternIndex + 1 < pattern.size() && pattern[patternIndex + 1] == '*';
+		if (doubleStar) {
+			for (size_t i = pathIndex; i <= path.size(); ++i) {
+				if (globMatchesPathRecursive(pattern, patternIndex + 2, path, i)) {
+					return true;
+				}
+			}
+			return false;
+		}
+		for (size_t i = pathIndex; i <= path.size(); ++i) {
+			if (i > pathIndex && path[i - 1] == '/') {
+				break;
+			}
+			if (globMatchesPathRecursive(pattern, patternIndex + 1, path, i)) {
+				return true;
+			}
+		}
+		return false;
+	}
+	if (pathIndex >= path.size()) {
+		return false;
+	}
+	if (pattern[patternIndex] == '?') {
+		return path[pathIndex] != '/' &&
+			globMatchesPathRecursive(pattern, patternIndex + 1, path, pathIndex + 1);
+	}
+	if (pattern[patternIndex] != path[pathIndex]) {
+		return false;
+	}
+	return globMatchesPathRecursive(pattern, patternIndex + 1, path, pathIndex + 1);
+}
+
+bool globMatchesPath(const std::string & pattern, const std::string & path) {
+	const std::string normalizedPattern = normalizePathForMatch(pattern);
+	const std::string normalizedPath = normalizePathForMatch(path);
+	return globMatchesPathRecursive(normalizedPattern, 0, normalizedPath, 0);
+}
+
+struct RepoInstructionSnippet {
+	std::string path;
+	std::string content;
+	int priority = 0;
+};
+
+std::vector<RepoInstructionSnippet> collectRepoInstructionSnippets(
+	ofxGgmlScriptSource * scriptSource,
+	const std::string & targetPath,
+	bool includePathSpecific) {
+	std::vector<RepoInstructionSnippet> snippets;
+	if (scriptSource == nullptr) {
+		return snippets;
+	}
+
+	const auto files = scriptSource->getFiles();
+	const std::string normalizedTarget = normalizePathForMatch(targetPath);
+	const auto targetDirectory = normalizedTarget.empty()
+		? std::string()
+		: normalizePathForMatch(std::filesystem::path(normalizedTarget).parent_path().generic_string());
+
+	int bestAgentPriority = -1;
+	if (scriptSource->getSourceType() == ofxGgmlScriptSourceType::LocalFolder &&
+		!trimCopy(scriptSource->getLocalFolderPath()).empty()) {
+		const std::filesystem::path workspaceRoot(scriptSource->getLocalFolderPath());
+		auto relativePathFromRoot = [&](const std::filesystem::path & path) {
+			std::error_code ec;
+			const auto relative = std::filesystem::relative(path, workspaceRoot, ec);
+			return (!ec && !relative.empty())
+				? relative.generic_string()
+				: path.filename().generic_string();
+		};
+		auto readFileText = [](const std::filesystem::path & path) {
+			std::ifstream in(path, std::ios::binary);
+			if (!in.is_open()) {
+				return std::string();
+			}
+			return std::string(
+				(std::istreambuf_iterator<char>(in)),
+				std::istreambuf_iterator<char>());
+		};
+		auto addSnippet = [&](const std::filesystem::path & path, int priority, bool isAgentsFile) {
+			std::error_code ec;
+			if (!std::filesystem::exists(path, ec) || ec || std::filesystem::is_directory(path, ec)) {
+				return;
+			}
+
+			std::string content = truncateWithMarker(
+				stripInstructionFrontMatter(readFileText(path)),
+				900);
+			if (trimCopy(content).empty()) {
+				return;
+			}
+
+			const std::string relativePath = relativePathFromRoot(path);
+			if (isAgentsFile) {
+				if (priority < bestAgentPriority) {
+					return;
+				}
+				if (priority > bestAgentPriority) {
+					snippets.erase(
+						std::remove_if(
+							snippets.begin(),
+							snippets.end(),
+							[](const RepoInstructionSnippet & snippet) {
+								return normalizePathForMatch(snippet.path) == "agents.md" ||
+									hasSuffix(normalizePathForMatch(snippet.path), "/agents.md");
+							}),
+						snippets.end());
+					bestAgentPriority = priority;
+				}
+			}
+
+			snippets.push_back({relativePath, std::move(content), priority});
+		};
+
+		addSnippet(workspaceRoot / ".github" / "copilot-instructions.md", 260, false);
+
+		if (includePathSpecific) {
+			const std::filesystem::path instructionDir =
+				workspaceRoot / ".github" / "instructions";
+			std::error_code ec;
+			auto it = std::filesystem::recursive_directory_iterator(
+				instructionDir,
+				std::filesystem::directory_options::skip_permission_denied,
+				ec);
+			const auto end = std::filesystem::recursive_directory_iterator();
+			for (; !ec && it != end; it.increment(ec)) {
+				if (ec || !it->is_regular_file()) {
+					continue;
+				}
+				const std::string relativePath = relativePathFromRoot(it->path());
+				const std::string normalizedPath = normalizePathForMatch(relativePath);
+				if (normalizedPath.find(".github/instructions/") == std::string::npos ||
+					!hasSuffix(normalizedPath, ".instructions.md")) {
+					continue;
+				}
+				std::string content = truncateWithMarker(
+					stripInstructionFrontMatter(readFileText(it->path())),
+					900);
+				if (trimCopy(content).empty()) {
+					continue;
+				}
+				const auto globs = parseInstructionApplyToGlobs(content);
+				bool matches = globs.empty();
+				for (const auto & glob : globs) {
+					if (globMatchesPath(glob, normalizedTarget)) {
+						matches = true;
+						break;
+					}
+				}
+				if (matches) {
+					snippets.push_back({relativePath, std::move(content), 220});
+				}
+			}
+		}
+
+		addSnippet(workspaceRoot / "AGENTS.md", 120, true);
+		if (!targetDirectory.empty()) {
+			std::filesystem::path relativeDir = std::filesystem::path(targetDirectory);
+			while (!relativeDir.empty() && relativeDir != ".") {
+				const std::filesystem::path candidate = workspaceRoot / relativeDir / "AGENTS.md";
+				const int priority = 180 + static_cast<int>(
+					normalizePathForMatch(relativeDir.generic_string()).size());
+				addSnippet(candidate, priority, true);
+				relativeDir = relativeDir.parent_path();
+			}
+		}
+		if (!snippets.empty()) {
+			std::sort(
+				snippets.begin(),
+				snippets.end(),
+				[](const RepoInstructionSnippet & a, const RepoInstructionSnippet & b) {
+					if (a.priority != b.priority) {
+						return a.priority > b.priority;
+					}
+					return a.path < b.path;
+				});
+			if (snippets.size() > 4) {
+				snippets.resize(4);
+			}
+			return snippets;
+		}
+	}
+
+	for (size_t index = 0; index < files.size(); ++index) {
+		const auto & file = files[index];
+		const std::string normalizedPath = normalizePathForMatch(file.name);
+		const bool isCopilotInstructions =
+			normalizedPath == ".github/copilot-instructions.md";
+		const bool isPathInstructions =
+			normalizedPath.find(".github/instructions/") != std::string::npos &&
+			hasSuffix(normalizedPath, ".instructions.md");
+		const bool isAgentsFile =
+			normalizedPath == "agents.md" || hasSuffix(normalizedPath, "/agents.md");
+		if (!isCopilotInstructions && !isPathInstructions && !isAgentsFile) {
+			continue;
+		}
+
+		std::string content;
+		if (!scriptSource->loadFileContent(static_cast<int>(index), content)) {
+			continue;
+		}
+		content = truncateWithMarker(stripInstructionFrontMatter(content), 900);
+		if (trimCopy(content).empty()) {
+			continue;
+		}
+
+		if (isPathInstructions) {
+			if (!includePathSpecific || normalizedTarget.empty()) {
+				continue;
+			}
+			const auto globs = parseInstructionApplyToGlobs(content);
+			bool matches = globs.empty();
+			for (const auto & glob : globs) {
+				if (globMatchesPath(glob, normalizedTarget)) {
+					matches = true;
+					break;
+				}
+			}
+			if (!matches) {
+				continue;
+			}
+			snippets.push_back({file.name, std::move(content), 220});
+			continue;
+		}
+
+		if (isAgentsFile) {
+			int priority = 120;
+			if (!targetDirectory.empty()) {
+				const std::string agentDir =
+					normalizePathForMatch(std::filesystem::path(normalizedPath).parent_path().generic_string());
+				if (!agentDir.empty() &&
+					targetDirectory.rfind(agentDir, 0) == 0) {
+					priority = 180 + static_cast<int>(agentDir.size());
+				}
+			}
+			if (priority < bestAgentPriority) {
+				continue;
+			}
+			if (priority > bestAgentPriority) {
+				snippets.erase(
+					std::remove_if(
+						snippets.begin(),
+						snippets.end(),
+						[](const RepoInstructionSnippet & snippet) {
+							return normalizePathForMatch(snippet.path) == "agents.md" ||
+								hasSuffix(normalizePathForMatch(snippet.path), "/agents.md");
+						}),
+					snippets.end());
+				bestAgentPriority = priority;
+			}
+			snippets.push_back({file.name, std::move(content), priority});
+			continue;
+		}
+
+		snippets.push_back({file.name, std::move(content), 260});
+	}
+
+	std::sort(
+		snippets.begin(),
+		snippets.end(),
+		[](const RepoInstructionSnippet & a, const RepoInstructionSnippet & b) {
+			if (a.priority != b.priority) {
+				return a.priority > b.priority;
+			}
+			return a.path < b.path;
+		});
+	if (snippets.size() > 4) {
+		snippets.resize(4);
+	}
+	return snippets;
+}
+
+std::string buildRepoInstructionContext(
+	ofxGgmlScriptSource * scriptSource,
+	const std::string & targetPath,
+	bool includePathSpecific) {
+	const auto snippets = collectRepoInstructionSnippets(
+		scriptSource,
+		targetPath,
+		includePathSpecific);
+	if (snippets.empty()) {
+		return {};
+	}
+
+	std::ostringstream prompt;
+	prompt << "Repository instructions:\n";
+	for (const auto & snippet : snippets) {
+		prompt << "- " << snippet.path << ":\n"
+			<< truncateWithMarker(snippet.content, 700) << "\n";
+	}
+	prompt << "\n";
+	return prompt.str();
 }
 
 std::string inferCodeMapRole(const std::string & scope) {
@@ -1215,6 +1619,13 @@ std::string ofxGgmlCodeAssistant::defaultActionBody(
 		return withExtraInstructions(
 			"Review the focused file code for bugs, security issues, and style. Return findings with severity and suggested fixes.",
 			"Review the following code for bugs, security issues, and style. Return findings with severity and suggested fixes:\n");
+	case ofxGgmlCodeAssistantAction::NextEdit:
+		return withExtraInstructions(
+			"Predict the most likely next edit in the focused file or nearby files. Return the next edit target, why it matters, and an optional patch or diff for that single next change.",
+			"Predict the most likely next edit for the following code and return the next target plus an optional patch:\n");
+	case ofxGgmlCodeAssistantAction::SummarizeChanges:
+		return "Summarize the provided code changes professionally for reviewers. Return a concise summary, key files, risks, and verification notes.\n\n" +
+			trimmedInput;
 	case ofxGgmlCodeAssistantAction::FixBuild:
 		if (!trimmedOutput.empty()) {
 			return "Fix the build or test failure described below. Identify likely files, propose changes, and include verification commands.\n\n" +
@@ -1303,6 +1714,12 @@ std::string ofxGgmlCodeAssistant::defaultActionLabel(
 		return appendInstructions(hasFocusedFile
 			? "Review focused file."
 			: "Review code.");
+	case ofxGgmlCodeAssistantAction::NextEdit:
+		return appendInstructions(hasFocusedFile
+			? "Suggest next edit for focused file."
+			: "Suggest next edit.");
+	case ofxGgmlCodeAssistantAction::SummarizeChanges:
+		return appendInstructions("Summarize local changes.");
 	case ofxGgmlCodeAssistantAction::FixBuild:
 		return "Fix build or test failure.";
 	case ofxGgmlCodeAssistantAction::GroundedDocs:
@@ -2676,6 +3093,15 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 		prompt << context.projectMemory->buildPromptContext(
 			context.projectMemoryHeading);
 	}
+	if (context.scriptSource != nullptr) {
+		const std::string instructionContext = buildRepoInstructionContext(
+			context.scriptSource,
+			focusedFileName,
+			true);
+		if (!instructionContext.empty()) {
+			prompt << instructionContext;
+		}
+	}
 
 	appendRepoContext(
 		prompt,
@@ -2761,6 +3187,12 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 
 	if (request.action == ofxGgmlCodeAssistantAction::GroundedDocs) {
 		prompt << "If the answer depends on documentation, prefer citations over guesses.\n\n";
+	}
+	if (request.action == ofxGgmlCodeAssistantAction::NextEdit) {
+		prompt << "Keep the answer tightly scoped to one likely next edit. Prefer one file and one focused change.\n\n";
+	}
+	if (request.action == ofxGgmlCodeAssistantAction::SummarizeChanges) {
+		prompt << "Write for a human reviewer. Prefer crisp prose over generic AI framing.\n\n";
 	}
 
 	prompt << "Generate high-quality code and short explanation for this request:\n"

@@ -242,6 +242,14 @@ When the server backend is selected, the GUI exposes:
 - `Start Local Server` / `Stop Local Server` for an app-managed local `llama-server`
 - `Tune For Server` to apply lower-latency settings for the active mode
 
+Text-heavy modes also ship with server-friendly quick actions so the warm backend is useful outside of coding:
+
+- `Chat`: `Summarize Chat`
+- `Summarize`: `Executive Brief`, `Action Items`, `Meeting Notes`, `Source Brief`
+- `Write`: `Shorten`, `Email Reply`, `Release Notes`, `Commit Message`
+- `Translate`: `Natural`, `Literal`, `Detect + Translate`
+- `Custom`: `JSON Reply`, `Professional Tone`
+
 ## Performance
 
 `ofxGgml` now ships with explicit benchmark entry points instead of burying performance checks only inside `tests/`.
@@ -297,6 +305,14 @@ The helper normalizes HTML-heavy pages into cleaner text, clips oversized source
 
 Use it when an app wants a reusable local code-review pipeline instead of wiring `ofxGgmlScriptSource`, embedding calls, and prompt choreography by hand.
 
+Repository-specific instructions can now shape review prompts as well. For local workspaces, the addon reads:
+
+- `.github/copilot-instructions.md`
+- path-specific `.github/instructions/*.instructions.md`
+- nearest `AGENTS.md`
+
+Those instruction files are read directly from the workspace, so they still work even when hidden folders such as `.github` would otherwise be excluded from a normal file listing.
+
 ## Chat Assistant Helpers
 
 `ofxGgmlChatAssistant` lifts the generic chat prompt path out of the `GuiExample`. It prepares reusable conversation prompts with optional system instructions and response-language hints, so apps can keep chat UIs thin and consistent.
@@ -310,6 +326,12 @@ Use it when an app wants local chat behavior without duplicating prompt assembly
 It can also request structured task output so apps receive a machine-readable plan instead of only free-form prose. Structured responses can include acceptance criteria, file intents, patch operations, unified diffs, synthesized test ideas, verification commands, review findings with severity/confidence, reviewer-simulation passes, risk scoring, open questions, and parsed build-error context.
 
 Use it when an app wants Copilot-style local coding assistance without duplicating prompt assembly, retrieval, and follow-up logic in UI code.
+
+The `GuiExample` now layers higher-level scripting workflows on top of those assistant actions:
+
+- slash commands such as `/review`, `/reviewfix`, `/nextedit`, `/summary`, `/tests`, `/fix`, `/explain`, and `/docs`
+- one-click `Next Edit`, `Review Fix Plan`, and local `Change Summary` actions
+- server-first code generation with automatic CLI fallback when the server is unavailable
 
 Symbol context is no longer limited to file snippets. Apps can build a semantic index, query relevant definitions of `runInference` and likely callers, and feed that directly into coding or review prompts. When a local workspace exposes `compile_commands.json`, the assistant upgrades retrieval with compile-database-aware file coverage and range-based caller tracking. For planning-heavy flows, `buildCodeMap(...)` exposes a compact semantic code map, while `runSpecToCode(...)` turns a feature specification into a structured implementation plan with tests, review passes, and risk metadata.
 
@@ -334,6 +356,8 @@ The public result types make that loop inspectable:
 ## Text Assistant Helpers
 
 `ofxGgmlTextAssistant` lifts translation and general text-workflow prompting out of the `GuiExample`. It prepares reusable prompts for `Summarize`, `KeyPoints`, `TlDr`, `Rewrite`, `Expand`, `Translate`, `DetectLanguage`, and `Custom` tasks.
+
+On top of those core prompts, the GUI example now includes professional one-click flows for executive briefs, action extraction, meeting notes, email replies, release notes, commit messages, natural vs. literal translations, and structured JSON replies.
 
 Use it when an app wants translation or writing-assistant features without hardcoding task prompts in its UI layer.
 
