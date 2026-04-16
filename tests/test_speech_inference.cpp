@@ -106,6 +106,27 @@ TEST_CASE("Whisper backend parses SRT segments into addon speech segments", "[sp
 	REQUIRE(segments[1].text == "Second line.");
 }
 
+TEST_CASE("Whisper server backend normalizes transcription and translation URLs", "[speech_inference]") {
+	REQUIRE(
+		ofxGgmlWhisperServerSpeechBackend::normalizeServerUrl(
+			"http://127.0.0.1:8081",
+			ofxGgmlSpeechTask::Transcribe) ==
+		"http://127.0.0.1:8081/v1/audio/transcriptions");
+	REQUIRE(
+		ofxGgmlWhisperServerSpeechBackend::normalizeServerUrl(
+			"http://127.0.0.1:8081/v1",
+			ofxGgmlSpeechTask::Translate) ==
+		"http://127.0.0.1:8081/v1/audio/translations");
+}
+
+TEST_CASE("Speech inference can create a whisper server backend", "[speech_inference]") {
+	const auto backend = ofxGgmlSpeechInference::createWhisperServerBackend(
+		"http://127.0.0.1:8081",
+		"whisper-large-v3");
+	REQUIRE(backend != nullptr);
+	REQUIRE(backend->backendName() == "WhisperServer");
+}
+
 TEST_CASE("Speech inference allows backend replacement", "[speech_inference]") {
 	ofxGgmlSpeechInference inference;
 	inference.setBackend(std::make_shared<FakeSpeechBackend>());

@@ -55,6 +55,22 @@ TEST_CASE("Video inference builds frame-aware prompts", "[video_inference]") {
 	REQUIRE(prompt.find("Closing frame") != std::string::npos);
 }
 
+TEST_CASE("Video inference builds action and emotion prompts", "[video_inference]") {
+	ofxGgmlVideoRequest actionRequest;
+	actionRequest.task = ofxGgmlVideoTask::Action;
+	std::vector<ofxGgmlSampledVideoFrame> frames = {
+		{"frame0.png", "Opening frame", 0.0},
+		{"frame1.png", "Middle frame", 2.0}
+	};
+	const std::string actionPrompt = ofxGgmlVideoInference::buildFrameAwarePrompt(actionRequest, frames);
+	REQUIRE(actionPrompt.find("primary action") != std::string::npos);
+
+	ofxGgmlVideoRequest emotionRequest;
+	emotionRequest.task = ofxGgmlVideoTask::Emotion;
+	const std::string emotionPrompt = ofxGgmlVideoInference::buildFrameAwarePrompt(emotionRequest, frames);
+	REQUIRE(emotionPrompt.find("dominant emotion") != std::string::npos);
+}
+
 TEST_CASE("Video inference formats timestamps", "[video_inference]") {
 	REQUIRE(ofxGgmlVideoInference::formatTimestamp(4.2) == "0:04");
 	REQUIRE(ofxGgmlVideoInference::formatTimestamp(125.0) == "2:05");
@@ -65,6 +81,34 @@ TEST_CASE("Video inference uses sampled-frames backend by default", "[video_infe
 	ofxGgmlVideoInference inference;
 	REQUIRE(inference.getBackend() != nullptr);
 	REQUIRE(inference.getBackend()->backendName() == "SampledFrames");
+}
+
+TEST_CASE("Video inference normalizes temporal sidecar URLs", "[video_inference]") {
+	REQUIRE(
+		ofxGgmlVideoInference::normalizeSidecarUrl("http://127.0.0.1:8090") ==
+		"http://127.0.0.1:8090/analyze");
+	REQUIRE(
+		ofxGgmlVideoInference::normalizeSidecarUrl("http://127.0.0.1:8090/analyze") ==
+		"http://127.0.0.1:8090/analyze");
+}
+
+TEST_CASE("Video inference builds temporal sidecar payloads", "[video_inference]") {
+	ofxGgmlVideoRequest request;
+	request.task = ofxGgmlVideoTask::Action;
+	request.videoPath = "clip.mp4";
+	request.prompt = "Classify the action.";
+	request.sidecarModel = "temporal-action-v1";
+	std::vector<ofxGgmlSampledVideoFrame> frames = {
+		{"frame0.png", "Opening frame", 0.0},
+		{"frame1.png", "Closing frame", 4.0}
+	};
+
+	const std::string payload = ofxGgmlVideoInference::buildTemporalSidecarJson(request, frames);
+	REQUIRE(payload.find("\"task\":\"Action\"") != std::string::npos);
+	REQUIRE(payload.find("\"model\":\"temporal-action-v1\"") != std::string::npos);
+	REQUIRE(payload.find("\"video_path\":\"clip.mp4\"") != std::string::npos);
+	REQUIRE(payload.find("\"sampled_frames\"") != std::string::npos);
+	REQUIRE(payload.find("\"primary_label\":\"string\"") != std::string::npos);
 }
 
 TEST_CASE("Video inference allows backend replacement", "[video_inference]") {

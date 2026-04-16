@@ -9,7 +9,9 @@
 enum class ofxGgmlVideoTask {
 	Summarize = 0,
 	Ocr,
-	Ask
+	Ask,
+	Action,
+	Emotion
 };
 
 struct ofxGgmlSampledVideoFrame {
@@ -24,6 +26,8 @@ struct ofxGgmlVideoRequest {
 	std::string prompt;
 	std::string systemPrompt;
 	std::string responseLanguage;
+	std::string sidecarUrl;
+	std::string sidecarModel;
 	int maxTokens = 512;
 	float temperature = 0.2f;
 	int maxFrames = 6;
@@ -33,13 +37,29 @@ struct ofxGgmlVideoRequest {
 	bool includeTimestamps = true;
 };
 
+struct ofxGgmlVideoStructuredAnalysis {
+	std::string analysisType;
+	std::string primaryLabel;
+	float confidence = -1.0f;
+	std::vector<std::string> secondaryLabels;
+	std::vector<std::string> timeline;
+	std::vector<std::string> evidence;
+	std::string valence;
+	std::string arousal;
+	std::string notes;
+};
+
 struct ofxGgmlVideoResult {
 	bool success = false;
 	float elapsedMs = 0.0f;
 	std::string text;
 	std::string error;
 	std::string backendName;
+	std::string usedServerUrl;
+	std::string requestJson;
+	std::string responseJson;
 	std::vector<ofxGgmlSampledVideoFrame> sampledFrames;
+	ofxGgmlVideoStructuredAnalysis structured;
 	ofxGgmlVisionResult visionResult;
 };
 
@@ -82,6 +102,10 @@ public:
 	static std::string buildFrameAwarePrompt(
 		const ofxGgmlVideoRequest & request,
 		const std::vector<ofxGgmlSampledVideoFrame> & frames);
+	static std::string normalizeSidecarUrl(const std::string & sidecarUrl);
+	static std::string buildTemporalSidecarJson(
+		const ofxGgmlVideoRequest & request,
+		const std::vector<ofxGgmlSampledVideoFrame> & frames);
 	static std::shared_ptr<ofxGgmlVideoBackend> createSampledFramesBackend();
 
 	void setBackend(std::shared_ptr<ofxGgmlVideoBackend> backend);
@@ -93,6 +117,8 @@ public:
 
 	ofxGgmlVideoResult runServerRequest(
 		const ofxGgmlVisionModelProfile & profile,
+		const ofxGgmlVideoRequest & request) const;
+	ofxGgmlVideoResult runTemporalSidecarRequest(
 		const ofxGgmlVideoRequest & request) const;
 
 private:

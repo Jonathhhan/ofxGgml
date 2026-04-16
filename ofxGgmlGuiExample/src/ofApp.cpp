@@ -50,6 +50,7 @@ const char * const kTextBackendLabels[] = {
 };
 
 const char * const kDefaultTextServerUrl = "http://127.0.0.1:8080";
+const char * const kDefaultSpeechServerUrl = "http://127.0.0.1:8081";
 
 namespace {
 struct TokenLiteral {
@@ -262,6 +263,11 @@ std::string effectiveTextServerUrl(const char * buffer) {
 	return value.empty() ? std::string(kDefaultTextServerUrl) : value;
 }
 
+std::string effectiveSpeechServerUrl(const char * buffer) {
+	const std::string value = trim(buffer ? std::string(buffer) : std::string());
+	return value.empty() ? std::string(kDefaultSpeechServerUrl) : value;
+}
+
 std::string buildStructuredTextPrompt(
 	const std::string & systemPrompt,
 	const std::string & instruction,
@@ -398,6 +404,28 @@ std::string serverBaseUrlFromConfiguredUrl(const std::string & configuredUrl) {
 	return value.empty() ? std::string(kDefaultTextServerUrl) : value;
 }
 
+std::string speechServerBaseUrlFromConfiguredUrl(const std::string & configuredUrl) {
+	std::string value = trim(configuredUrl);
+	if (value.empty()) {
+		return kDefaultSpeechServerUrl;
+	}
+	auto stripSuffix = [&](const std::string & suffix) {
+		if (value.size() >= suffix.size() &&
+			value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0) {
+			value.erase(value.size() - suffix.size());
+		}
+	};
+	stripSuffix("/v1/audio/transcriptions");
+	stripSuffix("/v1/audio/translations");
+	stripSuffix("/audio/transcriptions");
+	stripSuffix("/audio/translations");
+	stripSuffix("/v1");
+	if (!value.empty() && value.back() == '/') {
+		value.pop_back();
+	}
+	return value.empty() ? std::string(kDefaultSpeechServerUrl) : value;
+}
+
 std::pair<std::string, int> parseServerHostPort(const std::string & configuredUrl) {
 	const std::string baseUrl = serverBaseUrlFromConfiguredUrl(configuredUrl);
 	static const std::regex hostPortRe(R"(^https?://([^/:]+)(?::(\d+))?.*$)", std::regex::icase);
@@ -412,6 +440,20 @@ std::pair<std::string, int> parseServerHostPort(const std::string & configuredUr
 	return {"127.0.0.1", 8080};
 }
 
+std::pair<std::string, int> parseSpeechServerHostPort(const std::string & configuredUrl) {
+	const std::string baseUrl = speechServerBaseUrlFromConfiguredUrl(configuredUrl);
+	static const std::regex hostPortRe(R"(^https?://([^/:]+)(?::(\d+))?.*$)", std::regex::icase);
+	std::smatch match;
+	if (std::regex_match(baseUrl, match, hostPortRe)) {
+		const std::string host = match[1].str();
+		const int port = (match.size() >= 3 && match[2].matched)
+			? std::max(1, std::stoi(match[2].str()))
+			: 8081;
+		return {host, port};
+	}
+	return {"127.0.0.1", 8081};
+}
+
 bool shouldManageLocalTextServer(const std::string & configuredUrl) {
 	const auto [host, port] = parseServerHostPort(configuredUrl);
 	(void)port;
@@ -424,6 +466,33 @@ bool shouldManageLocalTextServer(const std::string & configuredUrl) {
 	return normalizedHost.empty() ||
 		normalizedHost == "127.0.0.1" ||
 		normalizedHost == "localhost";
+}
+
+bool shouldManageLocalSpeechServer(const std::string & configuredUrl) {
+	const auto [host, port] = parseSpeechServerHostPort(configuredUrl);
+	(void)port;
+	std::string normalizedHost = trim(host);
+	std::transform(
+		normalizedHost.begin(),
+		normalizedHost.end(),
+		normalizedHost.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return normalizedHost.empty() ||
+		normalizedHost == "127.0.0.1" ||
+		normalizedHost == "localhost";
+}
+
+std::string probeServerExecutable(
+	const std::vector<std::filesystem::path> & candidates) {
+	for (const auto & candidate : candidates) {
+		std::error_code ec;
+		const auto normalized = std::filesystem::weakly_canonical(candidate, ec);
+		const auto & checkPath = ec ? candidate : normalized;
+		if (std::filesystem::exists(checkPath, ec) && !ec) {
+			return checkPath.string();
+		}
+	}
+	return {};
 }
 
 bool aiModeSupportsTextBackend(AiMode mode) {
@@ -1545,22 +1614,18 @@ bool ofApp::ensureTextServerReady(bool logResult, bool allowLaunch) {
 	return false;
 }
 
-std::string ofApp::findLocalTextServerExecutable() const {
+std::string ofApp::findLocalTextServerExecutable(bool refresh) {
+	if (textServerExecutableCached && !refresh) {
+		return cachedTextServerExecutable;
+	}
 	std::vector<std::filesystem::path> candidates;
 	const std::filesystem::path exeDir(ofFilePath::getCurrentExeDir());
 	candidates.push_back(exeDir / ".." / ".." / "libs" / "llama" / "bin" / "llama-server.exe");
 	candidates.push_back(exeDir / ".." / ".." / "build" / "llama.cpp-build" / "bin" / "Release" / "llama-server.exe");
 	candidates.push_back(exeDir / "llama-server.exe");
-
-	for (const auto & candidate : candidates) {
-		std::error_code ec;
-		const auto normalized = std::filesystem::weakly_canonical(candidate, ec);
-		const auto & checkPath = ec ? candidate : normalized;
-		if (std::filesystem::exists(checkPath, ec) && !ec) {
-			return checkPath.string();
-		}
-	}
-	return {};
+	cachedTextServerExecutable = probeServerExecutable(candidates);
+	textServerExecutableCached = true;
+	return cachedTextServerExecutable;
 }
 
 bool ofApp::isManagedTextServerRunning() {
@@ -1603,7 +1668,7 @@ void ofApp::startLocalTextServer() {
 		return;
 	}
 
-	const std::string serverExe = findLocalTextServerExecutable();
+	const std::string serverExe = findLocalTextServerExecutable(true);
 	if (serverExe.empty()) {
 		logWithLevel(OF_LOG_ERROR, "No local llama-server executable was found. Build or copy llama-server.exe into libs/llama/bin first.");
 		textServerStatus = ServerStatusState::Unreachable;
@@ -1748,6 +1813,207 @@ void ofApp::stopLocalTextServer(bool logResult) {
 	textServerCapabilityHint.clear();
 	if (logResult) {
 		logWithLevel(OF_LOG_NOTICE, textServerStatusMessage);
+	}
+}
+
+std::string ofApp::findLocalSpeechServerExecutable(bool refresh) {
+	if (speechServerExecutableCached && !refresh) {
+		return cachedSpeechServerExecutable;
+	}
+	std::vector<std::filesystem::path> candidates;
+	const std::filesystem::path exeDir(ofFilePath::getCurrentExeDir());
+	candidates.push_back(exeDir / ".." / ".." / "libs" / "whisper" / "bin" / "whisper-server.exe");
+	candidates.push_back(exeDir / ".." / ".." / "build" / "whisper.cpp-build" / "bin" / "Release" / "whisper-server.exe");
+	candidates.push_back(exeDir / "whisper-server.exe");
+	cachedSpeechServerExecutable = probeServerExecutable(candidates);
+	speechServerExecutableCached = true;
+	return cachedSpeechServerExecutable;
+}
+
+bool ofApp::isManagedSpeechServerRunning() {
+	if (!speechServerManagedByApp) {
+		return false;
+	}
+#ifdef _WIN32
+	if (!speechServerProcessHandle) {
+		speechServerManagedByApp = false;
+		speechServerProcessId = 0;
+		return false;
+	}
+	const DWORD waitCode = WaitForSingleObject(speechServerProcessHandle, 0);
+	if (waitCode == WAIT_TIMEOUT) {
+		return true;
+	}
+	CloseHandle(speechServerProcessHandle);
+	speechServerProcessHandle = nullptr;
+	speechServerProcessId = 0;
+	speechServerManagedByApp = false;
+	return false;
+#else
+	if (speechServerProcessId <= 0) {
+		speechServerManagedByApp = false;
+		return false;
+	}
+	if (kill(speechServerProcessId, 0) == 0) {
+		return true;
+	}
+	speechServerProcessId = 0;
+	speechServerManagedByApp = false;
+	return false;
+#endif
+}
+
+void ofApp::startLocalSpeechServer() {
+	if (isManagedSpeechServerRunning()) {
+		logWithLevel(OF_LOG_NOTICE, "Local whisper-server is already running.");
+		return;
+	}
+
+	if (speechProfiles.empty()) {
+		speechProfiles = ofxGgmlSpeechInference::defaultProfiles();
+	}
+	selectedSpeechProfileIndex = std::clamp(
+		selectedSpeechProfileIndex,
+		0,
+		std::max(0, static_cast<int>(speechProfiles.size()) - 1));
+	const ofxGgmlSpeechModelProfile activeSpeechProfile =
+		speechProfiles.empty()
+			? ofxGgmlSpeechModelProfile{}
+			: speechProfiles[static_cast<size_t>(selectedSpeechProfileIndex)];
+
+	const std::string serverExe = findLocalSpeechServerExecutable(true);
+	std::string modelPath = trim(speechModelPath);
+	if (modelPath.empty()) {
+		modelPath = trim(activeSpeechProfile.modelPath);
+	}
+	if (modelPath.empty() && !trim(activeSpeechProfile.modelFileHint).empty()) {
+		const std::string suggestedPath =
+			suggestedModelPath(activeSpeechProfile.modelPath, activeSpeechProfile.modelFileHint);
+		if (!suggestedPath.empty()) {
+			modelPath = suggestedPath;
+		}
+	}
+	if (serverExe.empty()) {
+		logWithLevel(OF_LOG_ERROR, "No local whisper-server executable was found. Build or copy whisper-server.exe into libs/whisper/bin first.");
+		speechServerStatus = ServerStatusState::Unreachable;
+		speechServerStatusMessage = "Local whisper-server executable not found.";
+		return;
+	}
+	if (modelPath.empty() || !std::filesystem::exists(modelPath)) {
+		logWithLevel(OF_LOG_ERROR, "No local Whisper model was found for whisper-server startup.");
+		speechServerStatus = ServerStatusState::Unreachable;
+		speechServerStatusMessage = "Local Whisper model not found for whisper-server.";
+		return;
+	}
+
+	const auto [host, port] = parseSpeechServerHostPort(effectiveSpeechServerUrl(speechServerUrl));
+
+#ifdef _WIN32
+	std::vector<std::string> args = {
+		serverExe,
+		"--host", host,
+		"--port", ofToString(port),
+		"-m", modelPath
+	};
+	std::string cmdLine;
+	for (size_t i = 0; i < args.size(); ++i) {
+		if (i > 0) cmdLine += " ";
+		const bool needsQuotes = args[i].find_first_of(" \t\"") != std::string::npos;
+		if (!needsQuotes) {
+			cmdLine += args[i];
+			continue;
+		}
+		cmdLine += "\"";
+		for (char c : args[i]) {
+			if (c == '"') cmdLine += "\\\"";
+			else cmdLine += c;
+		}
+		cmdLine += "\"";
+	}
+
+	std::wstring wideCmd = ofxGgmlWideFromUtf8(cmdLine);
+	std::vector<wchar_t> mutableCmd(wideCmd.begin(), wideCmd.end());
+	mutableCmd.push_back(L'\0');
+	STARTUPINFOW si {};
+	si.cb = sizeof(si);
+	PROCESS_INFORMATION pi {};
+	const std::wstring workingDir = ofxGgmlWideFromUtf8(
+		std::filesystem::path(serverExe).parent_path().string());
+	const BOOL ok = CreateProcessW(
+		nullptr,
+		mutableCmd.data(),
+		nullptr,
+		nullptr,
+		FALSE,
+		CREATE_NO_WINDOW,
+		nullptr,
+		workingDir.c_str(),
+		&si,
+		&pi);
+	if (!ok) {
+		logWithLevel(OF_LOG_ERROR, "Failed to start local whisper-server. Windows error: " + ofToString(static_cast<int>(GetLastError())));
+		speechServerStatus = ServerStatusState::Unreachable;
+		speechServerStatusMessage = "Failed to launch local whisper-server.";
+		return;
+	}
+	if (speechServerProcessHandle) {
+		CloseHandle(speechServerProcessHandle);
+	}
+	speechServerProcessHandle = pi.hProcess;
+	speechServerProcessId = pi.dwProcessId;
+	CloseHandle(pi.hThread);
+#else
+	pid_t pid = fork();
+	if (pid == 0) {
+		chdir(std::filesystem::path(serverExe).parent_path().string().c_str());
+		execl(
+			serverExe.c_str(),
+			serverExe.c_str(),
+			"--host", host.c_str(),
+			"--port", ofToString(port).c_str(),
+			"-m", modelPath.c_str(),
+			nullptr);
+		_exit(127);
+	}
+	if (pid <= 0) {
+		logWithLevel(OF_LOG_ERROR, "Failed to fork local whisper-server process.");
+		return;
+	}
+	speechServerProcessId = pid;
+#endif
+
+	speechServerManagedByApp = true;
+	speechServerStatus = ServerStatusState::Unknown;
+	speechServerStatusMessage = "Local whisper-server started.";
+	logWithLevel(
+		OF_LOG_NOTICE,
+		"Started local whisper-server on " + host + ":" + ofToString(port) +
+		" using model " + ofFilePath::getFileName(modelPath) + ".");
+}
+
+void ofApp::stopLocalSpeechServer(bool logResult) {
+	if (!isManagedSpeechServerRunning()) {
+		speechServerManagedByApp = false;
+		speechServerStatus = ServerStatusState::Unknown;
+		if (logResult) {
+			logWithLevel(OF_LOG_NOTICE, "No app-managed local whisper-server is currently running.");
+		}
+		return;
+	}
+#ifdef _WIN32
+	TerminateProcess(speechServerProcessHandle, 0);
+	CloseHandle(speechServerProcessHandle);
+	speechServerProcessHandle = nullptr;
+	speechServerProcessId = 0;
+#else
+	kill(speechServerProcessId, SIGTERM);
+	speechServerProcessId = 0;
+#endif
+	speechServerManagedByApp = false;
+	speechServerStatus = ServerStatusState::Unknown;
+	speechServerStatusMessage = "Local whisper-server stopped.";
+	if (logResult) {
+		logWithLevel(OF_LOG_NOTICE, speechServerStatusMessage);
 	}
 }
 
@@ -2083,6 +2349,13 @@ for (int i = 0; i < kModeCount; ++i) {
 		break;
 	}
 }
+if (trim(speechServerUrl).empty()) {
+	copyStringToBuffer(speechServerUrl, sizeof(speechServerUrl), kDefaultSpeechServerUrl);
+}
+if (shouldManageLocalSpeechServer(effectiveSpeechServerUrl(speechServerUrl)) &&
+	!findLocalSpeechServerExecutable().empty()) {
+	startLocalSpeechServer();
+}
 
 // Pre-fill example system prompt only if not restored from session.
 if (customSystemPrompt[0] == '\0') {
@@ -2137,6 +2410,7 @@ gui.end();
 void ofApp::exit() {
 autoSaveSession();
 stopLocalTextServer(false);
+stopLocalSpeechServer(false);
 stopGeneration();
 stopSpeechRecording(false);
 ggml.close();
@@ -4660,6 +4934,32 @@ ImGui::InputTextMultiline(
 
 	ImGui::Separator();
 	ImGui::TextDisabled("Optional video workflow");
+	if (ImGui::Button("Action Analysis", ImVec2(130, 0))) {
+		videoTaskIndex = static_cast<int>(ofxGgmlVideoTask::Action);
+		copyStringToBuffer(
+			visionPrompt,
+			sizeof(visionPrompt),
+			"Analyze this clip like a professional action-recognition assistant. Identify the primary action, any secondary actions, the evidence frames, and a grounded confidence estimate.");
+		copyStringToBuffer(
+			visionSystemPrompt,
+			sizeof(visionSystemPrompt),
+			"You are a temporal video analysis assistant. Report only actions supported by the observed clip and keep uncertainty explicit.");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Emotion Analysis", ImVec2(130, 0))) {
+		videoTaskIndex = static_cast<int>(ofxGgmlVideoTask::Emotion);
+		copyStringToBuffer(
+			visionPrompt,
+			sizeof(visionPrompt),
+			"Analyze this clip like a professional emotion-recognition assistant. Identify the dominant emotion, any secondary emotions, visible evidence, and a grounded confidence estimate.");
+		copyStringToBuffer(
+			visionSystemPrompt,
+			sizeof(visionSystemPrompt),
+			"You are a multimodal emotion analysis assistant. Infer only emotions supported by visible evidence and keep uncertainty explicit.");
+	}
+	static const char * videoTaskLabels[] = { "Summarize", "OCR", "Ask", "Action", "Emotion" };
+	ImGui::SetNextItemWidth(180);
+	ImGui::Combo("Video task", &videoTaskIndex, videoTaskLabels, 5);
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Video path", visionVideoPath, sizeof(visionVideoPath));
 	ImGui::SameLine();
@@ -4671,11 +4971,26 @@ ImGui::InputTextMultiline(
 	}
 	ImGui::SetNextItemWidth(180);
 	ImGui::SliderInt("Sampled frames", &visionVideoMaxFrames, 1, 12);
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Sidecar URL", videoSidecarUrl, sizeof(videoSidecarUrl));
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Optional temporal sidecar endpoint for Action and Emotion tasks. Example: http://127.0.0.1:8090/analyze");
+	}
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Sidecar model", videoSidecarModel, sizeof(videoSidecarModel));
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Optional model or route hint forwarded to the temporal sidecar.");
+	}
 	if (!visionProfiles.empty()) {
 		const auto & profile = visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)];
 		if (!profile.supportsMultipleImages) {
 			ImGui::TextDisabled("This profile is single-image oriented. Video analysis will use one representative frame.");
 		}
+	}
+	if ((videoTaskIndex == static_cast<int>(ofxGgmlVideoTask::Action) ||
+		 videoTaskIndex == static_cast<int>(ofxGgmlVideoTask::Emotion)) &&
+		trim(videoSidecarUrl).empty()) {
+		ImGui::TextDisabled("Action and Emotion can run through the current vision server, but improve with a temporal sidecar.");
 	}
 
 ImGui::BeginDisabled(generating.load() || std::strlen(visionImagePath) == 0);
@@ -4730,8 +5045,8 @@ void ofApp::drawSpeechPanel() {
 	const float compactModeFieldWidth = std::min(280.0f, ImGui::GetContentRegionAvail().x);
 
 	ImGui::TextWrapped(
-		"Use a local speech backend such as whisper-cli. The speech path now preserves transcript artifacts, "
-		"timestamp segments, and detected language metadata when the backend provides them.");
+		"Use either a local speech backend such as whisper-cli or an OpenAI-compatible speech server. "
+		"The speech path preserves transcript artifacts, timestamp segments, and detected language metadata when the backend provides them.");
 
 	const auto applySpeechProfileDefaults =
 		[this](const ofxGgmlSpeechModelProfile & profile, bool onlyWhenEmpty) {
@@ -4840,9 +5155,39 @@ void ofApp::drawSpeechPanel() {
 	}
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Server URL", speechServerUrl, sizeof(speechServerUrl));
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Optional OpenAI-compatible speech server. Example: http://127.0.0.1:8081 or http://127.0.0.1:8081/v1");
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Server model", speechServerModel, sizeof(speechServerModel));
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Optional server model name for /v1/audio/transcriptions or /v1/audio/translations.");
+	}
+
+	if (trim(speechServerUrl).empty()) {
+		ImGui::TextDisabled("Backend: whisper-cli");
+	} else {
+		ImGui::TextDisabled("Backend: speech server first, whisper-cli fallback");
+	}
+	const std::string localSpeechServerExe = findLocalSpeechServerExecutable();
+	if (!localSpeechServerExe.empty()) {
+		ImGui::TextDisabled("Local speech server: %s", ofFilePath::getFileName(localSpeechServerExe).c_str());
+		if (ImGui::IsItemHovered()) {
+			showWrappedTooltip(localSpeechServerExe);
+		}
+	} else {
+		ImGui::TextDisabled("Local speech server: not found");
+	}
+	if (!speechServerStatusMessage.empty()) {
+		ImGui::TextDisabled("%s", speechServerStatusMessage.c_str());
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Executable", speechExecutable, sizeof(speechExecutable));
 	if (ImGui::IsItemHovered()) {
-		showWrappedTooltip("Example: whisper-cli or a full path to whisper-cli.exe");
+		showWrappedTooltip("Optional CLI fallback. Example: whisper-cli or a full path to whisper-cli.exe");
 	}
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
@@ -5350,13 +5695,18 @@ out << "visionImagePath=" << escapeSessionText(visionImagePath) << "\n";
 out << "visionVideoPath=" << escapeSessionText(visionVideoPath) << "\n";
 out << "visionModelPath=" << escapeSessionText(visionModelPath) << "\n";
 out << "visionServerUrl=" << escapeSessionText(visionServerUrl) << "\n";
+out << "videoSidecarUrl=" << escapeSessionText(videoSidecarUrl) << "\n";
+out << "videoSidecarModel=" << escapeSessionText(videoSidecarModel) << "\n";
 out << "visionSystemPrompt=" << escapeSessionText(visionSystemPrompt) << "\n";
 out << "visionTaskIndex=" << visionTaskIndex << "\n";
+out << "videoTaskIndex=" << videoTaskIndex << "\n";
 out << "visionVideoMaxFrames=" << visionVideoMaxFrames << "\n";
 out << "visionProfileIndex=" << selectedVisionProfileIndex << "\n";
 out << "speechAudioPath=" << escapeSessionText(speechAudioPath) << "\n";
 out << "speechExecutable=" << escapeSessionText(speechExecutable) << "\n";
 out << "speechModelPath=" << escapeSessionText(speechModelPath) << "\n";
+out << "speechServerUrl=" << escapeSessionText(speechServerUrl) << "\n";
+out << "speechServerModel=" << escapeSessionText(speechServerModel) << "\n";
 out << "speechPrompt=" << escapeSessionText(speechPrompt) << "\n";
 out << "speechLanguageHint=" << escapeSessionText(speechLanguageHint) << "\n";
 out << "speechTaskIndex=" << speechTaskIndex << "\n";
@@ -5560,16 +5910,21 @@ else if (key == "customInput") copyToBuf(customInput, sizeof(customInput), value
 else if (key == "customSystemPrompt") copyToBuf(customSystemPrompt, sizeof(customSystemPrompt), value);
 else if (key == "visionPrompt") copyToBuf(visionPrompt, sizeof(visionPrompt), value);
 else if (key == "visionImagePath") copyToBuf(visionImagePath, sizeof(visionImagePath), value);
-else if (key == "visionVideoPath") copyToBuf(visionVideoPath, sizeof(visionVideoPath), value);
-else if (key == "visionModelPath") copyToBuf(visionModelPath, sizeof(visionModelPath), value);
-else if (key == "visionServerUrl") copyToBuf(visionServerUrl, sizeof(visionServerUrl), value);
-else if (key == "visionSystemPrompt") copyToBuf(visionSystemPrompt, sizeof(visionSystemPrompt), value);
-else if (key == "visionTaskIndex") visionTaskIndex = std::clamp(safeStoi(value), 0, 2);
-else if (key == "visionVideoMaxFrames") visionVideoMaxFrames = std::clamp(safeStoi(value, 6), 1, 12);
+	else if (key == "visionVideoPath") copyToBuf(visionVideoPath, sizeof(visionVideoPath), value);
+	else if (key == "visionModelPath") copyToBuf(visionModelPath, sizeof(visionModelPath), value);
+	else if (key == "visionServerUrl") copyToBuf(visionServerUrl, sizeof(visionServerUrl), value);
+	else if (key == "videoSidecarUrl") copyToBuf(videoSidecarUrl, sizeof(videoSidecarUrl), value);
+	else if (key == "videoSidecarModel") copyToBuf(videoSidecarModel, sizeof(videoSidecarModel), value);
+	else if (key == "visionSystemPrompt") copyToBuf(visionSystemPrompt, sizeof(visionSystemPrompt), value);
+	else if (key == "visionTaskIndex") visionTaskIndex = std::clamp(safeStoi(value), 0, 2);
+	else if (key == "videoTaskIndex") videoTaskIndex = std::clamp(safeStoi(value), 0, 4);
+	else if (key == "visionVideoMaxFrames") visionVideoMaxFrames = std::clamp(safeStoi(value, 6), 1, 12);
 else if (key == "visionProfileIndex") selectedVisionProfileIndex = std::max(0, safeStoi(value));
 else if (key == "speechAudioPath") copyToBuf(speechAudioPath, sizeof(speechAudioPath), value);
 else if (key == "speechExecutable") copyToBuf(speechExecutable, sizeof(speechExecutable), value);
 else if (key == "speechModelPath") copyToBuf(speechModelPath, sizeof(speechModelPath), value);
+else if (key == "speechServerUrl") copyToBuf(speechServerUrl, sizeof(speechServerUrl), value);
+else if (key == "speechServerModel") copyToBuf(speechServerModel, sizeof(speechServerModel), value);
 else if (key == "speechPrompt") copyToBuf(speechPrompt, sizeof(speechPrompt), value);
 else if (key == "speechLanguageHint") copyToBuf(speechLanguageHint, sizeof(speechLanguageHint), value);
 else if (key == "speechTaskIndex") speechTaskIndex = std::clamp(safeStoi(value), 0, 1);
@@ -6131,15 +6486,17 @@ void ofApp::runVideoInference() {
 	const std::string videoPath = trim(visionVideoPath);
 	const std::string modelPath = trim(visionModelPath);
 	const std::string serverUrl = trim(visionServerUrl);
+	const std::string sidecarUrl = trim(videoSidecarUrl);
+	const std::string sidecarModel = trim(videoSidecarModel);
 	const std::string systemPrompt = trim(visionSystemPrompt);
-	const int taskIndex = std::clamp(visionTaskIndex, 0, 2);
+	const int taskIndex = std::clamp(videoTaskIndex, 0, 4);
 	const int requestedMaxTokens = std::clamp(maxTokens, 96, 4096);
 	const float requestedTemperature = std::isfinite(temperature)
 		? std::clamp(temperature, 0.0f, 2.0f)
 		: 0.2f;
 	const int sampledFrames = std::clamp(visionVideoMaxFrames, 1, 12);
 
-	workerThread = std::thread([this, profileBase, prompt, videoPath, modelPath, serverUrl, systemPrompt, taskIndex, requestedMaxTokens, requestedTemperature, sampledFrames]() {
+	workerThread = std::thread([this, profileBase, prompt, videoPath, modelPath, serverUrl, sidecarUrl, sidecarModel, systemPrompt, taskIndex, requestedMaxTokens, requestedTemperature, sampledFrames]() {
 		auto setPending = [this](const std::string & text) {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingOutput = text;
@@ -6167,6 +6524,8 @@ void ofApp::runVideoInference() {
 			request.videoPath = videoPath;
 			request.prompt = prompt;
 			request.systemPrompt = systemPrompt;
+			request.sidecarUrl = sidecarUrl;
+			request.sidecarModel = sidecarModel;
 			request.maxTokens = requestedMaxTokens;
 			request.temperature = requestedTemperature;
 			const int effectiveFrames = profile.supportsMultipleImages
@@ -6181,21 +6540,39 @@ void ofApp::runVideoInference() {
 
 			{
 				std::lock_guard<std::mutex> lock(streamMutex);
-				streamingOutput = "Sampling frames and contacting " +
-					ofxGgmlVisionInference::normalizeServerUrl(profile.serverUrl);
+				const bool prefersTemporalSidecar =
+					(request.task == ofxGgmlVideoTask::Action ||
+					 request.task == ofxGgmlVideoTask::Emotion) &&
+					!trim(request.sidecarUrl).empty();
+				streamingOutput = prefersTemporalSidecar
+					? "Sampling frames and contacting " + ofxGgmlVideoInference::normalizeSidecarUrl(request.sidecarUrl)
+					: "Sampling frames and contacting " + ofxGgmlVisionInference::normalizeServerUrl(profile.serverUrl);
 			}
 
-			const ofxGgmlVideoResult result = videoInference.runServerRequest(profile, request);
+			const bool prefersTemporalSidecar =
+				(request.task == ofxGgmlVideoTask::Action ||
+				 request.task == ofxGgmlVideoTask::Emotion) &&
+				!trim(request.sidecarUrl).empty();
+			const ofxGgmlVideoResult result = prefersTemporalSidecar
+				? videoInference.runTemporalSidecarRequest(request)
+				: videoInference.runServerRequest(profile, request);
 			if (cancelRequested.load()) {
 				setPending("[Cancelled] Video request cancelled.");
 			} else if (result.success) {
 				std::ostringstream output;
-				output << "Video analysis";
+				output << ((request.task == ofxGgmlVideoTask::Action)
+					? "Video action analysis"
+					: (request.task == ofxGgmlVideoTask::Emotion)
+						? "Video emotion analysis"
+						: "Video analysis");
 				if (!result.backendName.empty()) {
 					output << " (" << result.backendName << ")";
 				}
 				output << "\n";
 				output << "Sampled frames: " << result.sampledFrames.size() << "\n";
+				if (!result.usedServerUrl.empty()) {
+					output << "Backend URL: " << result.usedServerUrl << "\n";
+				}
 				if (!profile.supportsMultipleImages && sampledFrames > 1) {
 					output << "Note: selected profile is single-image oriented, so video analysis used one representative frame.\n";
 				}
@@ -6258,12 +6635,14 @@ void ofApp::runSpeechInference() {
 	const std::string audioPath = trim(speechAudioPath);
 	const std::string executable = trim(speechExecutable);
 	const std::string modelPath = trim(speechModelPath);
+	const std::string serverUrl = trim(speechServerUrl);
+	const std::string serverModel = trim(speechServerModel);
 	const std::string prompt = trim(speechPrompt);
 	const std::string languageHint = trim(speechLanguageHint);
 	const int taskIndex = std::clamp(speechTaskIndex, 0, 1);
 	const bool returnTimestamps = speechReturnTimestamps;
 
-	workerThread = std::thread([this, profileBase, audioPath, executable, modelPath, prompt, languageHint, taskIndex, returnTimestamps]() {
+	workerThread = std::thread([this, profileBase, audioPath, executable, modelPath, serverUrl, serverModel, prompt, languageHint, taskIndex, returnTimestamps]() {
 		auto setPending = [this](const std::string & text) {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingOutput = text;
@@ -6297,24 +6676,49 @@ void ofApp::runSpeechInference() {
 				}
 			}
 
-			speechInference.setBackend(
-				ofxGgmlSpeechInference::createWhisperCliBackend(
-					effectiveExecutable));
-
 			ofxGgmlSpeechRequest request;
 			request.task = static_cast<ofxGgmlSpeechTask>(taskIndex);
 			request.audioPath = audioPath;
 			request.modelPath = effectiveModelPath;
+			request.serverUrl = serverUrl;
+			request.serverModel = serverModel;
 			request.languageHint = languageHint;
 			request.prompt = prompt;
 			request.returnTimestamps = returnTimestamps;
 
-			{
-				std::lock_guard<std::mutex> lock(streamMutex);
-				streamingOutput = "Running " + effectiveExecutable + "...";
+			ofxGgmlSpeechResult result;
+			bool attemptedServer = false;
+			if (!serverUrl.empty()) {
+				attemptedServer = true;
+				speechInference.setBackend(
+					ofxGgmlSpeechInference::createWhisperServerBackend(
+						serverUrl,
+						serverModel));
+				{
+					std::lock_guard<std::mutex> lock(streamMutex);
+					streamingOutput = "Calling speech server...";
+				}
+				result = speechInference.transcribe(request);
+				if (!result.success && !effectiveExecutable.empty()) {
+					logWithLevel(
+						OF_LOG_WARNING,
+						"Speech server failed, falling back to " + effectiveExecutable +
+							": " + result.error);
+				}
 			}
 
-			const ofxGgmlSpeechResult result = speechInference.transcribe(request);
+			if (!result.success) {
+				speechInference.setBackend(
+					ofxGgmlSpeechInference::createWhisperCliBackend(
+						effectiveExecutable));
+				{
+					std::lock_guard<std::mutex> lock(streamMutex);
+					streamingOutput = attemptedServer
+						? "Falling back to " + effectiveExecutable + "..."
+						: "Running " + effectiveExecutable + "...";
+				}
+				result = speechInference.transcribe(request);
+			}
 			if (cancelRequested.load()) {
 				setPending("[Cancelled] Speech request cancelled.");
 			} else if (result.success) {

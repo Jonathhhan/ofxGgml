@@ -1,6 +1,7 @@
 #include "ofxGgmlSpeechInference.h"
 #include "core/ofxGgmlWindowsUtf8.h"
 #include "support/ofxGgmlSimpleSrtSubtitleParser.h"
+#include "ofMain.h"
 
 #include <algorithm>
 #include <array>
@@ -11,6 +12,13 @@
 #include <random>
 #include <regex>
 #include <sstream>
+
+#ifndef OFXGGML_HEADLESS_STUBS
+#ifdef _WIN32
+#define CURL_STATICLIB
+#endif
+#include <curl/curl.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -23,6 +31,18 @@
 #endif
 
 namespace {
+
+struct NormalizedSpeechRequest {
+	ofxGgmlSpeechTask task = ofxGgmlSpeechTask::Transcribe;
+	std::string audioPath;
+	std::string modelPath;
+	std::string serverUrl;
+	std::string serverModel;
+	std::string languageHint;
+	std::string prompt;
+	bool returnTimestamps = false;
+	bool useLanguageHint = false;
+};
 
 std::string trimCopy(const std::string & s) {
 	size_t start = 0;
@@ -65,6 +85,20 @@ std::string readTextFile(const std::string & path) {
 	std::ostringstream buffer;
 	buffer << input.rdbuf();
 	return buffer.str();
+}
+
+std::string fileExtensionToMimeType(const std::string & path) {
+	std::string ext = std::filesystem::path(path).extension().string();
+	std::transform(ext.begin(), ext.end(), ext.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	if (ext == ".wav") return "audio/wav";
+	if (ext == ".mp3") return "audio/mpeg";
+	if (ext == ".m4a") return "audio/mp4";
+	if (ext == ".mp4") return "audio/mp4";
+	if (ext == ".webm") return "audio/webm";
+	if (ext == ".ogg") return "audio/ogg";
+	if (ext == ".flac") return "audio/flac";
+	return "application/octet-stream";
 }
 
 std::string detectLanguageFromOutput(const std::string & text) {
@@ -127,6 +161,41 @@ std::string makeTempOutputBase(const char * prefix) {
 	}
 
 	return tempPath.string();
+}
+
+#ifndef OFXGGML_HEADLESS_STUBS
+size_t curlWriteToString(char * ptr, size_t size, size_t nmemb, void * userdata) {
+	if (!ptr || !userdata) return 0;
+	const size_t bytes = size * nmemb;
+	auto * output = static_cast<std::string *>(userdata);
+	output->append(ptr, bytes);
+	return bytes;
+}
+#endif
+
+NormalizedSpeechRequest normalizeSpeechRequest(
+	const ofxGgmlSpeechRequest & request,
+	const std::string & fallbackServerUrl = std::string(),
+	const std::string & fallbackServerModel = std::string()) {
+	NormalizedSpeechRequest normalized;
+	normalized.task = request.task;
+	normalized.audioPath = trimCopy(request.audioPath);
+	normalized.modelPath = trimCopy(request.modelPath);
+	normalized.serverUrl = trimCopy(request.serverUrl);
+	if (normalized.serverUrl.empty()) {
+		normalized.serverUrl = trimCopy(fallbackServerUrl);
+	}
+	normalized.serverModel = trimCopy(request.serverModel);
+	if (normalized.serverModel.empty()) {
+		normalized.serverModel = trimCopy(fallbackServerModel);
+	}
+	normalized.languageHint = trimCopy(request.languageHint);
+	normalized.prompt = trimCopy(request.prompt);
+	normalized.returnTimestamps = request.returnTimestamps;
+	normalized.useLanguageHint = !normalized.languageHint.empty() &&
+		normalized.languageHint != "Auto" &&
+		normalized.languageHint != "auto";
+	return normalized;
 }
 
 #ifdef _WIN32
@@ -413,33 +482,33 @@ std::string ofxGgmlWhisperCliSpeechBackend::backendName() const {
 std::vector<std::string> ofxGgmlWhisperCliSpeechBackend::buildCommandArguments(
 	const ofxGgmlSpeechRequest & request,
 	const std::string & outputBase) const {
+	const NormalizedSpeechRequest normalized = normalizeSpeechRequest(request);
 	std::vector<std::string> args;
+	args.reserve(12);
 	args.push_back(m_executable.empty() ? "whisper-cli" : m_executable);
-	if (!trimCopy(request.modelPath).empty()) {
+	if (!normalized.modelPath.empty()) {
 		args.push_back("-m");
-		args.push_back(trimCopy(request.modelPath));
+		args.push_back(normalized.modelPath);
 	}
 	args.push_back("-f");
-	args.push_back(request.audioPath);
+	args.push_back(normalized.audioPath);
 	args.push_back("-otxt");
-	if (request.returnTimestamps) {
+	if (normalized.returnTimestamps) {
 		args.push_back("-osrt");
 		args.push_back("-ovtt");
 	}
 	args.push_back("-of");
 	args.push_back(outputBase);
-	if (!trimCopy(request.languageHint).empty() &&
-		trimCopy(request.languageHint) != "Auto" &&
-		trimCopy(request.languageHint) != "auto") {
+	if (normalized.useLanguageHint) {
 		args.push_back("-l");
-		args.push_back(trimCopy(request.languageHint));
+		args.push_back(normalized.languageHint);
 	}
-	if (request.task == ofxGgmlSpeechTask::Translate) {
+	if (normalized.task == ofxGgmlSpeechTask::Translate) {
 		args.push_back("--translate");
 	}
-	if (!trimCopy(request.prompt).empty()) {
+	if (!normalized.prompt.empty()) {
 		args.push_back("--prompt");
-		args.push_back(trimCopy(request.prompt));
+		args.push_back(normalized.prompt);
 	}
 	return args;
 }
@@ -490,15 +559,15 @@ ofxGgmlSpeechResult ofxGgmlWhisperCliSpeechBackend::transcribe(
 	ofxGgmlSpeechResult result;
 	result.backendName = backendName();
 
-	const std::string audioPath = trimCopy(request.audioPath);
-	if (audioPath.empty()) {
+	const NormalizedSpeechRequest normalized = normalizeSpeechRequest(request);
+	if (normalized.audioPath.empty()) {
 		result.error = "no audio file was provided";
 		return result;
 	}
 
 	std::error_code ec;
-	if (!std::filesystem::exists(std::filesystem::path(audioPath), ec) || ec) {
-		result.error = "audio file not found: " + audioPath;
+	if (!std::filesystem::exists(std::filesystem::path(normalized.audioPath), ec) || ec) {
+		result.error = "audio file not found: " + normalized.audioPath;
 		return result;
 	}
 
@@ -520,7 +589,7 @@ ofxGgmlSpeechResult ofxGgmlWhisperCliSpeechBackend::transcribe(
 		result.text = trimCopy(result.rawOutput);
 	}
 	result.detectedLanguage = detectLanguageFromOutput(result.rawOutput);
-	if (request.returnTimestamps) {
+	if (normalized.returnTimestamps) {
 		const std::string srtText = readTextFile(result.srtPath);
 		if (!srtText.empty()) {
 			result.segments = parseSrtSegments(srtText);
@@ -542,12 +611,231 @@ ofxGgmlSpeechResult ofxGgmlWhisperCliSpeechBackend::transcribe(
 	return result;
 }
 
+ofxGgmlWhisperServerSpeechBackend::ofxGgmlWhisperServerSpeechBackend(
+	std::string serverUrl,
+	std::string serverModel)
+	: m_serverUrl(std::move(serverUrl))
+	, m_serverModel(std::move(serverModel)) {
+}
+
+void ofxGgmlWhisperServerSpeechBackend::setServerUrl(const std::string & serverUrl) {
+	m_serverUrl = serverUrl;
+}
+
+void ofxGgmlWhisperServerSpeechBackend::setServerModel(const std::string & serverModel) {
+	m_serverModel = serverModel;
+}
+
+const std::string & ofxGgmlWhisperServerSpeechBackend::getServerUrl() const {
+	return m_serverUrl;
+}
+
+const std::string & ofxGgmlWhisperServerSpeechBackend::getServerModel() const {
+	return m_serverModel;
+}
+
+std::string ofxGgmlWhisperServerSpeechBackend::backendName() const {
+	return "WhisperServer";
+}
+
+std::string ofxGgmlWhisperServerSpeechBackend::normalizeServerUrl(
+	const std::string & serverUrl,
+	ofxGgmlSpeechTask task) {
+	std::string normalized = trimCopy(serverUrl);
+	if (normalized.empty()) {
+		normalized = "http://127.0.0.1:8081";
+	}
+	const char * suffix = task == ofxGgmlSpeechTask::Translate
+		? "/v1/audio/translations"
+		: "/v1/audio/transcriptions";
+	if (normalized.find("/v1/audio/transcriptions") != std::string::npos ||
+		normalized.find("/v1/audio/translations") != std::string::npos) {
+		return normalized;
+	}
+	if (!normalized.empty() && normalized.back() == '/') {
+		normalized.pop_back();
+	}
+	if (normalized.find("/v1") == std::string::npos) {
+		normalized += suffix;
+	} else {
+		normalized += (task == ofxGgmlSpeechTask::Translate)
+			? "/audio/translations"
+			: "/audio/transcriptions";
+	}
+	return normalized;
+}
+
+ofxGgmlSpeechResult ofxGgmlWhisperServerSpeechBackend::transcribe(
+	const ofxGgmlSpeechRequest & request) const {
+	ofxGgmlSpeechResult result;
+	result.backendName = backendName();
+
+	const NormalizedSpeechRequest normalized = normalizeSpeechRequest(
+		request,
+		m_serverUrl,
+		m_serverModel);
+	if (normalized.audioPath.empty()) {
+		result.error = "no audio file was provided";
+		return result;
+	}
+
+	std::error_code ec;
+	if (!std::filesystem::exists(std::filesystem::path(normalized.audioPath), ec) || ec) {
+		result.error = "audio file not found: " + normalized.audioPath;
+		return result;
+	}
+
+	result.usedServerUrl = normalizeServerUrl(
+		normalized.serverUrl,
+		normalized.task);
+
+#ifdef OFXGGML_HEADLESS_STUBS
+	result.error = "speech server requests require openFrameworks runtime";
+	return result;
+#else
+	const auto t0 = std::chrono::steady_clock::now();
+	CURL * curl = curl_easy_init();
+	if (!curl) {
+		result.error = "failed to initialize curl for speech server request";
+		return result;
+	}
+
+	std::string responseBody;
+	long httpCode = 0;
+	curl_mime * mime = nullptr;
+	curl_slist * headers = nullptr;
+	CURLcode performCode = CURLE_OK;
+
+	try {
+		curl_easy_setopt(curl, CURLOPT_URL, result.usedServerUrl.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteToString);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
+		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 180L);
+		curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
+
+		headers = curl_slist_append(headers, "Accept: application/json");
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+		mime = curl_mime_init(curl);
+
+		auto addField = [&](const char * name, const std::string & value) {
+			if (!name || value.empty()) return;
+			curl_mimepart * part = curl_mime_addpart(mime);
+			curl_mime_name(part, name);
+			curl_mime_data(part, value.c_str(), CURL_ZERO_TERMINATED);
+		};
+
+		curl_mimepart * filePart = curl_mime_addpart(mime);
+		curl_mime_name(filePart, "file");
+		curl_mime_filedata(filePart, normalized.audioPath.c_str());
+		curl_mime_type(filePart, fileExtensionToMimeType(normalized.audioPath).c_str());
+
+		addField("model", normalized.serverModel);
+		if (normalized.useLanguageHint) {
+			addField("language", normalized.languageHint);
+		}
+		addField("prompt", normalized.prompt);
+		addField(
+			"response_format",
+			normalized.returnTimestamps ? "verbose_json" : "json");
+		if (normalized.returnTimestamps) {
+			addField("timestamp_granularities[]", "segment");
+		}
+
+		curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
+		performCode = curl_easy_perform(curl);
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+	} catch (...) {
+		performCode = CURLE_ABORTED_BY_CALLBACK;
+	}
+
+	if (mime) curl_mime_free(mime);
+	if (headers) curl_slist_free_all(headers);
+	curl_easy_cleanup(curl);
+
+	result.rawOutput = responseBody;
+	result.elapsedMs = std::chrono::duration<float, std::milli>(
+		std::chrono::steady_clock::now() - t0).count();
+
+	if (performCode != CURLE_OK) {
+		result.error = std::string("speech server request failed: ") +
+			curl_easy_strerror(performCode);
+		return result;
+	}
+	if (httpCode < 200 || httpCode >= 300) {
+		result.error = "speech server returned HTTP " + std::to_string(httpCode);
+		if (!responseBody.empty()) {
+			result.error += ": " + trimCopy(responseBody);
+		}
+		return result;
+	}
+	if (trimCopy(responseBody).empty()) {
+		result.error = "speech server returned empty output";
+		return result;
+	}
+
+	try {
+		ofJson json = ofJson::parse(responseBody, nullptr, false);
+		if (json.is_discarded()) {
+			result.error = "speech server returned invalid JSON";
+			return result;
+		}
+		if (json.contains("text") && json["text"].is_string()) {
+			result.text = trimCopy(json["text"].get<std::string>());
+		}
+		if (json.contains("language") && json["language"].is_string()) {
+			result.detectedLanguage = trimCopy(json["language"].get<std::string>());
+		}
+		if (json.contains("segments") && json["segments"].is_array()) {
+			for (const auto & segmentJson : json["segments"]) {
+				ofxGgmlSpeechSegment segment;
+				if (segmentJson.contains("start") && segmentJson["start"].is_number()) {
+					segment.startSeconds = segmentJson["start"].get<double>();
+				}
+				if (segmentJson.contains("end") && segmentJson["end"].is_number()) {
+					segment.endSeconds = segmentJson["end"].get<double>();
+				}
+				if (segmentJson.contains("text") && segmentJson["text"].is_string()) {
+					segment.text = trimCopy(segmentJson["text"].get<std::string>());
+				}
+				if (!segment.text.empty()) {
+					result.segments.push_back(std::move(segment));
+				}
+			}
+		}
+		if (result.text.empty() && !result.segments.empty()) {
+			std::ostringstream combined;
+			for (const auto & segment : result.segments) {
+				if (!combined.str().empty()) combined << "\n";
+				combined << segment.text;
+			}
+			result.text = trimCopy(combined.str());
+		}
+	} catch (const std::exception & e) {
+		result.error = std::string("speech server JSON parse failed: ") + e.what();
+		return result;
+	} catch (...) {
+		result.error = "speech server JSON parse failed";
+		return result;
+	}
+
+	if (result.text.empty()) {
+		result.error = "speech server returned empty transcription";
+		return result;
+	}
+
+	result.success = true;
+	return result;
+#endif
+}
+
 ofxGgmlSpeechInference::ofxGgmlSpeechInference()
 	: m_backend(createWhisperCliBackend()) {
 }
 
 std::vector<ofxGgmlSpeechModelProfile> ofxGgmlSpeechInference::defaultProfiles() {
-	return {
+	static const std::vector<ofxGgmlSpeechModelProfile> kProfiles = {
 		{
 			"Whisper Tiny.en",
 			"ggerganov/whisper.cpp",
@@ -585,6 +873,7 @@ std::vector<ofxGgmlSpeechModelProfile> ofxGgmlSpeechInference::defaultProfiles()
 			true
 		}
 	};
+	return kProfiles;
 }
 
 const char * ofxGgmlSpeechInference::taskLabel(ofxGgmlSpeechTask task) {
@@ -598,6 +887,14 @@ const char * ofxGgmlSpeechInference::taskLabel(ofxGgmlSpeechTask task) {
 std::shared_ptr<ofxGgmlSpeechBackend> ofxGgmlSpeechInference::createWhisperCliBackend(
 	const std::string & executable) {
 	return std::make_shared<ofxGgmlWhisperCliSpeechBackend>(executable);
+}
+
+std::shared_ptr<ofxGgmlSpeechBackend> ofxGgmlSpeechInference::createWhisperServerBackend(
+	const std::string & serverUrl,
+	const std::string & serverModel) {
+	return std::make_shared<ofxGgmlWhisperServerSpeechBackend>(
+		serverUrl,
+		serverModel);
 }
 
 void ofxGgmlSpeechInference::setBackend(std::shared_ptr<ofxGgmlSpeechBackend> backend) {

@@ -376,6 +376,18 @@ Use it when an app wants translation or writing-assistant features without hardc
 
 Use it when an app wants local `Transcribe` / `Translate` audio workflows without hardcoding command-line assembly in its UI layer. The `GuiExample` exposes executable path, model path, profile selection, language hint, prompt, and transcript output as a first-class panel.
 
+The speech path can now also target an optional OpenAI-compatible speech server through `Server URL` and `Server model` in the GUI. When a speech server is configured, the Speech panel prefers the warm server backend first and falls back to `whisper-cli` automatically if the server request fails and a local CLI path is still available.
+
+For a local `whisper.cpp` server workflow on Windows, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-whisper-server.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\build-whisper-server.ps1 -Cuda
+powershell -ExecutionPolicy Bypass -File .\scripts\start-whisper-server.ps1
+```
+
+The helper defaults to `http://127.0.0.1:8081`, which avoids colliding with the addon's default `llama-server` text backend on `8080`. The GUI now defaults the Speech server URL to that local endpoint and can auto-start a local `whisper-server` during setup when the configured URL points at localhost and a local server binary is available.
+
 When the backend supports it, the speech path now keeps richer artifacts:
 
 - detected language hints from Whisper output
@@ -419,6 +431,53 @@ The sampled-frame workflow is now more structured:
 - summaries and OCR requests are phrased to be more professional and to call out unsampled gaps when they may matter
 
 The GUI example now exposes this path directly from the Vision panel with an optional video file input and configurable sampled-frame count, so you can route short local clips through the same stable `llama-server` vision profile.
+
+The Vision panel now also includes dedicated `Action Analysis` and `Emotion Analysis` presets. Those tasks can still run through the regular sampled-frame vision path, but they can optionally target a stronger temporal sidecar service through `Sidecar URL` and `Sidecar model`.
+
+### Temporal Sidecar Contract
+
+For `Action` and `Emotion` video tasks, `ofxGgmlVideoInference` can call an optional sidecar endpoint. By default it normalizes the configured URL to `http://127.0.0.1:8090/analyze`.
+
+The addon sends a JSON payload shaped like:
+
+```json
+{
+  "task": "Action",
+  "model": "temporal-action-v1",
+  "video_path": "clip.mp4",
+  "prompt": "...",
+  "system_prompt": "...",
+  "response_language": "en",
+  "max_tokens": 512,
+  "temperature": 0.2,
+  "sampled_frames": [
+    {
+      "path": "frame0.png",
+      "label": "Opening frame at 0:00",
+      "timestamp_seconds": 0.0
+    }
+  ],
+  "output_schema": {
+    "primary_label": "string",
+    "confidence": "number_0_to_1",
+    "secondary_labels": "string[]",
+    "timeline": "string[]",
+    "evidence": "string[]",
+    "valence": "string_optional",
+    "arousal": "string_optional",
+    "notes": "string_optional"
+  }
+}
+```
+
+The sidecar can respond either with those fields at the top level or under a top-level `result` object. The addon maps that into a professional report with:
+
+- primary label and confidence
+- secondary labels
+- evidence bullets
+- timeline bullets
+- optional `valence` / `arousal` for emotion-style models
+- optional free-form notes
 
 Use it when an app wants practical local video understanding today, but still wants a clean path to stronger temporal backends later.
 

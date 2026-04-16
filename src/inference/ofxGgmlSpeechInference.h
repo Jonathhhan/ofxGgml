@@ -29,6 +29,8 @@ struct ofxGgmlSpeechRequest {
 	ofxGgmlSpeechTask task = ofxGgmlSpeechTask::Transcribe;
 	std::string audioPath;
 	std::string modelPath;
+	std::string serverUrl;
+	std::string serverModel;
 	std::string languageHint;
 	std::string prompt;
 	bool returnTimestamps = false;
@@ -45,6 +47,7 @@ struct ofxGgmlSpeechResult {
 	std::string srtPath;
 	std::string vttPath;
 	std::string detectedLanguage;
+	std::string usedServerUrl;
 	std::vector<ofxGgmlSpeechSegment> segments;
 };
 
@@ -80,6 +83,29 @@ private:
 	std::string m_executable;
 };
 
+class ofxGgmlWhisperServerSpeechBackend : public ofxGgmlSpeechBackend {
+public:
+	ofxGgmlWhisperServerSpeechBackend(
+		std::string serverUrl = "http://127.0.0.1:8081",
+		std::string serverModel = "");
+
+	void setServerUrl(const std::string & serverUrl);
+	void setServerModel(const std::string & serverModel);
+	const std::string & getServerUrl() const;
+	const std::string & getServerModel() const;
+
+	std::string backendName() const override;
+	static std::string normalizeServerUrl(
+		const std::string & serverUrl,
+		ofxGgmlSpeechTask task);
+	ofxGgmlSpeechResult transcribe(
+		const ofxGgmlSpeechRequest & request) const override;
+
+private:
+	std::string m_serverUrl;
+	std::string m_serverModel;
+};
+
 class ofxGgmlSpeechInference {
 public:
 	ofxGgmlSpeechInference();
@@ -88,6 +114,9 @@ public:
 	static const char * taskLabel(ofxGgmlSpeechTask task);
 	static std::shared_ptr<ofxGgmlSpeechBackend> createWhisperCliBackend(
 		const std::string & executable = "whisper-cli");
+	static std::shared_ptr<ofxGgmlSpeechBackend> createWhisperServerBackend(
+		const std::string & serverUrl = "http://127.0.0.1:8081",
+		const std::string & serverModel = "");
 
 	void setBackend(std::shared_ptr<ofxGgmlSpeechBackend> backend);
 	std::shared_ptr<ofxGgmlSpeechBackend> getBackend() const;

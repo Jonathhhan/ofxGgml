@@ -9,7 +9,10 @@ All notable changes to `ofxGgml` are documented in this file.
 - Script mode now supports higher-level slash commands and quick actions such as `/review`, `/reviewfix`, `/nextedit`, `/summary`, and `Change Summary`.
 - Text-focused GUI modes now expose additional professional one-click actions, including executive briefs, action items, meeting notes, email replies, release notes, commit messages, and structured JSON replies.
 - The Speech panel now supports temporary microphone capture, including `Start Mic Recording`, `Stop + Run`, and `Use Last Recording` for direct transcribe / translate workflows from the default input device.
+- Speech inference now supports an optional OpenAI-compatible speech-server backend for `/v1/audio/transcriptions` and `/v1/audio/translations`, with automatic `whisper-cli` fallback when the server path fails.
+- Windows helpers now cover `whisper-server` too, including `scripts/build-whisper-server.ps1` and `scripts/start-whisper-server.ps1` for a local warm speech backend on port `8081`.
 - The Vision panel now includes quick actions such as `Scene Describe`, `Screenshot Review`, and `Document OCR`, plus an optional sampled-video path that reuses the stable multimodal server backend directly from the GUI.
+- Video `Action` and `Emotion` tasks can now optionally call a temporal sidecar service, with structured request/response plumbing and dedicated Vision-panel presets for those workflows.
 
 ### Changed
 - `ofxGgmlGuiExample` replaces the old online/offline toggle with four `Live context` policies: `Offline`, `LoadedSourcesOnly`, `LiveContext`, and `LiveContextStrictCitations`.
@@ -19,13 +22,14 @@ All notable changes to `ofxGgml` are documented in this file.
 - Setup scripts now follow the faster server-first path by default: `ggml` still builds automatically, while `llama-cli` / `llama-completion` are opt-in via `--with-llama-cli` instead of being built on every `--auto` setup.
 - The GUI now presents `llama-server` as the recommended text backend and frames `llama-completion` as an optional local fallback instead of a required default component.
 - Server-backed text modes now auto-apply the old low-latency tuning defaults, auto-start the local server during app setup when the configured URL is local, and remove the manual `Check Server` / `Start Local Server` / `Stop Local Server` / `Tune For Server` buttons from the GUI.
+- The Speech panel now defaults to a local speech-server URL on `http://127.0.0.1:8081`, prefers a warm speech server first, and can auto-start a managed local `whisper-server` during setup when the configured URL is local.
 - Whisper timestamp handling now preserves `.srt` / `.vtt` artifacts, surfaces parsed segments in the GUI, and reuses the same lightweight SRT parsing approach we already trust in `ofxVlc4`.
 - Vision response handling now accepts more OpenAI-compatible response shapes, adds stronger task-specific prompting, and labels multimodal image parts more explicitly for better grounding.
 - Vision profile download hints can now use explicit direct URLs, and the default `LFM2.5-VL` GUI action now targets the correct `LFM2.5-VL-1.6B-Q4_0.gguf` file instead of a broken guessed link.
 - Video analysis now uses more structured sampled-frame prompts with frame-position labels, sample-count context, and clearer timeline guidance.
 
 ### Documentation
-- `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, repository instruction-file support, the new optional CLI build behavior, the microphone-driven speech workflow, and the upgraded vision / sampled-video workflows.
+- `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, repository instruction-file support, the new optional CLI build behavior, the microphone-driven speech workflow, the optional speech-server backend, `whisper-server` helper scripts, the upgraded vision / sampled-video workflows, and the optional temporal sidecar contract for video action / emotion analysis.
 
 ## [1.0.2] - 2026-04-16
 

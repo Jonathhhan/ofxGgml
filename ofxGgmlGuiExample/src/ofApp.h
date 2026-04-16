@@ -132,16 +132,32 @@ private:
 	char visionVideoPath[1024] = {};
 	char visionModelPath[1024] = {};
 	char visionServerUrl[256] = "http://127.0.0.1:8080";
+	char videoSidecarUrl[256] = {};
+	char videoSidecarModel[256] = {};
 	char visionSystemPrompt[1024] = {};
 	int visionTaskIndex = 0;
+	int videoTaskIndex = 0;
 	int visionVideoMaxFrames = 6;
 	char speechAudioPath[1024] = {};
 	char speechExecutable[256] = "whisper-cli";
 	char speechModelPath[1024] = {};
+	char speechServerUrl[256] = "http://127.0.0.1:8081";
+	char speechServerModel[128] = {};
 	char speechPrompt[1024] = {};
 	char speechLanguageHint[64] = "auto";
 	int speechTaskIndex = 0;
 	bool speechReturnTimestamps = false;
+	bool speechServerManagedByApp = false;
+	ServerStatusState speechServerStatus = ServerStatusState::Unknown;
+	std::string speechServerStatusMessage;
+	std::string cachedSpeechServerExecutable;
+	bool speechServerExecutableCached = false;
+#ifdef _WIN32
+	HANDLE speechServerProcessHandle = nullptr;
+	DWORD speechServerProcessId = 0;
+#else
+	pid_t speechServerProcessId = 0;
+#endif
 
 	// -- conversation / output --
 	std::deque<Message> chatMessages;
@@ -213,6 +229,8 @@ private:
 	std::string textServerStatusMessage;
 	std::string textServerCapabilityHint;
 	bool textServerManagedByApp = false;
+	std::string cachedTextServerExecutable;
+	bool textServerExecutableCached = false;
 #ifdef _WIN32
 	HANDLE textServerProcessHandle = nullptr;
 	DWORD textServerProcessId = 0;
@@ -341,10 +359,14 @@ private:
 	void syncTextBackendForActiveMode(bool announce = false);
 	void checkTextServerStatus(bool logResult = true);
 	bool ensureTextServerReady(bool logResult = false, bool allowLaunch = true);
-	std::string findLocalTextServerExecutable() const;
+	std::string findLocalTextServerExecutable(bool refresh = false);
 	bool isManagedTextServerRunning();
 	void startLocalTextServer();
 	void stopLocalTextServer(bool logResult = true);
+	std::string findLocalSpeechServerExecutable(bool refresh = false);
+	bool isManagedSpeechServerRunning();
+	void startLocalSpeechServer();
+	void stopLocalSpeechServer(bool logResult = true);
 	ofLogLevel mapGgmlLogLevel(int level) const;
 	void probeLlamaCli(const std::string & customPath = "");
 	void probeCliCapabilities();
