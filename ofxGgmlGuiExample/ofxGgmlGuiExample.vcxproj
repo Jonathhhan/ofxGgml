@@ -1,4 +1,4 @@
-<?xml version="1.0"?>
+﻿<?xml version="1.0"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 	<ItemGroup Label="ProjectConfigurations">
 		<ProjectConfiguration Include="Debug|x64">
@@ -63,6 +63,14 @@
 		<Import Project="..\..\..\libs\openFrameworksCompiled\project\vs\openFrameworksDebug.props" />
 	</ImportGroup>
 	<PropertyGroup Label="UserMacros" />
+	<PropertyGroup>
+		<OfxGgmlStableIncludeDirectories>src;..\libs;..\libs\ggml;..\libs\ggml\include;..\libs\ggml\src;..\src;..\src\assistants;..\src\compute;..\src\core;..\src\inference;..\src\model;..\src\support;..\..\ofxImGui\libs;..\..\ofxImGui\libs\imgui;..\..\ofxImGui\libs\imgui\backends;..\..\ofxImGui\libs\imgui\src;..\..\ofxImGui\src</OfxGgmlStableIncludeDirectories>
+		<OfxGgmlSystemDependencies>iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib</OfxGgmlSystemDependencies>
+		<OfxGgmlCpuDependencies>ggml.lib;ggml-base.lib;ggml-cpu.lib</OfxGgmlCpuDependencies>
+		<OfxGgmlGpuDependencies>ggml-cuda.lib;ggml-vulkan.lib;cublas.lib;cudart.lib;cuda.lib;vulkan-1.lib</OfxGgmlGpuDependencies>
+		<OfxGgmlCpuLibraryDirectories>..\libs\ggml\build\src\$(Configuration);..\libs\ggml\build\src\Release</OfxGgmlCpuLibraryDirectories>
+		<OfxGgmlGpuLibraryDirectories>..\libs\ggml\build\src\ggml-cuda\$(Configuration);..\libs\ggml\build\src\ggml-vulkan\$(Configuration);..\libs\ggml\build\src\ggml-cuda\Release;..\libs\ggml\build\src\ggml-vulkan\Release;$(CUDA_PATH)\lib\x64;$(VULKAN_SDK)\Lib</OfxGgmlGpuLibraryDirectories>
+	</PropertyGroup>
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64' or '$(Configuration)|$(Platform)'=='Debug|ARM64' or '$(Configuration)|$(Platform)'=='Debug|ARM64EC'">
 		<OutDir>bin\</OutDir>
 		<IntDir>obj\$(Platform)\$(Configuration)\</IntDir>
@@ -82,7 +90,7 @@
 			<PreprocessorDefinitions>%(PreprocessorDefinitions)</PreprocessorDefinitions>
 			<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
 			<WarningLevel>Level3</WarningLevel>
-			<AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);src;..\libs;..\libs\ggml;..\libs\ggml\build;..\libs\ggml\build\ALL_BUILD.dir;..\libs\ggml\build\ALL_BUILD.dir\Debug;..\libs\ggml\build\ALL_BUILD.dir\MinSizeRel;..\libs\ggml\build\ALL_BUILD.dir\RelWithDebInfo;..\libs\ggml\build\ALL_BUILD.dir\Release;..\libs\ggml\build\CMakeFiles;..\libs\ggml\build\CMakeFiles\2767dcc88a2b8ef07a064446917c9f6a;..\libs\ggml\build\CMakeFiles\4.3.0-rc3;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdC;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdC\Debug;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdC\Debug\CompilerIdC.tlog;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdC\tmp;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\CompilerIdCUDA;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\CompilerIdCUDA\x64;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\CompilerIdCUDA\x64\Debug;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\Debug;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\Debug\CompilerIdCUDA.tlog;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\tmp;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCXX;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCXX\Debug;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCXX\Debug\CompilerIdCXX.tlog;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCXX\tmp;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\VCTargetsPath;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\VCTargetsPath\x64;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\VCTargetsPath\x64\Debug;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\VCTargetsPath\x64\Debug\VCTargetsPath.tlog;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\x64;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\x64\Debug;..\libs\ggml\build\CMakeFiles\790555070138e9b487c3233a86f11c2c;..\libs\ggml\build\CMakeFiles\CMakeScratch;..\libs\ggml\build\CMakeFiles\FindOpenMP;..\libs\ggml\build\CMakeFiles\ea9e0f6e2bb716862dfe32611449eb11;..\libs\ggml\build\CMakeFiles\f883f737e2ea0427fff203e210c67aa5;..\libs\ggml\build\CMakeFiles\pkgRedirects;..\libs\ggml\build\INSTALL.dir;..\libs\ggml\build\INSTALL.dir\Debug;..\libs\ggml\build\INSTALL.dir\MinSizeRel;..\libs\ggml\build\INSTALL.dir\RelWithDebInfo;..\libs\ggml\build\INSTALL.dir\Release;..\libs\ggml\build\ZERO_CHECK.dir;..\libs\ggml\build\ZERO_CHECK.dir\Debug;..\libs\ggml\build\ZERO_CHECK.dir\MinSizeRel;..\libs\ggml\build\ZERO_CHECK.dir\RelWithDebInfo;..\libs\ggml\build\ZERO_CHECK.dir\Release;..\libs\ggml\build\src;..\libs\ggml\build\src\CMakeFiles;..\libs\ggml\build\src\Debug;..\libs\ggml\build\src\INSTALL.dir;..\libs\ggml\build\src\INSTALL.dir\Debug;..\libs\ggml\build\src\INSTALL.dir\MinSizeRel;..\libs\ggml\build\src\INSTALL.dir\RelWithDebInfo;..\libs\ggml\build\src\INSTALL.dir\Release;..\libs\ggml\build\src\Release;..\libs\ggml\build\src\ggml-base.dir;..\libs\ggml\build\src\ggml-base.dir\Debug;..\libs\ggml\build\src\ggml-base.dir\Debug\ggml-base.tlog;..\libs\ggml\build\src\ggml-base.dir\MinSizeRel;..\libs\ggml\build\src\ggml-base.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml-base.dir\Release;..\libs\ggml\build\src\ggml-base.dir\Release\ggml-base.tlog;..\libs\ggml\build\src\ggml-cpu;..\libs\ggml\build\src\ggml-cpu\CMakeFiles;..\libs\ggml\build\src\ggml-cpu\INSTALL.dir;..\libs\ggml\build\src\ggml-cpu\INSTALL.dir\Debug;..\libs\ggml\build\src\ggml-cpu\INSTALL.dir\MinSizeRel;..\libs\ggml\build\src\ggml-cpu\INSTALL.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml-cpu\INSTALL.dir\Release;..\libs\ggml\build\src\ggml-cpu.dir;..\libs\ggml\build\src\ggml-cpu.dir\Debug;..\libs\ggml\build\src\ggml-cpu.dir\Debug\ggml-cpu;..\libs\ggml\build\src\ggml-cpu.dir\Debug\ggml-cpu\arch;..\libs\ggml\build\src\ggml-cpu.dir\Debug\ggml-cpu\arch\x86;..\libs\ggml\build\src\ggml-cpu.dir\Debug\ggml-cpu.tlog;..\libs\ggml\build\src\ggml-cpu.dir\MinSizeRel;..\libs\ggml\build\src\ggml-cpu.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml-cpu.dir\Release;..\libs\ggml\build\src\ggml-cpu.dir\Release\ggml-cpu;..\libs\ggml\build\src\ggml-cpu.dir\Release\ggml-cpu\arch;..\libs\ggml\build\src\ggml-cpu.dir\Release\ggml-cpu\arch\x86;..\libs\ggml\build\src\ggml-cpu.dir\Release\ggml-cpu.tlog;..\libs\ggml\build\src\ggml-cuda;..\libs\ggml\build\src\ggml-cuda\CMakeFiles;..\libs\ggml\build\src\ggml-cuda\Debug;..\libs\ggml\build\src\ggml-cuda\INSTALL.dir;..\libs\ggml\build\src\ggml-cuda\INSTALL.dir\Debug;..\libs\ggml\build\src\ggml-cuda\INSTALL.dir\MinSizeRel;..\libs\ggml\build\src\ggml-cuda\INSTALL.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml-cuda\INSTALL.dir\Release;..\libs\ggml\build\src\ggml-cuda\Release;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\Debug;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\Debug\ggml-cuda.tlog;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\MinSizeRel;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\Release;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\Release\ggml-cuda.tlog;..\libs\ggml\build\src\ggml.dir;..\libs\ggml\build\src\ggml.dir\Debug;..\libs\ggml\build\src\ggml.dir\Debug\ggml.tlog;..\libs\ggml\build\src\ggml.dir\MinSizeRel;..\libs\ggml\build\src\ggml.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml.dir\Release;..\libs\ggml\build\src\ggml.dir\Release\ggml.tlog;..\libs\ggml\build\x64;..\libs\ggml\build\x64\Debug;..\libs\ggml\build\x64\Debug\ALL_BUILD;..\libs\ggml\build\x64\Debug\ALL_BUILD\ALL_BUILD.tlog;..\libs\ggml\build\x64\Debug\ZERO_CHECK;..\libs\ggml\build\x64\Debug\ZERO_CHECK\ZERO_CHECK.tlog;..\libs\ggml\build\x64\Release;..\libs\ggml\build\x64\Release\ALL_BUILD;..\libs\ggml\build\x64\Release\ALL_BUILD\ALL_BUILD.tlog;..\libs\ggml\build\x64\Release\ZERO_CHECK;..\libs\ggml\build\x64\Release\ZERO_CHECK\ZERO_CHECK.tlog;..\libs\ggml\cmake;..\libs\ggml\include;..\libs\ggml\src;..\libs\ggml\src\ggml-cpu;..\libs\ggml\src\ggml-cpu\amx;..\libs\ggml\src\ggml-cpu\arch;..\libs\ggml\src\ggml-cpu\arch\arm;..\libs\ggml\src\ggml-cpu\arch\loongarch;..\libs\ggml\src\ggml-cpu\arch\powerpc;..\libs\ggml\src\ggml-cpu\arch\riscv;..\libs\ggml\src\ggml-cpu\arch\s390;..\libs\ggml\src\ggml-cpu\arch\wasm;..\libs\ggml\src\ggml-cpu\arch\x86;..\libs\ggml\src\ggml-cpu\cmake;..\libs\ggml\src\ggml-cpu\kleidiai;..\libs\ggml\src\ggml-cpu\llamafile;..\libs\ggml\src\ggml-cpu\spacemit;..\libs\ggml\src\ggml-cuda;..\libs\ggml\src\ggml-cuda\template-instances;..\libs\ggml\src\ggml-cuda\vendors;..\libs\ggml\src\ggml-metal;..\libs\ggml\src\ggml-vulkan;..\libs\ggml\src\ggml-vulkan\cmake;..\libs\ggml\src\ggml-vulkan\vulkan-shaders;..\libs\ggml\src\ggml-vulkan\vulkan-shaders\feature-tests;..\src;..\..\ofxImGui\libs;..\..\ofxImGui\libs\imgui;..\..\ofxImGui\libs\imgui\backends;..\..\ofxImGui\libs\imgui\docs;..\..\ofxImGui\libs\imgui\extras;..\..\ofxImGui\libs\imgui\src;..\..\ofxImGui\src</AdditionalIncludeDirectories>
+			<AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(OfxGgmlStableIncludeDirectories)</AdditionalIncludeDirectories>
 			<CompileAs>CompileAsCpp</CompileAs>
 			<MultiProcessorCompilation>true</MultiProcessorCompilation>
 			<ObjectFileName>$(IntDir)\Build\%(RelativeDir)\$(Configuration)\</ObjectFileName>
@@ -96,8 +104,8 @@
 			<GenerateDebugInformation>true</GenerateDebugInformation>
 			<SubSystem>Console</SubSystem>
 			<RandomizedBaseAddress>true</RandomizedBaseAddress>
-			<AdditionalDependencies>$(ProjectDir)..\libs\ggml\build\src\Release\ggml.lib;$(ProjectDir)..\libs\ggml\build\src\Release\ggml-base.lib;$(ProjectDir)..\libs\ggml\build\src\Release\ggml-cpu.lib;$(ProjectDir)..\libs\ggml\build\src\ggml-cuda\Release\ggml-cuda.lib;$(ProjectDir)..\libs\ggml\build\src\ggml-vulkan\Release\ggml-vulkan.lib;$(CUDA_PATH)\lib\x64\cublas.lib;$(CUDA_PATH)\lib\x64\cudart.lib;$(CUDA_PATH)\lib\x64\cuda.lib;$(VULKAN_SDK)\Lib\vulkan-1.lib;iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib;%(AdditionalDependencies)</AdditionalDependencies>
-			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+			<AdditionalDependencies>$(OfxGgmlSystemDependencies);%(AdditionalDependencies);$(OfxGgmlCpuDependencies);$(OfxGgmlGpuDependencies)</AdditionalDependencies>
+			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(OfxGgmlCpuLibraryDirectories);$(OfxGgmlGpuLibraryDirectories)</AdditionalLibraryDirectories>
 			<ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
 		</Link>
 	</ItemDefinitionGroup>
@@ -106,8 +114,8 @@
 			<GenerateDebugInformation>true</GenerateDebugInformation>
 			<SubSystem>Console</SubSystem>
 			<RandomizedBaseAddress>true</RandomizedBaseAddress>
-			<AdditionalDependencies>iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib;%(AdditionalDependencies);ggml.lib;ggml-base.lib;ggml-cpu.lib;ggml-cuda.lib;cublas.lib;cudart.lib;cuda.lib</AdditionalDependencies>
-			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);..\libs/ggml/build/src/$(Configuration);..\libs/ggml/build/src/ggml-cuda/$(Configuration);C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\lib\x64</AdditionalLibraryDirectories>
+			<AdditionalDependencies>$(OfxGgmlSystemDependencies);%(AdditionalDependencies);$(OfxGgmlCpuDependencies)</AdditionalDependencies>
+			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(OfxGgmlCpuLibraryDirectories)</AdditionalLibraryDirectories>
 			<ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
 		</Link>
 	</ItemDefinitionGroup>
@@ -116,8 +124,8 @@
 			<GenerateDebugInformation>true</GenerateDebugInformation>
 			<SubSystem>Console</SubSystem>
 			<RandomizedBaseAddress>true</RandomizedBaseAddress>
-			<AdditionalDependencies>iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib;%(AdditionalDependencies);ggml.lib;ggml-base.lib;ggml-cpu.lib;ggml-cuda.lib;cublas.lib;cudart.lib;cuda.lib</AdditionalDependencies>
-			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);..\libs/ggml/build/src/$(Configuration);..\libs/ggml/build/src/ggml-cuda/$(Configuration);C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\lib\x64</AdditionalLibraryDirectories>
+			<AdditionalDependencies>$(OfxGgmlSystemDependencies);%(AdditionalDependencies);$(OfxGgmlCpuDependencies)</AdditionalDependencies>
+			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(OfxGgmlCpuLibraryDirectories)</AdditionalLibraryDirectories>
 			<ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
 		</Link>
 	</ItemDefinitionGroup>
@@ -127,7 +135,7 @@
 			<PreprocessorDefinitions>%(PreprocessorDefinitions)</PreprocessorDefinitions>
 			<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
 			<WarningLevel>Level3</WarningLevel>
-			<AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);src;..\libs;..\libs\ggml;..\libs\ggml\build;..\libs\ggml\build\ALL_BUILD.dir;..\libs\ggml\build\ALL_BUILD.dir\Debug;..\libs\ggml\build\ALL_BUILD.dir\MinSizeRel;..\libs\ggml\build\ALL_BUILD.dir\RelWithDebInfo;..\libs\ggml\build\ALL_BUILD.dir\Release;..\libs\ggml\build\CMakeFiles;..\libs\ggml\build\CMakeFiles\2767dcc88a2b8ef07a064446917c9f6a;..\libs\ggml\build\CMakeFiles\4.3.0-rc3;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdC;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdC\Debug;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdC\Debug\CompilerIdC.tlog;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdC\tmp;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\CompilerIdCUDA;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\CompilerIdCUDA\x64;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\CompilerIdCUDA\x64\Debug;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\Debug;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\Debug\CompilerIdCUDA.tlog;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCUDA\tmp;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCXX;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCXX\Debug;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCXX\Debug\CompilerIdCXX.tlog;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\CompilerIdCXX\tmp;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\VCTargetsPath;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\VCTargetsPath\x64;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\VCTargetsPath\x64\Debug;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\VCTargetsPath\x64\Debug\VCTargetsPath.tlog;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\x64;..\libs\ggml\build\CMakeFiles\4.3.0-rc3\x64\Debug;..\libs\ggml\build\CMakeFiles\790555070138e9b487c3233a86f11c2c;..\libs\ggml\build\CMakeFiles\CMakeScratch;..\libs\ggml\build\CMakeFiles\FindOpenMP;..\libs\ggml\build\CMakeFiles\ea9e0f6e2bb716862dfe32611449eb11;..\libs\ggml\build\CMakeFiles\f883f737e2ea0427fff203e210c67aa5;..\libs\ggml\build\CMakeFiles\pkgRedirects;..\libs\ggml\build\INSTALL.dir;..\libs\ggml\build\INSTALL.dir\Debug;..\libs\ggml\build\INSTALL.dir\MinSizeRel;..\libs\ggml\build\INSTALL.dir\RelWithDebInfo;..\libs\ggml\build\INSTALL.dir\Release;..\libs\ggml\build\ZERO_CHECK.dir;..\libs\ggml\build\ZERO_CHECK.dir\Debug;..\libs\ggml\build\ZERO_CHECK.dir\MinSizeRel;..\libs\ggml\build\ZERO_CHECK.dir\RelWithDebInfo;..\libs\ggml\build\ZERO_CHECK.dir\Release;..\libs\ggml\build\src;..\libs\ggml\build\src\CMakeFiles;..\libs\ggml\build\src\Debug;..\libs\ggml\build\src\INSTALL.dir;..\libs\ggml\build\src\INSTALL.dir\Debug;..\libs\ggml\build\src\INSTALL.dir\MinSizeRel;..\libs\ggml\build\src\INSTALL.dir\RelWithDebInfo;..\libs\ggml\build\src\INSTALL.dir\Release;..\libs\ggml\build\src\Release;..\libs\ggml\build\src\ggml-base.dir;..\libs\ggml\build\src\ggml-base.dir\Debug;..\libs\ggml\build\src\ggml-base.dir\Debug\ggml-base.tlog;..\libs\ggml\build\src\ggml-base.dir\MinSizeRel;..\libs\ggml\build\src\ggml-base.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml-base.dir\Release;..\libs\ggml\build\src\ggml-base.dir\Release\ggml-base.tlog;..\libs\ggml\build\src\ggml-cpu;..\libs\ggml\build\src\ggml-cpu\CMakeFiles;..\libs\ggml\build\src\ggml-cpu\INSTALL.dir;..\libs\ggml\build\src\ggml-cpu\INSTALL.dir\Debug;..\libs\ggml\build\src\ggml-cpu\INSTALL.dir\MinSizeRel;..\libs\ggml\build\src\ggml-cpu\INSTALL.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml-cpu\INSTALL.dir\Release;..\libs\ggml\build\src\ggml-cpu.dir;..\libs\ggml\build\src\ggml-cpu.dir\Debug;..\libs\ggml\build\src\ggml-cpu.dir\Debug\ggml-cpu;..\libs\ggml\build\src\ggml-cpu.dir\Debug\ggml-cpu\arch;..\libs\ggml\build\src\ggml-cpu.dir\Debug\ggml-cpu\arch\x86;..\libs\ggml\build\src\ggml-cpu.dir\Debug\ggml-cpu.tlog;..\libs\ggml\build\src\ggml-cpu.dir\MinSizeRel;..\libs\ggml\build\src\ggml-cpu.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml-cpu.dir\Release;..\libs\ggml\build\src\ggml-cpu.dir\Release\ggml-cpu;..\libs\ggml\build\src\ggml-cpu.dir\Release\ggml-cpu\arch;..\libs\ggml\build\src\ggml-cpu.dir\Release\ggml-cpu\arch\x86;..\libs\ggml\build\src\ggml-cpu.dir\Release\ggml-cpu.tlog;..\libs\ggml\build\src\ggml-cuda;..\libs\ggml\build\src\ggml-cuda\CMakeFiles;..\libs\ggml\build\src\ggml-cuda\Debug;..\libs\ggml\build\src\ggml-cuda\INSTALL.dir;..\libs\ggml\build\src\ggml-cuda\INSTALL.dir\Debug;..\libs\ggml\build\src\ggml-cuda\INSTALL.dir\MinSizeRel;..\libs\ggml\build\src\ggml-cuda\INSTALL.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml-cuda\INSTALL.dir\Release;..\libs\ggml\build\src\ggml-cuda\Release;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\Debug;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\Debug\ggml-cuda.tlog;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\MinSizeRel;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\Release;..\libs\ggml\build\src\ggml-cuda\ggml-cuda.dir\Release\ggml-cuda.tlog;..\libs\ggml\build\src\ggml.dir;..\libs\ggml\build\src\ggml.dir\Debug;..\libs\ggml\build\src\ggml.dir\Debug\ggml.tlog;..\libs\ggml\build\src\ggml.dir\MinSizeRel;..\libs\ggml\build\src\ggml.dir\RelWithDebInfo;..\libs\ggml\build\src\ggml.dir\Release;..\libs\ggml\build\src\ggml.dir\Release\ggml.tlog;..\libs\ggml\build\x64;..\libs\ggml\build\x64\Debug;..\libs\ggml\build\x64\Debug\ALL_BUILD;..\libs\ggml\build\x64\Debug\ALL_BUILD\ALL_BUILD.tlog;..\libs\ggml\build\x64\Debug\ZERO_CHECK;..\libs\ggml\build\x64\Debug\ZERO_CHECK\ZERO_CHECK.tlog;..\libs\ggml\build\x64\Release;..\libs\ggml\build\x64\Release\ALL_BUILD;..\libs\ggml\build\x64\Release\ALL_BUILD\ALL_BUILD.tlog;..\libs\ggml\build\x64\Release\ZERO_CHECK;..\libs\ggml\build\x64\Release\ZERO_CHECK\ZERO_CHECK.tlog;..\libs\ggml\cmake;..\libs\ggml\include;..\libs\ggml\src;..\libs\ggml\src\ggml-cpu;..\libs\ggml\src\ggml-cpu\amx;..\libs\ggml\src\ggml-cpu\arch;..\libs\ggml\src\ggml-cpu\arch\arm;..\libs\ggml\src\ggml-cpu\arch\loongarch;..\libs\ggml\src\ggml-cpu\arch\powerpc;..\libs\ggml\src\ggml-cpu\arch\riscv;..\libs\ggml\src\ggml-cpu\arch\s390;..\libs\ggml\src\ggml-cpu\arch\wasm;..\libs\ggml\src\ggml-cpu\arch\x86;..\libs\ggml\src\ggml-cpu\cmake;..\libs\ggml\src\ggml-cpu\kleidiai;..\libs\ggml\src\ggml-cpu\llamafile;..\libs\ggml\src\ggml-cpu\spacemit;..\libs\ggml\src\ggml-cuda;..\libs\ggml\src\ggml-cuda\template-instances;..\libs\ggml\src\ggml-cuda\vendors;..\libs\ggml\src\ggml-metal;..\libs\ggml\src\ggml-vulkan;..\libs\ggml\src\ggml-vulkan\cmake;..\libs\ggml\src\ggml-vulkan\vulkan-shaders;..\libs\ggml\src\ggml-vulkan\vulkan-shaders\feature-tests;..\src;..\..\ofxImGui\libs;..\..\ofxImGui\libs\imgui;..\..\ofxImGui\libs\imgui\backends;..\..\ofxImGui\libs\imgui\docs;..\..\ofxImGui\libs\imgui\extras;..\..\ofxImGui\libs\imgui\src;..\..\ofxImGui\src</AdditionalIncludeDirectories>
+			<AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(OfxGgmlStableIncludeDirectories)</AdditionalIncludeDirectories>
 			<CompileAs>CompileAsCpp</CompileAs>
 			<ObjectFileName>$(IntDir)\Build\%(RelativeDir)\$(Configuration)\</ObjectFileName>
 			<LanguageStandard>stdcpplatest</LanguageStandard>
@@ -143,8 +151,8 @@
 			<OptimizeReferences>true</OptimizeReferences>
 			<EnableCOMDATFolding>true</EnableCOMDATFolding>
 			<RandomizedBaseAddress>true</RandomizedBaseAddress>
-			<AdditionalDependencies>$(ProjectDir)..\libs\ggml\build\src\Release\ggml.lib;$(ProjectDir)..\libs\ggml\build\src\Release\ggml-base.lib;$(ProjectDir)..\libs\ggml\build\src\Release\ggml-cpu.lib;$(ProjectDir)..\libs\ggml\build\src\ggml-cuda\Release\ggml-cuda.lib;$(ProjectDir)..\libs\ggml\build\src\ggml-vulkan\Release\ggml-vulkan.lib;"$(CUDA_PATH)\lib\x64\cublas.lib";"$(CUDA_PATH)\lib\x64\cudart.lib";"$(CUDA_PATH)\lib\x64\cuda.lib";"$(VULKAN_SDK)\Lib\vulkan-1.lib";iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib;%(AdditionalDependencies)</AdditionalDependencies>
-			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+			<AdditionalDependencies>$(OfxGgmlSystemDependencies);%(AdditionalDependencies);$(OfxGgmlCpuDependencies);$(OfxGgmlGpuDependencies)</AdditionalDependencies>
+			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(OfxGgmlCpuLibraryDirectories);$(OfxGgmlGpuLibraryDirectories)</AdditionalLibraryDirectories>
 			<ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
 		</Link>
 	</ItemDefinitionGroup>
@@ -156,8 +164,8 @@
 			<OptimizeReferences>true</OptimizeReferences>
 			<EnableCOMDATFolding>true</EnableCOMDATFolding>
 			<RandomizedBaseAddress>true</RandomizedBaseAddress>
-			<AdditionalDependencies>iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib;%(AdditionalDependencies);ggml.lib;ggml-base.lib;ggml-cpu.lib;ggml-cuda.lib;cublas.lib;cudart.lib;cuda.lib</AdditionalDependencies>
-			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);..\libs/ggml/build/src/$(Configuration);..\libs/ggml/build/src/ggml-cuda/$(Configuration);C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\lib\x64</AdditionalLibraryDirectories>
+			<AdditionalDependencies>$(OfxGgmlSystemDependencies);%(AdditionalDependencies);$(OfxGgmlCpuDependencies)</AdditionalDependencies>
+			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(OfxGgmlCpuLibraryDirectories)</AdditionalLibraryDirectories>
 			<ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
 		</Link>
 	</ItemDefinitionGroup>
@@ -169,8 +177,8 @@
 			<OptimizeReferences>true</OptimizeReferences>
 			<EnableCOMDATFolding>true</EnableCOMDATFolding>
 			<RandomizedBaseAddress>true</RandomizedBaseAddress>
-			<AdditionalDependencies>iphlpapi.lib;ws2_32.lib;wldap32.lib;crypt32.lib;advapi32.lib;winmm.lib;normaliz.lib;%(AdditionalDependencies);ggml.lib;ggml-base.lib;ggml-cpu.lib;ggml-cuda.lib;cublas.lib;cudart.lib;cuda.lib</AdditionalDependencies>
-			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);..\libs/ggml/build/src/$(Configuration);..\libs/ggml/build/src/ggml-cuda/$(Configuration);C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\lib\x64</AdditionalLibraryDirectories>
+			<AdditionalDependencies>$(OfxGgmlSystemDependencies);%(AdditionalDependencies);$(OfxGgmlCpuDependencies)</AdditionalDependencies>
+			<AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(OfxGgmlCpuLibraryDirectories)</AdditionalLibraryDirectories>
 			<ForceFileOutput>MultiplyDefinedSymbolOnly</ForceFileOutput>
 		</Link>
 	</ItemDefinitionGroup>
@@ -230,18 +238,19 @@
 		<ClCompile Include="src\ofApp.cpp" />
 		<ClCompile Include="..\src\assistants\ofxGgmlChatAssistant.cpp" />
 		<ClCompile Include="..\src\assistants\ofxGgmlCodeAssistant.cpp" />
-		<ClCompile Include="..\src\core\ofxGgmlCore.cpp" />
 		<ClCompile Include="..\src\assistants\ofxGgmlCodeReview.cpp" />
+		<ClCompile Include="..\src\assistants\ofxGgmlTextAssistant.cpp" />
+		<ClCompile Include="..\src\assistants\ofxGgmlWorkspaceAssistant.cpp" />
 		<ClCompile Include="..\src\compute\ofxGgmlGraph.cpp" />
+		<ClCompile Include="..\src\compute\ofxGgmlTensor.cpp" />
+		<ClCompile Include="..\src\core\ofxGgmlCore.cpp" />
 		<ClCompile Include="..\src\inference\ofxGgmlInference.cpp" />
 		<ClCompile Include="..\src\inference\ofxGgmlSpeechInference.cpp" />
+		<ClCompile Include="..\src\inference\ofxGgmlVideoInference.cpp" />
 		<ClCompile Include="..\src\inference\ofxGgmlVisionInference.cpp" />
 		<ClCompile Include="..\src\model\ofxGgmlModel.cpp" />
 		<ClCompile Include="..\src\support\ofxGgmlProjectMemory.cpp" />
 		<ClCompile Include="..\src\support\ofxGgmlScriptSource.cpp" />
-		<ClCompile Include="..\src\compute\ofxGgmlTensor.cpp" />
-		<ClCompile Include="..\src\assistants\ofxGgmlTextAssistant.cpp" />
-		<ClCompile Include="..\src\assistants\ofxGgmlWorkspaceAssistant.cpp" />
 		<ClCompile Include="..\..\ofxImGui\src\BaseEngine.cpp" />
 		<ClCompile Include="..\..\ofxImGui\src\DefaultTheme.cpp" />
 		<ClCompile Include="..\..\ofxImGui\src\EngineGLFW.cpp" />
@@ -264,23 +273,27 @@
 	</ItemGroup>
 	<ItemGroup>
 		<ClInclude Include="src\ofApp.h" />
-		<ClInclude Include="..\src\ofxGgml.h" />
 		<ClInclude Include="..\src\assistants\ofxGgmlChatAssistant.h" />
 		<ClInclude Include="..\src\assistants\ofxGgmlCodeAssistant.h" />
-		<ClInclude Include="..\src\core\ofxGgmlCore.h" />
 		<ClInclude Include="..\src\assistants\ofxGgmlCodeReview.h" />
-		<ClInclude Include="..\src\compute\ofxGgmlGraph.h" />
-		<ClInclude Include="..\src\core\ofxGgmlHelpers.h" />
-		<ClInclude Include="..\src\inference\ofxGgmlInference.h" />
-		<ClInclude Include="..\src\model\ofxGgmlModel.h" />
-		<ClInclude Include="..\src\support\ofxGgmlProjectMemory.h" />
-		<ClInclude Include="..\src\core\ofxGgmlResult.h" />
-		<ClInclude Include="..\src\support\ofxGgmlScriptSource.h" />
-		<ClInclude Include="..\src\compute\ofxGgmlTensor.h" />
 		<ClInclude Include="..\src\assistants\ofxGgmlTextAssistant.h" />
+		<ClInclude Include="..\src\assistants\ofxGgmlWorkspaceAssistant.h" />
+		<ClInclude Include="..\src\compute\ofxGgmlGraph.h" />
+		<ClInclude Include="..\src\compute\ofxGgmlTensor.h" />
+		<ClInclude Include="..\src\core\ofxGgmlCore.h" />
+		<ClInclude Include="..\src\core\ofxGgmlHelpers.h" />
+		<ClInclude Include="..\src\core\ofxGgmlResourceGuards.h" />
+		<ClInclude Include="..\src\core\ofxGgmlResult.h" />
 		<ClInclude Include="..\src\core\ofxGgmlTypes.h" />
 		<ClInclude Include="..\src\core\ofxGgmlVersion.h" />
-		<ClInclude Include="..\src\assistants\ofxGgmlWorkspaceAssistant.h" />
+		<ClInclude Include="..\src\inference\ofxGgmlInference.h" />
+		<ClInclude Include="..\src\inference\ofxGgmlSpeechInference.h" />
+		<ClInclude Include="..\src\inference\ofxGgmlVideoInference.h" />
+		<ClInclude Include="..\src\inference\ofxGgmlVisionInference.h" />
+		<ClInclude Include="..\src\model\ofxGgmlModel.h" />
+		<ClInclude Include="..\src\ofxGgml.h" />
+		<ClInclude Include="..\src\support\ofxGgmlProjectMemory.h" />
+		<ClInclude Include="..\src\support\ofxGgmlScriptSource.h" />
 		<ClInclude Include="..\libs\ggml\include\ggml-alloc.h" />
 		<ClInclude Include="..\libs\ggml\include\ggml-backend.h" />
 		<ClInclude Include="..\libs\ggml\include\ggml-blas.h" />
