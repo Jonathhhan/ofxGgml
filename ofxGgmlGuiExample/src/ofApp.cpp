@@ -7,6 +7,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -92,6 +93,37 @@ void drawHelpMarker(const char * helpText) {
 		ImGui::PopTextWrapPos();
 		ImGui::EndTooltip();
 	}
+}
+
+void showWrappedTooltip(const std::string & tooltipText) {
+	if (tooltipText.empty()) {
+		return;
+	}
+	ImGui::BeginTooltip();
+	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+	ImGui::TextUnformatted(tooltipText.c_str());
+	ImGui::PopTextWrapPos();
+	ImGui::EndTooltip();
+}
+
+void showWrappedTooltipf(const char * fmt, ...) {
+	if (!fmt || *fmt == '\0') {
+		return;
+	}
+	va_list args;
+	va_start(args, fmt);
+	va_list argsCopy;
+	va_copy(argsCopy, args);
+	const int required = std::vsnprintf(nullptr, 0, fmt, args);
+	va_end(args);
+	if (required <= 0) {
+		va_end(argsCopy);
+		return;
+	}
+	std::string buffer(static_cast<size_t>(required), '\0');
+	std::vsnprintf(buffer.data(), static_cast<size_t>(required) + 1, fmt, argsCopy);
+	va_end(argsCopy);
+	showWrappedTooltip(buffer);
 }
 
 static const std::array<LogLevelOption, 5> kLogLevelOptions = {{
@@ -2225,10 +2257,10 @@ gpuLayers = detectedModelLayers;
 }
 }
 if (ImGui::IsItemHovered()) {
-ImGui::SetTooltip("%s\nBest for: %s\nFile: %s",
-preset.description.c_str(),
-preset.bestFor.c_str(),
-preset.filename.c_str());
+showWrappedTooltipf("%s\nBest for: %s\nFile: %s",
+	preset.description.c_str(),
+	preset.bestFor.c_str(),
+	preset.filename.c_str());
 }
 if (isSelected) ImGui::SetItemDefaultFocus();
 }
@@ -2250,7 +2282,7 @@ if (!modelPresets.empty()) {
 	}
 	ImGui::EndDisabled();
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Switch to the catalog default for this mode.");
+		showWrappedTooltip("Switch to the catalog default for this mode.");
 	}
 
 	const auto & selectedPreset = modelPresets[static_cast<size_t>(selectedModelIndex)];
@@ -2261,7 +2293,7 @@ if (!modelPresets.empty()) {
 		if (std::filesystem::exists(modelPath, modelEc) && !modelEc) {
 			ImGui::TextDisabled("Local GGUF: %s", modelFileName.c_str());
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s", modelPath.c_str());
+				showWrappedTooltip(modelPath);
 			}
 			if (useServerBackend) {
 				ImGui::TextDisabled("Used for review / embeddings");
@@ -2272,7 +2304,7 @@ if (!modelPresets.empty()) {
 			drawHelpMarker("Normal text generation can run through llama-server without a local GGUF. This local file remains optional.");
 			ImGui::TextDisabled("Suggested file: %s", modelFileName.c_str());
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s", modelPath.c_str());
+				showWrappedTooltip(modelPath);
 			}
 			ImGui::BeginDisabled(selectedPreset.url.empty());
 			if (ImGui::SmallButton("Download in browser")) {
@@ -2280,13 +2312,13 @@ if (!modelPresets.empty()) {
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Opens the preset download URL in your browser.");
+				showWrappedTooltip("Opens the preset download URL in your browser.");
 			}
 		} else {
 			ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.3f, 1.0f),
 				"Model missing: %s", modelFileName.c_str());
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s", modelPath.c_str());
+				showWrappedTooltip(modelPath);
 			}
 			ImGui::TextDisabled("Target path");
 			drawHelpMarker(modelPath.c_str());
@@ -2296,7 +2328,7 @@ if (!modelPresets.empty()) {
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Opens the preset download URL in your browser.");
+				showWrappedTooltip("Opens the preset download URL in your browser.");
 			}
 			ImGui::SameLine();
 			const int presetNumber = selectedModelIndex + 1;
@@ -2305,7 +2337,7 @@ if (!modelPresets.empty()) {
 				copyToClipboard(downloadCmd);
 			}
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Copies a shell command to fetch preset %d into bin/data/models/", presetNumber);
+				showWrappedTooltipf("Copies a shell command to fetch preset %d into bin/data/models/", presetNumber);
 			}
 		}
 	}
@@ -2354,7 +2386,7 @@ if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 	if (!localServerExe.empty()) {
 		ImGui::TextDisabled("Local server exe: %s", ofFilePath::getFileName(localServerExe).c_str());
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("%s", localServerExe.c_str());
+			showWrappedTooltip(localServerExe);
 		}
 	} else {
 		ImGui::TextColored(ImVec4(0.9f, 0.45f, 0.35f, 1.0f), "Local server executable not found.");
@@ -2422,7 +2454,7 @@ if (ImGui::SliderInt("##MaxTok", &maxTokens, 32, 4096, "Tokens: %d")) {
 }
 ImGui::Checkbox("Per-mode token budgets", &useModeTokenBudgets);
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Remember and auto-apply a separate Max Tokens value per mode.");
+	showWrappedTooltip("Remember and auto-apply a separate Max Tokens value per mode.");
 }
 ImGui::SetNextItemWidth(-1);
 ImGui::SliderFloat("##Temp", &temperature, 0.0f, 2.0f, "Temp: %.2f");
@@ -2438,17 +2470,17 @@ ImGui::SetNextItemWidth(-1);
 ImGui::SliderInt("##Seed", &seed, -1, 99999, "Seed: %d");
 ImGui::Checkbox("Stop on natural boundary", &stopAtNaturalBoundary);
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Trims cut-off output to sentence or line boundaries when generation ends abruptly.");
+	showWrappedTooltip("Trims cut-off output to sentence or line boundaries when generation ends abruptly.");
 }
 ImGui::Checkbox("Auto-continue cutoffs (Script)", &autoContinueCutoff);
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("When Script output appears cut off, run one automatic continuation pass.");
+	showWrappedTooltip("When Script output appears cut off, run one automatic continuation pass.");
 }
 ImGui::BeginDisabled(useServerBackend);
 ImGui::Checkbox("Use prompt cache", &usePromptCache);
 ImGui::EndDisabled();
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip(useServerBackend
+	showWrappedTooltip(useServerBackend
 		? "Prompt cache is a local CLI optimization and is ignored for llama-server."
 		: "Reuse llama prompt cache between requests for faster follow-up responses.");
 }
@@ -2464,7 +2496,7 @@ if (ImGui::Combo("##LiveContextMode", &liveContextModeIndex, liveContextLabels, 
 	liveContextMode = static_cast<LiveContextMode>(liveContextModeIndex);
 }
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip(
+	showWrappedTooltip(
 		"Offline disables external context. Loaded sources only uses the URLs you provide. "
 		"Live context also allows automatic news, weather, and search grounding.");
 }
@@ -2492,7 +2524,7 @@ ImGui::BeginDisabled(useServerBackend);
 ImGui::SliderInt("##Threads", &numThreads, 1, 32, "Threads: %d");
 ImGui::EndDisabled();
 if (useServerBackend && ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Thread count is only used by the local CLI path.");
+	showWrappedTooltip("Thread count is only used by the local CLI path.");
 }
 ImGui::SetNextItemWidth(-1);
 ImGui::SliderInt(
@@ -2502,7 +2534,7 @@ ImGui::SliderInt(
 	16384,
 	useServerBackend ? "Prompt budget: %d" : "Context: %d");
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip(useServerBackend
+	showWrappedTooltip(useServerBackend
 		? "Used as a local prompt-trimming heuristic before sending text to llama-server."
 		: "Maximum local context window requested for llama-completion.");
 }
@@ -2511,7 +2543,7 @@ ImGui::BeginDisabled(useServerBackend);
 ImGui::SliderInt("##BatchSize", &batchSize, 32, 4096, "Batch: %d");
 ImGui::EndDisabled();
 if (useServerBackend && ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Batch size is only used by the local CLI path.");
+	showWrappedTooltip("Batch size is only used by the local CLI path.");
 }
 
 if (!backendNames.empty()) {
@@ -2543,7 +2575,7 @@ ImGui::BeginDisabled(useServerBackend);
 ImGui::SliderInt("##GPULayers", &gpuLayers, 0, sliderMax, "GPU Layers: %d");
 if (ImGui::IsItemHovered()) {
 if (detectedModelLayers > 0) {
-ImGui::SetTooltip("Model has %d layers\nGPU offloading via llama-completion", detectedModelLayers);
+showWrappedTooltipf("Model has %d layers\nGPU offloading via llama-completion", detectedModelLayers);
 }
 }
 // None / All quick buttons.
@@ -2674,7 +2706,7 @@ if (ImGui::BeginCombo("##ChatLang", selectedChatLanguage.c_str())) {
 	ImGui::EndCombo();
 }
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Auto lets the model decide. Choose a language to force chat replies.");
+	showWrappedTooltip("Auto lets the model decide. Choose a language to force chat replies.");
 }
 
 // Message history.
@@ -2739,7 +2771,7 @@ ImGui::InputTextMultiline(
 	sizeof(sourceUrlsInput),
 	ImVec2(-1, 48));
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Optional source URLs for grounded answers in Chat, Summarize, and Custom.");
+	showWrappedTooltip("Optional source URLs for grounded answers in Chat, Summarize, and Custom.");
 }
 
 	if ((submitted || sendClicked || sendWithSourcesClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
@@ -3432,7 +3464,7 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 		runHierarchicalReview();
 	}
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Run embedding-powered, multi-pass review over the loaded folder/repository.\nRecommended: use the Script-mode recommended model plus Review Preset.");
+		showWrappedTooltip("Run embedding-powered, multi-pass review over the loaded folder/repository.\nRecommended: use the Script-mode recommended model plus Review Preset.");
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Review Fix Plan", ImVec2(120, 0))) {
@@ -3454,7 +3486,7 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			buildWorkspaceAllowedFiles());
 	}
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Review the loaded workspace and return an actionable fix plan with structured edits.");
+		showWrappedTooltip("Review the loaded workspace and return an actionable fix plan with structured edits.");
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Review Preset", ImVec2(110, 0))) {
@@ -3479,7 +3511,7 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 		usePromptCache = true;
 	}
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Switch to the recommended Script model and review-tuned generation settings.");
+		showWrappedTooltip("Switch to the recommended Script model and review-tuned generation settings.");
 	}
 }
 
@@ -3501,7 +3533,7 @@ ImGui::Spacing();
 ImGui::TextDisabled("Quick Actions:");
 ImGui::TextDisabled("%s", "Tip: /review /reviewfix /nextedit /summary /tests /fix /docs");
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("%s", buildScriptCommandHelpText().c_str());
+	showWrappedTooltip(buildScriptCommandHelpText());
 }
 ImGui::BeginDisabled(generating.load() || (!hasUserInput && !hasSelectedFile));
 for (size_t i = 0; i < std::size(actionSpecs); i++) {
@@ -3541,14 +3573,14 @@ if (ImGui::Button("Change Summary", ImVec2(120, 0))) {
 	std::memset(scriptInput, 0, sizeof(scriptInput));
 }
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Summarize local Git changes professionally for reviewers.");
+	showWrappedTooltip("Summarize local Git changes professionally for reviewers.");
 }
 ImGui::EndDisabled();
 
 if (ImGui::CollapsingHeader("Semantic & Workspace")) {
 	ImGui::Checkbox("Restrict workspace previews to focused file", &restrictWorkspaceToFocusedFile);
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("When enabled, structured edit previews stay inside the currently selected file.");
+		showWrappedTooltip("When enabled, structured edit previews stay inside the currently selected file.");
 	}
 
 	ImGui::BeginDisabled(generating.load() || (!hasUserInput && !hasSelectedFile));
@@ -3618,13 +3650,13 @@ if (ImGui::CollapsingHeader("Tools & Memory")) {
 	}
 	ImGui::SameLine();
 	ImGui::Checkbox("Include repo context", &scriptIncludeRepoContext);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Include loaded file list and selected file snippet in script prompts");
+	if (ImGui::IsItemHovered()) showWrappedTooltip("Include loaded file list and selected file snippet in script prompts");
 
 	ImGui::BeginDisabled(generating.load() || (!hasScriptOutput && !hasLastTask));
 	if (ImGui::Button("Continue Task", ImVec2(120, 0))) {
 		submitScriptRequest(ofxGgmlCodeAssistantAction::ContinueTask);
 	}
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Continue from the latest coding response without rewriting your full prompt.");
+	if (ImGui::IsItemHovered()) showWrappedTooltip("Continue from the latest coding response without rewriting your full prompt.");
 	ImGui::SameLine();
 	if (ImGui::Button("Shorter", ImVec2(80, 0))) {
 		submitScriptRequest(ofxGgmlCodeAssistantAction::Shorter);
@@ -3869,7 +3901,7 @@ if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 		selectedScriptFileIndex = -1;
 	}
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Remove all added URLs.");
+		showWrappedTooltip("Remove all added URLs.");
 	}
 	if (selectedScriptFileIndex >= 0) {
 		ImGui::SameLine();
@@ -4517,10 +4549,10 @@ if (!visionProfiles.empty()) {
 				sizeof(visionModelPath),
 				recommendedModelPath);
 		}
-		ImGui::EndDisabled();
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Sets the model path to the profile's recommended file under bin/data/models/.");
-		}
+			ImGui::EndDisabled();
+			if (ImGui::IsItemHovered()) {
+				showWrappedTooltip("Sets the model path to the profile's recommended file under bin/data/models/.");
+			}
 		ImGui::SameLine();
 		ImGui::BeginDisabled(recommendedDownloadUrl.empty());
 		const bool opensModelPage =
@@ -4532,11 +4564,11 @@ if (!visionProfiles.empty()) {
 		ImGui::EndDisabled();
 		if (ImGui::IsItemHovered()) {
 			if (isEuRestrictedVisionProfile(profile)) {
-				ImGui::SetTooltip("Opens the model page in your browser. Meta currently blocks this download in the EU.");
+				showWrappedTooltip("Opens the model page in your browser. Meta currently blocks this download in the EU.");
 			} else if (opensModelPage) {
-				ImGui::SetTooltip("Opens the recommended model page in your browser so you can pick the exact GGUF file.");
+				showWrappedTooltip("Opens the recommended model page in your browser so you can pick the exact GGUF file.");
 			} else {
-				ImGui::SetTooltip("Opens the recommended multimodal model in your browser.");
+				showWrappedTooltip("Opens the recommended multimodal model in your browser.");
 			}
 		}
 	}
@@ -4552,7 +4584,7 @@ if (!visionProfiles.empty()) {
 ImGui::SetNextItemWidth(compactModeFieldWidth);
 ImGui::InputText("Server URL", visionServerUrl, sizeof(visionServerUrl));
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Example: http://127.0.0.1:8080");
+	showWrappedTooltip("Example: http://127.0.0.1:8080");
 }
 
 ImGui::SetNextItemWidth(compactModeFieldWidth);
@@ -4783,7 +4815,7 @@ void ofApp::drawSpeechPanel() {
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Sets the speech model path to the recommended file under bin/data/models/.");
+				showWrappedTooltip("Sets the speech model path to the recommended file under bin/data/models/.");
 			}
 			ImGui::SameLine();
 			ImGui::BeginDisabled(recommendedDownloadUrl.empty());
@@ -4792,7 +4824,7 @@ void ofApp::drawSpeechPanel() {
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Opens the recommended Whisper model in your browser.");
+				showWrappedTooltip("Opens the recommended Whisper model in your browser.");
 			}
 		}
 	}
@@ -4810,7 +4842,7 @@ void ofApp::drawSpeechPanel() {
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Executable", speechExecutable, sizeof(speechExecutable));
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Example: whisper-cli or a full path to whisper-cli.exe");
+		showWrappedTooltip("Example: whisper-cli or a full path to whisper-cli.exe");
 	}
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
@@ -4837,7 +4869,7 @@ void ofApp::drawSpeechPanel() {
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Language hint", speechLanguageHint, sizeof(speechLanguageHint));
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Use auto to let the backend decide, or pass a language like en, de, fr.");
+		showWrappedTooltip("Use auto to let the backend decide, or pass a language like en, de, fr.");
 	}
 
 	ImGui::Checkbox("Return timestamps", &speechReturnTimestamps);
@@ -4874,7 +4906,7 @@ void ofApp::drawSpeechPanel() {
 			startSpeechRecording();
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Records from the default microphone into a temporary WAV file.");
+			showWrappedTooltip("Records from the default microphone into a temporary WAV file.");
 		}
 		if (!speechRecordedTempPath.empty() || recordedSeconds > 0.0) {
 			ImGui::SameLine();
