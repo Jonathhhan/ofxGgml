@@ -77,6 +77,21 @@ void drawWrappedDisabledText(const std::string & text) {
 	ImGui::PopTextWrapPos();
 }
 
+void drawHelpMarker(const char * helpText) {
+	if (!helpText || *helpText == '\0') {
+		return;
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("(?)");
+	if (ImGui::IsItemHovered()) {
+		ImGui::BeginTooltip();
+		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+		ImGui::TextUnformatted(helpText);
+		ImGui::PopTextWrapPos();
+		ImGui::EndTooltip();
+	}
+}
+
 static const std::array<LogLevelOption, 5> kLogLevelOptions = {{
 	{"Silent",   OF_LOG_SILENT},
 	{"Errors",   OF_LOG_ERROR},
@@ -2097,6 +2112,7 @@ ImGuiWindowFlags flags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
 ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
 
 if (ImGui::Begin("##Sidebar", nullptr, flags)) {
+const float compactSidebarFieldWidth = std::min(260.0f, ImGui::GetContentRegionAvail().x);
 ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "AI Studio");
 ImGui::Separator();
 ImGui::Spacing();
@@ -2124,6 +2140,7 @@ ImGui::SetNextItemWidth(-1);
 const bool useServerBackend =
 	(textInferenceBackend == TextInferenceBackend::LlamaServer);
 if (!modelPresets.empty()) {
+ImGui::SetNextItemWidth(compactSidebarFieldWidth);
 if (ImGui::BeginCombo("##ModelSel", modelPresets[static_cast<size_t>(selectedModelIndex)].name.c_str())) {
 for (int i = 0; i < static_cast<int>(modelPresets.size()); i++) {
 bool isSelected = (selectedModelIndex == i);
@@ -2169,15 +2186,24 @@ if (!modelPresets.empty()) {
 	const auto & selectedPreset = modelPresets[static_cast<size_t>(selectedModelIndex)];
 	const std::string modelPath = getSelectedModelPath();
 	if (!modelPath.empty()) {
+		const std::string modelFileName = ofFilePath::getFileName(modelPath);
 		std::error_code modelEc;
 		if (std::filesystem::exists(modelPath, modelEc) && !modelEc) {
-			drawWrappedDisabledText("File: " + modelPath);
+			ImGui::TextDisabled("Local GGUF: %s", modelFileName.c_str());
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", modelPath.c_str());
+			}
 			if (useServerBackend) {
-				drawWrappedDisabledText("Server mode active: this local GGUF remains useful for reviews and embeddings.");
+				ImGui::TextDisabled("Used for review / embeddings");
+				drawHelpMarker("When llama-server is active, the local GGUF can still be useful for review and embedding-related flows.");
 			}
 		} else if (useServerBackend) {
-			drawWrappedDisabledText("Server mode active: a local GGUF is optional for normal text generation.");
-			drawWrappedDisabledText("Suggested local file: " + modelPath);
+			ImGui::TextDisabled("Local GGUF optional");
+			drawHelpMarker("Normal text generation can run through llama-server without a local GGUF. This local file remains optional.");
+			ImGui::TextDisabled("Suggested file: %s", modelFileName.c_str());
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", modelPath.c_str());
+			}
 			ImGui::BeginDisabled(selectedPreset.url.empty());
 			if (ImGui::SmallButton("Download in browser")) {
 				ofLaunchBrowser(selectedPreset.url);
@@ -2188,8 +2214,12 @@ if (!modelPresets.empty()) {
 			}
 		} else {
 			ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.3f, 1.0f),
-				"Model missing: %s", ofFilePath::getFileName(modelPath).c_str());
-			drawWrappedDisabledText("Place file at: " + modelPath);
+				"Model missing: %s", modelFileName.c_str());
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", modelPath.c_str());
+			}
+			ImGui::TextDisabled("Target path");
+			drawHelpMarker(modelPath.c_str());
 			ImGui::BeginDisabled(selectedPreset.url.empty());
 			if (ImGui::SmallButton("Download in browser")) {
 				ofLaunchBrowser(selectedPreset.url);
@@ -2213,7 +2243,7 @@ if (!modelPresets.empty()) {
 ImGui::Spacing();
 const bool modeSupportsTextBackend = aiModeSupportsTextBackend(activeMode);
 ImGui::Text(modeSupportsTextBackend ? "Text Backend (this mode):" : "Text Backend:");
-ImGui::SetNextItemWidth(-1);
+ImGui::SetNextItemWidth(compactSidebarFieldWidth);
 ImGui::BeginDisabled(!modeSupportsTextBackend);
 int textBackendIndex = static_cast<int>(textInferenceBackend);
 if (ImGui::Combo("##TextBackend", &textBackendIndex,
@@ -2230,13 +2260,13 @@ if (ImGui::Combo("##TextBackend", &textBackendIndex,
 	announceTextBackendChange();
 }
 ImGui::EndDisabled();
-if (modeSupportsTextBackend) {
-	drawWrappedDisabledText("Stored separately per text mode. Switching tabs restores that mode's backend.");
-} else {
-	drawWrappedDisabledText("Vision and Speech use their own pipelines. Switch to a text mode to change its backend.");
-}
+drawHelpMarker(modeSupportsTextBackend
+	? "Stored separately per text mode. Switching tabs restores that mode's backend."
+	: "Vision and Speech use their own pipelines. Switch to a text mode to change its backend.");
 if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
+	ImGui::SetNextItemWidth(compactSidebarFieldWidth);
 	const bool serverUrlChanged = ImGui::InputText("Server URL", textServerUrl, sizeof(textServerUrl));
+	ImGui::SetNextItemWidth(compactSidebarFieldWidth);
 	ImGui::InputText("Server model", textServerModel, sizeof(textServerModel));
 	if (serverUrlChanged) {
 		textServerStatus = ServerStatusState::Unknown;
@@ -2246,16 +2276,19 @@ if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 			false,
 			shouldManageLocalTextServer(effectiveTextServerUrl(textServerUrl)));
 	}
-	drawWrappedDisabledText("Uses a warm OpenAI-compatible llama-server for Chat, Script, and text modes.");
-	drawWrappedDisabledText("Leave Server model empty to use the model already loaded by the server.");
-	drawWrappedDisabledText("Server-friendly defaults are applied automatically, and the app starts the local server during setup.");
-	drawWrappedDisabledText("CLI binaries are optional and only used as a local fallback path.");
+	ImGui::TextDisabled("Persistent server backend");
+	drawHelpMarker("Uses a warm OpenAI-compatible llama-server for Chat, Script, and text modes. Leave Server model empty to use the model already loaded by the server.");
+	ImGui::TextDisabled("Auto-tuned on setup");
+	drawHelpMarker("Server-friendly defaults are applied automatically, and the app starts the local server during setup when the configured URL is local.");
 	const std::string localServerExe = findLocalTextServerExecutable();
 	if (!localServerExe.empty()) {
-		drawWrappedDisabledText("Local server executable: " + ofFilePath::getFileName(localServerExe));
+		ImGui::TextDisabled("Local server exe: %s", ofFilePath::getFileName(localServerExe).c_str());
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("%s", localServerExe.c_str());
+		}
 	} else {
 		ImGui::TextColored(ImVec4(0.9f, 0.45f, 0.35f, 1.0f), "Local server executable not found.");
-		drawWrappedDisabledText("Build it with scripts/build-llama-server.ps1 when you want a managed local server.");
+		drawHelpMarker("Build it with scripts/build-llama-server.ps1 when you want a managed local server.");
 	}
 	if (textServerStatus != ServerStatusState::Unknown && !textServerStatusMessage.empty()) {
 		const ImVec4 statusColor =
@@ -2264,14 +2297,16 @@ if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 				: ImVec4(0.9f, 0.45f, 0.35f, 1.0f);
 		ImGui::TextColored(statusColor, "%s", textServerStatusMessage.c_str());
 		if (!textServerCapabilityHint.empty()) {
-			drawWrappedDisabledText(textServerCapabilityHint);
+			drawHelpMarker(textServerCapabilityHint.c_str());
 		}
 	}
 } else {
 	if (llamaCliState.load(std::memory_order_relaxed) == 1) {
-		drawWrappedDisabledText("Optional CLI fallback detected: " + llamaCliCommand);
+		ImGui::TextDisabled("CLI fallback available");
+		drawHelpMarker(llamaCliCommand.c_str());
 	} else {
-		drawWrappedDisabledText("Optional CLI fallback is not installed. Build it only if you want a local non-server fallback.");
+		ImGui::TextDisabled("CLI fallback not installed");
+		drawHelpMarker("Build it only if you want a local non-server fallback.");
 	}
 }
 
@@ -4327,6 +4362,7 @@ ImGui::EndChild();
 
 void ofApp::drawVisionPanel() {
 drawPanelHeader("Vision", "image / video-to-text via llama-server multimodal models");
+const float compactModeFieldWidth = std::min(280.0f, ImGui::GetContentRegionAvail().x);
 
 	const auto applyVisionProfileDefaults =
 		[this](const ofxGgmlVisionModelProfile & profile, bool onlyWhenEmpty) {
@@ -4443,11 +4479,13 @@ if (!visionProfiles.empty()) {
 		profile.supportsMultipleImages ? "supported" : "single-image oriented");
 }
 
+ImGui::SetNextItemWidth(compactModeFieldWidth);
 ImGui::InputText("Server URL", visionServerUrl, sizeof(visionServerUrl));
 if (ImGui::IsItemHovered()) {
 	ImGui::SetTooltip("Example: http://127.0.0.1:8080");
 }
 
+ImGui::SetNextItemWidth(compactModeFieldWidth);
 ImGui::InputText("Model path", visionModelPath, sizeof(visionModelPath));
 ImGui::SameLine();
 if (ImGui::Button("Browse model...", ImVec2(110, 0))) {
@@ -4457,6 +4495,7 @@ if (ImGui::Button("Browse model...", ImVec2(110, 0))) {
 	}
 }
 
+ImGui::SetNextItemWidth(compactModeFieldWidth);
 ImGui::InputText("Image path", visionImagePath, sizeof(visionImagePath));
 ImGui::SameLine();
 if (ImGui::Button("Browse...", ImVec2(90, 0))) {
@@ -4519,6 +4558,7 @@ ImGui::InputTextMultiline(
 
 	ImGui::Separator();
 	ImGui::TextDisabled("Optional video workflow");
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Video path", visionVideoPath, sizeof(visionVideoPath));
 	ImGui::SameLine();
 	if (ImGui::Button("Browse video...", ImVec2(110, 0))) {
@@ -4585,6 +4625,7 @@ if (generating.load() && activeGenerationMode == AiMode::Vision) {
 
 void ofApp::drawSpeechPanel() {
 	drawPanelHeader("Speech", "audio transcription and translation via speech backends");
+	const float compactModeFieldWidth = std::min(280.0f, ImGui::GetContentRegionAvail().x);
 
 	ImGui::TextWrapped(
 		"Use a local speech backend such as whisper-cli. The speech path now preserves transcript artifacts, "
@@ -4686,6 +4727,7 @@ void ofApp::drawSpeechPanel() {
 		}
 	}
 
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Audio path", speechAudioPath, sizeof(speechAudioPath));
 	ImGui::SameLine();
 	if (ImGui::Button("Browse audio...", ImVec2(110, 0))) {
@@ -4695,11 +4737,13 @@ void ofApp::drawSpeechPanel() {
 		}
 	}
 
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Executable", speechExecutable, sizeof(speechExecutable));
 	if (ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("Example: whisper-cli or a full path to whisper-cli.exe");
 	}
 
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Model path", speechModelPath, sizeof(speechModelPath));
 	ImGui::SameLine();
 	if (ImGui::Button("Browse model...", ImVec2(110, 0))) {
@@ -4720,6 +4764,7 @@ void ofApp::drawSpeechPanel() {
 		speechTaskIndex = static_cast<int>(ofxGgmlSpeechTask::Transcribe);
 	}
 
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Language hint", speechLanguageHint, sizeof(speechLanguageHint));
 	if (ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("Use auto to let the backend decide, or pass a language like en, de, fr.");
