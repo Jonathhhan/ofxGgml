@@ -14,6 +14,25 @@ All notable changes to `ofxGgml` are documented in this file.
 ### Documentation
 - `README.md` now documents the `Live context` policies and clarifies that source grounding can range from explicit loaded URLs to broader domain-provider and generic-search context.
 
+## [1.0.2] - 2026-04-16
+
+### Added
+- Windows helpers to build and launch a local `llama-server`, including `scripts/build-llama-server.ps1`, `scripts/start-llama-server.ps1`, and GUI controls to check, start, and stop a managed local server.
+- Shared server probing in `ofxGgmlInference` with normalized base URLs, model discovery via `/v1/models`, capability summaries, and server-backed embeddings support through `/v1/embeddings`.
+- Per-mode text-backend preferences in `ofxGgmlGuiExample` so chat/script/custom flows can stay on the persistent server path while other text tasks remain switchable.
+
+### Changed
+- `ofxGgmlInference` now supports persistent `llama-server` generation and embeddings, automatic active-model resolution, and local embedding fallback when a server embedding request fails.
+- `ofxGgmlGuiExample` now treats `llama-server` as a first-class text backend with server reachability feedback, capability hints, managed local startup, and per-mode backend persistence.
+- Hierarchical code review now uses improved semantic and lexical ranking, stronger low-signal filtering, and more professional fallback summaries for tiny files, project files, and code-fragment summaries.
+
+### Fixed
+- Review generation no longer reports misleading blank-pass success for empty server responses and now preserves real server transmission and HTTP failures in the UI.
+- Review summary cleanup now rejects incomplete call fragments such as `ofRunApp(window,` and generic placeholders like `Project file included in the hierarchical review.`.
+
+### Documentation
+- `README.md` now documents the `llama-server` build/start workflow, server-backed text generation, and the GUI example's mode-coupled text backend behavior.
+
 ## [1.0.1] - 2026-04-16
 
 ### Added

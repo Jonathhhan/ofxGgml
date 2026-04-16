@@ -1,6 +1,7 @@
 #include "ofxGgmlCodeReview.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <iomanip>
 #include <mutex>
 #include <sstream>
+#include <unordered_set>
 #include <unordered_map>
 
 namespace {
@@ -181,6 +183,94 @@ std::string toLowerCopy(std::string value) {
 	return value;
 }
 
+std::vector<std::string> tokenizeSearchTerms(const std::string & text) {
+	std::vector<std::string> tokens;
+	std::string current;
+	current.reserve(32);
+	auto flush = [&]() {
+		if (current.size() >= 3) {
+			tokens.push_back(current);
+		}
+		current.clear();
+	};
+	for (unsigned char ch : text) {
+		if (std::isalnum(ch) || ch == '_' || ch == '-') {
+			current.push_back(static_cast<char>(std::tolower(ch)));
+		} else {
+			flush();
+		}
+	}
+	flush();
+	return tokens;
+}
+
+bool isSearchStopWord(const std::string & token) {
+	static const std::unordered_set<std::string> stopWords = {
+		"the", "and", "for", "with", "that", "this", "from", "into", "only", "file",
+		"files", "code", "review", "repository", "comprehensive", "focus", "look",
+		"looking", "issues", "issue", "bugs", "tests", "test", "architecture",
+		"integration", "security", "missing", "coverage", "current", "mode", "use"
+	};
+	return stopWords.find(token) != stopWords.end();
+}
+
+std::vector<std::string> buildQueryTerms(const std::string & query) {
+	std::vector<std::string> terms;
+	std::unordered_set<std::string> seen;
+	for (const auto & token : tokenizeSearchTerms(query)) {
+		if (isSearchStopWord(token)) {
+			continue;
+		}
+		if (seen.insert(token).second) {
+			terms.push_back(token);
+		}
+	}
+	if (terms.empty()) {
+		static const std::array<const char *, 10> genericReviewTerms = {{
+			"build", "runtime", "config", "resource", "entry", "main", "app", "state", "dependency", "project"
+		}};
+		for (const char * token : genericReviewTerms) {
+			if (seen.insert(token).second) {
+				terms.emplace_back(token);
+			}
+		}
+	}
+	return terms;
+}
+
+float computeLexicalRelevance(
+	const std::vector<std::string> & queryTerms,
+	const ofxGgmlCodeReviewFileInfo & file) {
+	if (queryTerms.empty()) {
+		return 0.0f;
+	}
+	const std::string lowerName = toLowerCopy(file.name);
+	std::string searchCorpus = lowerName;
+	searchCorpus += "\n";
+	searchCorpus += toLowerCopy(file.truncatedContent.empty() ? file.content : file.truncatedContent);
+	searchCorpus += "\n";
+	for (const auto & dep : file.dependencies) {
+		searchCorpus += toLowerCopy(dep);
+		searchCorpus += "\n";
+	}
+
+	float score = 0.0f;
+	for (const auto & term : queryTerms) {
+		if (term.empty()) {
+			continue;
+		}
+		if (lowerName.find(term) != std::string::npos) {
+			score += 2.0f;
+			continue;
+		}
+		if (searchCorpus.find(term) != std::string::npos) {
+			score += 1.0f;
+		}
+	}
+
+	return score / static_cast<float>(queryTerms.size() * 2.0f);
+}
+
 bool containsAny(const std::string & haystack, std::initializer_list<const char *> needles) {
 	for (const auto * needle : needles) {
 		if (haystack.find(needle) != std::string::npos) {
@@ -225,14 +315,69 @@ bool looksLikeLowSignalReviewText(const std::string & text) {
 	return genericHits >= 2;
 }
 
+bool isNoMaterialFindingsSection(const std::string & text) {
+	const std::string lower = toLowerCopy(text);
+	return containsAny(lower, {
+		"no material findings in this file.",
+		"findings: no material findings in this file."
+	});
+}
+
+bool looksLikeCodeFragmentSummary(const std::string & summary) {
+	const std::string trimmed = trimCopy(summary);
+	if (trimmed.empty()) return false;
+	const std::string lower = toLowerCopy(trimmed);
+	if (trimmed.find(';') != std::string::npos) return true;
+	if (trimmed.find('{') != std::string::npos || trimmed.find('}') != std::string::npos) return true;
+	if (trimmed.find(" = ") != std::string::npos) return true;
+	if (trimmed.find(" == ") != std::string::npos) return true;
+	if (trimmed.find("nullptr") != std::string::npos) return true;
+	if (trimmed.find("->") != std::string::npos) return true;
+	if (trimmed.find("::") != std::string::npos) return true;
+	if (trimmed.find('(') != std::string::npos && trimmed.find(')') != std::string::npos) return true;
+	if (trimmed.find('(') != std::string::npos &&
+		(trimmed.back() == ',' || trimmed.find(')') == std::string::npos)) {
+		return true;
+	}
+	if (trimmed.rfind('#', 0) == 0) return true;
+	if (containsAny(lower, {
+		"case ",
+		"default:",
+		"switch (",
+		"if (",
+		"for (",
+		"while (",
+		"return ",
+		"test_case(",
+		"require(",
+		"check(",
+		"section(",
+		"int main(",
+		"void ",
+		"class ",
+		"struct "
+	})) {
+		return true;
+	}
+	if (trimmed.find(':') != std::string::npos && trimmed.find("//") != std::string::npos) return true;
+	return false;
+}
+
 bool looksLikeTrivialSummary(const std::string & summary) {
 	const std::string trimmed = trimCopy(summary);
 	if (trimmed.empty()) return true;
 	if (trimmed.rfind("```", 0) == 0) return true;
 	if (trimmed.find('\n') != std::string::npos) return true;
+	if (looksLikeCodeFragmentSummary(trimmed)) return true;
 
 	const std::string lower = toLowerCopy(trimmed);
-	if (containsAny(lower, {"```", "summary:", "findings:", "tests:"})) {
+	if (containsAny(lower, {
+		"```",
+		"summary:",
+		"findings:",
+		"tests:",
+		"project file included in the hierarchical review"
+	})) {
 		return true;
 	}
 
@@ -240,7 +385,7 @@ bool looksLikeTrivialSummary(const std::string & summary) {
 	const std::string basename = slashPos == std::string::npos
 		? trimmed
 		: trimmed.substr(slashPos + 1);
-	if (!basename.empty() && basename == trimmed) {
+	if (!basename.empty()) {
 		const size_t dotPos = basename.find('.');
 		if (dotPos != std::string::npos && dotPos > 0 && dotPos < basename.size() - 1) {
 			return true;
@@ -248,6 +393,49 @@ bool looksLikeTrivialSummary(const std::string & summary) {
 	}
 
 	return false;
+}
+
+std::string fallbackSummaryForFile(const ofxGgmlCodeReviewFileInfo & file) {
+	const std::string lowerName = toLowerCopy(file.name);
+	if (lowerName.find("main.cpp") != std::string::npos ||
+		lowerName.find("main.cxx") != std::string::npos) {
+		return "Application entry point that boots the OpenFrameworks app.";
+	}
+	if (lowerName.find("ofapp.cpp") != std::string::npos) {
+		return "Main application implementation containing UI, state management, and runtime behavior.";
+	}
+	if (lowerName.size() >= 11 && lowerName.compare(lowerName.size() - 11, 11, ".vcxproj") == 0) {
+		return "Visual Studio project definition for the example application and its build settings.";
+	}
+	if (lowerName.size() >= 19 && lowerName.compare(lowerName.size() - 19, 19, ".vcxproj.filters") == 0) {
+		return "Visual Studio filters file that organizes source and header files in the IDE.";
+	}
+	if (lowerName.size() >= 4 && lowerName.compare(lowerName.size() - 4, 4, ".sln") == 0) {
+		return "Visual Studio solution file that ties the example project and dependencies together.";
+	}
+	if (lowerName.size() >= 3 && lowerName.compare(lowerName.size() - 3, 3, ".rc") == 0) {
+		return "Windows resource script that selects the application icon for debug and release builds.";
+	}
+	if (lowerName == "addons.make" || lowerName.size() >= 11 &&
+		lowerName.compare(lowerName.size() - 11, 11, "addons.make") == 0) {
+		return "Addon manifest listing the OpenFrameworks addons required by the example.";
+	}
+
+	const size_t dotPos = lowerName.find_last_of('.');
+	if (dotPos != std::string::npos) {
+		const std::string ext = lowerName.substr(dotPos);
+		if (ext == ".cpp" || ext == ".cc" || ext == ".cxx") {
+			return "C++ implementation file in the example project.";
+		}
+		if (ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx") {
+			return "C++ header file in the example project.";
+		}
+		if (ext == ".json" || ext == ".yaml" || ext == ".yml" || ext == ".toml" || ext == ".ini") {
+			return "Configuration file used by the example project.";
+		}
+	}
+
+	return "Project file included in the hierarchical review.";
 }
 
 std::string extractSingleLineSummary(const std::string & text) {
@@ -354,6 +542,146 @@ bool contentContainsAnchor(
 	return fileName.find(anchor) != std::string::npos;
 }
 
+bool looksLikeWeakFindingClaim(const std::string & bullet) {
+	const std::string lower = toLowerCopy(bullet);
+	int weakHits = 0;
+	if (containsAny(lower, {
+		"could be a security risk",
+		"security risk if",
+		"user-supplied data",
+		"phishing",
+		"malicious purposes",
+		"might be too low",
+		"depending on the requirements",
+		"depending on the hardware",
+		"could be improved",
+		"ensure that this macro is consistently defined",
+		"common practice",
+		"no specific tests are required"
+	})) {
+		++weakHits;
+	}
+	if (containsAny(lower, {
+		"could",
+		"might",
+		"may",
+		"consider using",
+		"would be beneficial"
+	})) {
+		++weakHits;
+	}
+	return weakHits >= 2;
+}
+
+bool isStrictEvidenceFile(const ofxGgmlCodeReviewFileInfo & file) {
+	const std::string lowerName = toLowerCopy(file.name);
+	const auto hasSuffix = [&](const std::string & suffix) {
+		return lowerName.size() >= suffix.size() &&
+			lowerName.compare(lowerName.size() - suffix.size(), suffix.size(), suffix) == 0;
+	};
+	if (file.loc > 0 && file.loc <= 40) {
+		return true;
+	}
+	return hasSuffix(".rc") ||
+		hasSuffix(".sln") ||
+		hasSuffix(".vcxproj") ||
+		hasSuffix(".vcxproj.filters") ||
+		hasSuffix("addons.make") ||
+		hasSuffix(".json") ||
+		hasSuffix(".yaml") ||
+		hasSuffix(".yml") ||
+		hasSuffix(".toml") ||
+		hasSuffix(".ini");
+}
+
+bool looksLikeWeakTestBullet(const std::string & bullet) {
+	const std::string lower = toLowerCopy(bullet);
+	if (containsAny(lower, {
+		"none beyond current coverage",
+		"none specific",
+		"no specific tests",
+		"no file-specific tests",
+		"no tests are required",
+		"would catch the listed findings",
+		"verify that the file exists",
+		"ensure that the build system",
+		"inspect the output of the build process",
+		"dependency walker",
+		"dumpbin"
+	})) {
+		return true;
+	}
+	int weakHits = 0;
+	if (containsAny(lower, {
+		"ensure that",
+		"verify that",
+		"consider adding",
+		"if there are any associated code"
+	})) {
+		++weakHits;
+	}
+	if (!containsAny(lower, {
+		"test",
+		"assert",
+		"exercise",
+		"cover",
+		"startup",
+		"load",
+		"render",
+		"parse"
+	})) {
+		++weakHits;
+	}
+	return weakHits >= 2;
+}
+
+bool isHighConfidenceFindingBullet(
+	const std::string & bullet,
+	const ofxGgmlCodeReviewFileInfo & file) {
+	const auto anchors = extractEvidenceAnchors(bullet);
+	bool supported = false;
+	for (const auto & anchor : anchors) {
+		if (contentContainsAnchor(file.truncatedContent, file.name, anchor) ||
+			contentContainsAnchor(file.content, file.name, anchor)) {
+			supported = true;
+			break;
+		}
+	}
+	if (!supported) {
+		return false;
+	}
+
+	const std::string lower = toLowerCopy(bullet);
+	if (!containsConcreteIssueSignal(lower)) {
+		return false;
+	}
+	if (looksLikeWeakFindingClaim(lower)) {
+		return false;
+	}
+	if (isStrictEvidenceFile(file) && !containsAny(lower, {
+		"leak",
+		"race",
+		"crash",
+		"corrupt",
+		"mismatch",
+		"missing",
+		"invalid",
+		"fails",
+		"incorrect",
+		"wrong",
+		"unsafe",
+		"stale",
+		"broken",
+		"duplicate",
+		"unreachable",
+		"not found",
+		"inconsistent"
+	})) {
+		return false;
+	}
+	return true;
+}
+
 std::string normalizeFirstPassReviewSection(
 	const std::string & text,
 	const ofxGgmlCodeReviewFileInfo & file) {
@@ -363,29 +691,21 @@ std::string normalizeFirstPassReviewSection(
 			return "Summary: " + summary +
 				"\nFindings: No material findings in this file.\nTests: None beyond current coverage.";
 		}
-		return "No material findings in this file.";
+		return "Summary: " + fallbackSummaryForFile(file) +
+			"\nFindings: No material findings in this file.\nTests: None beyond current coverage.";
 	}
 
 	const std::string summary = extractSingleLineSummary(text);
 	const auto rawFindings = extractSectionBullets(text, "Findings:", "Tests:");
 	std::vector<std::string> supportedFindings;
 	for (const auto & bullet : rawFindings) {
-		const auto anchors = extractEvidenceAnchors(bullet);
-		bool supported = false;
-		for (const auto & anchor : anchors) {
-			if (contentContainsAnchor(file.truncatedContent, file.name, anchor) ||
-				contentContainsAnchor(file.content, file.name, anchor)) {
-				supported = true;
-				break;
-			}
-		}
-		if (supported) {
+		if (isHighConfidenceFindingBullet(bullet, file)) {
 			supportedFindings.push_back(bullet);
 		}
 	}
 
 	std::string normalized = summary.empty()
-		? "Summary: " + file.name
+		? "Summary: " + fallbackSummaryForFile(file)
 		: "Summary: " + summary;
 
 	if (supportedFindings.empty()) {
@@ -400,11 +720,17 @@ std::string normalizeFirstPassReviewSection(
 	}
 
 	const auto testBullets = extractSectionBullets(text, "Tests:");
-	if (testBullets.empty()) {
+	std::vector<std::string> supportedTests;
+	for (const auto & bullet : testBullets) {
+		if (!looksLikeWeakTestBullet(bullet)) {
+			supportedTests.push_back(bullet);
+		}
+	}
+	if (supportedTests.empty()) {
 		normalized += "\nTests: Add coverage for the supported findings above.";
 	} else {
 		normalized += "\nTests:";
-		for (const auto & bullet : testBullets) {
+		for (const auto & bullet : supportedTests) {
 			normalized += "\n" + bullet;
 		}
 	}
@@ -544,7 +870,9 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 	const ofxGgmlCodeReviewSettings & settings,
 	std::function<bool(const ofxGgmlCodeReviewProgress &)> onProgress) {
 	ofxGgmlCodeReviewResult result;
-	if (modelPath.empty()) {
+	if (modelPath.empty() &&
+		!settings.useServerBackend &&
+		trimCopy(settings.serverUrl).empty()) {
 		result.error = "model path is empty";
 		return result;
 	}
@@ -627,10 +955,15 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 		return result;
 	}
 	std::vector<float> queryEmbedding;
-	const auto queryEmbed = m_inference.embed(modelPath, effectiveQuery);
+	ofxGgmlEmbeddingSettings embeddingSettings;
+	embeddingSettings.useServerBackend = settings.useServerBackend;
+	embeddingSettings.serverUrl = settings.serverUrl;
+	embeddingSettings.serverModel = settings.serverModel;
+	const auto queryEmbed = m_inference.embed(modelPath, effectiveQuery, embeddingSettings);
 	if (queryEmbed.success) {
 		queryEmbedding = queryEmbed.embedding;
 	}
+	const auto queryTerms = buildQueryTerms(effectiveQuery);
 
 	if (!reportProgress(onProgress, "Embedding files", 0, result.files.size())) {
 		result.error = "cancelled";
@@ -646,7 +979,7 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 			if (snippet.size() > settings.maxEmbeddingSnippetChars) {
 				snippet = slidingWindowText(snippet, settings.maxEmbeddingSnippetChars);
 			}
-			const auto embedding = m_inference.embed(modelPath, snippet);
+			const auto embedding = m_inference.embed(modelPath, snippet, embeddingSettings);
 			if (embedding.success) {
 				file.embedding = embedding.embedding;
 			}
@@ -670,7 +1003,10 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 	size_t maxFanIn = 0;
 	size_t maxFanOut = 0;
 	float maxSimilarity = 0.0f;
+	float maxLexical = 0.0f;
 	for (auto & file : result.files) {
+		file.lexicalScore = computeLexicalRelevance(queryTerms, file);
+		maxLexical = std::max(maxLexical, file.lexicalScore);
 		if (!queryEmbedding.empty() && !file.embedding.empty()) {
 			file.similarityScore = ofxGgmlEmbeddingIndex::cosineSimilarity(
 				queryEmbedding,
@@ -694,14 +1030,20 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 				static_cast<float>(maxFanIn + maxFanOut) : 0.0f;
 		const float normSim = maxSimilarity > 0.0f
 			? file.similarityScore / maxSimilarity : file.similarityScore;
+		const float normLexical = maxLexical > 0.0f
+			? file.lexicalScore / maxLexical : file.lexicalScore;
+		const float relevanceScore = std::max(
+			std::clamp(normSim, 0.0f, 1.0f),
+			std::clamp(normLexical, 0.0f, 1.0f));
 
 		file.priorityScore =
 			0.30f * file.importanceScore +
 			0.20f * normComplexity +
 			0.15f * normLoc +
 			0.15f * normFan +
-			0.20f * std::clamp(normSim, 0.0f, 1.0f) +
+			0.20f * relevanceScore +
 			0.10f * std::clamp(file.recencyScore, 0.0f, 1.5f);
+		file.similarityScore = relevanceScore;
 	}
 
 	std::vector<size_t> ordered(result.files.size());
@@ -712,7 +1054,9 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 		return result.files[a].priorityScore > result.files[b].priorityScore;
 	});
 
-	const int responseReserve = std::max(settings.maxTokens, settings.contextSize / 3);
+	const int aggregateTokenBudget = std::clamp(std::min(settings.maxTokens, 384), 128, 384);
+	const int firstPassTokenCeiling = std::clamp(std::min(settings.maxTokens, 512), 160, 512);
+	const int responseReserve = std::max(aggregateTokenBudget, settings.contextSize / 8);
 	int remaining = std::max(128, settings.contextSize - responseReserve);
 	for (const size_t index : ordered) {
 		auto & file = result.files[index];
@@ -742,7 +1086,7 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 
 	auto makeInferenceSettings = [&]() {
 		ofxGgmlInferenceSettings inferenceSettings;
-		inferenceSettings.maxTokens = std::clamp(settings.maxTokens, 96, 4096);
+		inferenceSettings.maxTokens = firstPassTokenCeiling;
 		inferenceSettings.temperature = 0.25f;
 		inferenceSettings.topP = 0.92f;
 		inferenceSettings.repeatPenalty = 1.05f;
@@ -754,6 +1098,9 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 		inferenceSettings.autoPromptCache = false;
 		inferenceSettings.autoContinueCutoff = settings.autoContinueCutoff;
 		inferenceSettings.trimPromptToContext = true;
+		inferenceSettings.useServerBackend = settings.useServerBackend;
+		inferenceSettings.serverUrl = trimCopy(settings.serverUrl);
+		inferenceSettings.serverModel = trimCopy(settings.serverModel);
 		return inferenceSettings;
 	};
 
@@ -768,7 +1115,11 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 		summaryTasks.push_back(std::async(std::launch::async, [&, this, index]() {
 			auto & file = result.files[index];
 			auto inferenceSettings = makeInferenceSettings();
-			inferenceSettings.maxTokens = std::max(96, std::min(responseReserve, settings.maxTokens));
+			const int fileTokenEstimate = std::max(1, file.tokenCount);
+			inferenceSettings.maxTokens = std::clamp(
+				std::max(160, fileTokenEstimate / 3),
+				160,
+				firstPassTokenCeiling);
 
 			std::ostringstream prompt;
 			prompt << "First pass: Review this single file in isolation as a senior code reviewer.\n";
@@ -836,87 +1187,114 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 	result.firstPassSummary = firstPass.str();
 
 	auto aggregateSettings = makeInferenceSettings();
+	aggregateSettings.maxTokens = aggregateTokenBudget;
 	std::string summaryList;
 	for (size_t i = 0; i < result.selectedFileIndices.size() && i < 24; ++i) {
 		const auto & file = result.files[result.selectedFileIndices[i]];
 		summaryList += "- " + file.name + ": " + file.summary + "\n";
 	}
+	const bool allFirstPassesNoMaterial = !result.selectedFileIndices.empty() &&
+		std::all_of(result.selectedFileIndices.begin(), result.selectedFileIndices.end(),
+			[&](size_t index) {
+				return isNoMaterialFindingsSection(result.files[index].summary);
+			});
 
-	if (!reportProgress(onProgress, "Architecture review")) {
-		result.error = "cancelled";
-		return result;
-	}
-	{
-		std::string prompt = "Second pass: Architectural review using only the summaries below.\n";
-		prompt += "Do not repeat file summaries. Only report cross-cutting architecture or layering issues "
-			"that are supported by the provided summaries.\n";
-		prompt += "If no concrete architecture issues are evident, say exactly: No material architecture findings.\n";
-		prompt += "Request: " + effectiveQuery + "\n\n";
-		prompt += result.repoTree + "\n";
-		prompt += "File summaries:\n" + summaryList;
-		prompt += "\nIdentify architecture, layering, and dependency issues. "
-			"Highlight risky boundaries, missing invariants, and testing gaps. "
-			"Keep output concise, evidence-based, and repository-specific.\n";
-		std::string retryPrompt =
-			"Architecture review. Return 3-5 concise bullets covering only concrete layering, "
-			"dependency-boundary, shared-state, or testing issues visible in these summaries.\n"
-			"If none are evident, say: No material architecture findings.\n"
-			"Request: " + effectiveQuery + "\n\nSummaries:\n" + summaryList;
-		const auto architecture = generateReviewPassWithRetry(
-			m_inference,
-			m_generationFallback,
-			modelPath,
-			prompt,
-			retryPrompt,
-			aggregateSettings);
-		result.architectureReview = finalizedReviewSection(
-			architecture,
-			"Architecture review");
-	}
+	if (allFirstPassesNoMaterial) {
+		result.architectureReview = "No material architecture findings.";
+		result.integrationReview = "No material integration findings.";
+		reportProgress(onProgress, "Architecture review (skipped)");
+		reportProgress(onProgress, "Integration review (skipped)");
+	} else {
+		if (!reportProgress(onProgress, "Architecture review")) {
+			result.error = "cancelled";
+			return result;
+		}
+		{
+			std::string prompt = "Second pass: Architectural review using only the summaries below.\n";
+			prompt += "Do not repeat file summaries. Only report cross-cutting architecture or layering issues "
+				"that are supported by the provided summaries.\n";
+			prompt += "If no concrete architecture issues are evident, say exactly: No material architecture findings.\n";
+			prompt += "Request: " + effectiveQuery + "\n\n";
+			prompt += result.repoTree + "\n";
+			prompt += "File summaries:\n" + summaryList;
+			prompt += "\nIdentify architecture, layering, and dependency issues. "
+				"Highlight risky boundaries, missing invariants, and testing gaps. "
+				"Keep output concise, evidence-based, and repository-specific.\n";
+			std::string retryPrompt =
+				"Architecture review. Return 3-5 concise bullets covering only concrete layering, "
+				"dependency-boundary, shared-state, or testing issues visible in these summaries.\n"
+				"If none are evident, say: No material architecture findings.\n"
+				"Request: " + effectiveQuery + "\n\nSummaries:\n" + summaryList;
+			const auto architecture = generateReviewPassWithRetry(
+				m_inference,
+				m_generationFallback,
+				modelPath,
+				prompt,
+				retryPrompt,
+				aggregateSettings);
+			result.architectureReview = finalizedReviewSection(
+				architecture,
+				"Architecture review");
+		}
 
-	if (!reportProgress(onProgress, "Integration review")) {
-		result.error = "cancelled";
-		return result;
-	}
-	{
-		std::string prompt = "Third pass: Cross-file dependency and integration analysis.\n";
-		prompt += "Only report mismatches or integration risks that are supported by the provided per-file findings.\n";
-		prompt += "Do not give generic cleanup advice. If no concrete integration issue is evident, "
-			"say exactly: No material integration findings.\n";
-		prompt += "Request: " + effectiveQuery + "\n\n";
-		prompt += result.repoTree + "\nPer-file findings:\n";
-		for (size_t i = 0; i < result.selectedFileIndices.size() && i < 24; ++i) {
-			const auto & file = result.files[result.selectedFileIndices[i]];
-			prompt += "- " + file.name + " (fan-in " + std::to_string(file.dependencyFanIn) +
-				", fan-out " + std::to_string(file.dependencyFanOut) + "): " +
-				file.summary + "\n";
+		if (!reportProgress(onProgress, "Integration review")) {
+			result.error = "cancelled";
+			return result;
 		}
-		prompt += "\nFocus on contract mismatches, API misuse, inconsistent assumptions, "
-			"shared state, and missing integration tests. "
-			"Propose cross-file actions only when grounded in the summaries.\n";
-		std::string retryPrompt =
-			"Cross-file integration review. Return 3-5 concise bullets covering only concrete "
-			"interface mismatches, shared-state risks, or missing integration tests.\n"
-			"If none are evident, say: No material integration findings.\n"
-			"Request: " + effectiveQuery + "\n\nFindings:\n";
-		for (size_t i = 0; i < result.selectedFileIndices.size() && i < 12; ++i) {
-			const auto & file = result.files[result.selectedFileIndices[i]];
-			retryPrompt += "- " + file.name + ": " + file.summary + "\n";
+		{
+			std::string prompt = "Third pass: Cross-file dependency and integration analysis.\n";
+			prompt += "Only report mismatches or integration risks that are supported by the provided per-file findings.\n";
+			prompt += "Do not give generic cleanup advice. If no concrete integration issue is evident, "
+				"say exactly: No material integration findings.\n";
+			prompt += "Request: " + effectiveQuery + "\n\n";
+			prompt += result.repoTree + "\nPer-file findings:\n";
+			for (size_t i = 0; i < result.selectedFileIndices.size() && i < 24; ++i) {
+				const auto & file = result.files[result.selectedFileIndices[i]];
+				prompt += "- " + file.name + " (fan-in " + std::to_string(file.dependencyFanIn) +
+					", fan-out " + std::to_string(file.dependencyFanOut) + "): " +
+					file.summary + "\n";
+			}
+			prompt += "\nFocus on contract mismatches, API misuse, inconsistent assumptions, "
+				"shared state, and missing integration tests. "
+				"Propose cross-file actions only when grounded in the summaries.\n";
+			std::string retryPrompt =
+				"Cross-file integration review. Return 3-5 concise bullets covering only concrete "
+				"interface mismatches, shared-state risks, or missing integration tests.\n"
+				"If none are evident, say: No material integration findings.\n"
+				"Request: " + effectiveQuery + "\n\nFindings:\n";
+			for (size_t i = 0; i < result.selectedFileIndices.size() && i < 12; ++i) {
+				const auto & file = result.files[result.selectedFileIndices[i]];
+				retryPrompt += "- " + file.name + ": " + file.summary + "\n";
+			}
+			const auto integration = generateReviewPassWithRetry(
+				m_inference,
+				m_generationFallback,
+				modelPath,
+				prompt,
+				retryPrompt,
+				aggregateSettings);
+			result.integrationReview = finalizedReviewSection(
+				integration,
+				"Integration review");
 		}
-		const auto integration = generateReviewPassWithRetry(
-			m_inference,
-			m_generationFallback,
-			modelPath,
-			prompt,
-			retryPrompt,
-			aggregateSettings);
-		result.integrationReview = finalizedReviewSection(
-			integration,
-			"Integration review");
 	}
 
 	std::ostringstream combined;
 	combined << "Hierarchical code review (embeddings + multi-pass)\n\n";
+	combined << "Generation backend: "
+		<< (settings.useServerBackend ? "llama-server (persistent)" : "CLI (llama-completion)")
+		<< "\n";
+	if (settings.useServerBackend) {
+		const std::string serverUrl = trimCopy(settings.serverUrl);
+		const std::string serverModel = trimCopy(settings.serverModel);
+		if (!serverUrl.empty()) {
+			combined << "Server URL: " << serverUrl << "\n";
+		}
+		if (!serverModel.empty()) {
+			combined << "Server model: " << serverModel << "\n";
+		}
+	}
+	combined << "\n";
 	combined << result.tableOfContents << "\n";
 	combined << "Selected files (priority + similarity):\n";
 	for (const size_t index : result.selectedFileIndices) {

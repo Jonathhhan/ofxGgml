@@ -552,6 +552,60 @@ TEST_CASE("Inference generation - without executable", "[inference]") {
 	}
 }
 
+TEST_CASE("Inference server backend bypasses local model validation", "[inference]") {
+	ofxGgmlInference inf;
+	ofxGgmlInferenceSettings settings;
+	settings.useServerBackend = true;
+	settings.serverUrl = "http://127.0.0.1:8080";
+
+	auto result = inf.generate("", "test prompt", settings);
+
+#ifdef OFXGGML_HEADLESS_STUBS
+	REQUIRE_FALSE(result.success);
+	REQUIRE(result.error.find("server-backed inference requires openFrameworks HTTP runtime") != std::string::npos);
+#else
+	REQUIRE_FALSE(result.success);
+	REQUIRE(result.error.find("server-backed inference") != std::string::npos);
+#endif
+}
+
+TEST_CASE("Embedding server backend bypasses local model validation", "[inference]") {
+	ofxGgmlInference inf;
+	ofxGgmlEmbeddingSettings settings;
+	settings.useServerBackend = true;
+	settings.serverUrl = "http://127.0.0.1:8080";
+
+	auto result = inf.embed("", "test prompt", settings);
+
+#ifdef OFXGGML_HEADLESS_STUBS
+	REQUIRE_FALSE(result.success);
+	REQUIRE(result.error.find("server-backed embeddings require openFrameworks HTTP runtime") != std::string::npos);
+#else
+	REQUIRE_FALSE(result.success);
+	REQUIRE(result.error.find("server-backed embedding") != std::string::npos);
+#endif
+}
+
+TEST_CASE("Embedding server backend can fall back to local executable", "[inference]") {
+#ifdef OFXGGML_HEADLESS_STUBS
+	SUCCEED("Server embedding fallback requires HTTP-enabled runtime.");
+#else
+	const std::string modelPath = createDummyModel();
+	const std::string embeddingScript = createExecutableScript("echo [0.1, 0.2, 0.3]");
+	ofxGgmlInference inf;
+	inf.setEmbeddingExecutable(embeddingScript);
+
+	ofxGgmlEmbeddingSettings settings;
+	settings.useServerBackend = true;
+	settings.serverUrl = "http://127.0.0.1:1";
+	settings.allowLocalFallback = true;
+
+	const auto result = inf.embed(modelPath, "hello", settings);
+	REQUIRE(result.success);
+	REQUIRE(result.embedding.size() == 3);
+#endif
+}
+
 TEST_CASE("Inference nonzero exit handling is consistent", "[inference]") {
 	const std::string modelPath = createDummyModel();
 	const std::string completionScript = createExecutableScript(R"(

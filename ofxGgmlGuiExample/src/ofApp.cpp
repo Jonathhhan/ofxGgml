@@ -1,6 +1,7 @@
 #include "ofApp.h"
 
 #include "ofJson.h"
+#include "core/ofxGgmlWindowsUtf8.h"
 
 #include <algorithm>
 #include <array>
@@ -40,6 +41,13 @@
 const char * ofApp::modeLabels[kModeCount] = {
 	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Vision", "Speech"
 };
+
+const char * const kTextBackendLabels[] = {
+	"CLI (local llama-completion)",
+	"llama-server (persistent)"
+};
+
+const char * const kDefaultTextServerUrl = "http://127.0.0.1:8080";
 
 namespace {
 struct TokenLiteral {
@@ -188,6 +196,66 @@ std::string trim(const std::string & s) {
 		end--;
 	}
 	return s.substr(start, end - start);
+}
+
+std::string effectiveTextServerUrl(const char * buffer) {
+	const std::string value = trim(buffer ? std::string(buffer) : std::string());
+	return value.empty() ? std::string(kDefaultTextServerUrl) : value;
+}
+
+std::string serverBaseUrlFromConfiguredUrl(const std::string & configuredUrl) {
+	std::string value = trim(configuredUrl);
+	if (value.empty()) {
+		return kDefaultTextServerUrl;
+	}
+	auto stripSuffix = [&](const std::string & suffix) {
+		if (value.size() >= suffix.size() &&
+			value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0) {
+			value.erase(value.size() - suffix.size());
+		}
+	};
+	stripSuffix("/v1/chat/completions");
+	stripSuffix("/chat/completions");
+	if (!value.empty() && value.back() == '/') {
+		value.pop_back();
+	}
+	return value.empty() ? std::string(kDefaultTextServerUrl) : value;
+}
+
+std::pair<std::string, int> parseServerHostPort(const std::string & configuredUrl) {
+	const std::string baseUrl = serverBaseUrlFromConfiguredUrl(configuredUrl);
+	static const std::regex hostPortRe(R"(^https?://([^/:]+)(?::(\d+))?.*$)", std::regex::icase);
+	std::smatch match;
+	if (std::regex_match(baseUrl, match, hostPortRe)) {
+		const std::string host = match[1].str();
+		const int port = (match.size() >= 3 && match[2].matched)
+			? std::max(1, std::stoi(match[2].str()))
+			: 8080;
+		return {host, port};
+	}
+	return {"127.0.0.1", 8080};
+}
+
+bool aiModeSupportsTextBackend(AiMode mode) {
+	switch (mode) {
+	case AiMode::Chat:
+	case AiMode::Script:
+	case AiMode::Summarize:
+	case AiMode::Write:
+	case AiMode::Translate:
+	case AiMode::Custom:
+		return true;
+	case AiMode::Vision:
+	case AiMode::Speech:
+		return false;
+	}
+	return false;
+}
+
+TextInferenceBackend clampTextInferenceBackend(int value) {
+	return value == static_cast<int>(TextInferenceBackend::LlamaServer)
+		? TextInferenceBackend::LlamaServer
+		: TextInferenceBackend::Cli;
 }
 
 bool pathExists(const std::string & path) {
@@ -852,6 +920,321 @@ void ofApp::logWithLevel(ofLogLevel level, const std::string & message) {
 	}
 }
 
+void ofApp::announceTextBackendChange() {
+	const bool useServerBackend =
+		(textInferenceBackend == TextInferenceBackend::LlamaServer);
+	const std::string modePrefix = aiModeSupportsTextBackend(activeMode)
+		? std::string("Text backend for ") + modeLabels[static_cast<int>(activeMode)] + " switched to "
+		: std::string("Text backend switched to ");
+	std::string message = useServerBackend
+		? modePrefix + "llama-server (persistent)."
+		: modePrefix + "CLI (local llama-completion).";
+	if (useServerBackend) {
+		const std::string serverUrl = effectiveTextServerUrl(textServerUrl);
+		message += " Server: " + serverUrl + ".";
+	} else {
+		message += " Review/text generation will use the selected local GGUF model.";
+	}
+
+	logWithLevel(OF_LOG_NOTICE, message);
+
+	const Message notice{"system", message, ofGetElapsedTimef()};
+	if (activeMode == AiMode::Chat) {
+		chatMessages.push_back(notice);
+	} else if (activeGenerationMode == AiMode::Script || activeMode == AiMode::Script) {
+		scriptMessages.push_back(notice);
+	}
+
+	if (useServerBackend) {
+		checkTextServerStatus(false);
+	} else {
+		textServerStatus = ServerStatusState::Unknown;
+		textServerStatusMessage.clear();
+		textServerCapabilityHint.clear();
+	}
+}
+
+TextInferenceBackend ofApp::preferredTextBackendForMode(AiMode mode) const {
+	if (!aiModeSupportsTextBackend(mode)) {
+		return textInferenceBackend;
+	}
+	const int index = modeTextBackendIndices[static_cast<size_t>(mode)];
+	return clampTextInferenceBackend(index);
+}
+
+void ofApp::rememberTextBackendForMode(AiMode mode, TextInferenceBackend backend) {
+	if (!aiModeSupportsTextBackend(mode)) {
+		return;
+	}
+	modeTextBackendIndices[static_cast<size_t>(mode)] = static_cast<int>(backend);
+}
+
+void ofApp::syncTextBackendForActiveMode(bool announce) {
+	if (!aiModeSupportsTextBackend(activeMode)) {
+		return;
+	}
+	const TextInferenceBackend preferred = preferredTextBackendForMode(activeMode);
+	if (textInferenceBackend == preferred) {
+		if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
+			if (trim(textServerUrl).empty()) {
+				copyStringToBuffer(textServerUrl, sizeof(textServerUrl), kDefaultTextServerUrl);
+			}
+			checkTextServerStatus(false);
+		}
+		return;
+	}
+	textInferenceBackend = preferred;
+	if (textInferenceBackend == TextInferenceBackend::LlamaServer &&
+		trim(textServerUrl).empty()) {
+		copyStringToBuffer(textServerUrl, sizeof(textServerUrl), kDefaultTextServerUrl);
+	}
+	if (announce) {
+		announceTextBackendChange();
+	} else if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
+		checkTextServerStatus(false);
+	} else {
+		textServerStatus = ServerStatusState::Unknown;
+		textServerStatusMessage.clear();
+		textServerCapabilityHint.clear();
+	}
+}
+
+void ofApp::checkTextServerStatus(bool logResult) {
+	const std::string configuredUrl = effectiveTextServerUrl(textServerUrl);
+	const ofxGgmlServerProbeResult probe =
+		ofxGgmlInference::probeServer(configuredUrl, true);
+	if (probe.reachable) {
+		textServerStatus = ServerStatusState::Reachable;
+		textServerStatusMessage = "Server reachable at " + probe.baseUrl + ".";
+		if (!probe.activeModel.empty()) {
+			textServerStatusMessage += " Model: " + probe.activeModel + ".";
+		}
+		textServerCapabilityHint = probe.capabilitySummary.empty()
+			? std::string()
+			: "Server profile: " + probe.capabilitySummary + ".";
+		if (logResult) {
+			logWithLevel(OF_LOG_NOTICE, textServerStatusMessage);
+		}
+		return;
+	}
+
+	textServerStatus = ServerStatusState::Unreachable;
+	textServerStatusMessage = "Server not reachable at " + probe.baseUrl + ".";
+	textServerCapabilityHint.clear();
+	if (!probe.error.empty()) {
+		textServerStatusMessage += " " + probe.error;
+	}
+	if (logResult) {
+		logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
+	}
+}
+
+std::string ofApp::findLocalTextServerExecutable() const {
+	std::vector<std::filesystem::path> candidates;
+	const std::filesystem::path exeDir(ofFilePath::getCurrentExeDir());
+	candidates.push_back(exeDir / ".." / ".." / "libs" / "llama" / "bin" / "llama-server.exe");
+	candidates.push_back(exeDir / ".." / ".." / "build" / "llama.cpp-build" / "bin" / "Release" / "llama-server.exe");
+	candidates.push_back(exeDir / "llama-server.exe");
+
+	for (const auto & candidate : candidates) {
+		std::error_code ec;
+		const auto normalized = std::filesystem::weakly_canonical(candidate, ec);
+		const auto & checkPath = ec ? candidate : normalized;
+		if (std::filesystem::exists(checkPath, ec) && !ec) {
+			return checkPath.string();
+		}
+	}
+	return {};
+}
+
+bool ofApp::isManagedTextServerRunning() {
+	if (!textServerManagedByApp) {
+		return false;
+	}
+#ifdef _WIN32
+	if (!textServerProcessHandle) {
+		textServerManagedByApp = false;
+		textServerProcessId = 0;
+		return false;
+	}
+	const DWORD waitCode = WaitForSingleObject(textServerProcessHandle, 0);
+	if (waitCode == WAIT_TIMEOUT) {
+		return true;
+	}
+	CloseHandle(textServerProcessHandle);
+	textServerProcessHandle = nullptr;
+	textServerProcessId = 0;
+	textServerManagedByApp = false;
+	return false;
+#else
+	if (textServerProcessId <= 0) {
+		textServerManagedByApp = false;
+		return false;
+	}
+	if (kill(textServerProcessId, 0) == 0) {
+		return true;
+	}
+	textServerProcessId = 0;
+	textServerManagedByApp = false;
+	return false;
+#endif
+}
+
+void ofApp::startLocalTextServer() {
+	if (isManagedTextServerRunning()) {
+		logWithLevel(OF_LOG_NOTICE, "Local llama-server is already running.");
+		checkTextServerStatus(false);
+		return;
+	}
+
+	const std::string serverExe = findLocalTextServerExecutable();
+	if (serverExe.empty()) {
+		logWithLevel(OF_LOG_ERROR, "No local llama-server executable was found. Build or copy llama-server.exe into libs/llama/bin first.");
+		textServerStatus = ServerStatusState::Unreachable;
+		textServerStatusMessage = "Local llama-server executable not found.";
+		textServerCapabilityHint.clear();
+		return;
+	}
+
+	const std::string modelPath = getSelectedModelPath();
+	if (modelPath.empty() || !std::filesystem::exists(modelPath)) {
+		logWithLevel(OF_LOG_ERROR, "Cannot start local llama-server because the selected GGUF model is missing.");
+		textServerStatus = ServerStatusState::Unreachable;
+		textServerStatusMessage = "Selected GGUF model is missing; local server was not started.";
+		textServerCapabilityHint.clear();
+		return;
+	}
+
+	const auto [host, port] = parseServerHostPort(effectiveTextServerUrl(textServerUrl));
+	const int gpuLayerCount = std::max(0, gpuLayers > 0 ? gpuLayers : detectedModelLayers);
+
+#ifdef _WIN32
+	std::vector<std::string> args = {
+		serverExe,
+		"-m", modelPath,
+		"--host", host,
+		"--port", ofToString(port),
+		"-ngl", ofToString(gpuLayerCount)
+	};
+	if (contextSize > 0) {
+		args.emplace_back("-c");
+		args.emplace_back(ofToString(contextSize));
+	}
+
+	std::string cmdLine;
+	for (size_t i = 0; i < args.size(); ++i) {
+		if (i > 0) cmdLine += " ";
+		const bool needsQuotes = args[i].find_first_of(" \t\"") != std::string::npos;
+		if (!needsQuotes) {
+			cmdLine += args[i];
+			continue;
+		}
+		cmdLine += "\"";
+		for (char c : args[i]) {
+			if (c == '"') cmdLine += '\\';
+			cmdLine += c;
+		}
+		cmdLine += "\"";
+	}
+
+	std::wstring wideCmd = ofxGgmlWideFromUtf8(cmdLine);
+	std::wstring wideCwd = ofxGgmlWideFromUtf8(std::filesystem::path(serverExe).parent_path().string());
+	if (wideCmd.empty()) {
+		logWithLevel(OF_LOG_ERROR, "Failed to prepare local llama-server command line.");
+		return;
+	}
+
+	std::vector<wchar_t> mutableCmd(wideCmd.begin(), wideCmd.end());
+	mutableCmd.push_back(L'\0');
+
+	STARTUPINFOW si{};
+	si.cb = sizeof(si);
+	PROCESS_INFORMATION pi{};
+	const BOOL ok = CreateProcessW(
+		nullptr,
+		mutableCmd.data(),
+		nullptr,
+		nullptr,
+		FALSE,
+		CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+		nullptr,
+		wideCwd.empty() ? nullptr : wideCwd.c_str(),
+		&si,
+		&pi);
+	if (!ok) {
+		logWithLevel(OF_LOG_ERROR, "Failed to start local llama-server. Windows error: " + ofToString(static_cast<int>(GetLastError())));
+		textServerStatus = ServerStatusState::Unreachable;
+		textServerStatusMessage = "Failed to launch local llama-server.";
+		textServerCapabilityHint.clear();
+		return;
+	}
+
+	if (textServerProcessHandle) {
+		CloseHandle(textServerProcessHandle);
+	}
+	textServerProcessHandle = pi.hProcess;
+	textServerProcessId = pi.dwProcessId;
+	CloseHandle(pi.hThread);
+#else
+	pid_t pid = fork();
+	if (pid == 0) {
+		chdir(std::filesystem::path(serverExe).parent_path().string().c_str());
+		execl(
+			serverExe.c_str(),
+			serverExe.c_str(),
+			"-m", modelPath.c_str(),
+			"--host", host.c_str(),
+			"--port", ofToString(port).c_str(),
+			"-ngl", ofToString(gpuLayerCount).c_str(),
+			nullptr);
+		_exit(127);
+	}
+	if (pid <= 0) {
+		logWithLevel(OF_LOG_ERROR, "Failed to fork local llama-server process.");
+		return;
+	}
+	textServerProcessId = pid;
+#endif
+
+	textServerManagedByApp = true;
+	textServerStatus = ServerStatusState::Unknown;
+	textServerStatusMessage = "Local llama-server started. Give it a moment, then press Check Server.";
+	textServerCapabilityHint.clear();
+	logWithLevel(
+		OF_LOG_NOTICE,
+		"Started local llama-server on " + host + ":" + ofToString(port) +
+		" using model " + ofFilePath::getFileName(modelPath) + ".");
+}
+
+void ofApp::stopLocalTextServer(bool logResult) {
+	if (!isManagedTextServerRunning()) {
+		textServerManagedByApp = false;
+		textServerStatus = ServerStatusState::Unknown;
+		textServerCapabilityHint.clear();
+		if (logResult) {
+			logWithLevel(OF_LOG_NOTICE, "No app-managed local llama-server is currently running.");
+		}
+		return;
+	}
+
+#ifdef _WIN32
+	TerminateProcess(textServerProcessHandle, 0);
+	CloseHandle(textServerProcessHandle);
+	textServerProcessHandle = nullptr;
+	textServerProcessId = 0;
+#else
+	kill(textServerProcessId, SIGTERM);
+	textServerProcessId = 0;
+#endif
+	textServerManagedByApp = false;
+	textServerStatus = ServerStatusState::Unknown;
+	textServerStatusMessage = "Local llama-server stopped.";
+	textServerCapabilityHint.clear();
+	if (logResult) {
+		logWithLevel(OF_LOG_NOTICE, textServerStatusMessage);
+	}
+}
+
 ofLogLevel ofApp::mapGgmlLogLevel(int level) const {
 	switch (level) {
 	case 4: return OF_LOG_ERROR;
@@ -1154,6 +1537,7 @@ autoLoadSession();
 if (useModeTokenBudgets) {
 	maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(activeMode)], 32, 4096);
 }
+syncTextBackendForActiveMode(false);
 
 // Detect llama-completion / llama-cli / llama at startup.
 probeLlamaCli();
@@ -1220,6 +1604,7 @@ gui.end();
 
 void ofApp::exit() {
 autoSaveSession();
+stopLocalTextServer(false);
 stopGeneration();
 ggml.close();
 gui.exit();
@@ -1304,6 +1689,7 @@ activeMode = static_cast<AiMode>(i);
 	if (useModeTokenBudgets) {
 		maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(i)], 32, 4096);
 	}
+	syncTextBackendForActiveMode(false);
 }
 }
 
@@ -1314,6 +1700,8 @@ ImGui::Spacing();
 // Model preset selector.
 ImGui::Text("Model:");
 ImGui::SetNextItemWidth(-1);
+const bool useServerBackend =
+	(textInferenceBackend == TextInferenceBackend::LlamaServer);
 if (!modelPresets.empty()) {
 if (ImGui::BeginCombo("##ModelSel", modelPresets[static_cast<size_t>(selectedModelIndex)].name.c_str())) {
 for (int i = 0; i < static_cast<int>(modelPresets.size()); i++) {
@@ -1363,6 +1751,20 @@ if (!modelPresets.empty()) {
 		std::error_code modelEc;
 		if (std::filesystem::exists(modelPath, modelEc) && !modelEc) {
 			ImGui::TextDisabled("File: %s", modelPath.c_str());
+			if (useServerBackend) {
+				ImGui::TextDisabled("Server mode active: this local GGUF remains useful for reviews/embeddings.");
+			}
+		} else if (useServerBackend) {
+			ImGui::TextDisabled("Server mode active: local GGUF is optional for normal text generation.");
+			ImGui::TextDisabled("Suggested local file: %s", modelPath.c_str());
+			ImGui::BeginDisabled(selectedPreset.url.empty());
+			if (ImGui::SmallButton("Download in browser")) {
+				ofLaunchBrowser(selectedPreset.url);
+			}
+			ImGui::EndDisabled();
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Opens the preset download URL in your browser.");
+			}
 		} else {
 			ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.3f, 1.0f),
 				"Model missing: %s", ofFilePath::getFileName(modelPath).c_str());
@@ -1385,6 +1787,98 @@ if (!modelPresets.empty()) {
 				ImGui::SetTooltip("Copies a shell command to fetch preset %d into bin/data/models/", presetNumber);
 			}
 		}
+	}
+}
+ImGui::Spacing();
+const bool modeSupportsTextBackend = aiModeSupportsTextBackend(activeMode);
+ImGui::Text(modeSupportsTextBackend ? "Text Backend (this mode):" : "Text Backend:");
+ImGui::SetNextItemWidth(-1);
+ImGui::BeginDisabled(!modeSupportsTextBackend);
+int textBackendIndex = static_cast<int>(textInferenceBackend);
+if (ImGui::Combo("##TextBackend", &textBackendIndex,
+	kTextBackendLabels, IM_ARRAYSIZE(kTextBackendLabels))) {
+	textInferenceBackend = clampTextInferenceBackend(textBackendIndex);
+	rememberTextBackendForMode(activeMode, textInferenceBackend);
+	if (textInferenceBackend == TextInferenceBackend::LlamaServer &&
+		trim(textServerUrl).empty()) {
+		copyStringToBuffer(
+			textServerUrl,
+			sizeof(textServerUrl),
+			kDefaultTextServerUrl);
+	}
+	announceTextBackendChange();
+}
+ImGui::EndDisabled();
+if (modeSupportsTextBackend) {
+	ImGui::TextDisabled("Stored separately per text mode. Switching tabs restores that mode's backend.");
+} else {
+	ImGui::TextDisabled("Vision and Speech use their own pipelines. Switch to a text mode to change its backend.");
+}
+if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
+	ImGui::InputText("Server URL", textServerUrl, sizeof(textServerUrl));
+	ImGui::InputText("Server model (optional)", textServerModel, sizeof(textServerModel));
+	ImGui::TextDisabled("Uses a warm OpenAI-compatible llama-server for Chat/Script/Text modes.");
+	ImGui::TextDisabled("Leave Server model empty to use the model already loaded by the server.");
+	const std::string localServerExe = findLocalTextServerExecutable();
+	if (!localServerExe.empty()) {
+		ImGui::TextDisabled("Local server executable: %s", ofFilePath::getFileName(localServerExe).c_str());
+	} else {
+		ImGui::TextColored(ImVec4(0.9f, 0.45f, 0.35f, 1.0f), "Local server executable not found.");
+	}
+	const bool localServerRunning = isManagedTextServerRunning();
+	if (ImGui::Button("Check Server", ImVec2(-1, 0))) {
+		checkTextServerStatus(true);
+	}
+	ImGui::BeginDisabled(localServerRunning || localServerExe.empty());
+	if (ImGui::Button("Start Local Server", ImVec2(-1, 0))) {
+		startLocalTextServer();
+	}
+	ImGui::EndDisabled();
+	ImGui::BeginDisabled(!localServerRunning);
+	if (ImGui::Button("Stop Local Server", ImVec2(-1, 0))) {
+		stopLocalTextServer(true);
+	}
+	ImGui::EndDisabled();
+	if (textServerStatus != ServerStatusState::Unknown && !textServerStatusMessage.empty()) {
+		const ImVec4 statusColor =
+			(textServerStatus == ServerStatusState::Reachable)
+				? ImVec4(0.35f, 0.8f, 0.45f, 1.0f)
+				: ImVec4(0.9f, 0.45f, 0.35f, 1.0f);
+		ImGui::TextColored(statusColor, "%s", textServerStatusMessage.c_str());
+		if (!textServerCapabilityHint.empty()) {
+			ImGui::TextDisabled("%s", textServerCapabilityHint.c_str());
+		}
+	}
+	if (ImGui::Button("Tune For Server", ImVec2(-1, 0))) {
+		int tunedMaxTokens = 512;
+		switch (activeMode) {
+		case AiMode::Chat: tunedMaxTokens = 384; break;
+		case AiMode::Script: tunedMaxTokens = 768; break;
+		case AiMode::Summarize: tunedMaxTokens = 512; break;
+		case AiMode::Write: tunedMaxTokens = 640; break;
+		case AiMode::Translate: tunedMaxTokens = 384; break;
+		case AiMode::Custom: tunedMaxTokens = 512; break;
+		case AiMode::Vision:
+		case AiMode::Speech:
+			tunedMaxTokens = std::clamp(maxTokens, 256, 768);
+			break;
+		}
+		maxTokens = tunedMaxTokens;
+		modeMaxTokens[static_cast<size_t>(activeMode)] = maxTokens;
+		temperature = (activeMode == AiMode::Chat || activeMode == AiMode::Write)
+			? 0.6f
+			: 0.25f;
+		topP = 0.9f;
+		topK = 50;
+		minP = 0.05f;
+		repeatPenalty = 1.03f;
+		contextSize = std::clamp(contextSize, 2048, 8192);
+		stopAtNaturalBoundary = true;
+		autoContinueCutoff = (activeMode == AiMode::Script);
+		usePromptCache = false;
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Applies lower-latency, server-friendly defaults and disables the local prompt cache.");
 	}
 }
 
@@ -1452,9 +1946,13 @@ ImGui::Checkbox("Auto-continue cutoffs (Script)", &autoContinueCutoff);
 if (ImGui::IsItemHovered()) {
 	ImGui::SetTooltip("When Script output appears cut off, run one automatic continuation pass.");
 }
+ImGui::BeginDisabled(useServerBackend);
 ImGui::Checkbox("Use prompt cache", &usePromptCache);
+ImGui::EndDisabled();
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Reuse llama prompt cache between requests for faster follow-up responses.");
+	ImGui::SetTooltip(useServerBackend
+		? "Prompt cache is a local CLI optimization and is ignored for llama-server."
+		: "Reuse llama prompt cache between requests for faster follow-up responses.");
 }
 const char * liveContextLabels[] = {
 	"Live context: Offline",
@@ -1492,13 +1990,34 @@ if (mirostatMode > 0) {
 }
 
 ImGui::SetNextItemWidth(-1);
+ImGui::BeginDisabled(useServerBackend);
 ImGui::SliderInt("##Threads", &numThreads, 1, 32, "Threads: %d");
+ImGui::EndDisabled();
+if (useServerBackend && ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Thread count is only used by the local CLI path.");
+}
 ImGui::SetNextItemWidth(-1);
-ImGui::SliderInt("##ContextSize", &contextSize, 256, 16384, "Context: %d");
+ImGui::SliderInt(
+	"##ContextSize",
+	&contextSize,
+	256,
+	16384,
+	useServerBackend ? "Prompt budget: %d" : "Context: %d");
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip(useServerBackend
+		? "Used as a local prompt-trimming heuristic before sending text to llama-server."
+		: "Maximum local context window requested for llama-completion.");
+}
 ImGui::SetNextItemWidth(-1);
+ImGui::BeginDisabled(useServerBackend);
 ImGui::SliderInt("##BatchSize", &batchSize, 32, 4096, "Batch: %d");
+ImGui::EndDisabled();
+if (useServerBackend && ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Batch size is only used by the local CLI path.");
+}
 
 if (!backendNames.empty()) {
+	ImGui::BeginDisabled(useServerBackend);
 	selectedBackendIndex = std::clamp(selectedBackendIndex, 0, static_cast<int>(backendNames.size()) - 1);
 	const std::string currentBackendLabel = backendNames[static_cast<size_t>(selectedBackendIndex)];
 	if (ImGui::BeginCombo("Backend", currentBackendLabel.c_str())) {
@@ -1514,6 +2033,7 @@ if (!backendNames.empty()) {
 		}
 		ImGui::EndCombo();
 	}
+	ImGui::EndDisabled();
 }
 
 ImGui::SetNextItemWidth(-1);
@@ -1521,6 +2041,7 @@ ImGui::SetNextItemWidth(-1);
 // GPU layers control the llama-completion CLI process, which has
 // its own GPU support — always allow the user to adjust them.
 int sliderMax = detectedModelLayers > 0 ? detectedModelLayers : 128;
+ImGui::BeginDisabled(useServerBackend);
 ImGui::SliderInt("##GPULayers", &gpuLayers, 0, sliderMax, "GPU Layers: %d");
 if (ImGui::IsItemHovered()) {
 if (detectedModelLayers > 0) {
@@ -1535,6 +2056,7 @@ ImGui::SameLine();
 if (ImGui::Button("All##gpu", ImVec2(-1, 0))) {
 gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
 }
+ImGui::EndDisabled();
 }
 
 ImGui::Separator();
@@ -1900,6 +2422,8 @@ ImGui::EndChild();
 	for (const auto & msg : scriptMessages) {
 		if (msg.role == "user") {
 			ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "You:");
+		} else if (msg.role == "system") {
+			ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "System:");
 		} else {
 			ImGui::TextColored(ImVec4(0.6f, 0.7f, 1.0f, 1.0f), "AI:");
 		}
@@ -2227,8 +2751,8 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 				gpuLayers = detectedModelLayers;
 			}
 		}
-		maxTokens = std::max(maxTokens, 1536);
-		contextSize = std::max(contextSize, 8192);
+		maxTokens = std::clamp(maxTokens, 512, 768);
+		contextSize = std::clamp(contextSize, 4096, 6144);
 		batchSize = 256;
 		temperature = 0.2f;
 		topP = 0.9f;
@@ -3577,12 +4101,17 @@ out << "theme=" << themeIndex << "\n";
 out << "mirostatMode=" << mirostatMode << "\n";
 out << "mirostatTau=" << ofToString(mirostatTau, 4) << "\n";
 out << "mirostatEta=" << ofToString(mirostatEta, 4) << "\n";
+out << "textInferenceBackend=" << static_cast<int>(textInferenceBackend) << "\n";
+out << "textServerUrl=" << escapeSessionText(textServerUrl) << "\n";
+out << "textServerModel=" << escapeSessionText(textServerModel) << "\n";
 out << "useModeTokenBudgets=" << (useModeTokenBudgets ? 1 : 0) << "\n";
 out << "autoContinueCutoff=" << (autoContinueCutoff ? 1 : 0) << "\n";
 out << "usePromptCache=" << (usePromptCache ? 1 : 0) << "\n";
 for (int i = 0; i < kModeCount; i++) {
 	out << "modeTokenBudget" << i << "="
 		<< std::clamp(modeMaxTokens[static_cast<size_t>(i)], 32, 4096) << "\n";
+	out << "modeTextBackend" << i << "="
+		<< std::clamp(modeTextBackendIndices[static_cast<size_t>(i)], 0, 1) << "\n";
 }
 out << "logLevel=" << static_cast<int>(logLevel) << "\n";
 
@@ -3662,8 +4191,8 @@ return true;
 // ---------------------------------------------------------------------------
 
 bool ofApp::loadSession(const std::string & path) {
-std::ifstream in(path);
-if (!in.is_open()) return false;
+	std::ifstream in(path);
+	if (!in.is_open()) return false;
 
 std::string line;
 if (!std::getline(in, line) || line != "[session_v1]") {
@@ -3672,11 +4201,12 @@ return false;
 
 chatMessages.clear();
 int loadedScriptSourceType = static_cast<int>(ofxGgmlScriptSourceType::None);
-std::string loadedScriptSourcePath;
-std::string loadedScriptSourceInternetUrls;
-bool logLevelSpecified = false;
-bool legacyVerbose = false;
-bool legacyVerboseSeen = false;
+	std::string loadedScriptSourcePath;
+	std::string loadedScriptSourceInternetUrls;
+	bool logLevelSpecified = false;
+	bool legacyVerbose = false;
+	bool legacyVerboseSeen = false;
+	bool modeTextBackendsSpecified = false;
 
 auto copyToBuf = [this](char * buf, size_t bufSize, const std::string & value) {
 std::string text = unescapeSessionText(value);
@@ -3756,9 +4286,14 @@ else if (key == "theme") {
 else if (key == "mirostatMode") mirostatMode = std::clamp(safeStoi(value), 0, 2);
 else if (key == "mirostatTau") mirostatTau = std::clamp(safeStof(value, 5.0f), 0.0f, 10.0f);
 else if (key == "mirostatEta") mirostatEta = std::clamp(safeStof(value, 0.1f), 0.0f, 1.0f);
-else if (key == "useModeTokenBudgets") useModeTokenBudgets = (safeStoi(value, 1) != 0);
-else if (key == "autoContinueCutoff") autoContinueCutoff = (safeStoi(value, 0) != 0);
-else if (key == "usePromptCache") usePromptCache = (safeStoi(value, 1) != 0);
+else if (key == "textInferenceBackend") {
+	textInferenceBackend = clampTextInferenceBackend(safeStoi(value, 0));
+}
+	else if (key == "textServerUrl") copyToBuf(textServerUrl, sizeof(textServerUrl), value);
+	else if (key == "textServerModel") copyToBuf(textServerModel, sizeof(textServerModel), value);
+	else if (key == "useModeTokenBudgets") useModeTokenBudgets = (safeStoi(value, 1) != 0);
+	else if (key == "autoContinueCutoff") autoContinueCutoff = (safeStoi(value, 0) != 0);
+	else if (key == "usePromptCache") usePromptCache = (safeStoi(value, 1) != 0);
 else if (key.rfind("modeTokenBudget", 0) == 0) {
 	try {
 		int idx = std::stoi(key.substr(std::strlen("modeTokenBudget")));
@@ -3767,7 +4302,18 @@ else if (key.rfind("modeTokenBudget", 0) == 0) {
 		}
 	} catch (...) {
 	}
-}
+	}
+	else if (key.rfind("modeTextBackend", 0) == 0) {
+		try {
+			int idx = std::stoi(key.substr(std::strlen("modeTextBackend")));
+			if (idx >= 0 && idx < kModeCount) {
+				modeTextBackendIndices[static_cast<size_t>(idx)] =
+					std::clamp(safeStoi(value, 0), 0, 1);
+				modeTextBackendsSpecified = true;
+			}
+		} catch (...) {
+		}
+	}
 else if (key == "logLevel") {
 	int lvl = std::clamp(
 		safeStoi(value, static_cast<int>(OF_LOG_NOTICE)),
@@ -3889,11 +4435,21 @@ if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::LocalFol
 	selectedScriptFileIndex = -1;
 }
 
+if (!modeTextBackendsSpecified) {
+	for (int i = 0; i < kModeCount; i++) {
+		if (aiModeSupportsTextBackend(static_cast<AiMode>(i))) {
+			modeTextBackendIndices[static_cast<size_t>(i)] =
+				static_cast<int>(textInferenceBackend);
+		}
+	}
+}
+
 if (useModeTokenBudgets) {
 	maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(activeMode)], 32, 4096);
 } else {
 	modeMaxTokens[static_cast<size_t>(activeMode)] = std::clamp(maxTokens, 32, 4096);
 }
+syncTextBackendForActiveMode(false);
 
 return true;
 }
@@ -4006,8 +4562,10 @@ void ofApp::runHierarchicalReview() {
 				probeLlamaCli();
 			}
 
+			const bool useServerBackend =
+				(textInferenceBackend == TextInferenceBackend::LlamaServer);
 			const std::string modelPath = getSelectedModelPath();
-			if (modelPath.empty()) {
+			if (modelPath.empty() && !useServerBackend) {
 				setError("[Error] No model selected for review.");
 				generating.store(false);
 				return;
@@ -4039,11 +4597,16 @@ void ofApp::runHierarchicalReview() {
 				: ofxGgmlCodeReview::defaultReviewQuery();
 
 			ofxGgmlCodeReviewSettings reviewSettings;
-			reviewSettings.maxTokens = std::max(maxTokens, 1536);
-			reviewSettings.contextSize = std::max(contextSize, 8192);
+			reviewSettings.maxTokens = std::clamp(maxTokens, 384, 768);
+			reviewSettings.contextSize = std::clamp(contextSize, 4096, 6144);
 			reviewSettings.batchSize = std::clamp(batchSize, 128, 256);
 			reviewSettings.gpuLayers = gpuLayers;
 			reviewSettings.threads = numThreads;
+			reviewSettings.useServerBackend = useServerBackend;
+			reviewSettings.serverUrl = useServerBackend
+				? effectiveTextServerUrl(textServerUrl)
+				: trim(textServerUrl);
+			reviewSettings.serverModel = trim(textServerModel);
 			reviewSettings.maxEmbedParallelTasks = 2;
 			reviewSettings.maxSummaryParallelTasks = 1;
 			reviewSettings.usePromptCache = false;
@@ -4071,6 +4634,10 @@ void ofApp::runHierarchicalReview() {
 					const float savedRepeatPenalty = repeatPenalty;
 					const float savedMirostatTau = mirostatTau;
 					const float savedMirostatEta = mirostatEta;
+					const TextInferenceBackend savedTextInferenceBackend =
+						textInferenceBackend;
+					const std::string savedTextServerUrl = textServerUrl;
+					const std::string savedTextServerModel = textServerModel;
 					const bool savedUsePromptCache = usePromptCache;
 					const bool savedAutoContinueCutoff = autoContinueCutoff;
 
@@ -4089,6 +4656,17 @@ void ofApp::runHierarchicalReview() {
 					mirostatMode = inferenceSettings.mirostat;
 					mirostatTau = inferenceSettings.mirostatTau;
 					mirostatEta = inferenceSettings.mirostatEta;
+					textInferenceBackend = inferenceSettings.useServerBackend
+						? TextInferenceBackend::LlamaServer
+						: TextInferenceBackend::Cli;
+					copyStringToBuffer(
+						textServerUrl,
+						sizeof(textServerUrl),
+						inferenceSettings.serverUrl);
+					copyStringToBuffer(
+						textServerModel,
+						sizeof(textServerModel),
+						inferenceSettings.serverModel);
 					usePromptCache = false;
 					autoContinueCutoff = inferenceSettings.autoContinueCutoff;
 
@@ -4116,6 +4694,15 @@ void ofApp::runHierarchicalReview() {
 					repeatPenalty = savedRepeatPenalty;
 					mirostatTau = savedMirostatTau;
 					mirostatEta = savedMirostatEta;
+					textInferenceBackend = savedTextInferenceBackend;
+					copyStringToBuffer(
+						textServerUrl,
+						sizeof(textServerUrl),
+						savedTextServerUrl);
+					copyStringToBuffer(
+						textServerModel,
+						sizeof(textServerModel),
+						savedTextServerModel);
 					usePromptCache = savedUsePromptCache;
 					autoContinueCutoff = savedAutoContinueCutoff;
 
@@ -4426,27 +5013,31 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 	output.clear();
 	error.clear();
 
+	const bool useServerBackend =
+		(textInferenceBackend == TextInferenceBackend::LlamaServer);
 	const std::string modelPath = getSelectedModelPath();
-	if (modelPath.empty()) {
+	if (!useServerBackend && modelPath.empty()) {
 		error = "No model preset selected.";
 		return false;
 	}
 
-	if (!std::filesystem::exists(modelPath)) {
+	if (!useServerBackend && !std::filesystem::exists(modelPath)) {
 		error = "Model file not found: " + modelPath;
 		return false;
 	}
 
-	if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-		probeLlamaCli();
+	if (!useServerBackend) {
 		if (llamaCliState.load(std::memory_order_relaxed) != 1) {
-			error = "llama-completion/llama-cli/llama not found. Build with scripts/build-llama-cli.sh.";
-			return false;
+			probeLlamaCli();
+			if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+				error = "llama-completion/llama-cli/llama not found. Build with scripts/build-llama-cli.sh.";
+				return false;
+			}
 		}
-	}
 
-	llmInference.setCompletionExecutable(llamaCliCommand);
-	llmInference.probeCompletionCapabilities(true);
+		llmInference.setCompletionExecutable(llamaCliCommand);
+		llmInference.probeCompletionCapabilities(true);
+	}
 
 	ofxGgmlInferenceSettings inferenceSettings;
 	inferenceSettings.maxTokens = std::clamp(maxTokens, 1, 8192);
@@ -4480,8 +5071,14 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 	inferenceSettings.mirostat = mirostatMode;
 	inferenceSettings.mirostatTau = mirostatTau;
 	inferenceSettings.mirostatEta = mirostatEta;
+	inferenceSettings.useServerBackend = useServerBackend;
+	if (useServerBackend) {
+		inferenceSettings.serverUrl = effectiveTextServerUrl(textServerUrl);
+		inferenceSettings.serverModel = trim(textServerModel);
+	}
 
-	if (!backendNames.empty() &&
+	if (!useServerBackend &&
+		!backendNames.empty() &&
 		selectedBackendIndex >= 0 &&
 		selectedBackendIndex < static_cast<int>(backendNames.size())) {
 		const std::string & selected = backendNames[static_cast<size_t>(selectedBackendIndex)];
@@ -4489,13 +5086,15 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 			inferenceSettings.device = selected;
 		}
 	}
-	if (inferenceSettings.device.empty()) {
+	if (!useServerBackend && inferenceSettings.device.empty()) {
 		const std::string backend = ggml.getBackendName();
 		if (!backend.empty() && backend != "CPU" && backend != "none") {
 			inferenceSettings.device = backend;
 		}
 	}
-	if (inferenceSettings.gpuLayers == 0 && inferenceSettings.device != "CPU") {
+	if (!useServerBackend &&
+		inferenceSettings.gpuLayers == 0 &&
+		inferenceSettings.device != "CPU") {
 		inferenceSettings.gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 999;
 	}
 
@@ -4531,7 +5130,7 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 		error = inferenceResult.error.empty()
 			? "Inference failed."
 			: inferenceResult.error;
-		useLegacyFallback = true;
+		useLegacyFallback = !useServerBackend;
 	}
 	if (!useLegacyFallback) {
 		if (preserveLlamaInstructions) {
@@ -4544,8 +5143,15 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 		if (!output.empty()) {
 			return true;
 		}
-		error = "llama-completion returned empty output.";
-		useLegacyFallback = true;
+		if (error.empty()) {
+			error = useServerBackend
+				? "llama-server returned empty output."
+				: "llama-completion returned empty output.";
+		}
+		useLegacyFallback = !useServerBackend;
+		if (!useLegacyFallback) {
+			return false;
+		}
 	}
 	if (!suppressFallbackWarning && shouldLog(OF_LOG_WARNING)) {
 		logWithLevel(OF_LOG_WARNING,
@@ -5367,6 +5973,10 @@ ImGui::Text("  Preference: %s", prefLabel.c_str());
 ImGui::Text("  Threads:    %d", numThreads);
 ImGui::Text("  Context:    %d", contextSize);
 ImGui::Text("  Batch:      %d", batchSize);
+ImGui::Text("  Text path:  %s",
+	textInferenceBackend == TextInferenceBackend::LlamaServer
+		? "llama-server"
+		: "CLI");
 if (detectedModelLayers > 0) {
 ImGui::Text("  GPU Layers: %d / %d", gpuLayers, detectedModelLayers);
 } else {

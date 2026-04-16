@@ -114,10 +114,15 @@ public:
 	bool is_array() const { return m_type == Type::Array; }
 	bool is_object() const { return m_type == Type::Object; }
 	bool is_number() const { return m_type == Type::Number; }
+	bool is_string() const { return m_type == Type::String; }
 
 	template<typename T>
 	T get() const {
-		return static_cast<T>(m_number);
+		if constexpr (std::is_same_v<T, std::string>) {
+			return m_string;
+		} else {
+			return static_cast<T>(m_number);
+		}
 	}
 
 	bool contains(const std::string & key) const {

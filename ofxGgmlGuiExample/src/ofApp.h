@@ -15,6 +15,12 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/types.h>
+#endif
+
 // ---------------------------------------------------------------------------
 // Mode — the active AI task tab.
 // ---------------------------------------------------------------------------
@@ -35,6 +41,17 @@ enum class LiveContextMode {
 	LoadedSourcesOnly,
 	LiveContext,
 	LiveContextStrictCitations
+};
+
+enum class TextInferenceBackend {
+	Cli = 0,
+	LlamaServer
+};
+
+enum class ServerStatusState {
+	Unknown = 0,
+	Reachable,
+	Unreachable
 };
 
 // ---------------------------------------------------------------------------
@@ -107,6 +124,8 @@ private:
 	char customInput[4096] = {};
 	char customSystemPrompt[2048] = {};
 	char sourceUrlsInput[2048] = {};
+	char textServerUrl[256] = "http://127.0.0.1:8080";
+	char textServerModel[256] = {};
 	char visionPrompt[4096] = {};
 	char visionImagePath[1024] = {};
 	char visionModelPath[1024] = {};
@@ -169,6 +188,18 @@ private:
 	float mirostatEta = 0.1f;
 	int chatLanguageIndex = 0;                       // 0=Auto, otherwise force response language
 	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 384, 512};
+	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 0, 0, 0, 1, 0, 0};
+	TextInferenceBackend textInferenceBackend = TextInferenceBackend::Cli;
+	ServerStatusState textServerStatus = ServerStatusState::Unknown;
+	std::string textServerStatusMessage;
+	std::string textServerCapabilityHint;
+	bool textServerManagedByApp = false;
+#ifdef _WIN32
+	HANDLE textServerProcessHandle = nullptr;
+	DWORD textServerProcessId = 0;
+#else
+	pid_t textServerProcessId = 0;
+#endif
 	bool useModeTokenBudgets = true;
 	bool autoContinueCutoff = false;
 	bool usePromptCache = true;
@@ -279,6 +310,15 @@ private:
 	void applyLogLevel(ofLogLevel level);
 	bool shouldLog(ofLogLevel level) const;
 	void logWithLevel(ofLogLevel level, const std::string & message);
+	void announceTextBackendChange();
+	TextInferenceBackend preferredTextBackendForMode(AiMode mode) const;
+	void rememberTextBackendForMode(AiMode mode, TextInferenceBackend backend);
+	void syncTextBackendForActiveMode(bool announce = false);
+	void checkTextServerStatus(bool logResult = true);
+	std::string findLocalTextServerExecutable() const;
+	bool isManagedTextServerRunning();
+	void startLocalTextServer();
+	void stopLocalTextServer(bool logResult = true);
 	ofLogLevel mapGgmlLogLevel(int level) const;
 	void probeLlamaCli(const std::string & customPath = "");
 	void probeCliCapabilities();

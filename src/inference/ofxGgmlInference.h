@@ -47,6 +47,9 @@ struct ofxGgmlInferenceSettings {
 	std::string grammarPath;
 	std::string chatTemplate;
 	std::string device;
+	bool useServerBackend = false;
+	std::string serverUrl;
+	std::string serverModel;
 };
 
 struct ofxGgmlInferenceCapabilities {
@@ -106,11 +109,31 @@ struct ofxGgmlInferenceResult {
 struct ofxGgmlEmbeddingSettings {
 	bool normalize = true;
 	std::string pooling = "mean";
+	bool useServerBackend = false;
+	std::string serverUrl;
+	std::string serverModel;
+	bool allowLocalFallback = true;
 };
 
 struct ofxGgmlEmbeddingResult {
 	bool success = false;
 	std::vector<float> embedding;
+	std::string error;
+};
+
+struct ofxGgmlServerProbeResult {
+	bool reachable = false;
+	bool healthOk = false;
+	bool modelsOk = false;
+	bool embeddingsRouteLikely = false;
+	bool visionCapable = false;
+	bool routerLikely = false;
+	std::string baseUrl;
+	std::string chatCompletionsUrl;
+	std::string embeddingsUrl;
+	std::string activeModel;
+	std::string capabilitySummary;
+	std::vector<std::string> modelIds;
 	std::string error;
 };
 
@@ -121,7 +144,7 @@ struct ofxGgmlSimilarityHit {
 	size_t index = 0;
 };
 
-/// CLI-backed inference helper for llama.cpp tools.
+/// Inference helper for llama.cpp CLI tools and OpenAI-compatible local servers.
 class ofxGgmlInference {
 public:
 	ofxGgmlInference();
@@ -185,6 +208,9 @@ public:
 	static std::vector<ofxGgmlPromptSource> fetchUrlSources(
 		const std::vector<std::string> & urls,
 		const ofxGgmlPromptSourceSettings & sourceSettings = {});
+	static ofxGgmlServerProbeResult probeServer(
+		const std::string & serverUrl,
+		bool fetchModels = true);
 	static std::vector<ofxGgmlPromptSource> collectScriptSourceDocuments(
 		ofxGgmlScriptSource & scriptSource,
 		const ofxGgmlPromptSourceSettings & sourceSettings = {});

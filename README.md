@@ -1,6 +1,6 @@
 # ofxGgml
 
-`ofxGgml` is an openFrameworks wrapper around [ggml](https://github.com/ggml-org/ggml) with backend selection, graph execution, GGUF model loading, llama.cpp CLI inference helpers, prompt-memory utilities, and a GUI example aimed at local AI workflows.
+`ofxGgml` is an openFrameworks wrapper around [ggml](https://github.com/ggml-org/ggml) with backend selection, graph execution, GGUF model loading, llama.cpp CLI and `llama-server` inference helpers, prompt-memory utilities, and a GUI example aimed at local AI workflows.
 
 The main public header is:
 
@@ -18,7 +18,7 @@ This addon is released under the [MIT License](LICENSE).
 
 ## Release
 
-- addon release version: `1.0.1`
+- addon release version: `1.0.2`
 - changelog: `CHANGELOG.md`
 
 ## Highlights
@@ -27,7 +27,7 @@ This addon is released under the [MIT License](LICENSE).
 - runtime backend discovery and selection with CPU fallback
 - `ofxGgmlGraph` fluent graph builder for common ggml operations
 - `ofxGgmlModel` GGUF inspection and backend weight upload
-- `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, CLI capability probing, cutoff continuation, and source-grounded prompt building
+- `ofxGgmlInference` llama.cpp helper for CLI and persistent `llama-server` generation, embeddings, cache reuse, capability probing, cutoff continuation, and source-grounded prompt building
 - addon-level `Live context` support for loaded sources, domain-provider grounding, generic search fallback, and stricter citation-oriented response modes
 - `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
@@ -171,6 +171,33 @@ After building ggml, regenerate your project with the openFrameworks Project Gen
 
 `scripts\build-ggml.bat` also refreshes `addon_config.mk` for the `vs` section so Visual Studio links the exact ggml libraries you just built. When CUDA is enabled, it injects the CUDA Toolkit dependencies using `$(CUDA_PATH)`. Vulkan linking uses `$(VULKAN_SDK)`.
 
+### llama-server on Windows
+
+Use the dedicated PowerShell helper to clone `ggml-org/llama.cpp`, build `llama-server.exe`, and copy the server runtime into `libs/llama/bin`.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-llama-server.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\build-llama-server.ps1 -Cuda
+powershell -ExecutionPolicy Bypass -File .\scripts\build-llama-server.ps1 -CpuOnly
+```
+
+By default the script:
+
+- uses `build\llama.cpp-src` for the upstream source checkout
+- uses `build\llama.cpp-build` for the CMake build tree
+- installs `llama-server.exe` and the required DLLs into `libs\llama\bin`
+
+That install location matches the GUI example's local server discovery, so `Start Local Server` can reuse the freshly built binary without extra configuration.
+
+To launch the local server manually after building it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-llama-server.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\start-llama-server.ps1 -Detached
+```
+
+The helper defaults to `http://127.0.0.1:8080`, reuses the recommended local GGUF model when possible, and exposes GPU layers / context size flags so the server path matches the GUI example's defaults more closely.
+
 ### Manual CMake build
 
 ```bash
@@ -198,6 +225,22 @@ Both lightweight examples are now keyboard-driven so you can rerun compute and b
 ## Tests
 
 The test suite lives in `tests/` and covers core runtime behavior, model loading, inference helpers, chat/code/text assistants, and project memory support. When you change backend setup, Windows linking, or inference command assembly, it is worth rerunning the tests or at least rebuilding one example project.
+
+## Persistent Server Backend
+
+`ofxGgmlInference` can now target a warm `llama-server` process for both text generation and embeddings. When `serverModel` is left empty, the addon probes `/v1/models`, caches the active model briefly, and reuses that information across nearby requests. Review and retrieval flows can also use the same server, which keeps hierarchical review fast while preserving semantic ranking.
+
+The GUI example couples a preferred text backend to each text-capable mode:
+
+- `Chat`, `Script`, and `Custom` default to `llama-server`
+- `Summarize`, `Write`, and `Translate` default to CLI
+- the backend is still switchable per mode and stored with the session
+
+When the server backend is selected, the GUI exposes:
+
+- `Check Server` to probe reachability and fetch model/capability hints
+- `Start Local Server` / `Stop Local Server` for an app-managed local `llama-server`
+- `Tune For Server` to apply lower-latency settings for the active mode
 
 ## Performance
 

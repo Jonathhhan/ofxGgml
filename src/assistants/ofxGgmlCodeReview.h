@@ -22,6 +22,7 @@ struct ofxGgmlCodeReviewFileInfo {
 	float recencyScore = 0.0f;
 	float importanceScore = 0.0f;
 	float similarityScore = 0.0f;
+	float lexicalScore = 0.0f;
 	float priorityScore = 0.0f;
 	int tokenCount = 0;
 	bool truncated = false;
@@ -36,6 +37,9 @@ struct ofxGgmlCodeReviewSettings {
 	int batchSize = 512;
 	int gpuLayers = 0;
 	int threads = 0;
+	bool useServerBackend = false;
+	std::string serverUrl;
+	std::string serverModel;
 	size_t maxRepoTocFiles = 50;
 	size_t maxEmbeddingSnippetChars = 4000;
 	size_t maxEmbedParallelTasks = 4;
