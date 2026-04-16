@@ -18,8 +18,10 @@ All notable changes to `ofxGgml` are documented in this file.
 - `ofxGgmlCodeAssistant` and `ofxGgmlCodeReview` now read local `AGENTS.md` and `.github` instruction files directly from the workspace for server-first coding and review flows.
 - Setup scripts now follow the faster server-first path by default: `ggml` still builds automatically, while `llama-cli` / `llama-completion` are opt-in via `--with-llama-cli` instead of being built on every `--auto` setup.
 - The GUI now presents `llama-server` as the recommended text backend and frames `llama-completion` as an optional local fallback instead of a required default component.
+- Server-backed text modes now auto-apply the old low-latency tuning defaults, auto-start the local server during app setup when the configured URL is local, and remove the manual `Check Server` / `Start Local Server` / `Stop Local Server` / `Tune For Server` buttons from the GUI.
 - Whisper timestamp handling now preserves `.srt` / `.vtt` artifacts, surfaces parsed segments in the GUI, and reuses the same lightweight SRT parsing approach we already trust in `ofxVlc4`.
 - Vision response handling now accepts more OpenAI-compatible response shapes, adds stronger task-specific prompting, and labels multimodal image parts more explicitly for better grounding.
+- Vision profile download hints can now use explicit direct URLs, and the default `LFM2.5-VL` GUI action now targets the correct `LFM2.5-VL-1.6B-Q4_0.gguf` file instead of a broken guessed link.
 - Video analysis now uses more structured sampled-frame prompts with frame-position labels, sample-count context, and clearer timeline guidance.
 
 ### Documentation

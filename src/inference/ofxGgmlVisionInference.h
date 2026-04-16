@@ -16,6 +16,7 @@ struct ofxGgmlVisionModelProfile {
 	std::string architecture;
 	std::string modelRepoHint;
 	std::string modelFileHint;
+	std::string modelDownloadUrl;
 	std::string modelPath;
 	std::string mmprojPath;
 	std::string serverUrl = "http://127.0.0.1:8080";

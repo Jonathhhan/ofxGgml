@@ -337,6 +337,7 @@ private:
 	void announceTextBackendChange();
 	TextInferenceBackend preferredTextBackendForMode(AiMode mode) const;
 	void rememberTextBackendForMode(AiMode mode, TextInferenceBackend backend);
+	void applyServerFriendlyDefaultsForMode(AiMode mode);
 	void syncTextBackendForActiveMode(bool announce = false);
 	void checkTextServerStatus(bool logResult = true);
 	bool ensureTextServerReady(bool logResult = false, bool allowLaunch = true);

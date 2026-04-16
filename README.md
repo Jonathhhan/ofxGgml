@@ -191,7 +191,7 @@ By default the script:
 - uses `build\llama.cpp-build` for the CMake build tree
 - installs `llama-server.exe` and the required DLLs into `libs\llama\bin`
 
-That install location matches the GUI example's local server discovery, so `Start Local Server` can reuse the freshly built binary without extra configuration.
+That install location matches the GUI example's local server discovery, so server-backed text modes can auto-launch the local server during app setup without extra configuration.
 
 If you still want the old one-shot CLI fallback tools, build them explicitly instead of relying on setup defaults:
 
@@ -240,17 +240,14 @@ The test suite lives in `tests/` and covers core runtime behavior, model loading
 
 `ofxGgmlInference` can now target a warm `llama-server` process for both text generation and embeddings. When `serverModel` is left empty, the addon probes `/v1/models`, caches the active model briefly, and reuses that information across nearby requests. Review and retrieval flows can also use the same server, which keeps hierarchical review fast while preserving semantic ranking.
 
-The GUI example couples a preferred text backend to each text-capable mode:
+The GUI example couples a preferred text backend to each text-capable mode, stores that preference with the session, and now defaults every text mode to `llama-server`.
 
-- `Chat`, `Script`, and `Custom` default to `llama-server`
-- `Summarize`, `Write`, and `Translate` default to CLI
-- the backend is still switchable per mode and stored with the session
+When the server backend is selected, the GUI:
 
-When the server backend is selected, the GUI exposes:
-
-- `Check Server` to probe reachability and fetch model/capability hints
-- `Start Local Server` / `Stop Local Server` for an app-managed local `llama-server`
-- `Tune For Server` to apply lower-latency settings for the active mode
+- auto-applies server-friendly defaults for the active text mode
+- auto-probes the configured server URL
+- auto-launches a local `llama-server` during app setup when the URL points at the default local endpoint and a local server binary is available
+- keeps the sidebar focused on passive status and configuration rather than manual server-management buttons
 
 When the CLI backend is selected, it is treated as an optional fallback path rather than a required default. The sidebar now makes that explicit and keeps the missing-CLI state informational instead of presenting it as a broken primary setup.
 
@@ -397,6 +394,8 @@ The Speech panel now supports a simple microphone workflow directly in the GUI:
 `ofxGgmlVisionInference` adds multimodal image-to-text support for `llama-server`-compatible endpoints. It prepares task-specific prompts for `Describe`, `OCR`, and `Ask`, handles local image encoding as data URLs, and includes curated profile hints for families such as `LFM2.5-VL`, `Qwen VL`, `GLM OCR`, and `Llama 3.2 Vision`.
 
 The GUI example now recommends `LFM2.5-VL` first for general vision tasks, keeps `GLM-OCR` available for OCR-focused flows, and labels Meta `Llama 3.2 Vision` as EU-restricted because the official Hugging Face download is currently blocked from the European Union.
+
+The default `LFM2.5-VL` profile now points at the exact upstream GGUF download URL for `LFM2.5-VL-1.6B-Q4_0.gguf`, so the Vision panel’s model action goes straight to the correct file instead of a broken guessed path.
 
 The vision path is now more purpose-built too:
 

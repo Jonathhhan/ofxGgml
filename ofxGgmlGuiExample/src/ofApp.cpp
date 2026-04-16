@@ -354,6 +354,20 @@ std::pair<std::string, int> parseServerHostPort(const std::string & configuredUr
 	return {"127.0.0.1", 8080};
 }
 
+bool shouldManageLocalTextServer(const std::string & configuredUrl) {
+	const auto [host, port] = parseServerHostPort(configuredUrl);
+	(void)port;
+	std::string normalizedHost = trim(host);
+	std::transform(
+		normalizedHost.begin(),
+		normalizedHost.end(),
+		normalizedHost.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return normalizedHost.empty() ||
+		normalizedHost == "127.0.0.1" ||
+		normalizedHost == "localhost";
+}
+
 bool aiModeSupportsTextBackend(AiMode mode) {
 	switch (mode) {
 	case AiMode::Chat:
@@ -408,6 +422,17 @@ std::string suggestedModelDownloadUrl(
 	}
 	return "https://huggingface.co/" + trimmedRepoHint +
 		"/resolve/main/" + trimmedFileHint;
+}
+
+std::string effectiveSuggestedModelDownloadUrl(
+	const std::string & explicitUrl,
+	const std::string & modelRepoHint,
+	const std::string & modelFileHint) {
+	const std::string trimmedExplicitUrl = trim(explicitUrl);
+	if (!trimmedExplicitUrl.empty()) {
+		return trimmedExplicitUrl;
+	}
+	return suggestedModelDownloadUrl(modelRepoHint, modelFileHint);
 }
 
 bool isEuRestrictedVisionProfile(const ofxGgmlVisionModelProfile & profile) {
@@ -1234,7 +1259,10 @@ void ofApp::announceTextBackendChange() {
 	}
 
 	if (useServerBackend) {
-		ensureTextServerReady(false, true);
+		applyServerFriendlyDefaultsForMode(activeMode);
+		ensureTextServerReady(
+			false,
+			shouldManageLocalTextServer(effectiveTextServerUrl(textServerUrl)));
 	} else {
 		textServerStatus = ServerStatusState::Unknown;
 		textServerStatusMessage.clear();
@@ -1257,6 +1285,33 @@ void ofApp::rememberTextBackendForMode(AiMode mode, TextInferenceBackend backend
 	modeTextBackendIndices[static_cast<size_t>(mode)] = static_cast<int>(backend);
 }
 
+void ofApp::applyServerFriendlyDefaultsForMode(AiMode mode) {
+	int tunedMaxTokens = 512;
+	switch (mode) {
+	case AiMode::Chat: tunedMaxTokens = 384; break;
+	case AiMode::Script: tunedMaxTokens = 768; break;
+	case AiMode::Summarize: tunedMaxTokens = 512; break;
+	case AiMode::Write: tunedMaxTokens = 640; break;
+	case AiMode::Translate: tunedMaxTokens = 384; break;
+	case AiMode::Custom: tunedMaxTokens = 512; break;
+	case AiMode::Vision:
+	case AiMode::Speech:
+		tunedMaxTokens = std::clamp(maxTokens, 256, 768);
+		break;
+	}
+	maxTokens = tunedMaxTokens;
+	modeMaxTokens[static_cast<size_t>(mode)] = maxTokens;
+	temperature = (mode == AiMode::Chat || mode == AiMode::Write) ? 0.6f : 0.25f;
+	topP = 0.9f;
+	topK = 50;
+	minP = 0.05f;
+	repeatPenalty = 1.03f;
+	contextSize = std::clamp(contextSize, 2048, 8192);
+	stopAtNaturalBoundary = true;
+	autoContinueCutoff = (mode == AiMode::Script);
+	usePromptCache = false;
+}
+
 void ofApp::syncTextBackendForActiveMode(bool announce) {
 	if (!aiModeSupportsTextBackend(activeMode)) {
 		return;
@@ -1267,7 +1322,10 @@ void ofApp::syncTextBackendForActiveMode(bool announce) {
 			if (trim(textServerUrl).empty()) {
 				copyStringToBuffer(textServerUrl, sizeof(textServerUrl), kDefaultTextServerUrl);
 			}
-			ensureTextServerReady(false, true);
+			applyServerFriendlyDefaultsForMode(activeMode);
+			ensureTextServerReady(
+				false,
+				shouldManageLocalTextServer(effectiveTextServerUrl(textServerUrl)));
 		}
 		return;
 	}
@@ -1276,10 +1334,15 @@ void ofApp::syncTextBackendForActiveMode(bool announce) {
 		trim(textServerUrl).empty()) {
 		copyStringToBuffer(textServerUrl, sizeof(textServerUrl), kDefaultTextServerUrl);
 	}
+	if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
+		applyServerFriendlyDefaultsForMode(activeMode);
+	}
 	if (announce) {
 		announceTextBackendChange();
 	} else if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
-		ensureTextServerReady(false, true);
+		ensureTextServerReady(
+			false,
+			shouldManageLocalTextServer(effectiveTextServerUrl(textServerUrl)));
 	} else {
 		textServerStatus = ServerStatusState::Unknown;
 		textServerStatusMessage.clear();
@@ -1527,7 +1590,7 @@ void ofApp::startLocalTextServer() {
 
 	textServerManagedByApp = true;
 	textServerStatus = ServerStatusState::Unknown;
-	textServerStatusMessage = "Local llama-server started. Give it a moment, then press Check Server.";
+	textServerStatusMessage = "Local llama-server started. The app will probe it automatically.";
 	textServerCapabilityHint.clear();
 	logWithLevel(
 		OF_LOG_NOTICE,
@@ -1866,7 +1929,6 @@ autoLoadSession();
 if (useModeTokenBudgets) {
 	maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(activeMode)], 32, 4096);
 }
-syncTextBackendForActiveMode(false);
 
 // Detect llama-completion / llama-cli / llama at startup.
 probeLlamaCli();
@@ -1878,6 +1940,22 @@ detectModelLayers();
 		// Default GPU layers to all if a model is loaded and the user
 		// hasn't explicitly set them to 0 from a previous session.
 		gpuLayers = detectedModelLayers;
+	}
+}
+syncTextBackendForActiveMode(false);
+for (int i = 0; i < kModeCount; ++i) {
+	const AiMode mode = static_cast<AiMode>(i);
+	if (!aiModeSupportsTextBackend(mode)) {
+		continue;
+	}
+	if (preferredTextBackendForMode(mode) == TextInferenceBackend::LlamaServer) {
+		if (trim(textServerUrl).empty()) {
+			copyStringToBuffer(textServerUrl, sizeof(textServerUrl), kDefaultTextServerUrl);
+		}
+		ensureTextServerReady(
+			false,
+			shouldManageLocalTextServer(effectiveTextServerUrl(textServerUrl)));
+		break;
 	}
 }
 
@@ -2149,11 +2227,20 @@ if (modeSupportsTextBackend) {
 	ImGui::TextDisabled("Vision and Speech use their own pipelines. Switch to a text mode to change its backend.");
 }
 if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
-	ImGui::InputText("Server URL", textServerUrl, sizeof(textServerUrl));
+	const bool serverUrlChanged = ImGui::InputText("Server URL", textServerUrl, sizeof(textServerUrl));
 	ImGui::InputText("Server model (optional)", textServerModel, sizeof(textServerModel));
+	if (serverUrlChanged) {
+		textServerStatus = ServerStatusState::Unknown;
+		textServerStatusMessage.clear();
+		textServerCapabilityHint.clear();
+		ensureTextServerReady(
+			false,
+			shouldManageLocalTextServer(effectiveTextServerUrl(textServerUrl)));
+	}
 	ImGui::TextDisabled("Uses a warm OpenAI-compatible llama-server for Chat/Script/Text modes.");
 	ImGui::TextDisabled("Leave Server model empty to use the model already loaded by the server.");
-	ImGui::TextDisabled("This is the recommended default. CLI binaries are optional now.");
+	ImGui::TextDisabled("Server-friendly defaults are applied automatically, and the app starts the local server during setup.");
+	ImGui::TextDisabled("CLI binaries are optional now and only used as a local fallback path.");
 	const std::string localServerExe = findLocalTextServerExecutable();
 	if (!localServerExe.empty()) {
 		ImGui::TextDisabled("Local server executable: %s", ofFilePath::getFileName(localServerExe).c_str());
@@ -2161,20 +2248,6 @@ if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 		ImGui::TextColored(ImVec4(0.9f, 0.45f, 0.35f, 1.0f), "Local server executable not found.");
 		ImGui::TextDisabled("Build it with scripts/build-llama-server.ps1 when you want a managed local server.");
 	}
-	const bool localServerRunning = isManagedTextServerRunning();
-	if (ImGui::Button("Check Server", ImVec2(-1, 0))) {
-		checkTextServerStatus(true);
-	}
-	ImGui::BeginDisabled(localServerRunning || localServerExe.empty());
-	if (ImGui::Button("Start Local Server", ImVec2(-1, 0))) {
-		startLocalTextServer();
-	}
-	ImGui::EndDisabled();
-	ImGui::BeginDisabled(!localServerRunning);
-	if (ImGui::Button("Stop Local Server", ImVec2(-1, 0))) {
-		stopLocalTextServer(true);
-	}
-	ImGui::EndDisabled();
 	if (textServerStatus != ServerStatusState::Unknown && !textServerStatusMessage.empty()) {
 		const ImVec4 statusColor =
 			(textServerStatus == ServerStatusState::Reachable)
@@ -2184,37 +2257,6 @@ if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 		if (!textServerCapabilityHint.empty()) {
 			ImGui::TextDisabled("%s", textServerCapabilityHint.c_str());
 		}
-	}
-	if (ImGui::Button("Tune For Server", ImVec2(-1, 0))) {
-		int tunedMaxTokens = 512;
-		switch (activeMode) {
-		case AiMode::Chat: tunedMaxTokens = 384; break;
-		case AiMode::Script: tunedMaxTokens = 768; break;
-		case AiMode::Summarize: tunedMaxTokens = 512; break;
-		case AiMode::Write: tunedMaxTokens = 640; break;
-		case AiMode::Translate: tunedMaxTokens = 384; break;
-		case AiMode::Custom: tunedMaxTokens = 512; break;
-		case AiMode::Vision:
-		case AiMode::Speech:
-			tunedMaxTokens = std::clamp(maxTokens, 256, 768);
-			break;
-		}
-		maxTokens = tunedMaxTokens;
-		modeMaxTokens[static_cast<size_t>(activeMode)] = maxTokens;
-		temperature = (activeMode == AiMode::Chat || activeMode == AiMode::Write)
-			? 0.6f
-			: 0.25f;
-		topP = 0.9f;
-		topK = 50;
-		minP = 0.05f;
-		repeatPenalty = 1.03f;
-		contextSize = std::clamp(contextSize, 2048, 8192);
-		stopAtNaturalBoundary = true;
-		autoContinueCutoff = (activeMode == AiMode::Script);
-		usePromptCache = false;
-	}
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Applies lower-latency, server-friendly defaults and disables the local prompt cache.");
 	}
 } else {
 	if (llamaCliState.load(std::memory_order_relaxed) == 1) {
@@ -4331,7 +4373,10 @@ if (!visionProfiles.empty()) {
 	const std::string recommendedModelPath =
 		suggestedModelPath(profile.modelPath, profile.modelFileHint);
 	const std::string recommendedDownloadUrl =
-		suggestedModelDownloadUrl(profile.modelRepoHint, profile.modelFileHint);
+		effectiveSuggestedModelDownloadUrl(
+			profile.modelDownloadUrl,
+			profile.modelRepoHint,
+			profile.modelFileHint);
 	ImGui::TextDisabled("Architecture: %s", profile.architecture.c_str());
 	if (!profile.modelRepoHint.empty()) {
 		ImGui::TextDisabled("Recommended server model: %s", profile.modelRepoHint.c_str());
@@ -4363,13 +4408,18 @@ if (!visionProfiles.empty()) {
 		}
 		ImGui::SameLine();
 		ImGui::BeginDisabled(recommendedDownloadUrl.empty());
-		if (ImGui::SmallButton("Download model##Vision")) {
+		const bool opensModelPage =
+			recommendedDownloadUrl.find("/tree/") != std::string::npos ||
+			recommendedDownloadUrl.find("/blob/") != std::string::npos;
+		if (ImGui::SmallButton(opensModelPage ? "Open model page##Vision" : "Download model##Vision")) {
 			ofLaunchBrowser(recommendedDownloadUrl);
 		}
 		ImGui::EndDisabled();
 		if (ImGui::IsItemHovered()) {
 			if (isEuRestrictedVisionProfile(profile)) {
 				ImGui::SetTooltip("Opens the model page in your browser. Meta currently blocks this download in the EU.");
+			} else if (opensModelPage) {
+				ImGui::SetTooltip("Opens the recommended model page in your browser so you can pick the exact GGUF file.");
 			} else {
 				ImGui::SetTooltip("Opens the recommended multimodal model in your browser.");
 			}
