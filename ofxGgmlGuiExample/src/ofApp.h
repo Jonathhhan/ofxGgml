@@ -30,6 +30,13 @@ enum class AiMode {
 	Speech
 };
 
+enum class LiveContextMode {
+	Offline = 0,
+	LoadedSourcesOnly,
+	LiveContext,
+	LiveContextStrictCitations
+};
+
 // ---------------------------------------------------------------------------
 // Message — a single chat/output entry.
 // ---------------------------------------------------------------------------
@@ -171,7 +178,11 @@ private:
 	ofLogLevel logLevel = OF_LOG_NOTICE;
 	std::deque<std::string> logMessages;
 	std::mutex logMutex;
-	bool onlineModeEnabled = false;
+	LiveContextMode liveContextMode = LiveContextMode::Offline;
+	bool liveContextAllowPromptUrls = true;
+	bool liveContextAllowNews = true;
+	bool liveContextAllowWeather = true;
+	bool liveContextAllowSearch = true;
 	bool scriptIncludeRepoContext = true;
 	bool stopAtNaturalBoundary = true;
 	bool cliCapabilitiesProbed = false;
@@ -251,6 +262,10 @@ private:
 		const std::string & systemPrompt = "",
 		const std::string & overridePrompt = "",
 		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {});
+	ofxGgmlRealtimeInfoSettings buildLiveContextSettings(
+		const std::string & rawUrls,
+		const std::string & heading,
+		bool enableAutoLiveContext = false) const;
 	void runHierarchicalReview();
 	void runVisionInference();
 	void runSpeechInference();

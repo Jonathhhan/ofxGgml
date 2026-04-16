@@ -428,6 +428,21 @@ static bool looksLikeWeatherQuery(const std::string & text) {
 		lowered.find("rain") != std::string::npos;
 }
 
+static bool looksLikeNewsQuery(const std::string & text) {
+	std::string lowered = text;
+	std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+		[](unsigned char c) {
+			return static_cast<char>(std::tolower(c));
+		});
+	return lowered.find("news") != std::string::npos ||
+		lowered.find("headline") != std::string::npos ||
+		lowered.find("headlines") != std::string::npos ||
+		lowered.find("breaking") != std::string::npos ||
+		lowered.find("current events") != std::string::npos ||
+		lowered.find("latest") != std::string::npos ||
+		lowered.find("today") != std::string::npos;
+}
+
 static std::string detectWeatherLocation(const std::string & text) {
 	static const std::regex weatherLocRegex(
 		R"(weather\s+(?:in|for)\s+([A-Za-z0-9 ,._-]+))",
@@ -517,6 +532,100 @@ static ofxGgmlPromptSource fetchSearchSnippetSource(
 	source.content = normalizeSourceContent(source, sourceSettings);
 	source.content = clipTextWithMarker(
 		source.content,
+		sourceSettings.maxCharsPerSource,
+		&source.wasTruncated);
+	return source;
+}
+
+static std::string cleanRssText(const std::string & text) {
+	std::string cleaned = trim(text);
+	if (cleaned.rfind("<![CDATA[", 0) == 0) {
+		const size_t end = cleaned.rfind("]]>");
+		if (end != std::string::npos && end > 9) {
+			cleaned = cleaned.substr(9, end - 9);
+		}
+	}
+	cleaned = std::regex_replace(cleaned, std::regex(R"(<[^>]+>)"), "");
+	return trim(decodeBasicHtmlEntities(cleaned));
+}
+
+static ofxGgmlPromptSource fetchNewsSource(
+	const std::string & query,
+	const ofxGgmlPromptSourceSettings & sourceSettings) {
+	ofxGgmlPromptSource source;
+	const std::string trimmedQuery = trim(query);
+	if (trimmedQuery.empty()) {
+		return source;
+	}
+
+	const std::string url =
+		"https://news.google.com/rss/search?q=" + urlEncode(trimmedQuery) +
+		"&hl=en-US&gl=US&ceid=US:en";
+	const ofHttpResponse response = ofLoadURL(url);
+	if (response.status < 200 || response.status >= 300) {
+		return source;
+	}
+
+	static const std::regex itemRe(R"(<item\b[^>]*>([\s\S]*?)</item>)", std::regex::icase);
+	static const std::regex titleRe(R"(<title\b[^>]*>([\s\S]*?)</title>)", std::regex::icase);
+	static const std::regex sourceRe(R"(<source\b[^>]*>([\s\S]*?)</source>)", std::regex::icase);
+	static const std::regex pubDateRe(R"(<pubDate\b[^>]*>([\s\S]*?)</pubDate>)", std::regex::icase);
+
+	std::ostringstream content;
+	content << "Latest news results for \"" << trimmedQuery << "\":\n";
+
+	size_t itemCount = 0;
+	const std::string body = response.data.getText();
+	for (std::sregex_iterator it(body.begin(), body.end(), itemRe), end; it != end; ++it) {
+		if (itemCount >= 4) {
+			break;
+		}
+		const std::string item = (*it)[1].str();
+		std::smatch titleMatch;
+		if (!std::regex_search(item, titleMatch, titleRe) || titleMatch.size() < 2) {
+			continue;
+		}
+
+		const std::string title = cleanRssText(titleMatch[1].str());
+		if (title.empty()) {
+			continue;
+		}
+
+		std::string publisher;
+		std::smatch sourceMatch;
+		if (std::regex_search(item, sourceMatch, sourceRe) && sourceMatch.size() >= 2) {
+			publisher = cleanRssText(sourceMatch[1].str());
+		}
+
+		std::string pubDate;
+		std::smatch pubDateMatch;
+		if (std::regex_search(item, pubDateMatch, pubDateRe) && pubDateMatch.size() >= 2) {
+			pubDate = cleanRssText(pubDateMatch[1].str());
+		}
+
+		content << "- " << title;
+		if (!publisher.empty()) {
+			content << " (" << publisher;
+			if (!pubDate.empty()) {
+				content << ", " << pubDate;
+			}
+			content << ")";
+		} else if (!pubDate.empty()) {
+			content << " (" << pubDate << ")";
+		}
+		content << "\n";
+		++itemCount;
+	}
+
+	if (itemCount == 0) {
+		return source;
+	}
+
+	source.label = "Latest news";
+	source.uri = url;
+	source.isWebSource = true;
+	source.content = clipTextWithMarker(
+		trim(content.str()),
 		sourceSettings.maxCharsPerSource,
 		&source.wasTruncated);
 	return source;
@@ -1780,6 +1889,14 @@ std::vector<ofxGgmlPromptSource> ofxGgmlInference::fetchRealtimeSources(
 		ofxGgmlPromptSource weather = fetchWeatherSource(query, sourceSettings);
 		if (!trim(weather.content).empty()) {
 			sources.push_back(std::move(weather));
+			return sources;
+		}
+	}
+
+	if (realtimeSettings.allowNewsLookup && looksLikeNewsQuery(query)) {
+		ofxGgmlPromptSource news = fetchNewsSource(query, sourceSettings);
+		if (!trim(news.content).empty()) {
+			sources.push_back(std::move(news));
 			return sources;
 		}
 	}

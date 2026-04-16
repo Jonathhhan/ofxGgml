@@ -203,17 +203,6 @@ std::vector<std::string> extractHttpUrls(const std::string & text) {
 	return urls;
 }
 
-ofxGgmlRealtimeInfoSettings buildRealtimeInfoSettingsFromUrls(
-	const std::string & rawUrls,
-	const std::string & heading,
-	bool enableAutoRealtime = false) {
-	ofxGgmlRealtimeInfoSettings settings;
-	settings.enabled = enableAutoRealtime;
-	settings.heading = heading;
-	settings.explicitUrls = extractHttpUrls(rawUrls);
-	return settings;
-}
-
 // Strip common chat-template role markers and prompt artefacts that
 // llama-completion may emit around the actual generated text.
 // Examples of markers removed: "user", "assistant", "system",
@@ -1411,10 +1400,31 @@ ImGui::Checkbox("Use prompt cache", &usePromptCache);
 if (ImGui::IsItemHovered()) {
 	ImGui::SetTooltip("Reuse llama prompt cache between requests for faster follow-up responses.");
 }
-ImGui::Checkbox("Online mode", &onlineModeEnabled);
-if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Allow the assistant to fetch optional internet and realtime context for prompts.");
+const char * liveContextLabels[] = {
+	"Live context: Offline",
+	"Live context: Loaded sources only",
+	"Live context: Live context",
+	"Live context: Strict citations"
+};
+int liveContextModeIndex = static_cast<int>(liveContextMode);
+ImGui::SetNextItemWidth(-1);
+if (ImGui::Combo("##LiveContextMode", &liveContextModeIndex, liveContextLabels, 4)) {
+	liveContextMode = static_cast<LiveContextMode>(liveContextModeIndex);
 }
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip(
+		"Offline disables external context. Loaded sources only uses the URLs you provide. "
+		"Live context also allows automatic news, weather, and search grounding.");
+}
+const bool autoLiveLookupsEnabled =
+	liveContextMode == LiveContextMode::LiveContext ||
+	liveContextMode == LiveContextMode::LiveContextStrictCitations;
+ImGui::BeginDisabled(!autoLiveLookupsEnabled);
+ImGui::Checkbox("Allow prompt URLs", &liveContextAllowPromptUrls);
+ImGui::Checkbox("Allow news lookup", &liveContextAllowNews);
+ImGui::Checkbox("Allow weather lookup", &liveContextAllowWeather);
+ImGui::Checkbox("Allow search fallback", &liveContextAllowSearch);
+ImGui::EndDisabled();
 
 const char * mirostatLabels[] = { "Mirostat: Off", "Mirostat", "Mirostat 2.0" };
 ImGui::SetNextItemWidth(-1);
@@ -1633,18 +1643,21 @@ ImGui::SameLine();
 bool sendClicked = ImGui::Button("Send", ImVec2(70, 0));
 ImGui::SameLine();
 bool sendWithSourcesClicked = ImGui::Button("Send with Sources", ImVec2(130, 0));
-if (!onlineModeEnabled) {
+if (liveContextMode == LiveContextMode::Offline) {
 	ImGui::SameLine();
 	ImGui::TextDisabled("(offline)");
+} else if (liveContextMode == LiveContextMode::LoadedSourcesOnly) {
+	ImGui::SameLine();
+	ImGui::TextDisabled("(loaded sources only)");
 }
 
 ImGui::InputTextMultiline(
-	"Reference URLs",
+	"Loaded Sources (URLs)",
 	sourceUrlsInput,
 	sizeof(sourceUrlsInput),
 	ImVec2(-1, 48));
 if (ImGui::IsItemHovered()) {
-	ImGui::SetTooltip("Optional URLs for source-grounded answers in Chat, Summarize, and Custom.");
+	ImGui::SetTooltip("Optional source URLs for grounded answers in Chat, Summarize, and Custom.");
 }
 
 if ((submitted || sendClicked || sendWithSourcesClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
@@ -1652,13 +1665,15 @@ std::string userText(chatInput);
 chatMessages.push_back({"user", userText, ofGetElapsedTimef()});
 fprintf(stderr, "[ChatWindow] You: %s\n", userText.c_str());
 std::memset(chatInput, 0, sizeof(chatInput));
-ofxGgmlRealtimeInfoSettings realtimeSettings;
-realtimeSettings.enabled = onlineModeEnabled;
+ofxGgmlRealtimeInfoSettings realtimeSettings = buildLiveContextSettings(
+	"",
+	"Live context for chat",
+	true);
 if (sendWithSourcesClicked) {
-	realtimeSettings = buildRealtimeInfoSettingsFromUrls(
+	realtimeSettings = buildLiveContextSettings(
 		sourceUrlsInput,
-		"Reference URLs for this chat reply",
-		realtimeSettings.enabled);
+		"Loaded sources for this chat reply",
+		true);
 }
 runInference(AiMode::Chat, userText, "", "", realtimeSettings);
 }
@@ -2578,9 +2593,9 @@ if (ImGui::Button("Summarize URLs", ImVec2(150, 0))) {
 		? std::string(summarizeInput)
 		: "Summarize the reference sources.";
 	const auto prepared = textAssistant.preparePrompt(request);
-	const auto realtimeSettings = buildRealtimeInfoSettingsFromUrls(
+	const auto realtimeSettings = buildLiveContextSettings(
 		sourceUrlsInput,
-		"Reference URLs for summarization");
+		"Loaded sources for summarization");
 	runInference(
 		AiMode::Summarize,
 		request.inputText,
@@ -2854,9 +2869,9 @@ if (ImGui::Button("Run with Sources", ImVec2(150, 0))) {
 	request.inputText = customInput;
 	request.systemPrompt = customSystemPrompt;
 	const auto prepared = textAssistant.preparePrompt(request);
-	const auto realtimeSettings = buildRealtimeInfoSettingsFromUrls(
+	const auto realtimeSettings = buildLiveContextSettings(
 		sourceUrlsInput,
-		"Reference URLs for this custom task");
+		"Loaded sources for this custom task");
 	runInference(
 		AiMode::Custom,
 		request.inputText,
@@ -3181,12 +3196,18 @@ ImGui::Text(" | Lang: %s", scriptLanguages[static_cast<size_t>(selectedLanguageI
 ImGui::SameLine();
 ImGui::Text(" | Tokens: %d  Temp: %.2f  Top-P: %.2f  Top-K: %d  Min-P: %.2f",
 	maxTokens, temperature, topP, topK, minP);
-if (!onlineModeEnabled) {
+if (liveContextMode == LiveContextMode::Offline) {
 	ImGui::SameLine();
 	ImGui::TextDisabled(" | Offline");
+} else if (liveContextMode == LiveContextMode::LoadedSourcesOnly) {
+	ImGui::SameLine();
+	ImGui::TextDisabled(" | LoadedSourcesOnly");
+} else if (liveContextMode == LiveContextMode::LiveContextStrictCitations) {
+	ImGui::SameLine();
+	ImGui::TextDisabled(" | LiveContextStrictCitations");
 } else {
 	ImGui::SameLine();
-	ImGui::TextDisabled(" | Online");
+	ImGui::TextDisabled(" | LiveContext");
 }
 if (gpuLayers > 0) {
 ImGui::SameLine();
@@ -3422,7 +3443,11 @@ out << "translateOutput=" << escapeSessionText(translateOutput) << "\n";
 out << "customOutput=" << escapeSessionText(customOutput) << "\n";
 out << "visionOutput=" << escapeSessionText(visionOutput) << "\n";
 out << "speechOutput=" << escapeSessionText(speechOutput) << "\n";
-out << "onlineModeEnabled=" << (onlineModeEnabled ? 1 : 0) << "\n";
+out << "liveContextMode=" << static_cast<int>(liveContextMode) << "\n";
+out << "liveContextAllowPromptUrls=" << (liveContextAllowPromptUrls ? 1 : 0) << "\n";
+out << "liveContextAllowNews=" << (liveContextAllowNews ? 1 : 0) << "\n";
+out << "liveContextAllowWeather=" << (liveContextAllowWeather ? 1 : 0) << "\n";
+out << "liveContextAllowSearch=" << (liveContextAllowSearch ? 1 : 0) << "\n";
 out << "stopAtNaturalBoundary=" << (stopAtNaturalBoundary ? 1 : 0) << "\n";
 
 // Chat messages.
@@ -3611,7 +3636,13 @@ else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
 else if (key == "customOutput") customOutput = unescapeSessionText(value);
 else if (key == "visionOutput") visionOutput = unescapeSessionText(value);
 else if (key == "speechOutput") speechOutput = unescapeSessionText(value);
-else if (key == "onlineModeEnabled") onlineModeEnabled = (safeStoi(value, 0) != 0);
+else if (key == "liveContextMode") {
+	liveContextMode = static_cast<LiveContextMode>(std::clamp(safeStoi(value, 0), 0, 3));
+}
+else if (key == "liveContextAllowPromptUrls") liveContextAllowPromptUrls = (safeStoi(value, 1) != 0);
+else if (key == "liveContextAllowNews") liveContextAllowNews = (safeStoi(value, 1) != 0);
+else if (key == "liveContextAllowWeather") liveContextAllowWeather = (safeStoi(value, 1) != 0);
+else if (key == "liveContextAllowSearch") liveContextAllowSearch = (safeStoi(value, 1) != 0);
 else if (key == "stopAtNaturalBoundary") stopAtNaturalBoundary = (safeStoi(value, 1) != 0);
 else if (key == "msg") {
 // Parse: role|timestamp|text
@@ -4611,6 +4642,49 @@ void ofApp::syncSelectedBackendIndex() {
 	selectedBackendIndex = (matchIdx >= 0) ? matchIdx : 0;
 }
 
+ofxGgmlRealtimeInfoSettings ofApp::buildLiveContextSettings(
+	const std::string & rawUrls,
+	const std::string & heading,
+	bool enableAutoLiveContext) const {
+	ofxGgmlRealtimeInfoSettings settings;
+	settings.heading = heading;
+	settings.explicitUrls = extractHttpUrls(rawUrls);
+	settings.allowPromptUrlFetch = liveContextAllowPromptUrls;
+	settings.allowNewsLookup = liveContextAllowNews;
+	settings.allowWeatherLookup = liveContextAllowWeather;
+	settings.allowSearchFallback = liveContextAllowSearch;
+
+	switch (liveContextMode) {
+	case LiveContextMode::Offline:
+		settings.enabled = false;
+		settings.explicitUrls.clear();
+		settings.requestCitations = false;
+		settings.allowPromptUrlFetch = false;
+		settings.allowNewsLookup = false;
+		settings.allowWeatherLookup = false;
+		settings.allowSearchFallback = false;
+		break;
+	case LiveContextMode::LoadedSourcesOnly:
+		settings.enabled = false;
+		settings.requestCitations = true;
+		settings.allowPromptUrlFetch = false;
+		settings.allowNewsLookup = false;
+		settings.allowWeatherLookup = false;
+		settings.allowSearchFallback = false;
+		break;
+	case LiveContextMode::LiveContext:
+		settings.enabled = enableAutoLiveContext;
+		settings.requestCitations = false;
+		break;
+	case LiveContextMode::LiveContextStrictCitations:
+		settings.enabled = enableAutoLiveContext;
+		settings.requestCitations = true;
+		break;
+	}
+
+	return settings;
+}
+
 void ofApp::runInference(AiMode mode, const std::string & userText,
 	const std::string & systemPrompt,
 	const std::string & overridePrompt,
@@ -4653,13 +4727,23 @@ workerThread.join();
  try {
  const bool preserveLlamaInstructions = (mode == AiMode::Script);
  ofxGgmlRealtimeInfoSettings effectiveRealtimeSettings = realtimeSettings;
- if (!onlineModeEnabled) {
+ if (liveContextMode == LiveContextMode::Offline) {
 	effectiveRealtimeSettings.enabled = false;
 	effectiveRealtimeSettings.explicitUrls.clear();
  } else if (mode == AiMode::Script &&
 	scriptSource.getSourceType() == ofxGgmlScriptSourceType::Internet) {
-	effectiveRealtimeSettings.heading = "Context fetched from loaded internet sources";
+	effectiveRealtimeSettings.heading = "Context fetched from loaded sources";
 	effectiveRealtimeSettings.explicitUrls = scriptSource.getInternetUrls();
+	effectiveRealtimeSettings.allowPromptUrlFetch = false;
+	effectiveRealtimeSettings.allowNewsLookup = false;
+	effectiveRealtimeSettings.allowWeatherLookup = false;
+	effectiveRealtimeSettings.allowSearchFallback = false;
+	effectiveRealtimeSettings.enabled =
+		(liveContextMode == LiveContextMode::LiveContext ||
+		 liveContextMode == LiveContextMode::LiveContextStrictCitations);
+	effectiveRealtimeSettings.requestCitations =
+		(liveContextMode == LiveContextMode::LoadedSourcesOnly ||
+		 liveContextMode == LiveContextMode::LiveContextStrictCitations);
  }
 
  auto buildPromptForCurrentMode = [&](const std::string & text) {

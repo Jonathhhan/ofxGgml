@@ -81,6 +81,7 @@ struct ofxGgmlPromptSourceSettings {
 struct ofxGgmlRealtimeInfoSettings {
 	bool enabled = false;
 	bool allowPromptUrlFetch = true;
+	bool allowNewsLookup = true;
 	bool allowSearchFallback = true;
 	bool allowWeatherLookup = true;
 	size_t maxSources = 4;
