@@ -250,6 +250,17 @@ static ggml_backend_dev_t findUsableDeviceByNamePrefix(const char * prefix) {
 
 static void ggmlLogCallback(ggml_log_level level, const char * text, void * user_data) {
 	auto * impl = static_cast<ofxGgml::Impl *>(user_data);
+	// Thread-safe validation: Check if impl is still registered before accessing
+	{
+		std::lock_guard<std::mutex> lock(s_logOwnerMutex);
+		// Verify the impl pointer is still in the active owners list
+		const auto it = std::find(s_logOwners.begin(), s_logOwners.end(), impl);
+		if (it == s_logOwners.end()) {
+			// Impl was unregistered, ignore this callback
+			return;
+		}
+	}
+	// Safe to access impl->logCb now as we verified it's registered
 	if (impl && impl->logCb) {
 		impl->logCb(static_cast<int>(level), text ? text : "");
 	}
@@ -260,18 +271,26 @@ static std::vector<ofxGgml::Impl *> s_logOwners;
 
 static void registerLogCallbackOwner(ofxGgml::Impl * impl) {
 	std::lock_guard<std::mutex> lock(s_logOwnerMutex);
+	// Remove any existing registration for this impl
 	s_logOwners.erase(std::remove(s_logOwners.begin(), s_logOwners.end(), impl), s_logOwners.end());
+	// Add to the end of the list
 	s_logOwners.push_back(impl);
+	// Set the global callback with this impl as user_data
+	// The callback will validate the pointer is still registered
 	ggml_log_set(ggmlLogCallback, impl);
 }
 
 static void unregisterLogCallbackOwner(ofxGgml::Impl * impl) {
 	std::lock_guard<std::mutex> lock(s_logOwnerMutex);
+	// Remove this impl from the list
 	s_logOwners.erase(std::remove(s_logOwners.begin(), s_logOwners.end(), impl), s_logOwners.end());
 	if (s_logOwners.empty()) {
+		// No more owners, clear the callback
 		ggml_log_set(nullptr, nullptr);
 		return;
 	}
+	// Update the global callback to use the most recent owner
+	// This ensures callbacks go to a valid impl
 	ggml_log_set(ggmlLogCallback, s_logOwners.back());
 }
 
