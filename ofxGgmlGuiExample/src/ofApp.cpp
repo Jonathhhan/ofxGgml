@@ -190,6 +190,40 @@ std::string trim(const std::string & s) {
 	return s.substr(start, end - start);
 }
 
+bool pathExists(const std::string & path) {
+	if (path.empty()) {
+		return false;
+	}
+	std::error_code ec;
+	return std::filesystem::exists(path, ec) && !ec;
+}
+
+std::string suggestedModelPath(
+	const std::string & explicitPath,
+	const std::string & modelFileHint) {
+	const std::string trimmedExplicit = trim(explicitPath);
+	if (!trimmedExplicit.empty()) {
+		return trimmedExplicit;
+	}
+	const std::string trimmedFileHint = trim(modelFileHint);
+	if (trimmedFileHint.empty()) {
+		return "";
+	}
+	return ofToDataPath(ofFilePath::join("models", trimmedFileHint), true);
+}
+
+std::string suggestedModelDownloadUrl(
+	const std::string & modelRepoHint,
+	const std::string & modelFileHint) {
+	const std::string trimmedRepoHint = trim(modelRepoHint);
+	const std::string trimmedFileHint = trim(modelFileHint);
+	if (trimmedRepoHint.empty() || trimmedFileHint.empty()) {
+		return "";
+	}
+	return "https://huggingface.co/" + trimmedRepoHint +
+		"/resolve/main/" + trimmedFileHint;
+}
+
 std::vector<std::string> extractHttpUrls(const std::string & text) {
 	static const std::regex urlRegex(R"(https?://[^\s<>\"]+)", std::regex::icase);
 	std::vector<std::string> urls;
@@ -1311,6 +1345,7 @@ if (!modelPresets.empty()) {
 		ImGui::SetTooltip("Switch to the catalog default for this mode.");
 	}
 
+	const auto & selectedPreset = modelPresets[static_cast<size_t>(selectedModelIndex)];
 	const std::string modelPath = getSelectedModelPath();
 	if (!modelPath.empty()) {
 		std::error_code modelEc;
@@ -1320,6 +1355,15 @@ if (!modelPresets.empty()) {
 			ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.3f, 1.0f),
 				"Model missing: %s", ofFilePath::getFileName(modelPath).c_str());
 			ImGui::TextDisabled("Place file at: %s", modelPath.c_str());
+			ImGui::BeginDisabled(selectedPreset.url.empty());
+			if (ImGui::SmallButton("Download in browser")) {
+				ofLaunchBrowser(selectedPreset.url);
+			}
+			ImGui::EndDisabled();
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Opens the preset download URL in your browser.");
+			}
+			ImGui::SameLine();
 			const int presetNumber = selectedModelIndex + 1;
 			std::string downloadCmd = "./scripts/download-model.sh --preset " + ofToString(presetNumber);
 			if (ImGui::SmallButton("Copy download command")) {
@@ -2914,13 +2958,40 @@ ImGui::EndChild();
 void ofApp::drawVisionPanel() {
 drawPanelHeader("Vision", "image-to-text via llama-server multimodal models");
 
+	const auto applyVisionProfileDefaults =
+		[this](const ofxGgmlVisionModelProfile & profile, bool onlyWhenEmpty) {
+			if (!profile.serverUrl.empty() &&
+				(!onlyWhenEmpty || trim(visionServerUrl).empty())) {
+				copyStringToBuffer(
+					visionServerUrl,
+					sizeof(visionServerUrl),
+					profile.serverUrl);
+			}
+			const std::string suggestedPath =
+				suggestedModelPath(profile.modelPath, profile.modelFileHint);
+			if (!suggestedPath.empty() &&
+				(!onlyWhenEmpty || trim(visionModelPath).empty())) {
+				copyStringToBuffer(
+					visionModelPath,
+					sizeof(visionModelPath),
+					suggestedPath);
+			}
+		};
+
+	bool loadedVisionProfiles = false;
 if (visionProfiles.empty()) {
 	visionProfiles = ofxGgmlVisionInference::defaultProfiles();
+	loadedVisionProfiles = !visionProfiles.empty();
 }
 selectedVisionProfileIndex = std::clamp(
 	selectedVisionProfileIndex,
 	0,
 	std::max(0, static_cast<int>(visionProfiles.size()) - 1));
+if (loadedVisionProfiles && !visionProfiles.empty()) {
+	applyVisionProfileDefaults(
+		visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)],
+		true);
+}
 
 ImGui::TextWrapped(
 	"Use a llama-server instance that is already running with a multimodal GGUF model. "
@@ -2935,20 +3006,46 @@ if (!visionProfiles.empty()) {
 	ImGui::SetNextItemWidth(280);
 	if (ImGui::Combo("Vision profile", &selectedVisionProfileIndex, profileNames.data(), static_cast<int>(profileNames.size()))) {
 		const auto & profile = visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)];
-		if (!profile.serverUrl.empty()) {
-			copyStringToBuffer(visionServerUrl, sizeof(visionServerUrl), profile.serverUrl);
-		}
-		if (!profile.modelPath.empty()) {
-			copyStringToBuffer(visionModelPath, sizeof(visionModelPath), profile.modelPath);
-		}
+		applyVisionProfileDefaults(profile, false);
 	}
 	const auto & profile = visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)];
+	const std::string recommendedModelPath =
+		suggestedModelPath(profile.modelPath, profile.modelFileHint);
+	const std::string recommendedDownloadUrl =
+		suggestedModelDownloadUrl(profile.modelRepoHint, profile.modelFileHint);
 	ImGui::TextDisabled("Architecture: %s", profile.architecture.c_str());
 	if (!profile.modelRepoHint.empty()) {
-		ImGui::TextDisabled("Suggested model: %s", profile.modelRepoHint.c_str());
+		ImGui::TextDisabled("Recommended server model: %s", profile.modelRepoHint.c_str());
 	}
 	if (!profile.modelFileHint.empty()) {
-		ImGui::TextDisabled("Suggested file: %s", profile.modelFileHint.c_str());
+		ImGui::TextDisabled("Recommended file: %s", profile.modelFileHint.c_str());
+	}
+	if (!recommendedModelPath.empty()) {
+		ImGui::TextDisabled("Recommended local path: %s", recommendedModelPath.c_str());
+		ImGui::TextDisabled(
+			pathExists(recommendedModelPath)
+				? "Recommended model is already present."
+				: "Recommended model is not downloaded yet.");
+		ImGui::BeginDisabled(trim(visionModelPath) == recommendedModelPath);
+		if (ImGui::SmallButton("Use recommended path##Vision")) {
+			copyStringToBuffer(
+				visionModelPath,
+				sizeof(visionModelPath),
+				recommendedModelPath);
+		}
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Sets the model path to the profile's recommended file under bin/data/models/.");
+		}
+		ImGui::SameLine();
+		ImGui::BeginDisabled(recommendedDownloadUrl.empty());
+		if (ImGui::SmallButton("Download model##Vision")) {
+			ofLaunchBrowser(recommendedDownloadUrl);
+		}
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Opens the recommended multimodal model in your browser.");
+		}
 	}
 	if (profile.mayRequireMmproj) {
 		ImGui::TextDisabled("Note: some variants also need a matching mmproj file on the server side.");
@@ -3041,13 +3138,40 @@ ImGui::TextWrapped(
 	"Use a local speech backend such as whisper-cli. This keeps speech-to-text available as a first-class "
 	"addon workflow instead of hiding it behind the script or chat panels.");
 
+	const auto applySpeechProfileDefaults =
+		[this](const ofxGgmlSpeechModelProfile & profile, bool onlyWhenEmpty) {
+			if (!profile.executable.empty() &&
+				(!onlyWhenEmpty || trim(speechExecutable).empty())) {
+				copyStringToBuffer(
+					speechExecutable,
+					sizeof(speechExecutable),
+					profile.executable);
+			}
+			const std::string suggestedPath =
+				suggestedModelPath(profile.modelPath, profile.modelFileHint);
+			if (!suggestedPath.empty() &&
+				(!onlyWhenEmpty || trim(speechModelPath).empty())) {
+				copyStringToBuffer(
+					speechModelPath,
+					sizeof(speechModelPath),
+					suggestedPath);
+			}
+		};
+
+	bool loadedSpeechProfiles = false;
 if (speechProfiles.empty()) {
 	speechProfiles = ofxGgmlSpeechInference::defaultProfiles();
+	loadedSpeechProfiles = !speechProfiles.empty();
 }
 selectedSpeechProfileIndex = std::clamp(
 	selectedSpeechProfileIndex,
 	0,
 	std::max(0, static_cast<int>(speechProfiles.size()) - 1));
+if (loadedSpeechProfiles && !speechProfiles.empty()) {
+	applySpeechProfileDefaults(
+		speechProfiles[static_cast<size_t>(selectedSpeechProfileIndex)],
+		true);
+}
 
 if (!speechProfiles.empty()) {
 	std::vector<const char *> profileNames;
@@ -3059,20 +3183,46 @@ if (!speechProfiles.empty()) {
 	if (ImGui::Combo("Speech profile", &selectedSpeechProfileIndex, profileNames.data(),
 		static_cast<int>(profileNames.size()))) {
 		const auto & profile = speechProfiles[static_cast<size_t>(selectedSpeechProfileIndex)];
-		if (!profile.executable.empty()) {
-			copyStringToBuffer(speechExecutable, sizeof(speechExecutable), profile.executable);
-		}
-		if (!profile.modelPath.empty()) {
-			copyStringToBuffer(speechModelPath, sizeof(speechModelPath), profile.modelPath);
-		}
+		applySpeechProfileDefaults(profile, false);
 	}
 
 	const auto & profile = speechProfiles[static_cast<size_t>(selectedSpeechProfileIndex)];
+	const std::string recommendedModelPath =
+		suggestedModelPath(profile.modelPath, profile.modelFileHint);
+	const std::string recommendedDownloadUrl =
+		suggestedModelDownloadUrl(profile.modelRepoHint, profile.modelFileHint);
 	if (!profile.modelRepoHint.empty()) {
-		ImGui::TextDisabled("Suggested repo: %s", profile.modelRepoHint.c_str());
+		ImGui::TextDisabled("Recommended repo: %s", profile.modelRepoHint.c_str());
 	}
 	if (!profile.modelFileHint.empty()) {
-		ImGui::TextDisabled("Suggested file: %s", profile.modelFileHint.c_str());
+		ImGui::TextDisabled("Recommended file: %s", profile.modelFileHint.c_str());
+	}
+	if (!recommendedModelPath.empty()) {
+		ImGui::TextDisabled("Recommended local path: %s", recommendedModelPath.c_str());
+		ImGui::TextDisabled(
+			pathExists(recommendedModelPath)
+				? "Recommended model is already present."
+				: "Recommended model is not downloaded yet.");
+		ImGui::BeginDisabled(trim(speechModelPath) == recommendedModelPath);
+		if (ImGui::SmallButton("Use recommended path##Speech")) {
+			copyStringToBuffer(
+				speechModelPath,
+				sizeof(speechModelPath),
+				recommendedModelPath);
+		}
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Sets the speech model path to the recommended file under bin/data/models/.");
+		}
+		ImGui::SameLine();
+		ImGui::BeginDisabled(recommendedDownloadUrl.empty());
+		if (ImGui::SmallButton("Download model##Speech")) {
+			ofLaunchBrowser(recommendedDownloadUrl);
+		}
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Opens the recommended Whisper model in your browser.");
+		}
 	}
 }
 

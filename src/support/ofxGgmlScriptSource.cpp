@@ -1,4 +1,5 @@
 #include "ofxGgmlScriptSource.h"
+#include "core/ofxGgmlWindowsUtf8.h"
 
 #include <algorithm>
 #include <cctype>
@@ -226,7 +227,7 @@ std::string runExecutableAndCaptureLine(
 	}
 	SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
 
-	STARTUPINFOA si {};
+	STARTUPINFOW si {};
 	si.cb = sizeof(si);
 	si.dwFlags = STARTF_USESTDHANDLES;
 	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
@@ -239,11 +240,12 @@ std::string runExecutableAndCaptureLine(
 		commandLine += quoteWindowsArg(arg);
 	}
 
-	std::vector<char> mutableCommandLine(commandLine.begin(), commandLine.end());
-	mutableCommandLine.push_back('\0');
+	std::wstring wideCommandLine = ofxGgmlWideFromUtf8(commandLine);
+	std::vector<wchar_t> mutableCommandLine(wideCommandLine.begin(), wideCommandLine.end());
+	mutableCommandLine.push_back(L'\0');
 
 	PROCESS_INFORMATION pi {};
-	const BOOL created = CreateProcessA(
+	const BOOL created = CreateProcessW(
 		nullptr,
 		mutableCommandLine.data(),
 		nullptr,

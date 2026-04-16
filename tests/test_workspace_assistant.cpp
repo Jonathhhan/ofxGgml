@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <numeric>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -658,4 +659,105 @@ TEST_CASE("Workspace assistant keeps the original workspace untouched when shado
 	REQUIRE(readFile(root / "src" / "app.txt") == "before");
 	REQUIRE(result.verificationResult.summary.find("failed") != std::string::npos);
 	REQUIRE(std::filesystem::exists(result.shadowWorkspaceRoot));
+}
+
+TEST_CASE("Workspace assistant rejects shadow roots inside the source workspace", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("shadow_inside_source");
+	std::filesystem::create_directories(root / "src");
+	{
+		std::ofstream out(root / "src" / "app.txt");
+		out << "before";
+	}
+
+	const std::string modelPath = createWorkspaceDummyModel();
+	const std::string exePath = createWorkspaceExecutable({
+		"GOAL: Update app text safely",
+		"PATCH: replace | src/app.txt | update content",
+		"SEARCH: before",
+		"REPLACE: after"
+	});
+
+	ofxGgmlWorkspaceAssistant assistant;
+	assistant.setCompletionExecutable(exePath);
+
+	ofxGgmlCodeAssistantRequest request;
+	request.action = ofxGgmlCodeAssistantAction::Edit;
+	request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+	request.userInput = "Update the app text.";
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(root.string()));
+
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+
+	ofxGgmlWorkspaceSettings settings;
+	settings.workspaceRoot = root.string();
+	settings.useShadowWorkspace = true;
+	settings.shadowWorkspaceRoot = root.string();
+	settings.maxVerificationAttempts = 1;
+
+	const auto result = assistant.runTask(
+		modelPath,
+		request,
+		context,
+		settings);
+
+	REQUIRE_FALSE(result.success);
+	REQUIRE(readFile(root / "src" / "app.txt") == "before");
+	REQUIRE(std::filesystem::exists(root));
+	REQUIRE(std::filesystem::exists(root / "src" / "app.txt"));
+	REQUIRE_FALSE(result.usedShadowWorkspace);
+}
+
+TEST_CASE("Workspace assistant enforces synthesized FixBuild allowlists during apply", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("fixbuild_allowlist");
+	std::filesystem::create_directories(root / "src");
+	{
+		std::ofstream out(root / "src" / "app.txt");
+		out << "broken";
+	}
+
+	const std::string modelPath = createWorkspaceDummyModel();
+	const std::string exePath = createWorkspaceExecutable({
+		"GOAL: Fix the build",
+		"PATCH: write | src/other.txt | create unexpected file",
+		"CONTENT: should not be allowed"
+	});
+
+	ofxGgmlWorkspaceAssistant assistant;
+	assistant.setCompletionExecutable(exePath);
+
+	ofxGgmlCodeAssistantRequest request;
+	request.action = ofxGgmlCodeAssistantAction::FixBuild;
+	request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+	request.userInput = "Repair the failing build.";
+	request.buildErrors = "src/app.txt(1): error C2001: broken";
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(root.string()));
+
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+
+	ofxGgmlWorkspaceSettings settings;
+	settings.workspaceRoot = root.string();
+	settings.runVerification = false;
+	settings.maxVerificationAttempts = 1;
+
+	const auto result = assistant.runTask(
+		modelPath,
+		request,
+		context,
+		settings);
+
+	REQUIRE_FALSE(result.success);
+	REQUIRE_FALSE(std::filesystem::exists(root / "src" / "other.txt"));
+	REQUIRE(readFile(root / "src" / "app.txt") == "broken");
+	REQUIRE_FALSE(result.applyResult.messages.empty());
+	const auto combinedMessages = std::accumulate(
+		result.applyResult.messages.begin(),
+		result.applyResult.messages.end(),
+		std::string());
+	REQUIRE(combinedMessages.find("allowed file list") != std::string::npos);
 }

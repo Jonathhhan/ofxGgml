@@ -1,4 +1,5 @@
 #include "ofxGgmlWorkspaceAssistant.h"
+#include "core/ofxGgmlWindowsUtf8.h"
 
 #include <algorithm>
 #include <array>
@@ -192,7 +193,7 @@ std::string runWindowsProcessCaptureFirstLine(
 	}
 	SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
 
-	STARTUPINFOA si {};
+	STARTUPINFOW si {};
 	si.cb = sizeof(si);
 	si.dwFlags = STARTF_USESTDHANDLES;
 	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
@@ -205,11 +206,12 @@ std::string runWindowsProcessCaptureFirstLine(
 		commandLine += quoteWindowsArg(arg);
 	}
 
-	std::vector<char> mutableCommandLine(commandLine.begin(), commandLine.end());
-	mutableCommandLine.push_back('\0');
+	std::wstring wideCommandLine = ofxGgmlWideFromUtf8(commandLine);
+	std::vector<wchar_t> mutableCommandLine(wideCommandLine.begin(), wideCommandLine.end());
+	mutableCommandLine.push_back(L'\0');
 
 	PROCESS_INFORMATION pi {};
-	const BOOL ok = CreateProcessA(
+	const BOOL ok = CreateProcessW(
 		nullptr,
 		mutableCommandLine.data(),
 		nullptr,
@@ -464,7 +466,7 @@ bool runCommandCapture(
 		return false;
 	}
 
-	STARTUPINFOA si {};
+	STARTUPINFOW si {};
 	si.cb = sizeof(si);
 	si.dwFlags = STARTF_USESTDHANDLES;
 	HANDLE nullInput = CreateFileA("NUL", GENERIC_READ, 0, &sa,
@@ -503,12 +505,14 @@ bool runCommandCapture(
 		}
 	}
 
-	std::vector<char> mutableCmd(cmdLine.begin(), cmdLine.end());
-	mutableCmd.push_back('\0');
-	const char * workDirPtr =
-		workingDirectory.empty() ? nullptr : workingDirectory.c_str();
+	std::wstring wideCmdLine = ofxGgmlWideFromUtf8(cmdLine);
+	std::vector<wchar_t> mutableCmd(wideCmdLine.begin(), wideCmdLine.end());
+	mutableCmd.push_back(L'\0');
+	const std::wstring wideWorkingDirectory = ofxGgmlWideFromUtf8(workingDirectory);
+	const wchar_t * workDirPtr =
+		workingDirectory.empty() ? nullptr : wideWorkingDirectory.c_str();
 
-	BOOL ok = CreateProcessA(
+	BOOL ok = CreateProcessW(
 		nullptr,
 		mutableCmd.data(),
 		nullptr,
@@ -640,6 +644,17 @@ std::string patchKindToString(ofxGgmlCodeAssistantPatchKind kind) {
 	return "write";
 }
 
+bool isPathWithinRoot(
+	const std::filesystem::path & candidate,
+	const std::filesystem::path & root) {
+	const std::string rootString = root.lexically_normal().generic_string();
+	const std::string candidateString = candidate.lexically_normal().generic_string();
+	return candidateString == rootString ||
+		(candidateString.size() > rootString.size() &&
+			candidateString.compare(0, rootString.size(), rootString) == 0 &&
+			candidateString[rootString.size()] == '/');
+}
+
 std::filesystem::path resolveTargetPath(
 	const std::filesystem::path & root,
 	const std::string & relativePath,
@@ -653,14 +668,7 @@ std::filesystem::path resolveTargetPath(
 	}
 
 	const std::filesystem::path normalized = (root / relative).lexically_normal();
-	const std::string rootString = root.generic_string();
-	const std::string candidateString = normalized.generic_string();
-	const bool withinRoot =
-		candidateString == rootString ||
-		(candidateString.size() > rootString.size() &&
-			candidateString.compare(0, rootString.size(), rootString) == 0 &&
-			candidateString[rootString.size()] == '/');
-	if (!withinRoot) {
+	if (!isPathWithinRoot(normalized, root)) {
 		if (error != nullptr) {
 			*error = "Patch path escapes the workspace root: " + relativePath;
 		}
@@ -997,17 +1005,73 @@ bool writeWorkspaceFile(const std::filesystem::path & path, const std::string & 
 }
 
 std::filesystem::path makeShadowWorkspacePath(
-	const std::string & workspaceRoot,
-	const std::string & preferredRoot) {
+	const std::filesystem::path & workspaceRoot,
+	const std::string & preferredRoot,
+	std::string * error = nullptr) {
+	std::error_code ec;
+	std::filesystem::path baseRoot;
 	if (!trimCopy(preferredRoot).empty()) {
-		return std::filesystem::path(preferredRoot);
+		baseRoot = std::filesystem::path(preferredRoot);
+		if (std::filesystem::exists(baseRoot, ec) &&
+			!std::filesystem::is_directory(baseRoot, ec)) {
+			if (error != nullptr) {
+				*error = "Shadow workspace root must be a directory: " +
+					baseRoot.generic_string();
+			}
+			return {};
+		}
+		ec.clear();
+		std::filesystem::create_directories(baseRoot, ec);
+		if (ec) {
+			if (error != nullptr) {
+				*error = "Failed to create shadow workspace root: " +
+					baseRoot.generic_string();
+			}
+			return {};
+		}
+		baseRoot = std::filesystem::weakly_canonical(baseRoot, ec);
+		if (ec || baseRoot.empty()) {
+			if (error != nullptr) {
+				*error = "Failed to resolve shadow workspace root: " +
+					std::filesystem::path(preferredRoot).generic_string();
+			}
+			return {};
+		}
+	} else {
+		baseRoot = std::filesystem::temp_directory_path(ec);
+		if (ec || baseRoot.empty()) {
+			if (error != nullptr) {
+				*error = "Failed to resolve temporary directory for shadow workspace.";
+			}
+			return {};
+		}
 	}
-	const std::string stem = std::filesystem::path(workspaceRoot).filename().string();
+
+	const std::string stem = workspaceRoot.filename().string();
 	const auto now = std::chrono::system_clock::now().time_since_epoch();
 	const auto stamp =
 		std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-	return std::filesystem::temp_directory_path() /
-		("ofxggml-shadow-" + stem + "-" + std::to_string(stamp));
+	for (int attempt = 0; attempt < 32; ++attempt) {
+		const std::string suffix = attempt == 0
+			? std::to_string(stamp)
+			: std::to_string(stamp) + "-" + std::to_string(attempt);
+		const auto candidate = baseRoot /
+			("ofxggml-shadow-" + stem + "-" + suffix);
+		if (isPathWithinRoot(candidate, workspaceRoot)) {
+			if (error != nullptr) {
+				*error = "Shadow workspace root must not be inside the source workspace.";
+			}
+			return {};
+		}
+		ec.clear();
+		if (!std::filesystem::exists(candidate, ec) || ec) {
+			return candidate;
+		}
+	}
+	if (error != nullptr) {
+		*error = "Failed to allocate a unique shadow workspace path.";
+	}
+	return {};
 }
 
 bool copyWorkspaceTree(
@@ -1870,11 +1934,14 @@ std::string ofxGgmlWorkspaceAssistant::createShadowWorkspace(
 		return {};
 	}
 
+	std::string error;
 	const auto shadowRoot = makeShadowWorkspacePath(
-		sourceRoot.string(),
-		preferredRoot);
-	std::filesystem::remove_all(shadowRoot, ec);
-	ec.clear();
+		sourceRoot,
+		preferredRoot,
+		&error);
+	if (!error.empty() || shadowRoot.empty()) {
+		return {};
+	}
 	std::vector<std::string> messages;
 	if (!copyWorkspaceTree(sourceRoot, shadowRoot, &messages)) {
 		return {};
@@ -2062,7 +2129,7 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 			(hasUnifiedDiff || !currentStructured.patchOperations.empty())) {
 			const auto effectiveAllowedFiles =
 				workspaceSettings.allowedFiles.empty()
-					? request.allowedFiles
+					? initialRequest.allowedFiles
 					: workspaceSettings.allowedFiles;
 			transaction = hasUnifiedDiff
 				? beginUnifiedDiffTransaction(

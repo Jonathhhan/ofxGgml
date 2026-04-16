@@ -546,11 +546,11 @@ esac
 	inf.setCompletionExecutable(completionScript);
 	inf.setEmbeddingExecutable(embeddingScript);
 
-	SECTION("completion: nonzero with non-empty output succeeds") {
+	SECTION("completion: nonzero with non-empty output still fails") {
 		ScopedEnvVar mode("OFXGGML_EXIT_TEST_MODE", "nonempty");
 		auto result = inf.generate(modelPath, "hello");
-		REQUIRE(result.success);
-		REQUIRE(result.text.find("generated-output") != std::string::npos);
+		REQUIRE_FALSE(result.success);
+		REQUIRE(result.error.find("generated-output") != std::string::npos);
 	}
 
 	SECTION("completion: nonzero with empty output fails") {
@@ -566,11 +566,11 @@ esac
 		REQUIRE(result.success);
 	}
 
-	SECTION("embedding: nonzero with non-empty output succeeds") {
+	SECTION("embedding: nonzero with non-empty output still fails") {
 		ScopedEnvVar mode("OFXGGML_EXIT_TEST_MODE", "nonempty");
 		auto result = inf.embed(modelPath, "hello");
-		REQUIRE(result.success);
-		REQUIRE(result.embedding.size() == 3);
+		REQUIRE_FALSE(result.success);
+		REQUIRE(result.error.find("[0.25, 0.50, 0.75]") != std::string::npos);
 	}
 
 	SECTION("embedding: nonzero with empty output fails") {

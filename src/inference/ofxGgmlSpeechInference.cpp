@@ -1,4 +1,5 @@
 #include "ofxGgmlSpeechInference.h"
+#include "core/ofxGgmlWindowsUtf8.h"
 
 #include <algorithm>
 #include <array>
@@ -232,7 +233,7 @@ bool runCommandCapture(
 		return false;
 	}
 
-	STARTUPINFOA si {};
+	STARTUPINFOW si {};
 	si.cb = sizeof(si);
 	si.dwFlags = STARTF_USESTDHANDLES;
 	HANDLE nullInput = CreateFileA("NUL", GENERIC_READ, 0, &sa,
@@ -280,10 +281,11 @@ bool runCommandCapture(
 		}
 	}
 
-	std::vector<char> mutableCmd(cmdLine.begin(), cmdLine.end());
-	mutableCmd.push_back('\0');
+	std::wstring wideCmdLine = ofxGgmlWideFromUtf8(cmdLine);
+	std::vector<wchar_t> mutableCmd(wideCmdLine.begin(), wideCmdLine.end());
+	mutableCmd.push_back(L'\0');
 
-	const BOOL ok = CreateProcessA(
+	const BOOL ok = CreateProcessW(
 		nullptr,
 		mutableCmd.data(),
 		nullptr,

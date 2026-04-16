@@ -1,4 +1,5 @@
 #include "ofxGgmlInference.h"
+#include "core/ofxGgmlWindowsUtf8.h"
 #include "support/ofxGgmlScriptSource.h"
 
 #include <algorithm>
@@ -1032,12 +1033,7 @@ static bool shouldTreatNonZeroExitAsSuccess(
 		rawOutput.find("EOF by user") != std::string::npos ||
 		rawOutput.find("Interrupted by user") != std::string::npos;
 	if (interruptedMarker) return false;
-
-	return exitCode == -1073740791 // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409)
-		|| exitCode == -1073741819 // Windows STATUS_ACCESS_VIOLATION (0xC0000005)
-		|| exitCode == 1 // generic error (may occur during cleanup)
-		|| exitCode == -1 // signal-killed on POSIX
-		|| (exitCode >= 128 && exitCode < 160); // POSIX signal exits (128+signal)
+	return false;
 }
 
 /// Sanitize a string for safe use in command arguments.
@@ -1184,7 +1180,7 @@ if (args.empty() || args.front().empty()) return false;
 		return false;
 	}
 
-	STARTUPINFOA si {};
+	STARTUPINFOW si {};
 	si.cb = sizeof(si);
 	si.dwFlags = STARTF_USESTDHANDLES;
 	HANDLE nullInput = CreateFileA("NUL", GENERIC_READ, 0, &sa,
@@ -1237,10 +1233,11 @@ if (args.empty() || args.front().empty()) return false;
 			cmdLine += quoteWindowsArg(i == 0 ? resolvedExecutable : args[i]);
 		}
 	}
-	std::vector<char> mutableCmd(cmdLine.begin(), cmdLine.end());
-	mutableCmd.push_back('\0');
+	std::wstring wideCmdLine = ofxGgmlWideFromUtf8(cmdLine);
+	std::vector<wchar_t> mutableCmd(wideCmdLine.begin(), wideCmdLine.end());
+	mutableCmd.push_back(L'\0');
 
-	BOOL ok = CreateProcessA(
+	BOOL ok = CreateProcessW(
 		nullptr,
 		mutableCmd.data(),
 		nullptr,

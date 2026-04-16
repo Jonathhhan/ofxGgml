@@ -248,6 +248,9 @@ static ggml_backend_dev_t findUsableDeviceByNamePrefix(const char * prefix) {
 //  Static log callback for ggml
 // --------------------------------------------------------------------------
 
+static std::mutex s_logOwnerMutex;
+static std::vector<ofxGgml::Impl *> s_logOwners;
+
 static void ggmlLogCallback(ggml_log_level level, const char * text, void * user_data) {
 	auto * impl = static_cast<ofxGgml::Impl *>(user_data);
 
@@ -267,9 +270,6 @@ static void ggmlLogCallback(ggml_log_level level, const char * text, void * user
 		cb(static_cast<int>(level), text ? text : "");
 	}
 }
-
-static std::mutex s_logOwnerMutex;
-static std::vector<ofxGgml::Impl *> s_logOwners;
 
 static void registerLogCallbackOwner(ofxGgml::Impl * impl) {
 	std::lock_guard<std::mutex> lock(s_logOwnerMutex);

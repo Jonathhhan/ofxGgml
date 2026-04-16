@@ -238,7 +238,7 @@ ofxGgmlVideoBackendSampleResult ofxGgmlSampledFramesVideoBackend::sampleFrames(
 		return result;
 	}
 
-	const std::vector<double> timeline = buildSampleTimeline(
+	const std::vector<double> timeline = ofxGgmlVideoInference::buildSampleTimeline(
 		duration,
 		request.maxFrames,
 		request.startSeconds,

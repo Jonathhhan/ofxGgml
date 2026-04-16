@@ -126,6 +126,7 @@ TEST_CASE("Code assistant prompt preparation includes coding and symbol context"
 	request.requestStructuredResult = true;
 	request.requestUnifiedDiff = true;
 	request.allowedFiles = {"main.cpp", "helper.cpp", "helper.h"};
+	request.buildErrors = "helper.cpp(2): error C2065: missing_symbol";
 	request.preservePublicApi = true;
 	request.updateTests = true;
 	request.forbidNewDependencies = true;
@@ -151,6 +152,11 @@ TEST_CASE("Code assistant prompt preparation includes coding and symbol context"
 	REQUIRE(prepared.prompt.find("Project memory from previous coding requests:") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Available files in this folder:") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Focused file:") != std::string::npos);
+	REQUIRE(prepared.prompt.find("Likely edit target snippets:") != std::string::npos);
+	REQUIRE(prepared.prompt.find("helper.cpp") != std::string::npos);
+	REQUIRE(prepared.prompt.find("Build or test failure details:") != std::string::npos);
+	REQUIRE(prepared.prompt.find("missing_symbol") != std::string::npos);
+	REQUIRE(prepared.prompt.find("return 42") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Relevant symbols for this request:") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Allowed files for modifications:") != std::string::npos);
 	REQUIRE(prepared.prompt.find("Preserve the existing public API surface.") != std::string::npos);
@@ -218,7 +224,9 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		REQUIRE(structured.detectedStructuredOutput);
 		REQUIRE(structured.goalSummary == "Stabilize the helper implementation");
 		REQUIRE(structured.acceptanceCriteria.size() == 1);
-		REQUIRE(structured.filesToTouch.size() == 1);
+		REQUIRE(structured.filesToTouch.size() == 2);
+		REQUIRE(structured.filesToTouch[0].filePath == "src/main.txt");
+		REQUIRE(structured.filesToTouch[1].filePath == "tests/test_ui.cpp");
 		REQUIRE(structured.patchOperations.size() == 1);
 		REQUIRE(structured.patchOperations.front().kind ==
 			ofxGgmlCodeAssistantPatchKind::ReplaceTextOp);
@@ -239,6 +247,37 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		REQUIRE(structured.riskAssessment.level == "high");
 		REQUIRE(structured.risks.size() == 1);
 		REQUIRE(structured.questions.size() == 1);
+	}
+
+	SECTION("Structured parser backfills touched files from patches, findings, and tests") {
+		const std::string text =
+			"PATCH: replace | src/engine.cpp | tighten branch\n"
+			"SEARCH: oldBranch();\n"
+			"REPLACE: newBranch();\n"
+			"TEST: engine regression | tests/test_engine.cpp | covers the changed branch\n"
+			"REVIEWER: safety\n"
+			"FINDING: 1 | 0.85 | include/engine.h | 12 | Header contract changed\n"
+			"DETAIL: Callers may need updates.\n";
+
+		const auto structured = ofxGgmlCodeAssistant::parseStructuredResult(text);
+		REQUIRE(structured.detectedStructuredOutput);
+		REQUIRE(structured.filesToTouch.size() == 3);
+		REQUIRE(structured.filesToTouch[0].filePath == "src/engine.cpp");
+		REQUIRE(structured.filesToTouch[0].reason.find("tighten branch") != std::string::npos);
+		REQUIRE(structured.filesToTouch[1].filePath == "include/engine.h");
+		REQUIRE(structured.filesToTouch[2].filePath == "tests/test_engine.cpp");
+	}
+
+	SECTION("Structured parser backfills touched files from unified diff only") {
+		const std::string text =
+			"DIFF: --- a/src/cache.cpp\\n+++ b/src/cache.cpp\\n@@ -1,1 +1,1 @@\\n-old\\n+new\\n"
+			"QUESTION: verify downstream callers?\n";
+
+		const auto structured = ofxGgmlCodeAssistant::parseStructuredResult(text);
+		REQUIRE(structured.detectedStructuredOutput);
+		REQUIRE(structured.filesToTouch.size() == 1);
+		REQUIRE(structured.filesToTouch.front().filePath == "src/cache.cpp");
+		REQUIRE(structured.filesToTouch.front().reason == "unified diff");
 	}
 
 	SECTION("Run returns structured metadata alongside inference output") {
@@ -395,7 +434,9 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 	SECTION("Inline completion uses cursor-aware prompt building") {
 		const std::string modelPath = createAssistantDummyModel();
 		const std::string exePath = createAssistantExecutable({
-			"return cachedValue;"
+			"```cpp",
+			"return cachedValue;",
+			"```"
 		});
 
 		ofxGgmlCodeAssistant assistant;
@@ -413,10 +454,11 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		REQUIRE(prepared.prompt.find("<PRE>") != std::string::npos);
 		REQUIRE(prepared.prompt.find("<SUF>") != std::string::npos);
 		REQUIRE(prepared.prompt.find("Complete the return statement.") != std::string::npos);
+		REQUIRE(prepared.prompt.find("Do not repeat surrounding code") != std::string::npos);
 
 		const auto result = assistant.runInlineCompletion(modelPath, request);
 		REQUIRE(result.inference.success);
-		REQUIRE(result.completion.find("cachedValue") != std::string::npos);
+		REQUIRE(result.completion == "return cachedValue;");
 	}
 
 	SECTION("Risk scoring and reviewer simulation react to broad risky changes") {

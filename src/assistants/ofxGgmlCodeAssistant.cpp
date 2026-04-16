@@ -258,6 +258,99 @@ std::string escapeTaggedValue(const std::string & text) {
 	return out;
 }
 
+std::string normalizeLineEndings(const std::string & text) {
+	std::string out;
+	out.reserve(text.size());
+	for (size_t i = 0; i < text.size(); ++i) {
+		if (text[i] == '\r') {
+			if (i + 1 < text.size() && text[i + 1] == '\n') {
+				continue;
+			}
+			out.push_back('\n');
+			continue;
+		}
+		out.push_back(text[i]);
+	}
+	return out;
+}
+
+std::string currentLinePrefix(const std::string & text) {
+	const size_t lastNewline = text.find_last_of('\n');
+	return lastNewline == std::string::npos
+		? text
+		: text.substr(lastNewline + 1);
+}
+
+std::string leadingWhitespace(const std::string & text) {
+	size_t count = 0;
+	while (count < text.size() &&
+		(text[count] == ' ' || text[count] == '\t')) {
+		++count;
+	}
+	return text.substr(0, count);
+}
+
+bool isAllWhitespace(const std::string & text) {
+	for (unsigned char ch : text) {
+		if (!std::isspace(ch)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+std::string stripCodeFenceBlock(const std::string & text) {
+	const std::string normalized = trimCopy(normalizeLineEndings(text));
+	if (normalized.rfind("```", 0) != 0) {
+		return normalized;
+	}
+
+	size_t firstNewline = normalized.find('\n');
+	if (firstNewline == std::string::npos) {
+		return normalized;
+	}
+	size_t closingFence = normalized.rfind("\n```");
+	if (closingFence == std::string::npos || closingFence <= firstNewline) {
+		return normalized.substr(firstNewline + 1);
+	}
+	return normalized.substr(
+		firstNewline + 1,
+		closingFence - firstNewline - 1);
+}
+
+std::string sanitizeInlineCompletionText(
+	const ofxGgmlCodeAssistantInlineCompletionRequest & request,
+	const std::string & rawText) {
+	std::string cleaned = stripCodeFenceBlock(rawText);
+	if (cleaned.rfind("Completion:", 0) == 0) {
+		cleaned = trimCopy(cleaned.substr(std::string("Completion:").size()));
+	}
+	cleaned = normalizeLineEndings(cleaned);
+	if (request.singleLine) {
+		const size_t newline = cleaned.find('\n');
+		if (newline != std::string::npos) {
+			cleaned = cleaned.substr(0, newline);
+		}
+		return trimCopy(cleaned);
+	}
+
+	const std::string indent = leadingWhitespace(currentLinePrefix(request.prefix));
+	const auto lines = splitLines(cleaned);
+	std::ostringstream out;
+	for (size_t i = 0; i < lines.size(); ++i) {
+		std::string line = lines[i];
+		if (i > 0) {
+			out << "\n";
+		}
+		if (i > 0 && !indent.empty() &&
+			!line.empty() && !std::isspace(static_cast<unsigned char>(line.front()))) {
+			out << indent;
+		}
+		out << line;
+	}
+	return trimCopy(out.str());
+}
+
 std::string patchKindToString(ofxGgmlCodeAssistantPatchKind kind) {
 	switch (kind) {
 	case ofxGgmlCodeAssistantPatchKind::WriteFile:
@@ -601,6 +694,30 @@ std::string buildUnifiedDiffForPatch(
 	return diff.str();
 }
 
+std::vector<std::string> extractTouchedFilesFromUnifiedDiff(
+	const std::string & unifiedDiff) {
+	std::vector<std::string> files;
+	std::unordered_set<std::string> seen;
+	for (const auto & rawLine : splitLines(normalizeLineEndings(unifiedDiff))) {
+		if (rawLine.rfind("+++ ", 0) != 0 && rawLine.rfind("--- ", 0) != 0) {
+			continue;
+		}
+		std::string path = trimCopy(rawLine.substr(4));
+		if (path == "/dev/null" || path.empty()) {
+			continue;
+		}
+		if (path.rfind("a/", 0) == 0 || path.rfind("b/", 0) == 0) {
+			path = path.substr(2);
+		}
+		path = normalizeRelativeFilePath(path);
+		const std::string normalized = normalizePathForMatch(path);
+		if (!normalized.empty() && seen.insert(normalized).second) {
+			files.push_back(path);
+		}
+	}
+	return files;
+}
+
 bool loadFocusedFile(
 	const ofxGgmlCodeAssistantContext & context,
 	std::string * outName,
@@ -631,6 +748,158 @@ bool loadFocusedFile(
 		*outContent = truncateWithMarker(content, context.maxFocusedFileChars);
 	}
 	return true;
+}
+
+bool pathMatchesContextEntry(
+	const ofxGgmlCodeAssistantContext & context,
+	const std::string & candidate,
+	const std::string & requestedPath) {
+	const std::string normalizedCandidate =
+		normalizePathForMatch(normalizeContextFilePath(context, candidate));
+	const std::string normalizedRequested =
+		normalizePathForMatch(normalizeContextFilePath(context, requestedPath));
+	if (normalizedCandidate.empty() || normalizedRequested.empty()) {
+		return false;
+	}
+	if (normalizedCandidate == normalizedRequested) {
+		return true;
+	}
+	return normalizedCandidate.size() > normalizedRequested.size() &&
+		normalizedCandidate.compare(
+			normalizedCandidate.size() - normalizedRequested.size(),
+			normalizedRequested.size(),
+			normalizedRequested) == 0 &&
+		normalizedCandidate[normalizedCandidate.size() - normalizedRequested.size() - 1] == '/';
+}
+
+std::optional<size_t> findContextFileIndex(
+	const ofxGgmlCodeAssistantContext & context,
+	const std::string & requestedPath) {
+	if (context.scriptSource == nullptr || trimCopy(requestedPath).empty()) {
+		return std::nullopt;
+	}
+	const auto files = context.scriptSource->getFiles();
+	for (size_t i = 0; i < files.size(); ++i) {
+		if (files[i].isDirectory) {
+			continue;
+		}
+		if (pathMatchesContextEntry(context, files[i].name, requestedPath)) {
+			return i;
+		}
+	}
+	return std::nullopt;
+}
+
+struct PromptFileSnippet {
+	std::string filePath;
+	std::string reason;
+	std::string content;
+};
+
+std::vector<PromptFileSnippet> collectLikelyEditTargetSnippets(
+	const ofxGgmlCodeAssistantRequest & request,
+	const ofxGgmlCodeAssistantContext & context,
+	const std::string & focusedFileName) {
+	std::vector<PromptFileSnippet> snippets;
+	if (context.scriptSource == nullptr) {
+		return snippets;
+	}
+
+	struct Candidate {
+		std::string path;
+		std::string reason;
+	};
+
+	std::vector<Candidate> candidates;
+	for (const auto & allowedFile : request.allowedFiles) {
+		if (!trimCopy(allowedFile).empty()) {
+			candidates.push_back({allowedFile, "allowed edit target"});
+		}
+	}
+	for (const auto & error : ofxGgmlCodeAssistant::parseBuildErrors(request.buildErrors)) {
+		if (!trimCopy(error.filePath).empty()) {
+			std::string reason = "compiler-reported failure";
+			if (error.line > 0) {
+				reason += " near line " + std::to_string(error.line);
+			}
+			if (!trimCopy(error.code).empty()) {
+				reason += " [" + error.code + "]";
+			}
+			candidates.push_back({error.filePath, reason});
+		}
+	}
+
+	std::unordered_map<std::string, size_t> seen;
+	const auto files = context.scriptSource->getFiles();
+	for (const auto & candidate : candidates) {
+		const auto index = findContextFileIndex(context, candidate.path);
+		if (!index.has_value() || *index >= files.size() || files[*index].isDirectory) {
+			continue;
+		}
+		if (!focusedFileName.empty() &&
+			pathMatchesContextEntry(context, files[*index].name, focusedFileName)) {
+			continue;
+		}
+
+		const std::string normalizedName =
+			normalizePathForMatch(files[*index].name);
+		const auto existing = seen.find(normalizedName);
+		if (existing != seen.end()) {
+			auto & existingSnippet = snippets[existing->second];
+			if (!trimCopy(candidate.reason).empty() &&
+				existingSnippet.reason.find(candidate.reason) == std::string::npos) {
+				if (!existingSnippet.reason.empty()) {
+					existingSnippet.reason += "; ";
+				}
+				existingSnippet.reason += candidate.reason;
+			}
+			continue;
+		}
+
+		std::string content;
+		if (!context.scriptSource->loadFileContent(static_cast<int>(*index), content)) {
+			continue;
+		}
+
+		const size_t snippetLimit = (std::max)(
+			static_cast<size_t>(400),
+			(std::min)(context.maxFocusedFileChars, static_cast<size_t>(1200)));
+		snippets.push_back({
+			files[*index].name,
+			candidate.reason,
+			truncateWithMarker(content, snippetLimit)
+		});
+		seen.emplace(normalizedName, snippets.size() - 1);
+		if (snippets.size() >= 3) {
+			break;
+		}
+	}
+
+	return snippets;
+}
+
+void appendLikelyEditTargetSnippets(
+	std::ostringstream & prompt,
+	const ofxGgmlCodeAssistantRequest & request,
+	const ofxGgmlCodeAssistantContext & context,
+	const std::string & focusedFileName) {
+	const auto snippets = collectLikelyEditTargetSnippets(
+		request,
+		context,
+		focusedFileName);
+	if (snippets.empty()) {
+		return;
+	}
+
+	prompt << "Likely edit target snippets:\n";
+	for (const auto & snippet : snippets) {
+		prompt << "- " << snippet.filePath;
+		if (!trimCopy(snippet.reason).empty()) {
+			prompt << " (" << snippet.reason << ")";
+		}
+		prompt << "\n" << snippet.content << "\n";
+	}
+	prompt << "\n";
 }
 
 void appendRepoContext(
@@ -2301,6 +2570,45 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 			structured.reviewerSimulations[it->second].findings.push_back(finding);
 		}
 	}
+
+	std::unordered_set<std::string> touchedFileSet;
+	for (const auto & fileIntent : structured.filesToTouch) {
+		touchedFileSet.insert(normalizePathForMatch(fileIntent.filePath));
+	}
+	auto addFileIntent = [&](const std::string & filePath, const std::string & reason) {
+		const std::string normalized = normalizePathForMatch(filePath);
+		if (normalized.empty() || !touchedFileSet.insert(normalized).second) {
+			return;
+		}
+		ofxGgmlCodeAssistantFileIntent intent;
+		intent.filePath = filePath;
+		intent.reason = reason;
+		structured.filesToTouch.push_back(std::move(intent));
+	};
+	for (const auto & patch : structured.patchOperations) {
+		std::string reason = trimCopy(patch.summary);
+		if (reason.empty()) {
+			reason = patchKindToString(patch.kind) + " patch";
+		}
+		addFileIntent(patch.filePath, reason);
+	}
+	for (const auto & finding : structured.reviewFindings) {
+		std::string reason = trimCopy(finding.title);
+		if (reason.empty()) {
+			reason = "review finding";
+		}
+		addFileIntent(finding.filePath, reason);
+	}
+	for (const auto & test : structured.testSuggestions) {
+		std::string reason = trimCopy(test.rationale);
+		if (reason.empty()) {
+			reason = "suggested test coverage";
+		}
+		addFileIntent(test.filePath, reason);
+	}
+	for (const auto & diffFile : extractTouchedFilesFromUnifiedDiff(structured.unifiedDiff)) {
+		addFileIntent(diffFile, "unified diff");
+	}
 	if (trimCopy(structured.riskAssessment.level).empty()) {
 		structured.riskAssessment.level =
 			riskLevelForScore(structured.riskAssessment.score);
@@ -2375,6 +2683,11 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 		&prepared.includedRepoContext,
 		&prepared.includedFocusedFile,
 		&prepared.focusedFileName);
+	appendLikelyEditTargetSnippets(
+		prompt,
+		request,
+		context,
+		prepared.focusedFileName);
 
 	appendRequestConstraints(prompt, request);
 
@@ -2588,6 +2901,12 @@ ofxGgmlCodeAssistant::prepareInlineCompletion(
 	if (!trimCopy(request.instruction).empty()) {
 		prompt << "Instruction: " << request.instruction << "\n";
 	}
+	const std::string indent = leadingWhitespace(currentLinePrefix(request.prefix));
+	if (!indent.empty() && isAllWhitespace(currentLinePrefix(request.prefix))) {
+		prompt << "Current indentation: "
+			<< escapeTaggedValue(indent) << "\n";
+	}
+	prompt << "Do not repeat surrounding code that already exists in the prefix or suffix.\n";
 	if (request.useFillInTheMiddle) {
 		prompt << "\n<PRE>\n" << request.prefix << "\n</PRE>\n";
 		prompt << "<SUF>\n" << request.suffix << "\n</SUF>\n\n";
@@ -2620,6 +2939,6 @@ ofxGgmlCodeAssistant::runInlineCompletion(
 		result.prepared.prompt,
 		effectiveSettings,
 		onChunk);
-	result.completion = trimCopy(result.inference.text);
+	result.completion = sanitizeInlineCompletionText(request, result.inference.text);
 	return result;
 }
