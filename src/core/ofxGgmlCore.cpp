@@ -250,19 +250,21 @@ static ggml_backend_dev_t findUsableDeviceByNamePrefix(const char * prefix) {
 
 static void ggmlLogCallback(ggml_log_level level, const char * text, void * user_data) {
 	auto * impl = static_cast<ofxGgml::Impl *>(user_data);
-	// Thread-safe validation: Check if impl is still registered before accessing
+
+	// Validate the owner under lock and copy the callback to avoid use-after-free
+	// if the impl is destroyed immediately after unlocking.
+	ofxGgmlLogCallback cb;
 	{
 		std::lock_guard<std::mutex> lock(s_logOwnerMutex);
-		// Verify the impl pointer is still in the active owners list
 		const auto it = std::find(s_logOwners.begin(), s_logOwners.end(), impl);
-		if (it == s_logOwners.end()) {
-			// Impl was unregistered, ignore this callback
+		if (it == s_logOwners.end() || impl == nullptr) {
 			return;
 		}
+		cb = impl->logCb;
 	}
-	// Safe to access impl->logCb now as we verified it's registered
-	if (impl && impl->logCb) {
-		impl->logCb(static_cast<int>(level), text ? text : "");
+
+	if (cb) {
+		cb(static_cast<int>(level), text ? text : "");
 	}
 }
 
