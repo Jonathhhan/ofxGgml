@@ -1411,11 +1411,7 @@ ImGui::Checkbox("Use prompt cache", &usePromptCache);
 if (ImGui::IsItemHovered()) {
 	ImGui::SetTooltip("Reuse llama prompt cache between requests for faster follow-up responses.");
 }
-ImGui::Checkbox("Offline mode", &strictOfflineMode);
-ImGui::SameLine();
-ImGui::BeginDisabled(strictOfflineMode);
-ImGui::Checkbox("Realtime web access", &allowRealtimeInternet);
-ImGui::EndDisabled();
+ImGui::Checkbox("Online mode", &onlineModeEnabled);
 if (ImGui::IsItemHovered()) {
 	ImGui::SetTooltip("Allow the assistant to fetch optional internet and realtime context for prompts.");
 }
@@ -1637,7 +1633,7 @@ ImGui::SameLine();
 bool sendClicked = ImGui::Button("Send", ImVec2(70, 0));
 ImGui::SameLine();
 bool sendWithSourcesClicked = ImGui::Button("Send with Sources", ImVec2(130, 0));
-if (strictOfflineMode) {
+if (!onlineModeEnabled) {
 	ImGui::SameLine();
 	ImGui::TextDisabled("(offline)");
 }
@@ -1657,7 +1653,7 @@ chatMessages.push_back({"user", userText, ofGetElapsedTimef()});
 fprintf(stderr, "[ChatWindow] You: %s\n", userText.c_str());
 std::memset(chatInput, 0, sizeof(chatInput));
 ofxGgmlRealtimeInfoSettings realtimeSettings;
-realtimeSettings.enabled = allowRealtimeInternet && !strictOfflineMode;
+realtimeSettings.enabled = onlineModeEnabled;
 if (sendWithSourcesClicked) {
 	realtimeSettings = buildRealtimeInfoSettingsFromUrls(
 		sourceUrlsInput,
@@ -3185,12 +3181,12 @@ ImGui::Text(" | Lang: %s", scriptLanguages[static_cast<size_t>(selectedLanguageI
 ImGui::SameLine();
 ImGui::Text(" | Tokens: %d  Temp: %.2f  Top-P: %.2f  Top-K: %d  Min-P: %.2f",
 	maxTokens, temperature, topP, topK, minP);
-if (strictOfflineMode) {
+if (!onlineModeEnabled) {
 	ImGui::SameLine();
 	ImGui::TextDisabled(" | Offline");
-} else if (allowRealtimeInternet) {
+} else {
 	ImGui::SameLine();
-	ImGui::TextDisabled(" | Realtime web");
+	ImGui::TextDisabled(" | Online");
 }
 if (gpuLayers > 0) {
 ImGui::SameLine();
@@ -3426,8 +3422,7 @@ out << "translateOutput=" << escapeSessionText(translateOutput) << "\n";
 out << "customOutput=" << escapeSessionText(customOutput) << "\n";
 out << "visionOutput=" << escapeSessionText(visionOutput) << "\n";
 out << "speechOutput=" << escapeSessionText(speechOutput) << "\n";
-out << "strictOfflineMode=" << (strictOfflineMode ? 1 : 0) << "\n";
-out << "allowRealtimeInternet=" << (allowRealtimeInternet ? 1 : 0) << "\n";
+out << "onlineModeEnabled=" << (onlineModeEnabled ? 1 : 0) << "\n";
 out << "stopAtNaturalBoundary=" << (stopAtNaturalBoundary ? 1 : 0) << "\n";
 
 // Chat messages.
@@ -3616,8 +3611,7 @@ else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
 else if (key == "customOutput") customOutput = unescapeSessionText(value);
 else if (key == "visionOutput") visionOutput = unescapeSessionText(value);
 else if (key == "speechOutput") speechOutput = unescapeSessionText(value);
-else if (key == "strictOfflineMode") strictOfflineMode = (safeStoi(value, 0) != 0);
-else if (key == "allowRealtimeInternet") allowRealtimeInternet = (safeStoi(value, 0) != 0);
+else if (key == "onlineModeEnabled") onlineModeEnabled = (safeStoi(value, 0) != 0);
 else if (key == "stopAtNaturalBoundary") stopAtNaturalBoundary = (safeStoi(value, 1) != 0);
 else if (key == "msg") {
 // Parse: role|timestamp|text
@@ -4659,7 +4653,7 @@ workerThread.join();
  try {
  const bool preserveLlamaInstructions = (mode == AiMode::Script);
  ofxGgmlRealtimeInfoSettings effectiveRealtimeSettings = realtimeSettings;
- if (strictOfflineMode) {
+ if (!onlineModeEnabled) {
 	effectiveRealtimeSettings.enabled = false;
 	effectiveRealtimeSettings.explicitUrls.clear();
  } else if (mode == AiMode::Script &&

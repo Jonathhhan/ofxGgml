@@ -171,8 +171,7 @@ private:
 	ofLogLevel logLevel = OF_LOG_NOTICE;
 	std::deque<std::string> logMessages;
 	std::mutex logMutex;
-	bool strictOfflineMode = false;
-	bool allowRealtimeInternet = false;
+	bool onlineModeEnabled = false;
 	bool scriptIncludeRepoContext = true;
 	bool stopAtNaturalBoundary = true;
 	bool cliCapabilitiesProbed = false;
