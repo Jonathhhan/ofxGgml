@@ -144,16 +144,16 @@ std::string extractTextFromOpenAiResponse(const std::string & responseJson) {
 std::vector<ofxGgmlVisionModelProfile> ofxGgmlVisionInference::defaultProfiles() {
 	return {
 		{
-			"Llama 3.2 Vision (llama-server)",
-			"Llama 3.2 Vision / Llama 3.2 11B Vision Instruct",
-			"meta-llama/Llama-3.2-11B-Vision-Instruct",
-			"Llama-3.2-11B-Vision-Instruct-Q4_K_M.gguf",
+			"LFM2.5-VL (llama-server)",
+			"LFM2-VL",
+			"LiquidAI/LFM2.5-VL-1.6B-GGUF",
+			"LFM2.5-VL-1.6B-Q4_K_M.gguf",
 			"",
 			"",
 			"http://127.0.0.1:8080",
 			true,
 			true,
-			true
+			false
 		},
 		{
 			"Qwen Vision (llama-server)",
@@ -180,16 +180,16 @@ std::vector<ofxGgmlVisionModelProfile> ofxGgmlVisionInference::defaultProfiles()
 			false
 		},
 		{
-			"LFM2.5-VL (llama-server)",
-			"LFM2-VL",
-			"LiquidAI/LFM2.5-VL-1.6B-GGUF",
-			"LFM2.5-VL-1.6B-Q4_K_M.gguf",
+			"Llama 3.2 Vision (EU-restricted / gated)",
+			"Llama 3.2 Vision / Llama 3.2 11B Vision Instruct",
+			"meta-llama/Llama-3.2-11B-Vision-Instruct",
+			"Llama-3.2-11B-Vision-Instruct-Q4_K_M.gguf",
 			"",
 			"",
 			"http://127.0.0.1:8080",
 			true,
 			true,
-			false
+			true
 		}
 	};
 }

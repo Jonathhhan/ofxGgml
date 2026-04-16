@@ -224,6 +224,11 @@ std::string suggestedModelDownloadUrl(
 		"/resolve/main/" + trimmedFileHint;
 }
 
+bool isEuRestrictedVisionProfile(const ofxGgmlVisionModelProfile & profile) {
+	const std::string repoHint = trim(profile.modelRepoHint);
+	return repoHint.find("meta-llama/Llama-3.2-11B-Vision") != std::string::npos;
+}
+
 std::vector<std::string> extractHttpUrls(const std::string & text) {
 	static const std::regex urlRegex(R"(https?://[^\s<>\"]+)", std::regex::icase);
 	std::vector<std::string> urls;
@@ -3049,6 +3054,11 @@ if (!visionProfiles.empty()) {
 	if (!profile.modelRepoHint.empty()) {
 		ImGui::TextDisabled("Recommended server model: %s", profile.modelRepoHint.c_str());
 	}
+	if (isEuRestrictedVisionProfile(profile)) {
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.65f, 0.25f, 1.0f),
+			"EU note: this Meta model is gated and currently unavailable for download from the EU on Hugging Face.");
+	}
 	if (!profile.modelFileHint.empty()) {
 		ImGui::TextDisabled("Recommended file: %s", profile.modelFileHint.c_str());
 	}
@@ -3076,7 +3086,11 @@ if (!visionProfiles.empty()) {
 		}
 		ImGui::EndDisabled();
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Opens the recommended multimodal model in your browser.");
+			if (isEuRestrictedVisionProfile(profile)) {
+				ImGui::SetTooltip("Opens the model page in your browser. Meta currently blocks this download in the EU.");
+			} else {
+				ImGui::SetTooltip("Opens the recommended multimodal model in your browser.");
+			}
 		}
 	}
 	if (profile.mayRequireMmproj) {
