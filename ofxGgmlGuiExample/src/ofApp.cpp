@@ -67,37 +67,6 @@ static const std::array<LogLevelOption, 5> kLogLevelOptions = {{
 	{"Verbose",  OF_LOG_VERBOSE}
 }};
 
-static constexpr TokenLiteral kPreambleMarkers[] = {
-	{"Running in interactive mode", 27},
-	{"Press Ctrl+C to interject", 24},
-	{"Press Return to return control to the AI", 39},
-	{"To return control without starting a new line", 43},
-	{"If you want to submit another line", 34},
-	{"Not using system message", 24},
-	{"Using system message", 20},
-	{"Reverse prompt", 14},
-};
-
-static constexpr TokenLiteral kRoleLabels[] = {
-	{"user", 4},
-	{"assistant", 9},
-	{"system", 6},
-	{"User", 4},
-	{"Assistant", 9},
-	{"System", 6},
-	{"A:", 2},
-	{"> ", 2},
-};
-
-static constexpr TokenLiteral kTrailingArtifacts[] = {
-	{"> EOF by user", 13},
-	{"> EOF", 5},
-	{"EOF", 3},
-	{"Interrupted by user", 19},
-	{"[end of text]", 13},
-	{"<|endoftext|>", 13},
-};
-
 std::string getEnvVarString(const char * name) {
 	if (!name || *name == '\0') return {};
 #ifdef _WIN32
@@ -202,6 +171,11 @@ std::string stripAnsi(const std::string & text) {
 		}
 	}
 	return out;
+}
+
+std::string stripLiteralAnsiMarkers(const std::string & text) {
+	static const std::regex markerRegex(R"(\[(?:\d{1,3})(?:;\d{1,3})*m)");
+	return std::regex_replace(text, markerRegex, "");
 }
 
 std::string trim(const std::string & s) {
@@ -383,173 +357,39 @@ std::string buildInternetContextFromText(const std::string & userText, bool allo
 	return "\n\nInternet context:\n" + autoContext + "\n";
 }
 
-// Remove the llama.cpp interactive banner/instruction block that can
-// precede the actual model response when the CLI runs in chat mode.
-std::string stripInteractivePreamble(const std::string & text) {
-	bool skipping = true;
-	size_t pos = 0;
-	while (pos <= text.size()) {
-		const size_t end = text.find('\n', pos);
-		const std::string line = (end == std::string::npos)
-			? text.substr(pos)
-			: text.substr(pos, end - pos);
-		const std::string trimmed = trim(line);
-
-		if (skipping) {
-			if (!trimmed.empty()) {
-				bool isPreamble = false;
-				for (const auto & marker : kPreambleMarkers) {
-					if (trimmed.find(marker.text) != std::string::npos) {
-						isPreamble = true;
-						break;
-					}
-				}
-				if (!isPreamble) {
-					return trim(text.substr(pos));
-				}
-			}
-		}
-
-		if (end == std::string::npos) break;
-		pos = end + 1;
-	}
-
-	return "";
-}
-
 // Strip common chat-template role markers and prompt artefacts that
 // llama-completion may emit around the actual generated text.
 // Examples of markers removed: "user", "assistant", "system",
 // "<|...|>" ChatML tokens, and leading/trailing ">" prompt chars.
 std::string cleanChatOutput(const std::string & text) {
-	std::string out = text;
-
-	// Drop llama-cli interactive banners before further cleanup.
-	out = stripInteractivePreamble(out);
-
-	// Strip <|...|> ChatML-style tokens (e.g. <|assistant|>, <|end|>).
-	{
-		std::string cleaned;
-		cleaned.reserve(out.size());
-		size_t i = 0;
-		while (i < out.size()) {
-			if (i + 1 < out.size() && out[i] == '<' && out[i + 1] == '|') {
-				size_t end = out.find("|>", i + 2);
-				if (end != std::string::npos) {
-					i = end + 2;
-					continue;
-				}
-			}
-			cleaned += out[i];
-			i++;
-		}
-		out = cleaned;
-	}
-
-	// Strip leading lines that are just a role label or prompt marker.
-	// The llama chat template may prepend "user\n", "assistant\n", etc.
-	auto startsWithWord = [](const std::string & s, const std::string & word) {
-		if (s.size() < word.size()) return false;
-		if (s.compare(0, word.size(), word) != 0) return false;
-		if (s.size() == word.size()) return true;
-		const char after = s[word.size()];
-		return after == '\n' || after == '\r' || after == ':' || after == ' ';
-	};
-
-	bool changed = true;
-	while (changed) {
-		changed = false;
-		out = trim(out);
-		for (const auto & label : kRoleLabels) {
-			if (startsWithWord(out, label.text)) {
-				out = out.substr(label.len);
-				// Also strip an optional ':' delimiter after the role label.
-				out = trim(out);
-				if (!out.empty() && out[0] == ':') {
-					out = out.substr(1);
-				}
-				out = trim(out);
-				changed = true;
-				break;
-			}
-		}
-		// Strip a bare leading ">" (without trailing space — the "> "
-		// entry in roleLabels handles the space case).
-		if (!out.empty() && out[0] == '>') {
-			out = trim(out.substr(1));
-			changed = true;
-		}
-	}
-
-	// Strip trailing ">" prompt markers.
-	while (!out.empty() && out.back() == '>') {
-		out.pop_back();
-	}
-	out = trim(out);
-
-	// Strip trailing CLI artifacts: "> EOF", "EOF", "Interrupted by user".
-	{
-		bool stripped = true;
-		while (stripped) {
-			stripped = false;
-			for (const auto & art : kTrailingArtifacts) {
-				if (out.size() >= art.len &&
-					out.compare(out.size() - art.len, art.len, art.text) == 0) {
-					out = trim(out.substr(0, out.size() - art.len));
-					stripped = true;
-				}
-			}
-		}
-	}
-
-	// Strip stray literal ANSI codes or terminal markers that bypassed parser
-	const char* const strayArtifacts[] = {"[1m", "[32m", "[0m", "> "};
-	for (const char* art : strayArtifacts) {
-		size_t pos = 0;
-		while ((pos = out.find(art, pos)) != std::string::npos) {
-			out.erase(pos, std::strlen(art));
-		}
-	}
-	out = trim(out);
-
-	return out;
+	return ofxGgmlInference::sanitizeGeneratedText(text);
 }
 
-std::string stripPromptEcho(const std::string & text, const std::string & prompt) {
-	const std::string trimmedText = trim(text);
-	const std::string trimmedPrompt = trim(prompt);
-	if (trimmedText.empty() || trimmedPrompt.empty()) {
-		return trimmedText;
+std::string formatConsoleLogText(const std::string & text, bool chatLike = false) {
+	std::string out = stripLiteralAnsiMarkers(stripAnsi(text));
+	if (chatLike) {
+		out = ofxGgmlInference::sanitizeGeneratedText(out);
 	}
 
-	auto hasPromptPrefix = [&](const std::string & candidate) {
-		if (candidate.size() < trimmedPrompt.size()) {
-			return false;
+	std::string flattened;
+	flattened.reserve(out.size());
+	bool lastWasSpace = false;
+	for (unsigned char ch : out) {
+		if (ch == '\r' || ch == '\n' || ch == '\t') {
+			if (!flattened.empty() && !lastWasSpace) {
+				flattened.push_back(' ');
+				lastWasSpace = true;
+			}
+			continue;
 		}
-		if (candidate.compare(0, trimmedPrompt.size(), trimmedPrompt) != 0) {
-			return false;
+		if (std::iscntrl(ch)) {
+			continue;
 		}
-		if (candidate.size() == trimmedPrompt.size()) {
-			return true;
-		}
-		const char next = candidate[trimmedPrompt.size()];
-		return next == '\n' || next == '\r' || next == ':' ||
-			std::isspace(static_cast<unsigned char>(next)) != 0;
-	};
-
-	if (hasPromptPrefix(trimmedText)) {
-		return trim(trimmedText.substr(trimmedPrompt.size()));
+		flattened.push_back(static_cast<char>(ch));
+		lastWasSpace = (ch == ' ');
 	}
 
-	const size_t firstLineEnd = trimmedText.find('\n');
-	if (firstLineEnd != std::string::npos) {
-		const std::string firstLine = trim(trimmedText.substr(0, firstLineEnd));
-		if (firstLine == trimmedPrompt) {
-			return trim(trimmedText.substr(firstLineEnd + 1));
-		}
-	}
-
-	return trimmedText;
+	return trim(flattened);
 }
 
 // Translate well-known process crash/error exit codes into a short
@@ -3986,9 +3826,12 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 		prompt,
 		inferenceSettings,
 		chunkBridge);
+	bool useLegacyFallback = false;
 	if (!inferenceResult.success) {
 		if (!streamedText.empty() && !preserveLlamaInstructions) {
-			output = cleanChatOutput(stripPromptEcho(streamedText, prompt));
+			output = ofxGgmlInference::sanitizeGeneratedText(
+				streamedText,
+				prompt);
 			if (!output.empty()) {
 				logWithLevel(OF_LOG_WARNING,
 					"Generation ended with an error, but streamed output is available; using streamed text.");
@@ -3998,19 +3841,26 @@ bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::strin
 		error = inferenceResult.error.empty()
 			? "Inference failed."
 			: inferenceResult.error;
-		return false;
+		useLegacyFallback = true;
 	}
-
-	output = preserveLlamaInstructions
-		? trim(stripAnsi(streamedText.empty() ? inferenceResult.text : streamedText))
-		: cleanChatOutput(stripPromptEcho(
-			streamedText.empty() ? inferenceResult.text : streamedText,
-			prompt));
-	if (output.empty()) {
+	if (!useLegacyFallback) {
+		if (preserveLlamaInstructions) {
+			output = trim(stripAnsi(streamedText.empty() ? inferenceResult.text : streamedText));
+		} else if (!streamedText.empty()) {
+			output = ofxGgmlInference::sanitizeGeneratedText(streamedText, prompt);
+		} else {
+			output = trim(inferenceResult.text);
+		}
+		if (!output.empty()) {
+			return true;
+		}
 		error = "llama-completion returned empty output.";
-		return false;
+		useLegacyFallback = true;
 	}
-	return true;
+	if (shouldLog(OF_LOG_WARNING)) {
+		logWithLevel(OF_LOG_WARNING,
+			"Modern inference path produced no usable output; falling back to legacy CLI execution.");
+	}
 
 	// Probe for llama-completion/llama-cli/llama if not already found.
 	// Unlike earlier revisions this no longer permanently caches a
@@ -4310,9 +4160,6 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 		}
 	}
 
-	// Clean chat-template role markers and prompt artefacts.
-	output = cleanChatOutput(output);
-
 	if (output.empty()) {
 		error = llamaCliCommand + " returned empty output.";
 		return false;
@@ -4547,11 +4394,13 @@ workerThread.join();
 	if (preserveLlamaInstructions) {
 		return trim(stripAnsi(rawPartial));
 	}
-	std::string cleaned = stripPromptEcho(stripAnsi(rawPartial), trimmedPrompt);
+	std::string cleaned = ofxGgmlInference::sanitizeGeneratedText(
+		stripAnsi(rawPartial),
+		trimmedPrompt);
 	if (cleaned.empty() && stripAnsi(rawPartial).size() < trimmedPrompt.size()) {
 		cleaned.clear();
 	}
-	return cleanChatOutput(cleaned);
+	return cleaned;
  };
 
  auto streamCb = [this, trimmedPrompt,
@@ -4737,7 +4586,7 @@ if (pendingOutput.empty()) return;
 switch (pendingMode) {
 case AiMode::Chat:
 chatMessages.push_back({"assistant", pendingOutput, ofGetElapsedTimef()});
-fprintf(stderr, "[ChatWindow] AI: %s\n", pendingOutput.c_str());
+fprintf(stderr, "[ChatWindow] AI: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
 break;
 case AiMode::Script:
 scriptOutput = pendingOutput;
@@ -4745,23 +4594,23 @@ scriptMessages.push_back({"assistant", pendingOutput, ofGetElapsedTimef()});
 if (pendingOutput.rfind("[Error]", 0) != 0) {
 scriptProjectMemory.addInteraction(lastScriptRequest, pendingOutput);
 }
-fprintf(stderr, "[ChatWindow] Script: %s\n", pendingOutput.c_str());
+fprintf(stderr, "[ChatWindow] Script: %s\n", formatConsoleLogText(pendingOutput).c_str());
 break;
 case AiMode::Summarize:
 summarizeOutput = pendingOutput;
-fprintf(stderr, "[ChatWindow] Summarize: %s\n", pendingOutput.c_str());
+fprintf(stderr, "[ChatWindow] Summarize: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
 break;
 case AiMode::Write:
 writeOutput = pendingOutput;
-fprintf(stderr, "[ChatWindow] Write: %s\n", pendingOutput.c_str());
+fprintf(stderr, "[ChatWindow] Write: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
 break;
 case AiMode::Translate:
 translateOutput = pendingOutput;
-fprintf(stderr, "[ChatWindow] Translate: %s\n", pendingOutput.c_str());
+fprintf(stderr, "[ChatWindow] Translate: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
 break;
 case AiMode::Custom:
 customOutput = pendingOutput;
-fprintf(stderr, "[ChatWindow] Custom: %s\n", pendingOutput.c_str());
+fprintf(stderr, "[ChatWindow] Custom: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
 break;
 }
 pendingOutput.clear();

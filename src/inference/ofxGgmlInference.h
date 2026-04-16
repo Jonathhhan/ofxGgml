@@ -32,7 +32,7 @@ struct ofxGgmlInferenceSettings {
 	int threadsBatch = 0;
 	int seed = -1;
 	bool simpleIo = true;
-	bool promptCacheAll = true;
+	bool promptCacheAll = false;
 	bool flashAttn = false;
 	bool mlock = false;
 	bool singleTurn = true;
@@ -180,6 +180,11 @@ public:
 		bool codeLike = false);
 	static std::string buildCutoffContinuationRequest(
 		const std::string & tailText);
+	static std::string sanitizeGeneratedText(
+		const std::string & raw,
+		const std::string & prompt = {});
+	static std::string sanitizeStructuredText(
+		const std::string & raw);
 
 	static std::vector<std::string> tokenize(const std::string & text);
 	static std::string detokenize(const std::vector<std::string> & tokens);

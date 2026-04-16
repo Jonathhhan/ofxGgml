@@ -15,6 +15,7 @@
 #include <limits>
 #include <numeric>
 #include <random>
+#include <regex>
 #include <sstream>
 #include <string_view>
 
@@ -52,6 +53,19 @@ static constexpr TokenLiteral kTrailingArtifacts[] = {
 	{ "> EOF", 5 },
 	{ "EOF", 3 },
 	{ "Interrupted by user", 19 },
+	{ "[end of text]", 13 },
+	{ "<|endoftext|>", 13 },
+};
+
+static constexpr TokenLiteral kInteractivePreambleMarkers[] = {
+	{ "Running in interactive mode", 27 },
+	{ "Press Ctrl+C to interject", 24 },
+	{ "Press Return to return control to the AI", 39 },
+	{ "To return control without starting a new line", 43 },
+	{ "If you want to submit another line", 34 },
+	{ "Not using system message", 24 },
+	{ "Using system message", 20 },
+	{ "Reverse prompt", 14 },
 };
 
 static constexpr size_t kMaxSourceLabelChars = 96;
@@ -74,6 +88,41 @@ static std::string_view trimView(const std::string & s) {
 	while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
 		--e;
 	return std::string_view(s).substr(b, e - b);
+}
+
+static std::string stripLiteralAnsiMarkers(const std::string & text) {
+	static const std::regex markerRegex(R"(\[(?:\d{1,3})(?:;\d{1,3})*m)");
+	return std::regex_replace(text, markerRegex, "");
+}
+
+static std::string stripInteractivePreamble(const std::string & text) {
+	bool skipping = true;
+	size_t pos = 0;
+	while (pos <= text.size()) {
+		const size_t end = text.find('\n', pos);
+		const std::string line = (end == std::string::npos)
+			? text.substr(pos)
+			: text.substr(pos, end - pos);
+		const std::string_view trimmed = trimView(line);
+
+		if (skipping && !trimmed.empty()) {
+			bool isPreamble = false;
+			for (const auto & marker : kInteractivePreambleMarkers) {
+				if (trimmed.find(marker.text) != std::string_view::npos) {
+					isPreamble = true;
+					break;
+				}
+			}
+			if (!isPreamble) {
+				return trim(text.substr(pos));
+			}
+		}
+
+		if (end == std::string::npos) break;
+		pos = end + 1;
+	}
+
+	return {};
 }
 
 static std::string getEnvVarString(const char * name) {
@@ -368,6 +417,10 @@ static std::string stripLlamaWarnings(const std::string & text) {
 static bool isRuntimeNoiseLine(std::string_view trimmedLine) {
 	if (trimmedLine.empty()) return true;
 	if (trimmedLine.rfind("ofxGgml [", 0) == 0) return true;
+	if (trimmedLine.find("saving final output to session file") != std::string::npos) return true;
+	if (trimmedLine.rfind("main:", 0) == 0 &&
+		(trimmedLine.find("session file") != std::string::npos ||
+		 trimmedLine.find("prompt_cache_") != std::string::npos)) return true;
 	if (trimmedLine.find("warning: no usable GPU found") != std::string::npos) return true;
 	if (trimmedLine.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos) return true;
 	if (trimmedLine.find("warning: consult docs/build.md for compilation instructions") != std::string::npos) return true;
@@ -443,14 +496,40 @@ static std::string stripChatTemplateMarkers(const std::string & text) {
 }
 
 static std::string stripPromptEcho(const std::string & text, const std::string & prompt) {
-	std::string out = trim(text);
+	const std::string trimmedText = trim(text);
 	const std::string trimmedPrompt = trim(prompt);
-	if (trimmedPrompt.empty()) return out;
-	if (out.size() >= trimmedPrompt.size() &&
-		out.compare(0, trimmedPrompt.size(), trimmedPrompt) == 0) {
-		return trim(out.substr(trimmedPrompt.size()));
+	if (trimmedText.empty() || trimmedPrompt.empty()) {
+		return trimmedText;
 	}
-	return out;
+
+	auto hasPromptPrefix = [&](const std::string & candidate) {
+		if (candidate.size() < trimmedPrompt.size()) {
+			return false;
+		}
+		if (candidate.compare(0, trimmedPrompt.size(), trimmedPrompt) != 0) {
+			return false;
+		}
+		if (candidate.size() == trimmedPrompt.size()) {
+			return true;
+		}
+		const char next = candidate[trimmedPrompt.size()];
+		return next == '\n' || next == '\r' || next == ':' ||
+			std::isspace(static_cast<unsigned char>(next)) != 0;
+	};
+
+	if (hasPromptPrefix(trimmedText)) {
+		return trim(trimmedText.substr(trimmedPrompt.size()));
+	}
+
+	const size_t firstLineEnd = trimmedText.find('\n');
+	if (firstLineEnd != std::string::npos) {
+		const std::string firstLine = trim(trimmedText.substr(0, firstLineEnd));
+		if (firstLine == trimmedPrompt) {
+			return trim(trimmedText.substr(firstLineEnd + 1));
+		}
+	}
+
+	return trimmedText;
 }
 
 static std::string stripLeadingRoleLabels(const std::string & text) {
@@ -494,13 +573,27 @@ static std::string stripTrailingArtifacts(const std::string & text) {
 	return out;
 }
 
+static std::string stripInlineArtifacts(const std::string & text) {
+	std::string out = text;
+	for (const auto & artifact : kTrailingArtifacts) {
+		size_t pos = 0;
+		while ((pos = out.find(artifact.text, pos)) != std::string::npos) {
+			out.erase(pos, artifact.len);
+		}
+	}
+	return trim(out);
+}
+
 static std::string cleanCompletionOutput(const std::string & raw, const std::string & prompt) {
 	std::string cleaned = stripLlamaWarnings(raw);
 	cleaned = stripLeadingRuntimeNoise(cleaned);
+	cleaned = stripInteractivePreamble(cleaned);
+	cleaned = stripLiteralAnsiMarkers(cleaned);
 	cleaned = stripChatTemplateMarkers(cleaned);
 	cleaned = stripPromptEcho(cleaned, prompt);
 	cleaned = stripLeadingRoleLabels(cleaned);
 	cleaned = stripTrailingArtifacts(cleaned);
+	cleaned = stripInlineArtifacts(cleaned);
 	for (const char * marker : {"[1m", "[32m", "[0m", "> "}) {
 		size_t pos = 0;
 		const size_t len = std::strlen(marker);
@@ -508,6 +601,19 @@ static std::string cleanCompletionOutput(const std::string & raw, const std::str
 			cleaned.erase(pos, len);
 		}
 	}
+	cleaned = stripLeadingRuntimeNoise(cleaned);
+	return trim(cleaned);
+}
+
+static std::string cleanCompletionOutputConservative(const std::string & raw) {
+	std::string cleaned = stripLlamaWarnings(raw);
+	cleaned = stripLeadingRuntimeNoise(cleaned);
+	cleaned = stripInteractivePreamble(cleaned);
+	cleaned = stripLiteralAnsiMarkers(cleaned);
+	cleaned = stripChatTemplateMarkers(cleaned);
+	cleaned = stripLeadingRoleLabels(cleaned);
+	cleaned = stripTrailingArtifacts(cleaned);
+	cleaned = stripInlineArtifacts(cleaned);
 	cleaned = stripLeadingRuntimeNoise(cleaned);
 	return trim(cleaned);
 }
@@ -1567,8 +1673,19 @@ std::string ofxGgmlInference::buildCutoffContinuationRequest(
 		"Tail of previous output:\n" + tailText;
 }
 
+std::string ofxGgmlInference::sanitizeGeneratedText(
+	const std::string & raw,
+	const std::string & prompt) {
+	return cleanCompletionOutput(raw, prompt);
+}
+
+std::string ofxGgmlInference::sanitizeStructuredText(
+	const std::string & raw) {
+	return cleanStructuredOutput(raw);
+}
+
 ofxGgmlInferenceResult ofxGgmlInference::generate(
-const std::string & modelPath,
+	const std::string & modelPath,
 const std::string & prompt,
 const ofxGgmlInferenceSettings & settings,
 std::function<bool(const std::string&)> onChunk) const {
@@ -1689,6 +1806,8 @@ std::function<bool(const std::string&)> onChunk) const {
 		args.emplace_back(std::to_string(std::clamp(settings.repeatPenalty, 1.0f, 3.0f)));
 		args.emplace_back("--no-display-prompt");
 		args.emplace_back("--log-disable");
+		args.emplace_back("--color");
+		args.emplace_back("off");
 
 		if (simpleIoEnabled) {
 			args.emplace_back("--simple-io");
@@ -1756,6 +1875,9 @@ std::function<bool(const std::string&)> onChunk) const {
 			return false;
 		}
 		passCleaned = cleanCompletionOutput(passRaw, sanitizedPrompt);
+		if (passCleaned.empty() && !trim(passRaw).empty()) {
+			passCleaned = cleanCompletionOutputConservative(passRaw);
+		}
 		if (passExitCode != 0 && passCleaned.empty()) {
 			std::string diagRaw;
 			int diagExitCode = -1;
@@ -1765,6 +1887,9 @@ std::function<bool(const std::string&)> onChunk) const {
 					passCleaned = diagCleaned;
 				} else {
 					passRaw = cleanStructuredOutput(diagRaw);
+					if (passCleaned.empty() && !trim(passRaw).empty()) {
+						passCleaned = cleanCompletionOutputConservative(passRaw);
+					}
 				}
 			}
 		}

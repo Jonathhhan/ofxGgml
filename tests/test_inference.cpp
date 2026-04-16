@@ -304,7 +304,7 @@ TEST_CASE("Inference settings", "[inference]") {
 		REQUIRE(settings.threads == 0);
 		REQUIRE(settings.seed == -1);
 		REQUIRE(settings.simpleIo == true);
-		REQUIRE(settings.promptCacheAll == true);
+		REQUIRE(settings.promptCacheAll == false);
 		REQUIRE(settings.autoPromptCache == true);
 		REQUIRE(settings.singleTurn == true);
 		REQUIRE(settings.autoProbeCliCapabilities == true);
@@ -461,6 +461,13 @@ TEST_CASE("Inference helper utilities", "[inference]") {
 			"partial tail");
 		REQUIRE(request.find("Continue exactly from where the previous answer stopped.") != std::string::npos);
 		REQUIRE(request.find("partial tail") != std::string::npos);
+	}
+
+	SECTION("Prompt echo stripping does not eat greeting responses") {
+		const std::string cleaned = ofxGgmlInference::sanitizeGeneratedText(
+			"hello! How can I assist you today? [end of text]",
+			"hello");
+		REQUIRE(cleaned == "hello! How can I assist you today?");
 	}
 }
 
