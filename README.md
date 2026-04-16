@@ -18,7 +18,7 @@ This addon is released under the [MIT License](LICENSE).
 
 ## Release
 
-- addon release version: `1.0.0`
+- addon release version: `1.0.1`
 - changelog: `CHANGELOG.md`
 
 ## Highlights
@@ -28,6 +28,9 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlGraph` fluent graph builder for common ggml operations
 - `ofxGgmlModel` GGUF inspection and backend weight upload
 - `ofxGgmlInference` llama.cpp CLI helper for generation, embeddings, cache reuse, CLI capability probing, cutoff continuation, and source-grounded prompt building
+- `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
+- `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
+- `ofxGgmlVideoInference` for backend-driven video understanding, starting with sampled-frame analysis and room for future specialized video backends
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
 - `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
 - `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, shadow-workspace safe apply, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
@@ -50,7 +53,7 @@ Core implementation is split by concern:
 - `src/core/` for runtime entry points, shared types, helpers, and version metadata
 - `src/compute/` for tensors and graph building
 - `src/model/` for GGUF model loading
-- `src/inference/` for completion execution and grounded prompt assembly
+- `src/inference/` for completion execution, grounded prompt assembly, and speech / vision / video inference helpers
 - `src/assistants/` for chat, code, workspace, review, and text-task helpers
 - `src/support/` for script sources and project memory
 
@@ -136,6 +139,8 @@ scripts\setup_windows.bat --skip-model
 scripts\setup_windows.bat --skip-ggml --model-preset 2
 ```
 
+`download-model` covers the text GGUF presets used by chat/script/write flows. Speech (`Whisper`) and multimodal `Vision` models are configured separately in the addon and GUI example because they use different runtimes and file layouts.
+
 ### ggml only
 
 Linux and macOS:
@@ -184,7 +189,7 @@ Common options:
 ## Examples
 
 - `ofxGgmlBasicExample`: interactive matrix demo plus steady-state matmul benchmark
-- `ofxGgmlGuiExample`: local chat, review, and script workflow UI backed by addon assistants
+- `ofxGgmlGuiExample`: local chat, review, script, speech, and multimodal workflow UI backed by addon helpers
 - `ofxGgmlNeuralExample`: reusable inference graph with live class bars and latency view
 
 Both lightweight examples are now keyboard-driven so you can rerun compute and benchmark paths without restarting the app.
@@ -278,6 +283,24 @@ The public result types make that loop inspectable:
 `ofxGgmlTextAssistant` lifts translation and general text-workflow prompting out of the `GuiExample`. It prepares reusable prompts for `Summarize`, `KeyPoints`, `TlDr`, `Rewrite`, `Expand`, `Translate`, `DetectLanguage`, and `Custom` tasks.
 
 Use it when an app wants translation or writing-assistant features without hardcoding task prompts in its UI layer.
+
+## Speech Helpers
+
+`ofxGgmlSpeechInference` adds addon-level speech-to-text support through a pluggable backend interface. The default backend targets `whisper-cli`, and the addon now ships with ready-to-use profile hints for common Whisper model families such as `Tiny.en`, `Base.en`, `Small`, and `Large-v3 Turbo`.
+
+Use it when an app wants local `Transcribe` / `Translate` audio workflows without hardcoding command-line assembly in its UI layer. The `GuiExample` exposes executable path, model path, profile selection, language hint, prompt, and transcript output as a first-class panel.
+
+## Vision Helpers
+
+`ofxGgmlVisionInference` adds multimodal image-to-text support for `llama-server`-compatible endpoints. It prepares task-specific prompts for `Describe`, `OCR`, and `Ask`, handles local image encoding as data URLs, and includes curated profile hints for families such as `Llama 3.2 Vision`, `Qwen VL`, `GLM OCR`, and `LFM2.5-VL`.
+
+Use it when an app wants OCR, screenshot understanding, document extraction, or image-grounded prompting without rebuilding OpenAI-style request payloads manually.
+
+## Video Helpers
+
+`ofxGgmlVideoInference` adds a backend-driven video layer on top of the vision stack. The default backend samples frames and reuses the multimodal image path, while keeping the API open for future specialized backends such as dedicated video-language servers.
+
+Use it when an app wants practical local video understanding today, but still wants a clean path to stronger temporal backends later.
 
 ## Versioning
 

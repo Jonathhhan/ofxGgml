@@ -119,6 +119,9 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND ADDON_SOURCES
         ../src/assistants/ofxGgmlChatAssistant.cpp
         ../src/inference/ofxGgmlInference.cpp
+        ../src/inference/ofxGgmlSpeechInference.cpp
+        ../src/inference/ofxGgmlVisionInference.cpp
+        ../src/inference/ofxGgmlVideoInference.cpp
         ../src/support/ofxGgmlScriptSource.cpp
         ../src/assistants/ofxGgmlCodeAssistant.cpp
         ../src/assistants/ofxGgmlWorkspaceAssistant.cpp
@@ -140,6 +143,9 @@ set(TEST_SOURCES
 if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND TEST_SOURCES
         test_inference.cpp
+        test_speech_inference.cpp
+        test_vision_inference.cpp
+        test_video_inference.cpp
         test_assistant_eval.cpp
         test_chat_assistant.cpp
         test_code_assistant.cpp

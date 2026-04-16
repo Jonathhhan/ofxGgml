@@ -25,7 +25,9 @@ enum class AiMode {
 	Summarize,
 	Write,
 	Translate,
-	Custom
+	Custom,
+	Vision,
+	Speech
 };
 
 // ---------------------------------------------------------------------------
@@ -84,7 +86,7 @@ private:
 
 	// -- mode --
 	AiMode activeMode = AiMode::Chat;
-	static constexpr int kModeCount = 6;
+	static constexpr int kModeCount = 8;
 	static const char * modeLabels[kModeCount];
 
 	// -- input buffers --
@@ -98,6 +100,19 @@ private:
 	char customInput[4096] = {};
 	char customSystemPrompt[2048] = {};
 	char sourceUrlsInput[2048] = {};
+	char visionPrompt[4096] = {};
+	char visionImagePath[1024] = {};
+	char visionModelPath[1024] = {};
+	char visionServerUrl[256] = "http://127.0.0.1:8080";
+	char visionSystemPrompt[1024] = {};
+	int visionTaskIndex = 0;
+	char speechAudioPath[1024] = {};
+	char speechExecutable[256] = "whisper-cli";
+	char speechModelPath[1024] = {};
+	char speechPrompt[1024] = {};
+	char speechLanguageHint[64] = "auto";
+	int speechTaskIndex = 0;
+	bool speechReturnTimestamps = false;
 
 	// -- conversation / output --
 	std::deque<Message> chatMessages;
@@ -107,6 +122,8 @@ private:
 	std::string writeOutput;
 	std::string translateOutput;
 	std::string customOutput;
+	std::string visionOutput;
+	std::string speechOutput;
 
 	// -- generation state --
 	std::atomic<bool> generating{false};
@@ -144,7 +161,7 @@ private:
 	float mirostatTau = 5.0f;
 	float mirostatEta = 0.1f;
 	int chatLanguageIndex = 0;                       // 0=Auto, otherwise force response language
-	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512};
+	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 384, 512};
 	bool useModeTokenBudgets = true;
 	bool autoContinueCutoff = false;
 	bool usePromptCache = true;
@@ -189,6 +206,10 @@ private:
 	std::vector<ofxGgmlTextLanguageOption> translateLanguages;
 	std::vector<PromptTemplate> promptTemplates;
 	int selectedPromptTemplateIndex = -1;
+	std::vector<ofxGgmlVisionModelProfile> visionProfiles;
+	int selectedVisionProfileIndex = 0;
+	std::vector<ofxGgmlSpeechModelProfile> speechProfiles;
+	int selectedSpeechProfileIndex = 0;
 	void initPromptTemplates();
 
 	// -- script source (local folder / GitHub) --
@@ -202,6 +223,8 @@ private:
 	ofxGgmlCodeAssistant scriptAssistant;
 	ofxGgmlWorkspaceAssistant scriptWorkspaceAssistant;
 	ofxGgmlTextAssistant textAssistant;
+	ofxGgmlVisionInference visionInference;
+	ofxGgmlSpeechInference speechInference;
 	ofxGgmlInference llmInference;
 	ofxGgmlCodeReview scriptCodeReview;
 	ofxGgmlProjectMemory scriptProjectMemory;
@@ -230,6 +253,8 @@ private:
 		const std::string & overridePrompt = "",
 		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {});
 	void runHierarchicalReview();
+	void runVisionInference();
+	void runSpeechInference();
 	bool runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,
 		std::function<void(const std::string &)> onStreamData = nullptr,
 		bool preserveLlamaInstructions = false);
@@ -255,6 +280,8 @@ private:
 	void drawWritePanel();
 	void drawTranslatePanel();
 	void drawCustomPanel();
+	void drawVisionPanel();
+	void drawSpeechPanel();
 	void drawStatusBar();
 	void drawDeviceInfoWindow();
 	void drawLogWindow();

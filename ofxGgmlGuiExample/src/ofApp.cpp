@@ -38,7 +38,7 @@
 // ---------------------------------------------------------------------------
 
 const char * ofApp::modeLabels[kModeCount] = {
-"Chat", "Script", "Summarize", "Write", "Translate", "Custom"
+	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Vision", "Speech"
 };
 
 namespace {
@@ -909,7 +909,7 @@ void ofApp::initModelPresets() {
 			}
 		};
 		// Match the CLI defaults: preset 1 for most modes, preset 2 for Script.
-		taskDefaultModelIndices = {0, 1, 0, 0, 0, 0};
+		taskDefaultModelIndices = {0, 1, 0, 0, 0, 0, 0, 0};
 	};
 
 	// Try to load presets from scripts/model-catalog.json first.
@@ -966,6 +966,8 @@ void ofApp::initModelPresets() {
 				setDefault("write", AiMode::Write);
 				setDefault("translate", AiMode::Translate);
 				setDefault("custom", AiMode::Custom);
+				setDefault("vision", AiMode::Vision);
+				setDefault("speech", AiMode::Speech);
 			}
 			loaded = !modelPresets.empty();
 		} catch (const std::exception & e) {
@@ -1226,6 +1228,8 @@ summarizeOutput.clear();
 writeOutput.clear();
 translateOutput.clear();
 customOutput.clear();
+visionOutput.clear();
+speechOutput.clear();
 }
 ImGui::Separator();
 if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
@@ -1542,6 +1546,8 @@ case AiMode::Summarize: drawSummarizePanel(); break;
 case AiMode::Write:     drawWritePanel();     break;
 case AiMode::Translate: drawTranslatePanel(); break;
 case AiMode::Custom:    drawCustomPanel();    break;
+case AiMode::Vision:    drawVisionPanel();    break;
+case AiMode::Speech:    drawSpeechPanel();    break;
 }
 }
 ImGui::End();
@@ -2895,6 +2901,259 @@ ImGui::EndChild();
 }
 }
 
+void ofApp::drawVisionPanel() {
+drawPanelHeader("Vision", "image-to-text via llama-server multimodal models");
+
+if (visionProfiles.empty()) {
+	visionProfiles = ofxGgmlVisionInference::defaultProfiles();
+}
+selectedVisionProfileIndex = std::clamp(
+	selectedVisionProfileIndex,
+	0,
+	std::max(0, static_cast<int>(visionProfiles.size()) - 1));
+
+ImGui::TextWrapped(
+	"Use a llama-server instance that is already running with a multimodal GGUF model. "
+	"This panel sends OpenAI-compatible vision requests with local images encoded as data URLs.");
+
+if (!visionProfiles.empty()) {
+	std::vector<const char *> profileNames;
+	profileNames.reserve(visionProfiles.size());
+	for (const auto & profile : visionProfiles) {
+		profileNames.push_back(profile.name.c_str());
+	}
+	ImGui::SetNextItemWidth(280);
+	if (ImGui::Combo("Vision profile", &selectedVisionProfileIndex, profileNames.data(), static_cast<int>(profileNames.size()))) {
+		const auto & profile = visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)];
+		if (!profile.serverUrl.empty()) {
+			copyStringToBuffer(visionServerUrl, sizeof(visionServerUrl), profile.serverUrl);
+		}
+		if (!profile.modelPath.empty()) {
+			copyStringToBuffer(visionModelPath, sizeof(visionModelPath), profile.modelPath);
+		}
+	}
+	const auto & profile = visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)];
+	ImGui::TextDisabled("Architecture: %s", profile.architecture.c_str());
+	if (!profile.modelRepoHint.empty()) {
+		ImGui::TextDisabled("Suggested model: %s", profile.modelRepoHint.c_str());
+	}
+	if (!profile.modelFileHint.empty()) {
+		ImGui::TextDisabled("Suggested file: %s", profile.modelFileHint.c_str());
+	}
+	if (profile.mayRequireMmproj) {
+		ImGui::TextDisabled("Note: some variants also need a matching mmproj file on the server side.");
+	}
+}
+
+ImGui::InputText("Server URL", visionServerUrl, sizeof(visionServerUrl));
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Example: http://127.0.0.1:8080");
+}
+
+ImGui::InputText("Model path", visionModelPath, sizeof(visionModelPath));
+ImGui::SameLine();
+if (ImGui::Button("Browse model...", ImVec2(110, 0))) {
+	ofFileDialogResult result = ofSystemLoadDialog("Select vision model", false);
+	if (result.bSuccess) {
+		copyStringToBuffer(visionModelPath, sizeof(visionModelPath), result.getPath());
+	}
+}
+
+ImGui::InputText("Image path", visionImagePath, sizeof(visionImagePath));
+ImGui::SameLine();
+if (ImGui::Button("Browse...", ImVec2(90, 0))) {
+	ofFileDialogResult result = ofSystemLoadDialog("Select image", false);
+	if (result.bSuccess) {
+		copyStringToBuffer(visionImagePath, sizeof(visionImagePath), result.getPath());
+	}
+}
+
+static const char * visionTaskLabels[] = { "Describe", "OCR", "Ask" };
+ImGui::SetNextItemWidth(180);
+ImGui::Combo("Task", &visionTaskIndex, visionTaskLabels, 3);
+
+ImGui::InputTextMultiline(
+	"Vision prompt",
+	visionPrompt,
+	sizeof(visionPrompt),
+	ImVec2(-1, 100));
+ImGui::InputTextMultiline(
+	"Vision system prompt",
+	visionSystemPrompt,
+	sizeof(visionSystemPrompt),
+	ImVec2(-1, 70));
+
+ImGui::BeginDisabled(generating.load() || std::strlen(visionImagePath) == 0);
+if (ImGui::Button("Run Vision", ImVec2(140, 0))) {
+	runVisionInference();
+}
+ImGui::EndDisabled();
+
+ImGui::Separator();
+ImGui::Text("Output:");
+if (!visionOutput.empty()) {
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Copy##VisionCopy")) copyToClipboard(visionOutput);
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Clear##VisionClear")) visionOutput.clear();
+	ImGui::SameLine();
+	ImGui::TextDisabled("(%d chars)", static_cast<int>(visionOutput.size()));
+}
+if (generating.load() && activeGenerationMode == AiMode::Vision) {
+	ImGui::BeginChild("##VisionOut", ImVec2(0, 0), true);
+	std::string partial;
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		partial = streamingOutput;
+	}
+	if (partial.empty()) {
+		int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+		ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
+	} else {
+		ImGui::TextWrapped("%s", partial.c_str());
+	}
+	ImGui::EndChild();
+} else {
+	ImGui::BeginChild("##VisionOut", ImVec2(0, 0), true);
+	if (visionOutput.empty()) {
+		ImGui::TextDisabled("Vision responses appear here.");
+	} else {
+		ImGui::TextWrapped("%s", visionOutput.c_str());
+	}
+	ImGui::EndChild();
+	}
+}
+
+void ofApp::drawSpeechPanel() {
+drawPanelHeader("Speech", "audio transcription and translation via speech backends");
+
+ImGui::TextWrapped(
+	"Use a local speech backend such as whisper-cli. This keeps speech-to-text available as a first-class "
+	"addon workflow instead of hiding it behind the script or chat panels.");
+
+if (speechProfiles.empty()) {
+	speechProfiles = ofxGgmlSpeechInference::defaultProfiles();
+}
+selectedSpeechProfileIndex = std::clamp(
+	selectedSpeechProfileIndex,
+	0,
+	std::max(0, static_cast<int>(speechProfiles.size()) - 1));
+
+if (!speechProfiles.empty()) {
+	std::vector<const char *> profileNames;
+	profileNames.reserve(speechProfiles.size());
+	for (const auto & profile : speechProfiles) {
+		profileNames.push_back(profile.name.c_str());
+	}
+	ImGui::SetNextItemWidth(260);
+	if (ImGui::Combo("Speech profile", &selectedSpeechProfileIndex, profileNames.data(),
+		static_cast<int>(profileNames.size()))) {
+		const auto & profile = speechProfiles[static_cast<size_t>(selectedSpeechProfileIndex)];
+		if (!profile.executable.empty()) {
+			copyStringToBuffer(speechExecutable, sizeof(speechExecutable), profile.executable);
+		}
+		if (!profile.modelPath.empty()) {
+			copyStringToBuffer(speechModelPath, sizeof(speechModelPath), profile.modelPath);
+		}
+	}
+
+	const auto & profile = speechProfiles[static_cast<size_t>(selectedSpeechProfileIndex)];
+	if (!profile.modelRepoHint.empty()) {
+		ImGui::TextDisabled("Suggested repo: %s", profile.modelRepoHint.c_str());
+	}
+	if (!profile.modelFileHint.empty()) {
+		ImGui::TextDisabled("Suggested file: %s", profile.modelFileHint.c_str());
+	}
+}
+
+ImGui::InputText("Audio path", speechAudioPath, sizeof(speechAudioPath));
+ImGui::SameLine();
+if (ImGui::Button("Browse audio...", ImVec2(110, 0))) {
+	ofFileDialogResult result = ofSystemLoadDialog("Select audio file", false);
+	if (result.bSuccess) {
+		copyStringToBuffer(speechAudioPath, sizeof(speechAudioPath), result.getPath());
+	}
+}
+
+ImGui::InputText("Executable", speechExecutable, sizeof(speechExecutable));
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Example: whisper-cli or a full path to whisper-cli.exe");
+}
+
+ImGui::InputText("Model path", speechModelPath, sizeof(speechModelPath));
+ImGui::SameLine();
+if (ImGui::Button("Browse model...", ImVec2(110, 0))) {
+	ofFileDialogResult result = ofSystemLoadDialog("Select Whisper model", false);
+	if (result.bSuccess) {
+		copyStringToBuffer(speechModelPath, sizeof(speechModelPath), result.getPath());
+	}
+}
+
+static const char * speechTaskLabels[] = {"Transcribe", "Translate"};
+ImGui::SetNextItemWidth(180);
+ImGui::Combo("Speech task", &speechTaskIndex, speechTaskLabels, 2);
+
+ImGui::InputText("Language hint", speechLanguageHint, sizeof(speechLanguageHint));
+if (ImGui::IsItemHovered()) {
+	ImGui::SetTooltip("Use auto to let the backend decide, or pass a language like en, de, fr.");
+}
+
+ImGui::Checkbox("Return timestamps", &speechReturnTimestamps);
+if (!speechProfiles.empty()) {
+	const auto & profile = speechProfiles[static_cast<size_t>(selectedSpeechProfileIndex)];
+	if (!profile.supportsTimestamps) {
+		ImGui::SameLine();
+		ImGui::TextDisabled("(profile may ignore timestamps)");
+	}
+}
+
+ImGui::InputTextMultiline(
+	"Speech prompt",
+	speechPrompt,
+	sizeof(speechPrompt),
+	ImVec2(-1, 90));
+
+ImGui::BeginDisabled(generating.load() || std::strlen(speechAudioPath) == 0);
+if (ImGui::Button("Run Speech", ImVec2(140, 0))) {
+	runSpeechInference();
+}
+ImGui::EndDisabled();
+
+ImGui::Separator();
+ImGui::Text("Transcript:");
+if (!speechOutput.empty()) {
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Copy##SpeechCopy")) copyToClipboard(speechOutput);
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Clear##SpeechClear")) speechOutput.clear();
+	ImGui::SameLine();
+	ImGui::TextDisabled("(%d chars)", static_cast<int>(speechOutput.size()));
+}
+if (generating.load() && activeGenerationMode == AiMode::Speech) {
+	ImGui::BeginChild("##SpeechOut", ImVec2(0, 0), true);
+	std::string partial;
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		partial = streamingOutput;
+	}
+	if (partial.empty()) {
+		int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+		ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
+	} else {
+		ImGui::TextWrapped("%s", partial.c_str());
+	}
+	ImGui::EndChild();
+} else {
+	ImGui::BeginChild("##SpeechOut", ImVec2(0, 0), true);
+	if (speechOutput.empty()) {
+		ImGui::TextDisabled("Speech transcription appears here.");
+	} else {
+		ImGui::TextWrapped("%s", speechOutput.c_str());
+	}
+	ImGui::EndChild();
+}
+}
+
 // ---------------------------------------------------------------------------
 // Status bar
 // ---------------------------------------------------------------------------
@@ -3143,6 +3402,21 @@ out << "translateSourceLang=" << translateSourceLang << "\n";
 out << "translateTargetLang=" << translateTargetLang << "\n";
 out << "customInput=" << escapeSessionText(customInput) << "\n";
 out << "customSystemPrompt=" << escapeSessionText(customSystemPrompt) << "\n";
+out << "visionPrompt=" << escapeSessionText(visionPrompt) << "\n";
+out << "visionImagePath=" << escapeSessionText(visionImagePath) << "\n";
+out << "visionModelPath=" << escapeSessionText(visionModelPath) << "\n";
+out << "visionServerUrl=" << escapeSessionText(visionServerUrl) << "\n";
+out << "visionSystemPrompt=" << escapeSessionText(visionSystemPrompt) << "\n";
+out << "visionTaskIndex=" << visionTaskIndex << "\n";
+out << "visionProfileIndex=" << selectedVisionProfileIndex << "\n";
+out << "speechAudioPath=" << escapeSessionText(speechAudioPath) << "\n";
+out << "speechExecutable=" << escapeSessionText(speechExecutable) << "\n";
+out << "speechModelPath=" << escapeSessionText(speechModelPath) << "\n";
+out << "speechPrompt=" << escapeSessionText(speechPrompt) << "\n";
+out << "speechLanguageHint=" << escapeSessionText(speechLanguageHint) << "\n";
+out << "speechTaskIndex=" << speechTaskIndex << "\n";
+out << "speechProfileIndex=" << selectedSpeechProfileIndex << "\n";
+out << "speechReturnTimestamps=" << (speechReturnTimestamps ? 1 : 0) << "\n";
 
 // Outputs.
 out << "scriptOutput=" << escapeSessionText(scriptOutput) << "\n";
@@ -3150,6 +3424,8 @@ out << "summarizeOutput=" << escapeSessionText(summarizeOutput) << "\n";
 out << "writeOutput=" << escapeSessionText(writeOutput) << "\n";
 out << "translateOutput=" << escapeSessionText(translateOutput) << "\n";
 out << "customOutput=" << escapeSessionText(customOutput) << "\n";
+out << "visionOutput=" << escapeSessionText(visionOutput) << "\n";
+out << "speechOutput=" << escapeSessionText(speechOutput) << "\n";
 out << "strictOfflineMode=" << (strictOfflineMode ? 1 : 0) << "\n";
 out << "allowRealtimeInternet=" << (allowRealtimeInternet ? 1 : 0) << "\n";
 out << "stopAtNaturalBoundary=" << (stopAtNaturalBoundary ? 1 : 0) << "\n";
@@ -3318,11 +3594,28 @@ else if (key == "translateTargetLang") {
 }
 else if (key == "customInput") copyToBuf(customInput, sizeof(customInput), value);
 else if (key == "customSystemPrompt") copyToBuf(customSystemPrompt, sizeof(customSystemPrompt), value);
+else if (key == "visionPrompt") copyToBuf(visionPrompt, sizeof(visionPrompt), value);
+else if (key == "visionImagePath") copyToBuf(visionImagePath, sizeof(visionImagePath), value);
+else if (key == "visionModelPath") copyToBuf(visionModelPath, sizeof(visionModelPath), value);
+else if (key == "visionServerUrl") copyToBuf(visionServerUrl, sizeof(visionServerUrl), value);
+else if (key == "visionSystemPrompt") copyToBuf(visionSystemPrompt, sizeof(visionSystemPrompt), value);
+else if (key == "visionTaskIndex") visionTaskIndex = std::clamp(safeStoi(value), 0, 2);
+else if (key == "visionProfileIndex") selectedVisionProfileIndex = std::max(0, safeStoi(value));
+else if (key == "speechAudioPath") copyToBuf(speechAudioPath, sizeof(speechAudioPath), value);
+else if (key == "speechExecutable") copyToBuf(speechExecutable, sizeof(speechExecutable), value);
+else if (key == "speechModelPath") copyToBuf(speechModelPath, sizeof(speechModelPath), value);
+else if (key == "speechPrompt") copyToBuf(speechPrompt, sizeof(speechPrompt), value);
+else if (key == "speechLanguageHint") copyToBuf(speechLanguageHint, sizeof(speechLanguageHint), value);
+else if (key == "speechTaskIndex") speechTaskIndex = std::clamp(safeStoi(value), 0, 1);
+else if (key == "speechProfileIndex") selectedSpeechProfileIndex = std::max(0, safeStoi(value));
+else if (key == "speechReturnTimestamps") speechReturnTimestamps = (safeStoi(value, 0) != 0);
 else if (key == "scriptOutput") scriptOutput = unescapeSessionText(value);
 else if (key == "summarizeOutput") summarizeOutput = unescapeSessionText(value);
 else if (key == "writeOutput") writeOutput = unescapeSessionText(value);
 else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
 else if (key == "customOutput") customOutput = unescapeSessionText(value);
+else if (key == "visionOutput") visionOutput = unescapeSessionText(value);
+else if (key == "speechOutput") speechOutput = unescapeSessionText(value);
 else if (key == "strictOfflineMode") strictOfflineMode = (safeStoi(value, 0) != 0);
 else if (key == "allowRealtimeInternet") allowRealtimeInternet = (safeStoi(value, 0) != 0);
 else if (key == "stopAtNaturalBoundary") stopAtNaturalBoundary = (safeStoi(value, 1) != 0);
@@ -3582,6 +3875,248 @@ void ofApp::runHierarchicalReview() {
 			setError("[Error] Unknown failure during hierarchical review.");
 		}
 
+		generating.store(false);
+	});
+}
+
+void ofApp::runVisionInference() {
+	if (generating.load()) return;
+
+	if (visionProfiles.empty()) {
+		visionProfiles = ofxGgmlVisionInference::defaultProfiles();
+	}
+	if (visionProfiles.empty()) {
+		visionOutput = "[Error] No vision profiles are available.";
+		return;
+	}
+
+	selectedVisionProfileIndex = std::clamp(
+		selectedVisionProfileIndex,
+		0,
+		std::max(0, static_cast<int>(visionProfiles.size()) - 1));
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::Vision;
+	generationStartTime = ofGetElapsedTimef();
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput = "Preparing multimodal request...";
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	const ofxGgmlVisionModelProfile profileBase =
+		visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)];
+	const std::string prompt = trim(visionPrompt);
+	const std::string imagePath = trim(visionImagePath);
+	const std::string modelPath = trim(visionModelPath);
+	const std::string serverUrl = trim(visionServerUrl);
+	const std::string systemPrompt = trim(visionSystemPrompt);
+	const int taskIndex = std::clamp(visionTaskIndex, 0, 2);
+	const int requestedMaxTokens = std::clamp(maxTokens, 64, 4096);
+	const float requestedTemperature = std::isfinite(temperature)
+		? std::clamp(temperature, 0.0f, 2.0f)
+		: 0.2f;
+
+	workerThread = std::thread([this, profileBase, prompt, imagePath, modelPath, serverUrl, systemPrompt, taskIndex, requestedMaxTokens, requestedTemperature]() {
+		auto setPending = [this](const std::string & text) {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingOutput = text;
+			pendingRole = "assistant";
+			pendingMode = AiMode::Vision;
+		};
+
+		try {
+			if (imagePath.empty()) {
+				setPending("[Error] Select an image first.");
+				generating.store(false);
+				return;
+			}
+
+			ofxGgmlVisionModelProfile profile = profileBase;
+			if (!serverUrl.empty()) {
+				profile.serverUrl = serverUrl;
+			}
+			if (!modelPath.empty()) {
+				profile.modelPath = modelPath;
+			} else if (trim(profile.modelPath).empty() &&
+				!trim(profile.modelFileHint).empty()) {
+				const std::filesystem::path suggested =
+					std::filesystem::path(ofToDataPath("models", true)) /
+					trim(profile.modelFileHint);
+				std::error_code ec;
+				if (std::filesystem::exists(suggested, ec) && !ec) {
+					profile.modelPath = suggested.string();
+				}
+			}
+
+			ofxGgmlVisionRequest request;
+			request.task = static_cast<ofxGgmlVisionTask>(taskIndex);
+			request.prompt = prompt;
+			request.systemPrompt = systemPrompt;
+			request.maxTokens = requestedMaxTokens;
+			request.temperature = requestedTemperature;
+			if (chatLanguageIndex > 0 &&
+				chatLanguageIndex < static_cast<int>(chatLanguages.size())) {
+				request.responseLanguage =
+					chatLanguages[static_cast<size_t>(chatLanguageIndex)].name;
+			}
+			request.images.push_back({imagePath, "Input image", ""});
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput =
+					"Contacting " + ofxGgmlVisionInference::normalizeServerUrl(profile.serverUrl);
+			}
+
+			const ofxGgmlVisionResult result = visionInference.runServerRequest(profile, request);
+			if (cancelRequested.load()) {
+				setPending("[Cancelled] Vision request cancelled.");
+			} else if (result.success) {
+				setPending(result.text);
+				logWithLevel(
+					OF_LOG_NOTICE,
+					"Vision request completed in " +
+						ofxGgmlHelpers::formatDurationMs(result.elapsedMs) +
+						" via " + result.usedServerUrl);
+			} else {
+				setPending("[Error] " + result.error);
+				if (!result.responseJson.empty()) {
+					logWithLevel(OF_LOG_WARNING, "Vision response: " + result.responseJson);
+				}
+			}
+		} catch (const std::exception & e) {
+			setPending(std::string("[Error] Vision inference failed: ") + e.what());
+		} catch (...) {
+			setPending("[Error] Unknown failure during vision inference.");
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			streamingOutput.clear();
+		}
+		generating.store(false);
+	});
+}
+
+void ofApp::runSpeechInference() {
+	if (generating.load()) return;
+
+	if (speechProfiles.empty()) {
+		speechProfiles = ofxGgmlSpeechInference::defaultProfiles();
+	}
+	selectedSpeechProfileIndex = std::clamp(
+		selectedSpeechProfileIndex,
+		0,
+		std::max(0, static_cast<int>(speechProfiles.size()) - 1));
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::Speech;
+	generationStartTime = ofGetElapsedTimef();
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput = "Preparing speech transcription...";
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	const ofxGgmlSpeechModelProfile profileBase =
+		speechProfiles.empty()
+			? ofxGgmlSpeechModelProfile{}
+			: speechProfiles[static_cast<size_t>(selectedSpeechProfileIndex)];
+	const std::string audioPath = trim(speechAudioPath);
+	const std::string executable = trim(speechExecutable);
+	const std::string modelPath = trim(speechModelPath);
+	const std::string prompt = trim(speechPrompt);
+	const std::string languageHint = trim(speechLanguageHint);
+	const int taskIndex = std::clamp(speechTaskIndex, 0, 1);
+	const bool returnTimestamps = speechReturnTimestamps;
+
+	workerThread = std::thread([this, profileBase, audioPath, executable, modelPath, prompt, languageHint, taskIndex, returnTimestamps]() {
+		auto setPending = [this](const std::string & text) {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingOutput = text;
+			pendingRole = "assistant";
+			pendingMode = AiMode::Speech;
+		};
+
+		try {
+			if (audioPath.empty()) {
+				setPending("[Error] Select an audio file first.");
+				generating.store(false);
+				return;
+			}
+
+			std::string effectiveExecutable =
+				executable.empty() ? trim(profileBase.executable) : executable;
+			if (effectiveExecutable.empty()) {
+				effectiveExecutable = "whisper-cli";
+			}
+
+			std::string effectiveModelPath = modelPath.empty()
+				? trim(profileBase.modelPath)
+				: modelPath;
+			if (effectiveModelPath.empty() && !trim(profileBase.modelFileHint).empty()) {
+				const std::filesystem::path suggested =
+					std::filesystem::path(ofToDataPath("models", true)) /
+					trim(profileBase.modelFileHint);
+				std::error_code ec;
+				if (std::filesystem::exists(suggested, ec) && !ec) {
+					effectiveModelPath = suggested.string();
+				}
+			}
+
+			speechInference.setBackend(
+				ofxGgmlSpeechInference::createWhisperCliBackend(
+					effectiveExecutable));
+
+			ofxGgmlSpeechRequest request;
+			request.task = static_cast<ofxGgmlSpeechTask>(taskIndex);
+			request.audioPath = audioPath;
+			request.modelPath = effectiveModelPath;
+			request.languageHint = languageHint;
+			request.prompt = prompt;
+			request.returnTimestamps = returnTimestamps;
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = "Running " + effectiveExecutable + "...";
+			}
+
+			const ofxGgmlSpeechResult result = speechInference.transcribe(request);
+			if (cancelRequested.load()) {
+				setPending("[Cancelled] Speech request cancelled.");
+			} else if (result.success) {
+				setPending(result.text);
+				logWithLevel(
+					OF_LOG_NOTICE,
+					"Speech request completed in " +
+						ofxGgmlHelpers::formatDurationMs(result.elapsedMs) +
+						" via " + result.backendName);
+			} else {
+				setPending("[Error] " + result.error);
+				if (!result.rawOutput.empty()) {
+					logWithLevel(OF_LOG_WARNING, "Speech raw output: " + result.rawOutput);
+				}
+			}
+		} catch (const std::exception & e) {
+			setPending(std::string("[Error] Speech inference failed: ") + e.what());
+		} catch (...) {
+			setPending("[Error] Unknown failure during speech inference.");
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			streamingOutput.clear();
+		}
 		generating.store(false);
 	});
 }
@@ -4461,6 +4996,14 @@ break;
 case AiMode::Custom:
 customOutput = pendingOutput;
 fprintf(stderr, "[ChatWindow] Custom: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
+break;
+case AiMode::Vision:
+visionOutput = pendingOutput;
+fprintf(stderr, "[ChatWindow] Vision: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
+break;
+case AiMode::Speech:
+speechOutput = pendingOutput;
+fprintf(stderr, "[ChatWindow] Speech: %s\n", formatConsoleLogText(pendingOutput, true).c_str());
 break;
 }
 pendingOutput.clear();

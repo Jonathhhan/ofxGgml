@@ -2,9 +2,12 @@
 
 All notable changes to `ofxGgml` are documented in this file.
 
-## [Unreleased]
+## [1.0.1] - 2026-04-16
 
 ### Added
+- `ofxGgmlSpeechInference` with a pluggable speech backend interface, Whisper CLI integration, recommended Whisper model profiles, and GUI-example speech transcription / translation support.
+- `ofxGgmlVisionInference` with OpenAI-compatible multimodal request assembly for `llama-server`-style vision models and GUI-example image workflows.
+- `ofxGgmlVideoInference` with backend-based video understanding, including a sampled-frames default backend and addon-level tests.
 - `ofxGgmlCodeAssistant` structured task results with file intents, patch operations, verification commands, risks, and follow-up questions.
 - `ofxGgmlWorkspaceAssistant` as a public addon module for patch application, verification loops, and retry-driven coding workflows.
 - Symbol-aware retrieval in `ofxGgmlCodeAssistant` so coding prompts can surface relevant definitions and references from `ofxGgmlScriptSource`.
@@ -24,6 +27,8 @@ All notable changes to `ofxGgml` are documented in this file.
 - Shadow-workspace execution in `ofxGgmlWorkspaceAssistant` so edits can be verified safely before syncing back to the original workspace.
 
 ### Changed
+- `ofxGgmlGuiExample` now treats speech and vision as first-class addon-backed modes instead of keeping those flows buried inside ad-hoc UI logic.
+- Speech workflows can now carry an explicit Whisper model path instead of relying only on a backend executable.
 - Structured command parsing is now more tolerant of partially degraded assistant output, which makes Windows-based scripted test and tooling flows more robust.
 - C++ symbol extraction now recognizes scoped definitions such as `Type::method()` more reliably, improving retrieval quality for real codebases.
 - Symbol-aware context building can now expose likely callers and related references instead of only top matching declarations.
@@ -34,6 +39,7 @@ All notable changes to `ofxGgml` are documented in this file.
 - Structured coding flows now surface test ideas, reviewer-simulation findings, and risk metadata as first-class addon result types instead of leaving that logic to the GUI layer.
 
 ### Documentation
+- `README.md` now documents speech, vision, and video helpers together with the GUI example's multimodal workflows and the separation between text-model downloads vs. Whisper / vision runtimes.
 - `README.md` now documents semantic symbol retrieval, inline completion, transaction-based workspace editing, and the expanded assistant eval suite as public addon features.
 - `README.md` now also documents spec-to-code planning, semantic code maps, and shadow-workspace safe apply as public addon features.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# download-model.sh — Download a GGUF model for use with ofxGgml.
+# download-model.sh — Download a text GGUF model for use with ofxGgml.
 #
 # Usage:
 #   ./scripts/download-model.sh [--model URL] [--preset N] [--task NAME] [--both]
@@ -31,6 +31,10 @@
 #   write      → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
 #   translate  → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
 #   custom     → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#
+# Note:
+#   Speech / Whisper and multimodal Vision models are configured separately in
+#   the addon and GUI example. This helper downloads only text-generation GGUFs.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 

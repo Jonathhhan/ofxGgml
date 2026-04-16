@@ -17,9 +17,9 @@ REM   --vulkan           Enable Vulkan backend
 REM   --with-debug       Also build ggml Debug libraries (default: Release only)
 REM   --skip-ggml        Skip building ggml
 REM   --skip-llama       Skip building llama.cpp CLI tools
-REM   --skip-model       Skip downloading model file(s)
-REM   --download-model   Download model file(s)
-REM   --model-preset N   Download preset 1 or 2 (default: both)
+REM   --skip-model       Skip downloading text model file(s)
+REM   --download-model   Download text model file(s)
+REM   --model-preset N   Download text preset 1 or 2 (default: both)
 REM   --jobs N           Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
 REM   --clean            Remove previous build directories before building
 REM   --help             Show this help message
@@ -143,9 +143,9 @@ echo   --vulkan           Enable Vulkan backend
 echo   --with-debug       Also build ggml Debug libraries ^(default: Release only^)
 echo   --skip-ggml        Skip building ggml
 echo   --skip-llama       Skip building llama.cpp CLI tools
-echo   --skip-model       Skip downloading model files ^(default^)
-echo   --download-model   Download model files
-echo   --model-preset N   Download preset 1 or 2 ^(default: both^)
+echo   --skip-model       Skip downloading text model files ^(default^)
+echo   --download-model   Download text model files
+echo   --model-preset N   Download text preset 1 or 2 ^(default: both^)
 echo   --jobs N           Parallel build jobs ^(default: %NUMBER_OF_PROCESSORS%^)
 echo   --clean            Remove previous build directories before building
 echo   --help             Show this help message

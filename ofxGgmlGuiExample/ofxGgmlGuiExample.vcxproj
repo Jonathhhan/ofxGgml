@@ -234,6 +234,8 @@
 		<ClCompile Include="..\src\assistants\ofxGgmlCodeReview.cpp" />
 		<ClCompile Include="..\src\compute\ofxGgmlGraph.cpp" />
 		<ClCompile Include="..\src\inference\ofxGgmlInference.cpp" />
+		<ClCompile Include="..\src\inference\ofxGgmlSpeechInference.cpp" />
+		<ClCompile Include="..\src\inference\ofxGgmlVisionInference.cpp" />
 		<ClCompile Include="..\src\model\ofxGgmlModel.cpp" />
 		<ClCompile Include="..\src\support\ofxGgmlProjectMemory.cpp" />
 		<ClCompile Include="..\src\support\ofxGgmlScriptSource.cpp" />

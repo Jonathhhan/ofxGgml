@@ -6,6 +6,9 @@ param(
     [int]$TimeoutSec = 1800
 )
 
+# Downloads only text-generation GGUF presets.
+# Whisper / speech and multimodal vision models are configured separately.
+
 $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path

@@ -21,9 +21,9 @@
 #                      (default: /usr/local on Linux, /usr/local on macOS)
 #   --skip-ggml        Skip building ggml (if already built)
 #   --skip-llama       Skip building llama.cpp CLI tools
-#   --skip-model       Skip downloading the model file (default)
-#   --download-model   Download the model file(s)
-#   --model-preset N   Download a specific model preset (default: both)
+#   --skip-model       Skip downloading the text model file (default)
+#   --download-model   Download the text model file(s)
+#   --model-preset N   Download a specific text model preset (default: both)
 #   --jobs N           Parallel build jobs (default: auto-detect)
 #   --clean            Remove previous build directories before building
 #   --help             Show this help message
