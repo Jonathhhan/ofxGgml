@@ -96,7 +96,11 @@ TEST_CASE("Code review reports blank aggregate passes explicitly", "[code_review
 	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
 
 	ofxGgmlCodeReview review;
+#ifdef _WIN32
 	review.setCompletionExecutable(createCodeReviewExecutable("echo."));
+#else
+	review.setCompletionExecutable(createCodeReviewExecutable("printf '\\n'"));
+#endif
 	review.setEmbeddingExecutable(createCodeReviewExecutable("echo [0.1, 0.2, 0.3]"));
 
 	ofxGgmlCodeReviewSettings settings;
@@ -112,6 +116,7 @@ TEST_CASE("Code review reports blank aggregate passes explicitly", "[code_review
 		settings);
 
 	REQUIRE(result.success);
+	REQUIRE(result.firstPassSummary.find("[warning] First-pass review for main.cpp returned no findings.") != std::string::npos);
 	REQUIRE(result.architectureReview.find("[warning] Architecture review returned no findings.") != std::string::npos);
 	REQUIRE(result.integrationReview.find("[warning] Integration review returned no findings.") != std::string::npos);
 	REQUIRE(result.combinedReport.find("Second pass - architecture issues:\n[warning]") != std::string::npos);

@@ -929,10 +929,17 @@ void ofApp::initModelPresets() {
 				"https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
 				"Alibaba Qwen2.5-Coder — optimized for code generation",
 				"~1.0 GB", "scripting, code generation"
+			},
+			{
+				"Qwen2.5-Coder-7B Instruct Q4_K_M",
+				"qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+				"https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+				"Alibaba Qwen2.5-Coder — stronger local repo review and patch planning",
+				"~4.7 GB", "repo review, larger code edits, architecture analysis"
 			}
 		};
-		// Match the CLI defaults: preset 1 for most modes, preset 2 for Script.
-		taskDefaultModelIndices = {0, 1, 0, 0, 0, 0, 0, 0};
+		// Match the CLI defaults for most modes, but prefer a stronger coder model for Script.
+		taskDefaultModelIndices = {0, 2, 0, 0, 0, 0, 0, 0};
 	};
 
 	// Try to load presets from scripts/model-catalog.json first.
@@ -2202,7 +2209,32 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 		runHierarchicalReview();
 	}
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Run embedding-powered, multi-pass review over the loaded folder/repository");
+		ImGui::SetTooltip("Run embedding-powered, multi-pass review over the loaded folder/repository.\nRecommended: use the Script-mode recommended model plus Review Preset.");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Review Preset", ImVec2(110, 0))) {
+		if (!modelPresets.empty()) {
+			selectedModelIndex = std::clamp(
+				taskDefaultModelIndices[static_cast<int>(AiMode::Script)],
+				0, static_cast<int>(modelPresets.size()) - 1);
+			detectModelLayers();
+			if (detectedModelLayers > 0) {
+				gpuLayers = detectedModelLayers;
+			}
+		}
+		maxTokens = std::max(maxTokens, 1536);
+		contextSize = std::max(contextSize, 8192);
+		batchSize = std::max(batchSize, 1024);
+		temperature = 0.2f;
+		topP = 0.9f;
+		topK = std::max(topK, 50);
+		minP = std::max(minP, 0.05f);
+		repeatPenalty = 1.03f;
+		autoContinueCutoff = true;
+		usePromptCache = true;
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Switch to the recommended Script model and review-tuned generation settings.");
 	}
 }
 
@@ -3993,13 +4025,15 @@ void ofApp::runHierarchicalReview() {
 				: ofxGgmlCodeReview::defaultReviewQuery();
 
 			ofxGgmlCodeReviewSettings reviewSettings;
-			reviewSettings.maxTokens = maxTokens;
-			reviewSettings.contextSize = contextSize;
-			reviewSettings.batchSize = batchSize;
+			reviewSettings.maxTokens = std::max(maxTokens, 1536);
+			reviewSettings.contextSize = std::max(contextSize, 8192);
+			reviewSettings.batchSize = std::max(batchSize, 1024);
 			reviewSettings.gpuLayers = gpuLayers;
 			reviewSettings.threads = numThreads;
-			reviewSettings.usePromptCache = usePromptCache;
-			reviewSettings.autoContinueCutoff = autoContinueCutoff;
+			reviewSettings.maxEmbedParallelTasks = 2;
+			reviewSettings.maxSummaryParallelTasks = 2;
+			reviewSettings.usePromptCache = true;
+			reviewSettings.autoContinueCutoff = true;
 			reviewSettings.projectMemory = &scriptProjectMemory;
 
 			const auto reviewResult = scriptCodeReview.reviewScriptSource(

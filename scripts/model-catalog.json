@@ -49,11 +49,21 @@
       "best_for": "very lightweight, testing, prototyping",
       "sha256": "",
       "note": "Run ./scripts/dev/update-model-checksums.sh --preset 5 to compute and update checksum"
+    },
+    {
+      "preset": 6,
+      "name": "Qwen2.5-Coder-7B Instruct Q4_K_M",
+      "filename": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+      "size": "~4.7 GB",
+      "best_for": "repo review, larger code edits, architecture analysis",
+      "sha256": "",
+      "note": "Run ./scripts/dev/update-model-checksums.sh --preset 6 to compute and update checksum"
     }
   ],
   "task_defaults": {
     "chat": 1,
-    "script": 2,
+    "script": 6,
     "summarize": 1,
     "write": 1,
     "translate": 1,

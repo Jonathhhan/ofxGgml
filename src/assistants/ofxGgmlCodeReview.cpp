@@ -197,6 +197,22 @@ std::string finalizedReviewSection(
 		" returned no findings. The model produced an empty response.";
 }
 
+ofxGgmlInferenceResult generateReviewPassWithRetry(
+	ofxGgmlInference & inference,
+	const std::string & modelPath,
+	const std::string & primaryPrompt,
+	const std::string & retryPrompt,
+	const ofxGgmlInferenceSettings & settings) {
+	auto result = inference.generate(modelPath, primaryPrompt, settings);
+	if (!result.success || !trimCopy(result.text).empty() || retryPrompt.empty()) {
+		return result;
+	}
+
+	auto retrySettings = settings;
+	retrySettings.maxTokens = std::max(96, settings.maxTokens / 2);
+	return inference.generate(modelPath, retryPrompt, retrySettings);
+}
+
 } // namespace
 
 void ofxGgmlCodeReview::setCompletionExecutable(const std::string & path) {
@@ -469,8 +485,22 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 			prompt << "\nContent:\n" << file.truncatedContent << "\n";
 			prompt << "\nFormat:\n- Summary\n- Risks\n- Tests to add\n";
 
-			const auto summary = m_inference.generate(modelPath, prompt.str(), inferenceSettings);
-			file.summary = summary.success ? trimCopy(summary.text) : "[error] " + summary.error;
+			std::ostringstream retryPrompt;
+			retryPrompt << "Review this file and return exactly three bullets.\n";
+			retryPrompt << "- Summary\n- Risks\n- Tests to add\n";
+			retryPrompt << "Request: " << effectiveQuery << "\n";
+			retryPrompt << "File: " << file.name << "\n";
+			retryPrompt << "Content:\n" << file.truncatedContent << "\n";
+
+			const auto summary = generateReviewPassWithRetry(
+				m_inference,
+				modelPath,
+				prompt.str(),
+				retryPrompt.str(),
+				inferenceSettings);
+			file.summary = finalizedReviewSection(
+				summary,
+				"First-pass review for " + file.name);
 			++summarizedCount;
 		}));
 		if (summaryTasks.size() >= maxSummaryParallel) {
@@ -512,7 +542,16 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 		prompt += "\nIdentify architecture, layering, and dependency issues. "
 			"Highlight risky boundaries, missing invariants, and testing gaps. "
 			"Keep output concise and actionable.\n";
-		const auto architecture = m_inference.generate(modelPath, prompt, aggregateSettings);
+		std::string retryPrompt =
+			"Architecture review. Return 3-5 concise bullets covering layering, "
+			"dependency boundaries, risky shared state, and missing tests.\n"
+			"Request: " + effectiveQuery + "\n\nSummaries:\n" + summaryList;
+		const auto architecture = generateReviewPassWithRetry(
+			m_inference,
+			modelPath,
+			prompt,
+			retryPrompt,
+			aggregateSettings);
 		result.architectureReview = finalizedReviewSection(
 			architecture,
 			"Architecture review");
@@ -535,7 +574,20 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 		prompt += "\nFocus on contract mismatches, API misuse, inconsistent assumptions, "
 			"shared state, and missing integration tests. "
 			"Propose cross-file actions and dependency trims.\n";
-		const auto integration = m_inference.generate(modelPath, prompt, aggregateSettings);
+		std::string retryPrompt =
+			"Cross-file integration review. Return 3-5 concise bullets covering "
+			"interface mismatches, shared-state risks, and missing integration tests.\n"
+			"Request: " + effectiveQuery + "\n\nFindings:\n";
+		for (size_t i = 0; i < result.selectedFileIndices.size() && i < 12; ++i) {
+			const auto & file = result.files[result.selectedFileIndices[i]];
+			retryPrompt += "- " + file.name + ": " + file.summary + "\n";
+		}
+		const auto integration = generateReviewPassWithRetry(
+			m_inference,
+			modelPath,
+			prompt,
+			retryPrompt,
+			aggregateSettings);
 		result.integrationReview = finalizedReviewSection(
 			integration,
 			"Integration review");
