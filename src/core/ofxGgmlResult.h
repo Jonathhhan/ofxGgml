@@ -215,8 +215,15 @@ public:
 	}
 
 	/// Returns the value if present, otherwise returns the default value.
+	T valueOr(const T & defaultValue) const {
+		return m_hasValue ? m_storage.value : defaultValue;
+	}
+
 	T valueOr(T && defaultValue) const {
-		return m_hasValue ? m_storage.value : std::move(defaultValue);
+		if (m_hasValue) {
+			return m_storage.value;
+		}
+		return std::move(defaultValue);
 	}
 
 	/// Explicit bool conversion — returns true if success.
