@@ -24,10 +24,9 @@ set -euo pipefail
 
 LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
 LLAMA_BRANCH="master"
-TMP_ROOT="${TMPDIR:-/tmp}"
-BUILD_DIR="$TMP_ROOT/llama-cpp-build"
-SOURCE_DIR="$TMP_ROOT/llama-cpp-source"
 ADDON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_DIR="$ADDON_ROOT/build/llama.cpp-build"
+SOURCE_DIR="$ADDON_ROOT/build/llama.cpp-src"
 DEFAULT_INSTALL_PREFIX="$ADDON_ROOT/libs/llama"
 JOBS=""
 ENABLE_CUDA=0
@@ -298,10 +297,10 @@ fi
 
 # Build llama-completion (one-shot text completion — used by ofxGgmlGuiExample),
 # llama-cli (interactive chat mode), and llama-embedding when available.
-write_step "Building llama-completion, llama-cli, and llama-embedding with $JOBS parallel jobs..."
-if ! cmake --build . --config Release --target llama-completion llama-cli llama-embedding -j "$JOBS"; then
+write_step "Building llama-server, llama-completion, llama-cli, and llama-embedding with $JOBS parallel jobs..."
+if ! cmake --build . --config Release --target llama-server llama-completion llama-cli llama-embedding -j "$JOBS"; then
 	write_step "llama-embedding target unavailable, retrying without it..."
-	cmake --build . --config Release --target llama-completion llama-cli -j "$JOBS"
+	cmake --build . --config Release --target llama-server llama-completion llama-cli -j "$JOBS"
 fi
 
 # ---------------------------------------------------------------------------
@@ -332,14 +331,16 @@ find_binary() {
 	return 1
 }
 
+BUILT_SERVER=""
 BUILT_COMPLETION=""
 BUILT_CLI=""
 BUILT_EMBEDDING=""
+BUILT_SERVER=$(find_binary "llama-server") || true
 BUILT_COMPLETION=$(find_binary "llama-completion") || true
 BUILT_CLI=$(find_binary "llama-cli") || true
 BUILT_EMBEDDING=$(find_binary "llama-embedding") || true
 
-if [[ -z "$BUILT_COMPLETION" ]] && [[ -z "$BUILT_CLI" ]] && [[ -z "$BUILT_EMBEDDING" ]]; then
+if [[ -z "$BUILT_SERVER" ]] && [[ -z "$BUILT_COMPLETION" ]] && [[ -z "$BUILT_CLI" ]] && [[ -z "$BUILT_EMBEDDING" ]]; then
 	die "Could not find any built llama binaries under $BUILD_DIR"
 fi
 
@@ -369,7 +370,7 @@ install_binary_sudo() {
 do_install() {
 	local prefix="$1"
 	local use_sudo="${2:-false}"
-	for binary in "$BUILT_COMPLETION" "$BUILT_CLI" "$BUILT_EMBEDDING"; do
+	for binary in "$BUILT_SERVER" "$BUILT_COMPLETION" "$BUILT_CLI" "$BUILT_EMBEDDING"; do
 		if [[ -n "$binary" ]]; then
 			if [[ "$use_sudo" == "true" ]]; then
 				install_binary_sudo "$binary" "$prefix"
@@ -406,7 +407,7 @@ fi
 
 write_step "Verifying installation..."
 INSTALLED_TOOLS=0
-for tool_name in llama-completion llama-cli llama-embedding; do
+for tool_name in llama-server llama-completion llama-cli llama-embedding; do
 	tool_path="$EFFECTIVE_INSTALL_PREFIX/bin/$tool_name"
 	if is_windows_like; then
 		tool_path="${tool_path}.exe"
@@ -426,10 +427,11 @@ if [[ "$INSTALLED_TOOLS" -eq 0 ]]; then
 	write_step "Warning: could not verify any installed tools under $EFFECTIVE_INSTALL_PREFIX/bin."
 fi
 
-write_step "Done! llama.cpp tools have been built and installed to $EFFECTIVE_INSTALL_PREFIX/bin."
+write_step "Done! llama.cpp runtime tools have been built and installed to $EFFECTIVE_INSTALL_PREFIX/bin."
 write_step ""
 write_step "Next steps:"
-write_step "  1. Ensure $EFFECTIVE_INSTALL_PREFIX/bin is in your PATH, or set the"
-write_step "     custom CLI path in the ofxGgmlGuiExample sidebar."
+write_step "  1. Ensure $EFFECTIVE_INSTALL_PREFIX/bin is available to your app,"
+write_step "     or rely on the addon-local libs/llama/bin default."
 write_step "  2. Run scripts/download-model.sh to fetch a GGUF model (if not done)."
-write_step "  3. Build and run your OF project with ofxGgml."
+write_step "  3. Optionally launch scripts/start-llama-server.sh for a local warm server."
+write_step "  4. Build and run your OF project with ofxGgml."

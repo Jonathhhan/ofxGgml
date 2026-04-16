@@ -31,6 +31,8 @@ This addon is released under the [MIT License](LICENSE).
 - server-streamed text output now uses delta-based chunk handling so Chat and Script mode no longer duplicate partial text while `llama-server` replies are still arriving
 - addon-level `Live context` support for loaded sources, domain-provider grounding, generic search fallback, and stricter citation-oriented response modes
 - `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
+- `ofxGgmlClipInference` as a lightweight CLIP-style embedding and ranking bridge layer for text/image similarity workflows, with an optional `clip.cpp` adapter path
+- `ofxGgmlDiffusionInference` as a lightweight image-generation bridge layer that can host an `ofxStableDiffusion` adapter without coupling diffusion internals into the core addon
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
 - `ofxGgmlVideoInference` for backend-driven video understanding, starting with sampled-frame analysis and room for future specialized video backends
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
@@ -56,6 +58,7 @@ Core implementation is split by concern:
 - `src/compute/` for tensors and graph building
 - `src/model/` for GGUF model loading
 - `src/inference/` for completion execution, grounded prompt assembly, and speech / vision / video inference helpers
+- `src/inference/` also now includes bridge scaffolds for optional CLIP-style ranking and diffusion/image-generation backends such as `clip.cpp` and `ofxStableDiffusion`
 - `src/assistants/` for chat, code, workspace, review, and text-task helpers
 - `src/support/` for script sources and project memory
 
@@ -145,7 +148,7 @@ scripts\setup_windows.bat --skip-ggml --model-preset 2
 
 `download-model` covers the text GGUF presets used by chat/script/write flows. Speech (`Whisper`) and multimodal `Vision` models are configured separately in the addon and GUI example because they use different runtimes and file layouts. The current Vision defaults favor EU-safe llama-server profiles such as `LFM2.5-VL` for general image understanding and `GLM-OCR` for OCR-heavy work.
 
-`setup_windows.bat` and `setup_linux_macos.sh` now follow the server-first path by default: they build `ggml`, leave CLI fallback binaries optional, and let you opt into legacy `llama-cli` / `llama-completion` builds with `--with-llama-cli` only when you want them.
+`setup_windows.bat` and `setup_linux_macos.sh` now follow the server-first path by default: they build `ggml`, leave the local `llama.cpp` runtime optional, and let you opt into addon-local `llama-server` plus CLI fallback tools with `--with-llama-cli` only when you want them.
 
 ### ggml only
 
@@ -178,7 +181,7 @@ After building ggml, regenerate your project with the openFrameworks Project Gen
 
 ### llama-server on Windows
 
-Use the dedicated PowerShell helper to clone `ggml-org/llama.cpp`, build `llama-server.exe`, and copy the server runtime into `libs/llama/bin`.
+Use the dedicated PowerShell helper to clone `ggml-org/llama.cpp`, build the local text runtime, and copy the server plus CLI fallback tools into `libs/llama/bin`.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-llama-server.ps1
@@ -190,14 +193,16 @@ By default the script:
 
 - uses `build\llama.cpp-src` for the upstream source checkout
 - uses `build\llama.cpp-build` for the CMake build tree
-- installs `llama-server.exe` and the required DLLs into `libs\llama\bin`
+- installs `llama-server.exe`, `llama-completion.exe`, `llama-cli.exe`, and the required DLLs into `libs\llama\bin`
+- installs `llama-embedding.exe` too when that target is available in the upstream checkout
 
-That install location matches the GUI example's local server discovery, so server-backed text modes can auto-launch the local server during app setup without extra configuration.
+That install location matches the GUI example's local server discovery and CLI fallback probing, so server-backed text modes can auto-launch the local server during app setup and still fall back to addon-local `llama-completion` / `llama-cli` from the same `llama.cpp` checkout.
 
-If you still want the old one-shot CLI fallback tools, build them explicitly instead of relying on setup defaults:
+For Linux and macOS, the shell helper now follows the same addon-local runtime pattern:
 
 ```bash
 ./scripts/build-llama-cli.sh --auto
+./scripts/start-llama-server.sh
 ```
 
 To launch the local server manually after building it:
@@ -207,7 +212,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-llama-server.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\start-llama-server.ps1 -Detached
 ```
 
-The helper defaults to `http://127.0.0.1:8080`, reuses the recommended local GGUF model when possible, and exposes GPU layers / context size flags so the server path matches the GUI example's defaults more closely.
+The helpers default to `http://127.0.0.1:8080`, reuse the recommended local GGUF model when possible, and expose GPU layers / context size flags so the server path matches the GUI example's defaults more closely.
 
 ### Manual CMake build
 
@@ -373,13 +378,13 @@ Use it when an app wants translation or writing-assistant features without hardc
 
 ## Speech Helpers
 
-`ofxGgmlSpeechInference` adds addon-level speech-to-text support through a pluggable backend interface. The default backend targets `whisper-cli`, and the addon now ships with ready-to-use profile hints for common Whisper model families such as `Tiny.en`, `Base.en`, `Small`, and `Large-v3 Turbo`.
+`ofxGgmlSpeechInference` adds addon-level speech-to-text support through a pluggable backend interface. The default backend targets upstream `whisper.cpp`, prefers a local `whisper-cli` build in `libs/whisper/bin` or `build/whisper.cpp-build/bin` when available, and ships with ready-to-use profile hints for common Whisper model families such as `Tiny.en`, `Base.en`, `Small`, and `Large-v3 Turbo`.
 
 Use it when an app wants local `Transcribe` / `Translate` audio workflows without hardcoding command-line assembly in its UI layer. The `GuiExample` exposes executable path, model path, profile selection, language hint, prompt, and transcript output as a first-class panel.
 
 The speech path can now also target an optional OpenAI-compatible speech server through `Server URL` and `Server model` in the GUI. When a speech server is configured, the Speech panel prefers the warm server backend first and falls back to `whisper-cli` automatically if the server request fails and a local CLI path is still available.
 
-For a local `whisper.cpp` server workflow on Windows, use:
+For a local `whisper.cpp` speech workflow on Windows, use:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-whisper-server.ps1
@@ -387,7 +392,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-whisper-server.ps1 -Cud
 powershell -ExecutionPolicy Bypass -File .\scripts\start-whisper-server.ps1
 ```
 
-The helper defaults to `http://127.0.0.1:8081`, which avoids colliding with the addon's default `llama-server` text backend on `8080`. The GUI now defaults the Speech server URL to that local endpoint and can auto-start a local `whisper-server` during setup when the configured URL points at localhost and a local server binary is available.
+`scripts/build-whisper-server.ps1` now builds and installs both `whisper-cli.exe` and `whisper-server.exe` into `libs/whisper/bin`, so the CLI fallback and the warm speech server come from the same local `whisper.cpp` checkout. The helper defaults to `http://127.0.0.1:8081`, which avoids colliding with the addon's default `llama-server` text backend on `8080`. The GUI now defaults the Speech server URL to that local endpoint, auto-detects the local `whisper-cli` / `whisper-server` runtime, and can auto-start a local `whisper-server` during setup when the configured URL points at localhost and a local server binary is available.
 
 When the backend supports it, the speech path now keeps richer artifacts:
 

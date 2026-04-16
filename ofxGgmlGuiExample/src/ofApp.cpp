@@ -41,7 +41,7 @@
 // ---------------------------------------------------------------------------
 
 const char * ofApp::modeLabels[kModeCount] = {
-	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Vision", "Speech"
+	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Vision", "Speech", "Diffusion", "CLIP"
 };
 
 const char * const kTextBackendLabels[] = {
@@ -506,6 +506,8 @@ bool aiModeSupportsTextBackend(AiMode mode) {
 		return true;
 	case AiMode::Vision:
 	case AiMode::Speech:
+	case AiMode::Diffusion:
+	case AiMode::Clip:
 		return false;
 	}
 	return false;
@@ -562,6 +564,27 @@ std::string effectiveSuggestedModelDownloadUrl(
 	return suggestedModelDownloadUrl(modelRepoHint, modelFileHint);
 }
 
+bool isDefaultWhisperCliExecutableHint(const std::string & executable) {
+	const std::string trimmed = trim(executable);
+	if (trimmed.empty()) {
+		return true;
+	}
+	if (trimmed.find('\\') != std::string::npos ||
+		trimmed.find('/') != std::string::npos) {
+		return false;
+	}
+	std::string fileName = std::filesystem::path(trimmed).filename().string();
+	std::transform(
+		fileName.begin(),
+		fileName.end(),
+		fileName.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return fileName == "whisper-cli" ||
+		fileName == "whisper-cli.exe" ||
+		fileName == "main" ||
+		fileName == "main.exe";
+}
+
 bool isEuRestrictedVisionProfile(const ofxGgmlVisionModelProfile & profile) {
 	const std::string repoHint = trim(profile.modelRepoHint);
 	return repoHint.find("meta-llama/Llama-3.2-11B-Vision") != std::string::npos;
@@ -578,6 +601,28 @@ std::vector<std::string> extractHttpUrls(const std::string & text) {
 		}
 	}
 	return urls;
+}
+
+std::vector<std::string> extractPathList(const std::string & text) {
+	std::vector<std::string> paths;
+	std::unordered_set<std::string> seen;
+	std::string current;
+	auto flush = [&]() {
+		const std::string value = trim(current);
+		current.clear();
+		if (!value.empty() && seen.insert(value).second) {
+			paths.push_back(value);
+		}
+	};
+	for (const char c : text) {
+		if (c == '\r' || c == '\n' || c == ';') {
+			flush();
+		} else {
+			current.push_back(c);
+		}
+	}
+	flush();
+	return paths;
 }
 
 // Strip common chat-template role markers and prompt artefacts that
@@ -1489,6 +1534,8 @@ void ofApp::applyServerFriendlyDefaultsForMode(AiMode mode) {
 	case AiMode::Custom: tunedMaxTokens = 512; break;
 	case AiMode::Vision:
 	case AiMode::Speech:
+	case AiMode::Diffusion:
+	case AiMode::Clip:
 		tunedMaxTokens = std::clamp(maxTokens, 256, 768);
 		break;
 	}
@@ -1620,9 +1667,16 @@ std::string ofApp::findLocalTextServerExecutable(bool refresh) {
 	}
 	std::vector<std::filesystem::path> candidates;
 	const std::filesystem::path exeDir(ofFilePath::getCurrentExeDir());
+#ifdef _WIN32
 	candidates.push_back(exeDir / ".." / ".." / "libs" / "llama" / "bin" / "llama-server.exe");
 	candidates.push_back(exeDir / ".." / ".." / "build" / "llama.cpp-build" / "bin" / "Release" / "llama-server.exe");
 	candidates.push_back(exeDir / "llama-server.exe");
+#else
+	candidates.push_back(exeDir / ".." / ".." / "libs" / "llama" / "bin" / "llama-server");
+	candidates.push_back(exeDir / ".." / ".." / "build" / "llama.cpp-build" / "bin" / "llama-server");
+	candidates.push_back(exeDir / ".." / ".." / "build" / "llama.cpp-build" / "bin" / "Release" / "llama-server");
+	candidates.push_back(exeDir / "llama-server");
+#endif
 	cachedTextServerExecutable = probeServerExecutable(candidates);
 	textServerExecutableCached = true;
 	return cachedTextServerExecutable;
@@ -1670,7 +1724,7 @@ void ofApp::startLocalTextServer() {
 
 	const std::string serverExe = findLocalTextServerExecutable(true);
 	if (serverExe.empty()) {
-		logWithLevel(OF_LOG_ERROR, "No local llama-server executable was found. Build or copy llama-server.exe into libs/llama/bin first.");
+		logWithLevel(OF_LOG_ERROR, "No local llama-server executable was found. Build or copy llama-server into libs/llama/bin first.");
 		textServerStatus = ServerStatusState::Unreachable;
 		textServerStatusMessage = "Local llama-server executable not found.";
 		textServerCapabilityHint.clear();
@@ -1757,17 +1811,27 @@ void ofApp::startLocalTextServer() {
 	textServerProcessId = pi.dwProcessId;
 	CloseHandle(pi.hThread);
 #else
+	std::vector<std::string> args = {
+		serverExe,
+		"-m", modelPath,
+		"--host", host,
+		"--port", ofToString(port),
+		"-ngl", ofToString(gpuLayerCount)
+	};
+	if (contextSize > 0) {
+		args.emplace_back("-c");
+		args.emplace_back(ofToString(contextSize));
+	}
 	pid_t pid = fork();
 	if (pid == 0) {
 		chdir(std::filesystem::path(serverExe).parent_path().string().c_str());
-		execl(
-			serverExe.c_str(),
-			serverExe.c_str(),
-			"-m", modelPath.c_str(),
-			"--host", host.c_str(),
-			"--port", ofToString(port).c_str(),
-			"-ngl", ofToString(gpuLayerCount).c_str(),
-			nullptr);
+		std::vector<char *> argv;
+		argv.reserve(args.size() + 1);
+		for (auto & arg : args) {
+			argv.push_back(arg.data());
+		}
+		argv.push_back(nullptr);
+		execv(serverExe.c_str(), argv.data());
 		_exit(127);
 	}
 	if (pid <= 0) {
@@ -1820,14 +1884,27 @@ std::string ofApp::findLocalSpeechServerExecutable(bool refresh) {
 	if (speechServerExecutableCached && !refresh) {
 		return cachedSpeechServerExecutable;
 	}
-	std::vector<std::filesystem::path> candidates;
-	const std::filesystem::path exeDir(ofFilePath::getCurrentExeDir());
-	candidates.push_back(exeDir / ".." / ".." / "libs" / "whisper" / "bin" / "whisper-server.exe");
-	candidates.push_back(exeDir / ".." / ".." / "build" / "whisper.cpp-build" / "bin" / "Release" / "whisper-server.exe");
-	candidates.push_back(exeDir / "whisper-server.exe");
-	cachedSpeechServerExecutable = probeServerExecutable(candidates);
+	std::string resolved =
+		ofxGgmlSpeechInference::resolveWhisperServerExecutable();
+	if (resolved == "whisper-server") {
+		resolved.clear();
+	}
+	cachedSpeechServerExecutable = std::move(resolved);
 	speechServerExecutableCached = true;
 	return cachedSpeechServerExecutable;
+}
+
+std::string ofApp::findLocalSpeechCliExecutable(bool refresh) {
+	if (speechCliExecutableCached && !refresh) {
+		return cachedSpeechCliExecutable;
+	}
+	std::string resolved = ofxGgmlSpeechInference::resolveWhisperCliExecutable();
+	if (resolved == "whisper-cli") {
+		resolved.clear();
+	}
+	cachedSpeechCliExecutable = std::move(resolved);
+	speechCliExecutableCached = true;
+	return cachedSpeechCliExecutable;
 }
 
 bool ofApp::isManagedSpeechServerRunning() {
@@ -2109,7 +2186,7 @@ void ofApp::initModelPresets() {
 			}
 		};
 		// Match the CLI defaults for most modes, but prefer a stronger coder model for Script.
-		taskDefaultModelIndices = {0, 2, 0, 0, 0, 0, 0, 0};
+		taskDefaultModelIndices = {0, 2, 0, 0, 0, 0, 0, 0, 0};
 	};
 
 	// Try to load presets from scripts/model-catalog.json first.
@@ -2168,6 +2245,7 @@ void ofApp::initModelPresets() {
 				setDefault("custom", AiMode::Custom);
 				setDefault("vision", AiMode::Vision);
 				setDefault("speech", AiMode::Speech);
+				setDefault("diffusion", AiMode::Diffusion);
 			}
 			loaded = !modelPresets.empty();
 		} catch (const std::exception & e) {
@@ -2317,6 +2395,18 @@ ggml.setLogCallback([this](int level, const std::string & msg) {
 // Auto-load last session if available.
 autoLoadSession();
 
+{
+	const std::string configuredSpeechExecutable = trim(speechExecutable);
+	const std::string localSpeechCliExecutable = findLocalSpeechCliExecutable(true);
+	if (!localSpeechCliExecutable.empty() &&
+		isDefaultWhisperCliExecutableHint(configuredSpeechExecutable)) {
+		copyStringToBuffer(
+			speechExecutable,
+			sizeof(speechExecutable),
+			localSpeechCliExecutable);
+	}
+}
+
 if (useModeTokenBudgets) {
 	maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(activeMode)], 32, 4096);
 }
@@ -2351,6 +2441,12 @@ for (int i = 0; i < kModeCount; ++i) {
 }
 if (trim(speechServerUrl).empty()) {
 	copyStringToBuffer(speechServerUrl, sizeof(speechServerUrl), kDefaultSpeechServerUrl);
+}
+if (trim(diffusionOutputDir).empty()) {
+	copyStringToBuffer(
+		diffusionOutputDir,
+		sizeof(diffusionOutputDir),
+		ofToDataPath("generated", true));
 }
 if (shouldManageLocalSpeechServer(effectiveSpeechServerUrl(speechServerUrl)) &&
 	!findLocalSpeechServerExecutable().empty()) {
@@ -2457,10 +2553,20 @@ translateOutput.clear();
 customOutput.clear();
 visionOutput.clear();
 speechOutput.clear();
+diffusionOutput.clear();
+clipOutput.clear();
 speechDetectedLanguage.clear();
 speechTranscriptPath.clear();
 speechSrtPath.clear();
 speechSegmentCount = 0;
+diffusionBackendName.clear();
+diffusionElapsedMs = 0.0f;
+diffusionGeneratedImages.clear();
+diffusionMetadata.clear();
+clipBackendName.clear();
+clipElapsedMs = 0.0f;
+clipEmbeddingDimension = 0;
+clipHits.clear();
 }
 ImGui::Separator();
 if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
@@ -2638,7 +2744,7 @@ if (ImGui::Combo("##TextBackend", &textBackendIndex,
 ImGui::EndDisabled();
 drawHelpMarker(modeSupportsTextBackend
 	? "Stored separately per text mode. Switching tabs restores that mode's backend."
-	: "Vision and Speech use their own pipelines. Switch to a text mode to change its backend.");
+	: "Vision, Speech, and Diffusion use their own pipelines. Switch to a text mode to change its backend.");
 if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 	ImGui::SetNextItemWidth(compactSidebarFieldWidth);
 	const bool serverUrlChanged = ImGui::InputText("Server URL", textServerUrl, sizeof(textServerUrl));
@@ -2664,7 +2770,7 @@ if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 		}
 	} else {
 		ImGui::TextColored(ImVec4(0.9f, 0.45f, 0.35f, 1.0f), "Local server executable not found.");
-		drawHelpMarker("Build it with scripts/build-llama-server.ps1 when you want a managed local server.");
+		drawHelpMarker("Build it with scripts/build-llama-server.ps1 on Windows or scripts/build-llama-cli.sh on Linux/macOS when you want a managed local server.");
 	}
 	if (textServerStatus != ServerStatusState::Unknown && !textServerStatusMessage.empty()) {
 		const ImVec4 statusColor =
@@ -2930,12 +3036,14 @@ switch (activeMode) {
 case AiMode::Chat:      drawChatPanel();      break;
 case AiMode::Script:    drawScriptPanel();    break;
 case AiMode::Summarize: drawSummarizePanel(); break;
-case AiMode::Write:     drawWritePanel();     break;
-case AiMode::Translate: drawTranslatePanel(); break;
-case AiMode::Custom:    drawCustomPanel();    break;
-case AiMode::Vision:    drawVisionPanel();    break;
-case AiMode::Speech:    drawSpeechPanel();    break;
-}
+	case AiMode::Write:     drawWritePanel();     break;
+	case AiMode::Translate: drawTranslatePanel(); break;
+	case AiMode::Custom:    drawCustomPanel();    break;
+	case AiMode::Vision:    drawVisionPanel();    break;
+	case AiMode::Speech:    drawSpeechPanel();    break;
+	case AiMode::Diffusion: drawDiffusionPanel(); break;
+	case AiMode::Clip:      drawClipPanel();      break;
+	}
 }
 ImGui::End();
 }
@@ -5171,6 +5279,15 @@ void ofApp::drawSpeechPanel() {
 	} else {
 		ImGui::TextDisabled("Backend: speech server first, whisper-cli fallback");
 	}
+	const std::string localSpeechCliExe = findLocalSpeechCliExecutable();
+	if (!localSpeechCliExe.empty()) {
+		ImGui::TextDisabled("Local speech CLI: %s", ofFilePath::getFileName(localSpeechCliExe).c_str());
+		if (ImGui::IsItemHovered()) {
+			showWrappedTooltip(localSpeechCliExe);
+		}
+	} else {
+		ImGui::TextDisabled("Local speech CLI: not found");
+	}
 	const std::string localSpeechServerExe = findLocalSpeechServerExecutable();
 	if (!localSpeechServerExe.empty()) {
 		ImGui::TextDisabled("Local speech server: %s", ofFilePath::getFileName(localSpeechServerExe).c_str());
@@ -5187,7 +5304,7 @@ void ofApp::drawSpeechPanel() {
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Executable", speechExecutable, sizeof(speechExecutable));
 	if (ImGui::IsItemHovered()) {
-		showWrappedTooltip("Optional CLI fallback. Example: whisper-cli or a full path to whisper-cli.exe");
+		showWrappedTooltip("Optional CLI fallback. Example: whisper-cli or a full path to whisper-cli.exe. scripts/build-whisper-server.ps1 now installs whisper-cli into libs/whisper/bin too.");
 	}
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
@@ -5342,6 +5459,487 @@ void ofApp::drawSpeechPanel() {
 			ImGui::TextDisabled("Speech transcription appears here.");
 		} else {
 			ImGui::TextWrapped("%s", speechOutput.c_str());
+		}
+		ImGui::EndChild();
+	}
+}
+
+void ofApp::drawDiffusionPanel() {
+	drawPanelHeader("Diffusion", "optional image generation bridge for ofxStableDiffusion");
+	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
+
+	ImGui::TextWrapped(
+		"This panel is a thin bridge surface for stable-diffusion.cpp style backends. "
+		"It persists image-generation settings inside the AI Studio example while keeping the actual diffusion runtime optional.");
+
+	const auto applyDiffusionProfileDefaults =
+		[this](const ofxGgmlImageGenerationModelProfile & profile, bool onlyWhenEmpty) {
+			const std::string suggestedPath =
+				suggestedModelPath(profile.modelPath, profile.modelFileHint);
+			if (!suggestedPath.empty() &&
+				(!onlyWhenEmpty || trim(diffusionModelPath).empty())) {
+				copyStringToBuffer(
+					diffusionModelPath,
+					sizeof(diffusionModelPath),
+					suggestedPath);
+			}
+			if (!trim(profile.vaePath).empty() &&
+				(!onlyWhenEmpty || trim(diffusionVaePath).empty())) {
+				copyStringToBuffer(
+					diffusionVaePath,
+					sizeof(diffusionVaePath),
+					profile.vaePath);
+			}
+			if (trim(diffusionOutputDir).empty()) {
+				copyStringToBuffer(
+					diffusionOutputDir,
+					sizeof(diffusionOutputDir),
+					ofToDataPath("generated", true));
+			}
+		};
+
+	bool loadedDiffusionProfiles = false;
+	if (diffusionProfiles.empty()) {
+		diffusionProfiles = ofxGgmlDiffusionInference::defaultProfiles();
+		loadedDiffusionProfiles = !diffusionProfiles.empty();
+	}
+	selectedDiffusionProfileIndex = std::clamp(
+		selectedDiffusionProfileIndex,
+		0,
+		std::max(0, static_cast<int>(diffusionProfiles.size()) - 1));
+	if (loadedDiffusionProfiles && !diffusionProfiles.empty()) {
+		applyDiffusionProfileDefaults(
+			diffusionProfiles[static_cast<size_t>(selectedDiffusionProfileIndex)],
+			true);
+	}
+
+	const ofxGgmlImageGenerationModelProfile activeProfile =
+		diffusionProfiles.empty()
+			? ofxGgmlImageGenerationModelProfile{}
+			: diffusionProfiles[static_cast<size_t>(selectedDiffusionProfileIndex)];
+	const auto activeTask =
+		static_cast<ofxGgmlImageGenerationTask>(std::clamp(diffusionTaskIndex, 0, 3));
+	const bool needsInitImage =
+		activeTask == ofxGgmlImageGenerationTask::ImageToImage ||
+		activeTask == ofxGgmlImageGenerationTask::Inpaint ||
+		activeTask == ofxGgmlImageGenerationTask::Upscale;
+	const bool needsMaskImage = activeTask == ofxGgmlImageGenerationTask::Inpaint;
+
+	const auto configuredBridge =
+		std::dynamic_pointer_cast<ofxGgmlStableDiffusionBridgeBackend>(
+			diffusionInference.getBackend());
+	const bool bridgeConfigured =
+		!configuredBridge || configuredBridge->isConfigured();
+	const std::string diffusionBackendLabel =
+		diffusionInference.getBackend()
+			? diffusionInference.getBackend()->backendName()
+			: std::string("(none)");
+
+	ImGui::TextDisabled("Backend: %s", diffusionBackendLabel.c_str());
+	if (!bridgeConfigured) {
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.65f, 0.25f, 1.0f),
+			"Bridge scaffold only: attach an ofxStableDiffusion adapter callback to enable generation.");
+	}
+
+	if (!diffusionProfiles.empty()) {
+		std::vector<const char *> profileNames;
+		profileNames.reserve(diffusionProfiles.size());
+		for (const auto & profile : diffusionProfiles) {
+			profileNames.push_back(profile.name.c_str());
+		}
+		ImGui::SetNextItemWidth(280);
+		if (ImGui::Combo(
+			"Diffusion profile",
+			&selectedDiffusionProfileIndex,
+			profileNames.data(),
+			static_cast<int>(profileNames.size()))) {
+			const auto & profile =
+				diffusionProfiles[static_cast<size_t>(selectedDiffusionProfileIndex)];
+			applyDiffusionProfileDefaults(profile, false);
+			if (!profile.supportsImageToImage &&
+				diffusionTaskIndex == static_cast<int>(ofxGgmlImageGenerationTask::ImageToImage)) {
+				diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::TextToImage);
+			}
+			if (!profile.supportsInpaint &&
+				diffusionTaskIndex == static_cast<int>(ofxGgmlImageGenerationTask::Inpaint)) {
+				diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::TextToImage);
+			}
+			if (!profile.supportsUpscale &&
+				diffusionTaskIndex == static_cast<int>(ofxGgmlImageGenerationTask::Upscale)) {
+				diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::TextToImage);
+			}
+		}
+
+		const std::string recommendedModelPath =
+			suggestedModelPath(activeProfile.modelPath, activeProfile.modelFileHint);
+		const std::string recommendedDownloadUrl =
+			suggestedModelDownloadUrl(activeProfile.modelRepoHint, activeProfile.modelFileHint);
+		ImGui::TextDisabled("Architecture: %s", activeProfile.architecture.c_str());
+		if (!activeProfile.modelRepoHint.empty()) {
+			ImGui::TextDisabled("Recommended repo: %s", activeProfile.modelRepoHint.c_str());
+		}
+		if (!activeProfile.modelFileHint.empty()) {
+			ImGui::TextDisabled("Recommended file: %s", activeProfile.modelFileHint.c_str());
+		}
+		if (!recommendedModelPath.empty()) {
+			ImGui::TextDisabled("Recommended local path: %s", recommendedModelPath.c_str());
+			ImGui::TextDisabled(
+				pathExists(recommendedModelPath)
+					? "Recommended model is already present."
+					: "Recommended model is not downloaded yet.");
+			ImGui::BeginDisabled(trim(diffusionModelPath) == recommendedModelPath);
+			if (ImGui::SmallButton("Use recommended path##Diffusion")) {
+				copyStringToBuffer(
+					diffusionModelPath,
+					sizeof(diffusionModelPath),
+					recommendedModelPath);
+			}
+			ImGui::EndDisabled();
+			if (ImGui::IsItemHovered()) {
+				showWrappedTooltip("Sets the diffusion model path to the profile's recommended file under bin/data/models/.");
+			}
+			ImGui::SameLine();
+			ImGui::BeginDisabled(recommendedDownloadUrl.empty());
+			if (ImGui::SmallButton("Download model##Diffusion")) {
+				ofLaunchBrowser(recommendedDownloadUrl);
+			}
+			ImGui::EndDisabled();
+			if (ImGui::IsItemHovered()) {
+				showWrappedTooltip("Opens the recommended diffusion model in your browser.");
+			}
+		}
+		ImGui::TextDisabled(
+			"Img2Img: %s | Inpaint: %s | Upscale: %s",
+			activeProfile.supportsImageToImage ? "supported" : "not supported",
+			activeProfile.supportsInpaint ? "supported" : "not supported",
+			activeProfile.supportsUpscale ? "supported" : "not supported");
+	}
+
+	if (ImGui::Button("Text to Image", ImVec2(120, 0))) {
+		diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::TextToImage);
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Image to Image", ImVec2(120, 0))) {
+		diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::ImageToImage);
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Inpaint", ImVec2(100, 0))) {
+		diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::Inpaint);
+	}
+
+	static const char * diffusionTaskLabels[] = {
+		"Text to Image", "Image to Image", "Inpaint", "Upscale"
+	};
+	ImGui::SetNextItemWidth(180);
+	ImGui::Combo("Diffusion task", &diffusionTaskIndex, diffusionTaskLabels, 4);
+
+	ImGui::InputTextMultiline(
+		"Prompt",
+		diffusionPrompt,
+		sizeof(diffusionPrompt),
+		ImVec2(-1, 100));
+	ImGui::InputTextMultiline(
+		"Negative prompt",
+		diffusionNegativePrompt,
+		sizeof(diffusionNegativePrompt),
+		ImVec2(-1, 70));
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Model path", diffusionModelPath, sizeof(diffusionModelPath));
+	ImGui::SameLine();
+	if (ImGui::Button("Browse model...##Diffusion", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select diffusion model", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(diffusionModelPath, sizeof(diffusionModelPath), result.getPath());
+		}
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("VAE path", diffusionVaePath, sizeof(diffusionVaePath));
+	ImGui::SameLine();
+	if (ImGui::Button("Browse VAE...##Diffusion", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select VAE file", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(diffusionVaePath, sizeof(diffusionVaePath), result.getPath());
+		}
+	}
+
+	if (needsInitImage) {
+		ImGui::SetNextItemWidth(compactModeFieldWidth);
+		ImGui::InputText("Init image", diffusionInitImagePath, sizeof(diffusionInitImagePath));
+		ImGui::SameLine();
+		if (ImGui::Button("Browse init...##Diffusion", ImVec2(110, 0))) {
+			ofFileDialogResult result = ofSystemLoadDialog("Select init image", false);
+			if (result.bSuccess) {
+				copyStringToBuffer(
+					diffusionInitImagePath,
+					sizeof(diffusionInitImagePath),
+					result.getPath());
+			}
+		}
+	}
+
+	if (needsMaskImage) {
+		ImGui::SetNextItemWidth(compactModeFieldWidth);
+		ImGui::InputText("Mask image", diffusionMaskImagePath, sizeof(diffusionMaskImagePath));
+		ImGui::SameLine();
+		if (ImGui::Button("Browse mask...##Diffusion", ImVec2(110, 0))) {
+			ofFileDialogResult result = ofSystemLoadDialog("Select mask image", false);
+			if (result.bSuccess) {
+				copyStringToBuffer(
+					diffusionMaskImagePath,
+					sizeof(diffusionMaskImagePath),
+					result.getPath());
+			}
+		}
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Output dir", diffusionOutputDir, sizeof(diffusionOutputDir));
+	ImGui::SameLine();
+	if (ImGui::Button("Use data/generated", ImVec2(140, 0))) {
+		copyStringToBuffer(
+			diffusionOutputDir,
+			sizeof(diffusionOutputDir),
+			ofToDataPath("generated", true));
+	}
+
+	ImGui::SetNextItemWidth(200);
+	ImGui::InputText("Output prefix", diffusionOutputPrefix, sizeof(diffusionOutputPrefix));
+	ImGui::SetNextItemWidth(180);
+	ImGui::InputText("Sampler", diffusionSampler, sizeof(diffusionSampler));
+
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Width", &diffusionWidth, 64, 2048);
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Height", &diffusionHeight, 64, 2048);
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Steps", &diffusionSteps, 1, 80);
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Batch count", &diffusionBatchCount, 1, 8);
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Seed", &diffusionSeed, -1, 999999);
+	ImGui::SetNextItemWidth(220);
+	ImGui::SliderFloat("CFG scale", &diffusionCfgScale, 0.0f, 20.0f, "%.2f");
+	if (needsInitImage) {
+		ImGui::SetNextItemWidth(220);
+		ImGui::SliderFloat("Strength", &diffusionStrength, 0.0f, 1.0f, "%.2f");
+	}
+	ImGui::Checkbox("Save metadata", &diffusionSaveMetadata);
+
+	const bool canRunDiffusion =
+		!generating.load() &&
+		std::strlen(diffusionPrompt) > 0 &&
+		(!needsInitImage || std::strlen(diffusionInitImagePath) > 0) &&
+		(!needsMaskImage || std::strlen(diffusionMaskImagePath) > 0);
+	ImGui::BeginDisabled(!canRunDiffusion);
+	if (ImGui::Button("Run Diffusion", ImVec2(160, 0))) {
+		runDiffusionInference();
+	}
+	ImGui::EndDisabled();
+	if (!bridgeConfigured) {
+		ImGui::SameLine();
+		ImGui::TextDisabled("(waiting for backend adapter)");
+	}
+
+	ImGui::Separator();
+	ImGui::Text("Output:");
+	if (!diffusionOutput.empty()) {
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Copy##DiffusionCopy")) copyToClipboard(diffusionOutput);
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Clear##DiffusionClear")) {
+			diffusionOutput.clear();
+			diffusionBackendName.clear();
+			diffusionElapsedMs = 0.0f;
+			diffusionGeneratedImages.clear();
+			diffusionMetadata.clear();
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("(%d chars)", static_cast<int>(diffusionOutput.size()));
+	}
+	if (!diffusionBackendName.empty()) {
+		ImGui::TextDisabled(
+			"Last backend: %s%s",
+			diffusionBackendName.c_str(),
+			diffusionElapsedMs > 0.0f
+				? (" in " + ofxGgmlHelpers::formatDurationMs(diffusionElapsedMs)).c_str()
+				: "");
+	}
+	if (!diffusionGeneratedImages.empty()) {
+		ImGui::TextDisabled("Generated files:");
+		for (const auto & image : diffusionGeneratedImages) {
+			ImGui::BulletText("%s", image.path.c_str());
+		}
+	}
+
+	if (generating.load() && activeGenerationMode == AiMode::Diffusion) {
+		ImGui::BeginChild("##DiffusionOut", ImVec2(0, 0), true);
+		std::string partial;
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			partial = streamingOutput;
+		}
+		if (partial.empty()) {
+			int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+			ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
+		} else {
+			ImGui::TextWrapped("%s", partial.c_str());
+		}
+		ImGui::EndChild();
+	} else {
+		ImGui::BeginChild("##DiffusionOut", ImVec2(0, 0), true);
+		if (diffusionOutput.empty()) {
+			ImGui::TextDisabled("Diffusion request results appear here.");
+		} else {
+			ImGui::TextWrapped("%s", diffusionOutput.c_str());
+		}
+		ImGui::EndChild();
+	}
+}
+
+void ofApp::drawClipPanel() {
+	drawPanelHeader("CLIP", "optional clip.cpp text-image ranking bridge");
+	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
+
+	ImGui::TextWrapped(
+		"This panel ranks local images against a prompt using the CLIP bridge. "
+		"It is designed to pair well with the Diffusion tab, but it also works with any local image set.");
+
+#if OFXGGML_HAS_CLIPCPP
+	const bool clipCppAvailable = true;
+#else
+	const bool clipCppAvailable = false;
+#endif
+
+	const std::string clipBackendLabel =
+		clipInference.getBackend()
+			? clipInference.getBackend()->backendName()
+			: std::string("(none)");
+	ImGui::TextDisabled("Backend: %s", clipBackendLabel.c_str());
+	ImGui::TextDisabled("clip.cpp integration: %s", clipCppAvailable ? "available in this build" : "not compiled in");
+	if (!clipCppAvailable) {
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.65f, 0.25f, 1.0f),
+			"This build does not currently see clip.cpp headers. Add clip.cpp to the workspace include path to enable live ranking.");
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Model path", clipModelPath, sizeof(clipModelPath));
+	ImGui::SameLine();
+	if (ImGui::Button("Browse model...##Clip", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select CLIP model", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(clipModelPath, sizeof(clipModelPath), result.getPath());
+		}
+	}
+
+	if (ImGui::Button("Use Diffusion Outputs", ImVec2(160, 0))) {
+		std::ostringstream joined;
+		for (size_t i = 0; i < diffusionGeneratedImages.size(); ++i) {
+			if (i > 0) {
+				joined << "\n";
+			}
+			joined << diffusionGeneratedImages[i].path;
+		}
+		copyStringToBuffer(clipImagePaths, sizeof(clipImagePaths), joined.str());
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Clear Image List", ImVec2(140, 0))) {
+		clipImagePaths[0] = '\0';
+	}
+
+	ImGui::InputTextMultiline(
+		"Prompt",
+		clipPrompt,
+		sizeof(clipPrompt),
+		ImVec2(-1, 100));
+	ImGui::InputTextMultiline(
+		"Image paths (one per line)",
+		clipImagePaths,
+		sizeof(clipImagePaths),
+		ImVec2(-1, 120));
+
+	const std::vector<std::string> parsedImagePaths =
+		extractPathList(clipImagePaths);
+	ImGui::TextDisabled("Parsed images: %d", static_cast<int>(parsedImagePaths.size()));
+
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Top K", &clipTopK, 0, 16);
+	ImGui::Checkbox("Normalize embeddings", &clipNormalizeEmbeddings);
+	ImGui::SetNextItemWidth(160);
+	ImGui::SliderInt("Verbosity", &clipVerbosity, 0, 2);
+
+	const bool canRunClip =
+		!generating.load() &&
+		clipCppAvailable &&
+		std::strlen(clipPrompt) > 0 &&
+		std::strlen(clipModelPath) > 0 &&
+		!parsedImagePaths.empty();
+	ImGui::BeginDisabled(!canRunClip);
+	if (ImGui::Button("Rank Images", ImVec2(160, 0))) {
+		runClipInference();
+	}
+	ImGui::EndDisabled();
+
+	ImGui::Separator();
+	ImGui::Text("Output:");
+	if (!clipOutput.empty()) {
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Copy##ClipCopy")) copyToClipboard(clipOutput);
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Clear##ClipClear")) {
+			clipOutput.clear();
+			clipBackendName.clear();
+			clipElapsedMs = 0.0f;
+			clipEmbeddingDimension = 0;
+			clipHits.clear();
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("(%d chars)", static_cast<int>(clipOutput.size()));
+	}
+	if (!clipBackendName.empty()) {
+		ImGui::TextDisabled(
+			"Last backend: %s%s%s",
+			clipBackendName.c_str(),
+			clipElapsedMs > 0.0f
+				? (" in " + ofxGgmlHelpers::formatDurationMs(clipElapsedMs)).c_str()
+				: "",
+			clipEmbeddingDimension > 0
+				? (" | dim " + ofToString(clipEmbeddingDimension)).c_str()
+				: "");
+	}
+	if (!clipHits.empty()) {
+		ImGui::TextDisabled("Top matches:");
+		for (const auto & hit : clipHits) {
+			ImGui::BulletText(
+				"%.4f  %s",
+				hit.score,
+				hit.imagePath.c_str());
+		}
+	}
+
+	if (generating.load() && activeGenerationMode == AiMode::Clip) {
+		ImGui::BeginChild("##ClipOut", ImVec2(0, 0), true);
+		std::string partial;
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			partial = streamingOutput;
+		}
+		if (partial.empty()) {
+			int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+			ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
+		} else {
+			ImGui::TextWrapped("%s", partial.c_str());
+		}
+		ImGui::EndChild();
+	} else {
+		ImGui::BeginChild("##ClipOut", ImVec2(0, 0), true);
+		if (clipOutput.empty()) {
+			ImGui::TextDisabled("CLIP ranking results appear here.");
+		} else {
+			ImGui::TextWrapped("%s", clipOutput.c_str());
 		}
 		ImGui::EndChild();
 	}
@@ -5707,20 +6305,47 @@ out << "speechExecutable=" << escapeSessionText(speechExecutable) << "\n";
 out << "speechModelPath=" << escapeSessionText(speechModelPath) << "\n";
 out << "speechServerUrl=" << escapeSessionText(speechServerUrl) << "\n";
 out << "speechServerModel=" << escapeSessionText(speechServerModel) << "\n";
-out << "speechPrompt=" << escapeSessionText(speechPrompt) << "\n";
-out << "speechLanguageHint=" << escapeSessionText(speechLanguageHint) << "\n";
-out << "speechTaskIndex=" << speechTaskIndex << "\n";
-out << "speechProfileIndex=" << selectedSpeechProfileIndex << "\n";
-out << "speechReturnTimestamps=" << (speechReturnTimestamps ? 1 : 0) << "\n";
+  out << "speechPrompt=" << escapeSessionText(speechPrompt) << "\n";
+  out << "speechLanguageHint=" << escapeSessionText(speechLanguageHint) << "\n";
+  out << "speechTaskIndex=" << speechTaskIndex << "\n";
+  out << "speechProfileIndex=" << selectedSpeechProfileIndex << "\n";
+  out << "speechReturnTimestamps=" << (speechReturnTimestamps ? 1 : 0) << "\n";
+  out << "diffusionPrompt=" << escapeSessionText(diffusionPrompt) << "\n";
+  out << "diffusionNegativePrompt=" << escapeSessionText(diffusionNegativePrompt) << "\n";
+  out << "diffusionModelPath=" << escapeSessionText(diffusionModelPath) << "\n";
+  out << "diffusionVaePath=" << escapeSessionText(diffusionVaePath) << "\n";
+  out << "diffusionInitImagePath=" << escapeSessionText(diffusionInitImagePath) << "\n";
+  out << "diffusionMaskImagePath=" << escapeSessionText(diffusionMaskImagePath) << "\n";
+  out << "diffusionOutputDir=" << escapeSessionText(diffusionOutputDir) << "\n";
+  out << "diffusionOutputPrefix=" << escapeSessionText(diffusionOutputPrefix) << "\n";
+  out << "diffusionSampler=" << escapeSessionText(diffusionSampler) << "\n";
+  out << "diffusionTaskIndex=" << diffusionTaskIndex << "\n";
+  out << "diffusionWidth=" << diffusionWidth << "\n";
+  out << "diffusionHeight=" << diffusionHeight << "\n";
+  out << "diffusionSteps=" << diffusionSteps << "\n";
+  out << "diffusionBatchCount=" << diffusionBatchCount << "\n";
+  out << "diffusionSeed=" << diffusionSeed << "\n";
+  out << "diffusionCfgScale=" << ofToString(diffusionCfgScale, 4) << "\n";
+  out << "diffusionStrength=" << ofToString(diffusionStrength, 4) << "\n";
+  out << "diffusionProfileIndex=" << selectedDiffusionProfileIndex << "\n";
+  out << "diffusionSaveMetadata=" << (diffusionSaveMetadata ? 1 : 0) << "\n";
+  out << "clipPrompt=" << escapeSessionText(clipPrompt) << "\n";
+  out << "clipModelPath=" << escapeSessionText(clipModelPath) << "\n";
+  out << "clipImagePaths=" << escapeSessionText(clipImagePaths) << "\n";
+  out << "clipTopK=" << clipTopK << "\n";
+  out << "clipNormalizeEmbeddings=" << (clipNormalizeEmbeddings ? 1 : 0) << "\n";
+  out << "clipVerbosity=" << clipVerbosity << "\n";
 
-// Outputs.
-out << "scriptOutput=" << escapeSessionText(scriptOutput) << "\n";
-out << "summarizeOutput=" << escapeSessionText(summarizeOutput) << "\n";
-out << "writeOutput=" << escapeSessionText(writeOutput) << "\n";
+  // Outputs.
+  out << "scriptOutput=" << escapeSessionText(scriptOutput) << "\n";
+  out << "summarizeOutput=" << escapeSessionText(summarizeOutput) << "\n";
+  out << "writeOutput=" << escapeSessionText(writeOutput) << "\n";
 out << "translateOutput=" << escapeSessionText(translateOutput) << "\n";
-out << "customOutput=" << escapeSessionText(customOutput) << "\n";
-out << "visionOutput=" << escapeSessionText(visionOutput) << "\n";
-out << "speechOutput=" << escapeSessionText(speechOutput) << "\n";
+  out << "customOutput=" << escapeSessionText(customOutput) << "\n";
+  out << "visionOutput=" << escapeSessionText(visionOutput) << "\n";
+  out << "speechOutput=" << escapeSessionText(speechOutput) << "\n";
+  out << "diffusionOutput=" << escapeSessionText(diffusionOutput) << "\n";
+  out << "clipOutput=" << escapeSessionText(clipOutput) << "\n";
 out << "liveContextMode=" << static_cast<int>(liveContextMode) << "\n";
 out << "liveContextAllowPromptUrls=" << (liveContextAllowPromptUrls ? 1 : 0) << "\n";
 out << "liveContextAllowDomainProviders=" << (liveContextAllowDomainProviders ? 1 : 0) << "\n";
@@ -5924,19 +6549,46 @@ else if (key == "speechAudioPath") copyToBuf(speechAudioPath, sizeof(speechAudio
 else if (key == "speechExecutable") copyToBuf(speechExecutable, sizeof(speechExecutable), value);
 else if (key == "speechModelPath") copyToBuf(speechModelPath, sizeof(speechModelPath), value);
 else if (key == "speechServerUrl") copyToBuf(speechServerUrl, sizeof(speechServerUrl), value);
-else if (key == "speechServerModel") copyToBuf(speechServerModel, sizeof(speechServerModel), value);
-else if (key == "speechPrompt") copyToBuf(speechPrompt, sizeof(speechPrompt), value);
-else if (key == "speechLanguageHint") copyToBuf(speechLanguageHint, sizeof(speechLanguageHint), value);
-else if (key == "speechTaskIndex") speechTaskIndex = std::clamp(safeStoi(value), 0, 1);
-else if (key == "speechProfileIndex") selectedSpeechProfileIndex = std::max(0, safeStoi(value));
-else if (key == "speechReturnTimestamps") speechReturnTimestamps = (safeStoi(value, 0) != 0);
-else if (key == "scriptOutput") scriptOutput = unescapeSessionText(value);
-else if (key == "summarizeOutput") summarizeOutput = unescapeSessionText(value);
-else if (key == "writeOutput") writeOutput = unescapeSessionText(value);
-else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
-else if (key == "customOutput") customOutput = unescapeSessionText(value);
-else if (key == "visionOutput") visionOutput = unescapeSessionText(value);
-else if (key == "speechOutput") speechOutput = unescapeSessionText(value);
+  else if (key == "speechServerModel") copyToBuf(speechServerModel, sizeof(speechServerModel), value);
+  else if (key == "speechPrompt") copyToBuf(speechPrompt, sizeof(speechPrompt), value);
+  else if (key == "speechLanguageHint") copyToBuf(speechLanguageHint, sizeof(speechLanguageHint), value);
+  else if (key == "speechTaskIndex") speechTaskIndex = std::clamp(safeStoi(value), 0, 1);
+  else if (key == "speechProfileIndex") selectedSpeechProfileIndex = std::max(0, safeStoi(value));
+  else if (key == "speechReturnTimestamps") speechReturnTimestamps = (safeStoi(value, 0) != 0);
+  else if (key == "diffusionPrompt") copyToBuf(diffusionPrompt, sizeof(diffusionPrompt), value);
+  else if (key == "diffusionNegativePrompt") copyToBuf(diffusionNegativePrompt, sizeof(diffusionNegativePrompt), value);
+  else if (key == "diffusionModelPath") copyToBuf(diffusionModelPath, sizeof(diffusionModelPath), value);
+  else if (key == "diffusionVaePath") copyToBuf(diffusionVaePath, sizeof(diffusionVaePath), value);
+  else if (key == "diffusionInitImagePath") copyToBuf(diffusionInitImagePath, sizeof(diffusionInitImagePath), value);
+  else if (key == "diffusionMaskImagePath") copyToBuf(diffusionMaskImagePath, sizeof(diffusionMaskImagePath), value);
+  else if (key == "diffusionOutputDir") copyToBuf(diffusionOutputDir, sizeof(diffusionOutputDir), value);
+  else if (key == "diffusionOutputPrefix") copyToBuf(diffusionOutputPrefix, sizeof(diffusionOutputPrefix), value);
+  else if (key == "diffusionSampler") copyToBuf(diffusionSampler, sizeof(diffusionSampler), value);
+  else if (key == "diffusionTaskIndex") diffusionTaskIndex = std::clamp(safeStoi(value), 0, 3);
+  else if (key == "diffusionWidth") diffusionWidth = std::clamp(safeStoi(value, 1024), 64, 4096);
+  else if (key == "diffusionHeight") diffusionHeight = std::clamp(safeStoi(value, 1024), 64, 4096);
+  else if (key == "diffusionSteps") diffusionSteps = std::clamp(safeStoi(value, 20), 1, 200);
+  else if (key == "diffusionBatchCount") diffusionBatchCount = std::clamp(safeStoi(value, 1), 1, 16);
+  else if (key == "diffusionSeed") diffusionSeed = std::clamp(safeStoi(value, -1), -1, 2147483647);
+  else if (key == "diffusionCfgScale") diffusionCfgScale = std::clamp(safeStof(value, 7.0f), 0.0f, 30.0f);
+  else if (key == "diffusionStrength") diffusionStrength = std::clamp(safeStof(value, 0.75f), 0.0f, 1.0f);
+  else if (key == "diffusionProfileIndex") selectedDiffusionProfileIndex = std::max(0, safeStoi(value));
+  else if (key == "diffusionSaveMetadata") diffusionSaveMetadata = (safeStoi(value, 1) != 0);
+  else if (key == "clipPrompt") copyToBuf(clipPrompt, sizeof(clipPrompt), value);
+  else if (key == "clipModelPath") copyToBuf(clipModelPath, sizeof(clipModelPath), value);
+  else if (key == "clipImagePaths") copyToBuf(clipImagePaths, sizeof(clipImagePaths), value);
+  else if (key == "clipTopK") clipTopK = std::clamp(safeStoi(value, 3), 0, 16);
+  else if (key == "clipNormalizeEmbeddings") clipNormalizeEmbeddings = (safeStoi(value, 1) != 0);
+  else if (key == "clipVerbosity") clipVerbosity = std::clamp(safeStoi(value, 1), 0, 2);
+  else if (key == "scriptOutput") scriptOutput = unescapeSessionText(value);
+  else if (key == "summarizeOutput") summarizeOutput = unescapeSessionText(value);
+  else if (key == "writeOutput") writeOutput = unescapeSessionText(value);
+  else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
+  else if (key == "customOutput") customOutput = unescapeSessionText(value);
+  else if (key == "visionOutput") visionOutput = unescapeSessionText(value);
+  else if (key == "speechOutput") speechOutput = unescapeSessionText(value);
+  else if (key == "diffusionOutput") diffusionOutput = unescapeSessionText(value);
+  else if (key == "clipOutput") clipOutput = unescapeSessionText(value);
 else if (key == "liveContextMode") {
 	liveContextMode = static_cast<LiveContextMode>(std::clamp(safeStoi(value, 0), 0, 3));
 }
@@ -6662,6 +7314,8 @@ void ofApp::runSpeechInference() {
 			if (effectiveExecutable.empty()) {
 				effectiveExecutable = "whisper-cli";
 			}
+			effectiveExecutable =
+				ofxGgmlSpeechInference::resolveWhisperCliExecutable(effectiveExecutable);
 
 			std::string effectiveModelPath = modelPath.empty()
 				? trim(profileBase.modelPath)
@@ -6773,6 +7427,390 @@ void ofApp::runSpeechInference() {
 				pendingSpeechSegmentCount = 0;
 			}
 			setPending("[Error] Unknown failure during speech inference.");
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			streamingOutput.clear();
+		}
+		generating.store(false);
+	});
+}
+
+void ofApp::runDiffusionInference() {
+	if (generating.load()) return;
+
+	if (diffusionProfiles.empty()) {
+		diffusionProfiles = ofxGgmlDiffusionInference::defaultProfiles();
+	}
+	selectedDiffusionProfileIndex = std::clamp(
+		selectedDiffusionProfileIndex,
+		0,
+		std::max(0, static_cast<int>(diffusionProfiles.size()) - 1));
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::Diffusion;
+	generationStartTime = ofGetElapsedTimef();
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput = "Preparing diffusion request...";
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	const ofxGgmlImageGenerationModelProfile profileBase =
+		diffusionProfiles.empty()
+			? ofxGgmlImageGenerationModelProfile{}
+			: diffusionProfiles[static_cast<size_t>(selectedDiffusionProfileIndex)];
+	const std::string prompt = trim(diffusionPrompt);
+	const std::string negativePrompt = trim(diffusionNegativePrompt);
+	const std::string modelPath = trim(diffusionModelPath);
+	const std::string vaePath = trim(diffusionVaePath);
+	const std::string initImagePath = trim(diffusionInitImagePath);
+	const std::string maskImagePath = trim(diffusionMaskImagePath);
+	const std::string outputDir = trim(diffusionOutputDir);
+	const std::string outputPrefix = trim(diffusionOutputPrefix);
+	const std::string sampler = trim(diffusionSampler);
+	const int taskIndex = std::clamp(diffusionTaskIndex, 0, 3);
+	const int width = std::clamp(diffusionWidth, 64, 4096);
+	const int height = std::clamp(diffusionHeight, 64, 4096);
+	const int steps = std::clamp(diffusionSteps, 1, 200);
+	const int batchCount = std::clamp(diffusionBatchCount, 1, 16);
+	const int requestSeed = diffusionSeed;
+	const float cfgScale = std::isfinite(diffusionCfgScale)
+		? std::clamp(diffusionCfgScale, 0.0f, 30.0f)
+		: 7.0f;
+	const float strength = std::isfinite(diffusionStrength)
+		? std::clamp(diffusionStrength, 0.0f, 1.0f)
+		: 0.75f;
+	const bool saveMetadata = diffusionSaveMetadata;
+
+	workerThread = std::thread([this, profileBase, prompt, negativePrompt, modelPath, vaePath, initImagePath, maskImagePath, outputDir, outputPrefix, sampler, taskIndex, width, height, steps, batchCount, requestSeed, cfgScale, strength, saveMetadata]() {
+		auto setPending = [this](const std::string & text) {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingOutput = text;
+			pendingRole = "assistant";
+			pendingMode = AiMode::Diffusion;
+		};
+
+		auto clearPendingDiffusionArtifacts = [this]() {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingDiffusionBackendName.clear();
+			pendingDiffusionElapsedMs = 0.0f;
+			pendingDiffusionImages.clear();
+			pendingDiffusionMetadata.clear();
+		};
+
+		try {
+			if (prompt.empty()) {
+				clearPendingDiffusionArtifacts();
+				setPending("[Error] Enter a prompt first.");
+				generating.store(false);
+				return;
+			}
+
+			const auto task = static_cast<ofxGgmlImageGenerationTask>(taskIndex);
+			const bool needsInitImage =
+				task == ofxGgmlImageGenerationTask::ImageToImage ||
+				task == ofxGgmlImageGenerationTask::Inpaint ||
+				task == ofxGgmlImageGenerationTask::Upscale;
+			const bool needsMaskImage =
+				task == ofxGgmlImageGenerationTask::Inpaint;
+			if (needsInitImage && initImagePath.empty()) {
+				clearPendingDiffusionArtifacts();
+				setPending("[Error] Select an init image for the current diffusion task.");
+				generating.store(false);
+				return;
+			}
+			if (needsMaskImage && maskImagePath.empty()) {
+				clearPendingDiffusionArtifacts();
+				setPending("[Error] Select a mask image for inpaint mode.");
+				generating.store(false);
+				return;
+			}
+
+			if ((task == ofxGgmlImageGenerationTask::ImageToImage && !profileBase.supportsImageToImage) ||
+				(task == ofxGgmlImageGenerationTask::Inpaint && !profileBase.supportsInpaint) ||
+				(task == ofxGgmlImageGenerationTask::Upscale && !profileBase.supportsUpscale)) {
+				clearPendingDiffusionArtifacts();
+				setPending("[Error] The selected diffusion profile does not support the chosen task.");
+				generating.store(false);
+				return;
+			}
+
+			std::string effectiveModelPath = modelPath.empty()
+				? suggestedModelPath(profileBase.modelPath, profileBase.modelFileHint)
+				: modelPath;
+			std::string effectiveOutputDir = outputDir.empty()
+				? ofToDataPath("generated", true)
+				: outputDir;
+
+			std::error_code dirEc;
+			std::filesystem::create_directories(effectiveOutputDir, dirEc);
+			if (dirEc) {
+				clearPendingDiffusionArtifacts();
+				setPending("[Error] Failed to create output directory: " + effectiveOutputDir);
+				generating.store(false);
+				return;
+			}
+
+			ofxGgmlImageGenerationRequest request;
+			request.task = task;
+			request.prompt = prompt;
+			request.negativePrompt = negativePrompt;
+			request.modelPath = effectiveModelPath;
+			request.vaePath = vaePath;
+			request.initImagePath = initImagePath;
+			request.maskImagePath = maskImagePath;
+			request.outputDir = effectiveOutputDir;
+			request.outputPrefix = outputPrefix;
+			request.sampler = sampler;
+			request.width = width;
+			request.height = height;
+			request.steps = steps;
+			request.batchCount = batchCount;
+			request.seed = requestSeed;
+			request.cfgScale = cfgScale;
+			request.strength = strength;
+			request.saveMetadata = saveMetadata;
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput =
+					"Calling " + diffusionInference.getBackend()->backendName() + "...";
+			}
+
+			const ofxGgmlImageGenerationResult result =
+				diffusionInference.generate(request);
+			if (cancelRequested.load()) {
+				clearPendingDiffusionArtifacts();
+				setPending("[Cancelled] Diffusion request cancelled.");
+			} else if (result.success) {
+				std::ostringstream summary;
+				summary << "Generated " << result.images.size() << " image";
+				if (result.images.size() != 1) {
+					summary << "s";
+				}
+				if (!result.backendName.empty()) {
+					summary << " via " << result.backendName;
+				}
+				if (result.elapsedMs > 0.0f) {
+					summary << " in " << ofxGgmlHelpers::formatDurationMs(result.elapsedMs);
+				}
+				summary << ".";
+				if (!result.images.empty()) {
+					summary << "\n\nFiles:";
+					for (const auto & image : result.images) {
+						summary << "\n- " << image.path;
+						if (image.width > 0 && image.height > 0) {
+							summary << " (" << image.width << "x" << image.height << ")";
+						}
+					}
+				}
+				if (!result.metadata.empty()) {
+					summary << "\n\nMetadata:";
+					for (const auto & entry : result.metadata) {
+						summary << "\n- " << entry.first << ": " << entry.second;
+					}
+				}
+				if (!result.rawOutput.empty()) {
+					summary << "\n\nBackend output:\n" << result.rawOutput;
+				}
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingDiffusionBackendName = result.backendName;
+					pendingDiffusionElapsedMs = result.elapsedMs;
+					pendingDiffusionImages = result.images;
+					pendingDiffusionMetadata = result.metadata;
+				}
+				setPending(summary.str());
+				logWithLevel(
+					OF_LOG_NOTICE,
+					"Diffusion request completed in " +
+						ofxGgmlHelpers::formatDurationMs(result.elapsedMs) +
+						" via " + result.backendName);
+			} else {
+				clearPendingDiffusionArtifacts();
+				std::string errorText = result.error.empty()
+					? std::string("Diffusion backend returned no result.")
+					: result.error;
+				if (!result.rawOutput.empty()) {
+					errorText += "\n\nBackend output:\n" + result.rawOutput;
+				}
+				setPending("[Error] " + errorText);
+			}
+		} catch (const std::exception & e) {
+			clearPendingDiffusionArtifacts();
+			setPending(std::string("[Error] Diffusion inference failed: ") + e.what());
+		} catch (...) {
+			clearPendingDiffusionArtifacts();
+			setPending("[Error] Unknown failure during diffusion inference.");
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			streamingOutput.clear();
+		}
+		generating.store(false);
+	});
+}
+
+void ofApp::runClipInference() {
+	if (generating.load()) return;
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::Clip;
+	generationStartTime = ofGetElapsedTimef();
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput = "Preparing CLIP ranking request...";
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	const std::string prompt = trim(clipPrompt);
+	const std::string modelPath = trim(clipModelPath);
+	const std::vector<std::string> imagePaths = extractPathList(clipImagePaths);
+	const size_t topK = clipTopK > 0 ? static_cast<size_t>(clipTopK) : 0;
+	const bool normalizeEmbeddings = clipNormalizeEmbeddings;
+	const int verbosity = std::clamp(clipVerbosity, 0, 2);
+
+	workerThread = std::thread([this, prompt, modelPath, imagePaths, topK, normalizeEmbeddings, verbosity]() {
+		auto setPending = [this](const std::string & text) {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingOutput = text;
+			pendingRole = "assistant";
+			pendingMode = AiMode::Clip;
+		};
+
+		auto clearPendingClipArtifacts = [this]() {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingClipBackendName.clear();
+			pendingClipElapsedMs = 0.0f;
+			pendingClipEmbeddingDimension = 0;
+			pendingClipHits.clear();
+		};
+
+		try {
+			if (prompt.empty()) {
+				clearPendingClipArtifacts();
+				setPending("[Error] Enter a prompt first.");
+				generating.store(false);
+				return;
+			}
+			if (modelPath.empty()) {
+				clearPendingClipArtifacts();
+				setPending("[Error] Select a clip.cpp model first.");
+				generating.store(false);
+				return;
+			}
+			if (imagePaths.empty()) {
+				clearPendingClipArtifacts();
+				setPending("[Error] Add at least one image path.");
+				generating.store(false);
+				return;
+			}
+
+#if OFXGGML_HAS_CLIPCPP
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = "Loading clip.cpp model...";
+			}
+
+			ofxGgmlClipCppAdapters::RuntimeOptions options;
+			options.verbosity = verbosity;
+			options.normalizeByDefault = normalizeEmbeddings;
+			ofxGgmlClipCppAdapters::attachBackend(
+				clipInference,
+				modelPath,
+				options,
+				"clip.cpp");
+
+			ofxGgmlClipImageRankingRequest request;
+			request.prompt = prompt;
+			request.promptId = "prompt";
+			request.promptLabel = "Prompt";
+			request.imagePaths = imagePaths;
+			request.topK = topK;
+			request.normalizeEmbeddings = normalizeEmbeddings;
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput =
+					"Ranking " + ofToString(imagePaths.size()) + " image(s) with clip.cpp...";
+			}
+
+			const ofxGgmlClipImageRankingResult result =
+				clipInference.rankImagesForText(request);
+			if (cancelRequested.load()) {
+				clearPendingClipArtifacts();
+				setPending("[Cancelled] CLIP ranking cancelled.");
+			} else if (result.success) {
+				const int embeddingDimension =
+					static_cast<int>(result.queryEmbedding.embedding.size());
+				std::ostringstream summary;
+				summary << "Ranked " << imagePaths.size() << " image";
+				if (imagePaths.size() != 1) {
+					summary << "s";
+				}
+				if (!result.backendName.empty()) {
+					summary << " via " << result.backendName;
+				}
+				if (result.elapsedMs > 0.0f) {
+					summary << " in " << ofxGgmlHelpers::formatDurationMs(result.elapsedMs);
+				}
+				if (embeddingDimension > 0) {
+					summary << " (dim " << embeddingDimension << ")";
+				}
+				summary << ".";
+				if (!result.hits.empty()) {
+					summary << "\n\nTop matches:";
+					for (size_t i = 0; i < result.hits.size(); ++i) {
+						const auto & hit = result.hits[i];
+						summary << "\n" << (i + 1) << ". "
+							<< hit.imagePath
+							<< " | score " << ofToString(hit.score, 4);
+					}
+				}
+				if (!result.rawOutput.empty()) {
+					summary << "\n\nBackend output:\n" << result.rawOutput;
+				}
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingClipBackendName = result.backendName;
+					pendingClipElapsedMs = result.elapsedMs;
+					pendingClipEmbeddingDimension = embeddingDimension;
+					pendingClipHits = result.hits;
+				}
+				setPending(summary.str());
+			} else {
+				clearPendingClipArtifacts();
+				std::string errorText = result.error.empty()
+					? std::string("CLIP backend returned no result.")
+					: result.error;
+				if (!result.rawOutput.empty()) {
+					errorText += "\n\nBackend output:\n" + result.rawOutput;
+				}
+				setPending("[Error] " + errorText);
+			}
+#else
+			clearPendingClipArtifacts();
+			setPending("[Error] clip.cpp support is not available in this build yet.");
+#endif
+		} catch (const std::exception & e) {
+			clearPendingClipArtifacts();
+			setPending(std::string("[Error] CLIP ranking failed: ") + e.what());
+		} catch (...) {
+			clearPendingClipArtifacts();
+			setPending("[Error] Unknown failure during CLIP ranking.");
 		}
 
 		{
@@ -7747,21 +8785,45 @@ case AiMode::Vision:
 visionOutput = pendingOutput;
 fprintf(stderr, "%s\n", formatConsoleLogLine("Vision", "AI", pendingOutput, true).c_str());
 break;
-case AiMode::Speech:
-speechOutput = pendingOutput;
-speechDetectedLanguage = pendingSpeechDetectedLanguage;
-speechTranscriptPath = pendingSpeechTranscriptPath;
-speechSrtPath = pendingSpeechSrtPath;
-speechSegmentCount = pendingSpeechSegmentCount;
-fprintf(stderr, "%s\n", formatConsoleLogLine("Speech", "AI", pendingOutput, true).c_str());
-break;
-}
-pendingOutput.clear();
-pendingSpeechDetectedLanguage.clear();
-pendingSpeechTranscriptPath.clear();
-pendingSpeechSrtPath.clear();
-pendingSpeechSegmentCount = 0;
-}
+  case AiMode::Speech:
+  speechOutput = pendingOutput;
+  speechDetectedLanguage = pendingSpeechDetectedLanguage;
+  speechTranscriptPath = pendingSpeechTranscriptPath;
+  speechSrtPath = pendingSpeechSrtPath;
+  speechSegmentCount = pendingSpeechSegmentCount;
+  fprintf(stderr, "%s\n", formatConsoleLogLine("Speech", "AI", pendingOutput, true).c_str());
+  break;
+  case AiMode::Diffusion:
+  diffusionOutput = pendingOutput;
+  diffusionBackendName = pendingDiffusionBackendName;
+  diffusionElapsedMs = pendingDiffusionElapsedMs;
+  diffusionGeneratedImages = pendingDiffusionImages;
+  diffusionMetadata = pendingDiffusionMetadata;
+  fprintf(stderr, "%s\n", formatConsoleLogLine("Diffusion", "AI", pendingOutput, true).c_str());
+  break;
+  case AiMode::Clip:
+  clipOutput = pendingOutput;
+  clipBackendName = pendingClipBackendName;
+  clipElapsedMs = pendingClipElapsedMs;
+  clipEmbeddingDimension = pendingClipEmbeddingDimension;
+  clipHits = pendingClipHits;
+  fprintf(stderr, "%s\n", formatConsoleLogLine("CLIP", "AI", pendingOutput, true).c_str());
+  break;
+  }
+  pendingOutput.clear();
+  pendingSpeechDetectedLanguage.clear();
+  pendingSpeechTranscriptPath.clear();
+  pendingSpeechSrtPath.clear();
+  pendingSpeechSegmentCount = 0;
+  pendingDiffusionBackendName.clear();
+  pendingDiffusionElapsedMs = 0.0f;
+  pendingDiffusionImages.clear();
+  pendingDiffusionMetadata.clear();
+  pendingClipBackendName.clear();
+  pendingClipElapsedMs = 0.0f;
+  pendingClipEmbeddingDimension = 0;
+  pendingClipHits.clear();
+  }
 
 // ---------------------------------------------------------------------------
 // Performance metrics window

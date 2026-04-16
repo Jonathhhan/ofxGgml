@@ -33,7 +33,9 @@ enum class AiMode {
 	Translate,
 	Custom,
 	Vision,
-	Speech
+	Speech,
+	Diffusion,
+	Clip
 };
 
 enum class LiveContextMode {
@@ -111,7 +113,7 @@ private:
 
 	// -- mode --
 	AiMode activeMode = AiMode::Chat;
-	static constexpr int kModeCount = 8;
+	static constexpr int kModeCount = 10;
 	static const char * modeLabels[kModeCount];
 
 	// -- input buffers --
@@ -147,9 +149,35 @@ private:
 	char speechLanguageHint[64] = "auto";
 	int speechTaskIndex = 0;
 	bool speechReturnTimestamps = false;
+	char diffusionPrompt[4096] = {};
+	char diffusionNegativePrompt[4096] = {};
+	char diffusionModelPath[1024] = {};
+	char diffusionVaePath[1024] = {};
+	char diffusionInitImagePath[1024] = {};
+	char diffusionMaskImagePath[1024] = {};
+	char diffusionOutputDir[1024] = {};
+	char diffusionOutputPrefix[128] = "diffusion";
+	char diffusionSampler[64] = "euler_a";
+	int diffusionTaskIndex = 0;
+	int diffusionWidth = 1024;
+	int diffusionHeight = 1024;
+	int diffusionSteps = 20;
+	int diffusionBatchCount = 1;
+	int diffusionSeed = -1;
+	float diffusionCfgScale = 7.0f;
+	float diffusionStrength = 0.75f;
+	bool diffusionSaveMetadata = true;
+	char clipPrompt[4096] = {};
+	char clipModelPath[1024] = {};
+	char clipImagePaths[8192] = {};
+	int clipTopK = 3;
+	bool clipNormalizeEmbeddings = true;
+	int clipVerbosity = 1;
 	bool speechServerManagedByApp = false;
 	ServerStatusState speechServerStatus = ServerStatusState::Unknown;
 	std::string speechServerStatusMessage;
+	std::string cachedSpeechCliExecutable;
+	bool speechCliExecutableCached = false;
 	std::string cachedSpeechServerExecutable;
 	bool speechServerExecutableCached = false;
 #ifdef _WIN32
@@ -169,10 +197,20 @@ private:
 	std::string customOutput;
 	std::string visionOutput;
 	std::string speechOutput;
+	std::string diffusionOutput;
+	std::string clipOutput;
 	std::string speechDetectedLanguage;
 	std::string speechTranscriptPath;
 	std::string speechSrtPath;
 	int speechSegmentCount = 0;
+	std::string diffusionBackendName;
+	float diffusionElapsedMs = 0.0f;
+	std::vector<ofxGgmlGeneratedImage> diffusionGeneratedImages;
+	std::vector<std::pair<std::string, std::string>> diffusionMetadata;
+	std::string clipBackendName;
+	float clipElapsedMs = 0.0f;
+	int clipEmbeddingDimension = 0;
+	std::vector<ofxGgmlClipSimilarityHit> clipHits;
 	std::string speechRecordedTempPath;
 	bool speechRecording = false;
 	int speechInputSampleRate = 16000;
@@ -195,6 +233,14 @@ private:
 	std::string pendingSpeechTranscriptPath;
 	std::string pendingSpeechSrtPath;
 	int pendingSpeechSegmentCount = 0;
+	std::string pendingDiffusionBackendName;
+	float pendingDiffusionElapsedMs = 0.0f;
+	std::vector<ofxGgmlGeneratedImage> pendingDiffusionImages;
+	std::vector<std::pair<std::string, std::string>> pendingDiffusionMetadata;
+	std::string pendingClipBackendName;
+	float pendingClipElapsedMs = 0.0f;
+	int pendingClipEmbeddingDimension = 0;
+	std::vector<ofxGgmlClipSimilarityHit> pendingClipHits;
 	AiMode activeGenerationMode = AiMode::Chat;
 	float generationStartTime = 0.0f;
 	std::string streamingOutput;
@@ -222,8 +268,8 @@ private:
 	float mirostatTau = 5.0f;
 	float mirostatEta = 0.1f;
 	int chatLanguageIndex = 0;                       // 0=Auto, otherwise force response language
-	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 384, 512};
-	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 1, 1, 1, 1, 0, 0};
+	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 384, 512, 512, 384};
+	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 1, 1, 1, 1, 0, 0, 0, 0};
 	TextInferenceBackend textInferenceBackend = TextInferenceBackend::LlamaServer;
 	ServerStatusState textServerStatus = ServerStatusState::Unknown;
 	std::string textServerStatusMessage;
@@ -287,6 +333,8 @@ private:
 	int selectedVisionProfileIndex = 0;
 	std::vector<ofxGgmlSpeechModelProfile> speechProfiles;
 	int selectedSpeechProfileIndex = 0;
+	std::vector<ofxGgmlImageGenerationModelProfile> diffusionProfiles;
+	int selectedDiffusionProfileIndex = 0;
 	void initPromptTemplates();
 
 	// -- script source (local folder / GitHub) --
@@ -303,6 +351,8 @@ private:
 	ofxGgmlVisionInference visionInference;
 	ofxGgmlVideoInference videoInference;
 	ofxGgmlSpeechInference speechInference;
+	ofxGgmlDiffusionInference diffusionInference;
+	ofxGgmlClipInference clipInference;
 	ofxGgmlInference llmInference;
 	ofxGgmlCodeReview scriptCodeReview;
 	ofxGgmlProjectMemory scriptProjectMemory;
@@ -338,6 +388,8 @@ private:
 	void runVisionInference();
 	void runVideoInference();
 	void runSpeechInference();
+	void runDiffusionInference();
+	void runClipInference();
 	bool startSpeechRecording();
 	void stopSpeechRecording(bool keepBufferedAudio = true);
 	std::string flushSpeechRecordingToTempWav();
@@ -363,6 +415,7 @@ private:
 	bool isManagedTextServerRunning();
 	void startLocalTextServer();
 	void stopLocalTextServer(bool logResult = true);
+	std::string findLocalSpeechCliExecutable(bool refresh = false);
 	std::string findLocalSpeechServerExecutable(bool refresh = false);
 	bool isManagedSpeechServerRunning();
 	void startLocalSpeechServer();
@@ -384,6 +437,8 @@ private:
 	void drawCustomPanel();
 	void drawVisionPanel();
 	void drawSpeechPanel();
+	void drawDiffusionPanel();
+	void drawClipPanel();
 	void drawStatusBar();
 	void drawDeviceInfoWindow();
 	void drawLogWindow();

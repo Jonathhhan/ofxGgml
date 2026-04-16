@@ -112,6 +112,10 @@ public:
 
 	static std::vector<ofxGgmlSpeechModelProfile> defaultProfiles();
 	static const char * taskLabel(ofxGgmlSpeechTask task);
+	static std::string resolveWhisperCliExecutable(
+		const std::string & executable = "whisper-cli");
+	static std::string resolveWhisperServerExecutable(
+		const std::string & executable = "whisper-server");
 	static std::shared_ptr<ofxGgmlSpeechBackend> createWhisperCliBackend(
 		const std::string & executable = "whisper-cli");
 	static std::shared_ptr<ofxGgmlSpeechBackend> createWhisperServerBackend(

@@ -144,7 +144,11 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 $configureArgs = @(
     '-S', $SourceDir,
-    '-B', $BuildDir
+    '-B', $BuildDir,
+    '-DLLAMA_BUILD_SERVER=ON',
+    '-DLLAMA_BUILD_TESTS=OFF',
+    '-DLLAMA_BUILD_EXAMPLES=OFF',
+    '-DLLAMA_CURL=OFF'
 )
 if ($useCuda) {
     $configureArgs += @('-DGGML_CUDA=ON', "-DCMAKE_ASM_COMPILER=$asmCompiler")
@@ -152,48 +156,98 @@ if ($useCuda) {
     $configureArgs += '-DGGML_CUDA=OFF'
 }
 
-Write-Step ("Configuring llama.cpp for " + ($(if ($useCuda) { 'CUDA' } else { 'CPU-only' })) + " server build")
+Write-Step ("Configuring llama.cpp for " + ($(if ($useCuda) { 'CUDA' } else { 'CPU-only' })) + " text runtime build")
 if ($DryRun) {
     Write-Host "$cmake $($configureArgs -join ' ')"
 } else {
     & $cmake @configureArgs
 }
 
-$buildArgs = @(
-    '--build', $BuildDir,
-    '--config', 'Release',
-    '--target', 'llama-server',
-    '--parallel', $Jobs
-)
+$requiredTargets = @('llama-server', 'llama-completion', 'llama-cli')
+$optionalTargets = @('llama-embedding')
 
-Write-Step "Building llama-server"
-if ($DryRun) {
-    Write-Host "$cmake $($buildArgs -join ' ')"
-} else {
-    & $cmake @buildArgs
+foreach ($target in $requiredTargets) {
+    $buildArgs = @(
+        '--build', $BuildDir,
+        '--config', 'Release',
+        '--target', $target,
+        '--parallel', $Jobs
+    )
+
+    Write-Step "Building $target"
+    if ($DryRun) {
+        Write-Host "$cmake $($buildArgs -join ' ')"
+    } else {
+        & $cmake @buildArgs
+    }
+}
+
+foreach ($target in $optionalTargets) {
+    $buildArgs = @(
+        '--build', $BuildDir,
+        '--config', 'Release',
+        '--target', $target,
+        '--parallel', $Jobs
+    )
+
+    Write-Step "Building optional $target"
+    if ($DryRun) {
+        Write-Host "$cmake $($buildArgs -join ' ')"
+    } else {
+        try {
+            & $cmake @buildArgs
+        } catch {
+            Write-Warning "$target is unavailable in this llama.cpp checkout; continuing without it."
+        }
+    }
 }
 
 $releaseBinDir = Join-Path $BuildDir 'bin\Release'
 $serverExe = Join-Path $releaseBinDir 'llama-server.exe'
-if (-not $DryRun -and -not (Test-Path -LiteralPath $serverExe)) {
-    throw "Build finished but llama-server.exe was not found at $serverExe"
+$completionExe = Join-Path $releaseBinDir 'llama-completion.exe'
+$cliExe = Join-Path $releaseBinDir 'llama-cli.exe'
+$embeddingExe = Join-Path $releaseBinDir 'llama-embedding.exe'
+if (-not $DryRun) {
+    $requiredExecutables = @(
+        @{ Name = 'llama-server.exe'; Path = $serverExe },
+        @{ Name = 'llama-completion.exe'; Path = $completionExe },
+        @{ Name = 'llama-cli.exe'; Path = $cliExe }
+    )
+    foreach ($exe in $requiredExecutables) {
+        if (-not (Test-Path -LiteralPath $exe.Path)) {
+            throw "Build finished but $($exe.Name) was not found at $($exe.Path)"
+        }
+    }
 }
 
-Write-Step "Installing llama-server runtime into $InstallDir"
+Write-Step "Installing llama.cpp runtime into $InstallDir"
 if ($DryRun) {
     Write-Host "Copy $serverExe -> $InstallDir"
+    Write-Host "Copy $completionExe -> $InstallDir"
+    Write-Host "Copy $cliExe -> $InstallDir"
+    Write-Host "Copy $embeddingExe -> $InstallDir (if present)"
     Write-Host "Copy DLLs from $releaseBinDir -> $InstallDir"
 } else {
     Copy-Item -LiteralPath $serverExe -Destination $InstallDir -Force
+    Copy-Item -LiteralPath $completionExe -Destination $InstallDir -Force
+    Copy-Item -LiteralPath $cliExe -Destination $InstallDir -Force
+    if (Test-Path -LiteralPath $embeddingExe) {
+        Copy-Item -LiteralPath $embeddingExe -Destination $InstallDir -Force
+    }
     Get-ChildItem -LiteralPath $releaseBinDir -Filter '*.dll' | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $InstallDir -Force
     }
 }
 
 Write-Host ""
-Write-Host "llama-server build complete."
+Write-Host "llama.cpp text runtime build complete."
 Write-Host "  source:  $SourceDir"
 Write-Host "  build:   $BuildDir"
 Write-Host "  install: $InstallDir"
 Write-Host "  server:  $(Join-Path $InstallDir 'llama-server.exe')"
+Write-Host "  completion: $(Join-Path $InstallDir 'llama-completion.exe')"
+Write-Host "  cli:     $(Join-Path $InstallDir 'llama-cli.exe')"
+if (-not $DryRun -and (Test-Path -LiteralPath (Join-Path $InstallDir 'llama-embedding.exe'))) {
+    Write-Host "  embedding: $(Join-Path $InstallDir 'llama-embedding.exe')"
+}
 Write-Host "  cuda:    $useCuda"

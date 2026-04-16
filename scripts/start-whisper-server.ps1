@@ -33,6 +33,7 @@ function Resolve-FirstExistingPath {
 if ([string]::IsNullOrWhiteSpace($ServerExe)) {
     $ServerExe = Resolve-FirstExistingPath @(
         (Join-Path $addonRoot 'libs\whisper\bin\whisper-server.exe'),
+        (Join-Path $addonRoot 'build\whisper.cpp-build\bin\whisper-server.exe'),
         (Join-Path $addonRoot 'build\whisper.cpp-build\bin\Release\whisper-server.exe')
     )
 }

@@ -112,6 +112,106 @@ std::string detectLanguageFromOutput(const std::string & text) {
 	return {};
 }
 
+std::string lowerCopy(std::string value) {
+	std::transform(value.begin(), value.end(), value.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return value;
+}
+
+bool hasPathSeparator(const std::string & value) {
+	return value.find('\\') != std::string::npos ||
+		value.find('/') != std::string::npos;
+}
+
+bool isDefaultExecutableHint(
+	const std::string & executableHint,
+	const std::vector<std::string> & canonicalNames) {
+	const std::string trimmed = trimCopy(executableHint);
+	if (trimmed.empty()) {
+		return true;
+	}
+	if (hasPathSeparator(trimmed)) {
+		return false;
+	}
+	const std::string fileName = lowerCopy(
+		std::filesystem::path(trimmed).filename().string());
+	return std::find(
+		canonicalNames.begin(),
+		canonicalNames.end(),
+		fileName) != canonicalNames.end();
+}
+
+void appendUniquePath(
+	std::vector<std::filesystem::path> & paths,
+	const std::filesystem::path & candidate) {
+	if (candidate.empty()) {
+		return;
+	}
+	std::error_code ec;
+	const std::filesystem::path normalized =
+		std::filesystem::weakly_canonical(candidate, ec);
+	const std::filesystem::path stored = ec ? candidate.lexically_normal() : normalized;
+	const auto alreadyPresent = std::find(paths.begin(), paths.end(), stored);
+	if (alreadyPresent == paths.end()) {
+		paths.push_back(stored);
+	}
+}
+
+std::vector<std::filesystem::path> whisperExecutableSearchRoots() {
+	std::vector<std::filesystem::path> roots;
+	const std::filesystem::path exeDir(ofFilePath::getCurrentExeDir());
+	appendUniquePath(roots, exeDir);
+	appendUniquePath(roots, exeDir / ".." / ".." / "libs" / "whisper" / "bin");
+	appendUniquePath(roots, exeDir / ".." / ".." / "build" / "whisper.cpp-build" / "bin");
+	appendUniquePath(
+		roots,
+		exeDir / ".." / ".." / "build" / "whisper.cpp-build" / "bin" / "Release");
+
+	std::error_code ec;
+	const std::filesystem::path cwd = std::filesystem::current_path(ec);
+	if (!ec) {
+		appendUniquePath(roots, cwd);
+		appendUniquePath(roots, cwd / "libs" / "whisper" / "bin");
+		appendUniquePath(roots, cwd / "build" / "whisper.cpp-build" / "bin");
+		appendUniquePath(roots, cwd / "build" / "whisper.cpp-build" / "bin" / "Release");
+	}
+	return roots;
+}
+
+std::string findFirstExistingExecutable(
+	const std::vector<std::filesystem::path> & candidates) {
+	for (const auto & candidate : candidates) {
+		std::error_code ec;
+		if (std::filesystem::exists(candidate, ec) && !ec) {
+			return candidate.string();
+		}
+	}
+	return {};
+}
+
+std::string resolveWhisperBinaryPath(
+	const std::string & executableHint,
+	const std::vector<std::string> & canonicalNames) {
+	const std::string trimmedHint = trimCopy(executableHint);
+	const std::string fallback = trimmedHint.empty()
+		? canonicalNames.front()
+		: trimmedHint;
+	if (!isDefaultExecutableHint(fallback, canonicalNames)) {
+		return fallback;
+	}
+
+	std::vector<std::filesystem::path> candidates;
+	const auto roots = whisperExecutableSearchRoots();
+	for (const auto & root : roots) {
+		for (const auto & fileName : canonicalNames) {
+			candidates.push_back(root / fileName);
+		}
+	}
+
+	const std::string resolved = findFirstExistingExecutable(candidates);
+	return resolved.empty() ? fallback : resolved;
+}
+
 std::string makeTempOutputBase(const char * prefix) {
 	std::error_code ec;
 	std::filesystem::path base = std::filesystem::temp_directory_path(ec);
@@ -485,7 +585,8 @@ std::vector<std::string> ofxGgmlWhisperCliSpeechBackend::buildCommandArguments(
 	const NormalizedSpeechRequest normalized = normalizeSpeechRequest(request);
 	std::vector<std::string> args;
 	args.reserve(12);
-	args.push_back(m_executable.empty() ? "whisper-cli" : m_executable);
+	args.push_back(ofxGgmlSpeechInference::resolveWhisperCliExecutable(
+		m_executable.empty() ? "whisper-cli" : m_executable));
 	if (!normalized.modelPath.empty()) {
 		args.push_back("-m");
 		args.push_back(normalized.modelPath);
@@ -882,6 +983,42 @@ const char * ofxGgmlSpeechInference::taskLabel(ofxGgmlSpeechTask task) {
 	case ofxGgmlSpeechTask::Translate: return "Translate";
 	}
 	return "Transcribe";
+}
+
+std::string ofxGgmlSpeechInference::resolveWhisperCliExecutable(
+	const std::string & executable) {
+#ifdef _WIN32
+	static const std::vector<std::string> kCanonicalNames = {
+		"whisper-cli.exe",
+		"whisper-cli",
+		"main.exe",
+		"main"
+	};
+#else
+	static const std::vector<std::string> kCanonicalNames = {
+		"whisper-cli",
+		"main"
+	};
+#endif
+	return resolveWhisperBinaryPath(executable, kCanonicalNames);
+}
+
+std::string ofxGgmlSpeechInference::resolveWhisperServerExecutable(
+	const std::string & executable) {
+#ifdef _WIN32
+	static const std::vector<std::string> kCanonicalNames = {
+		"whisper-server.exe",
+		"whisper-server",
+		"server.exe",
+		"server"
+	};
+#else
+	static const std::vector<std::string> kCanonicalNames = {
+		"whisper-server",
+		"server"
+	};
+#endif
+	return resolveWhisperBinaryPath(executable, kCanonicalNames);
 }
 
 std::shared_ptr<ofxGgmlSpeechBackend> ofxGgmlSpeechInference::createWhisperCliBackend(

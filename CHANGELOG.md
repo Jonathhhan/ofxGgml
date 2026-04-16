@@ -6,11 +6,15 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ### Added
 - `ofxGgmlInference` live grounding now groups specialized sources under domain providers and keeps generic search as a separate fallback path.
+- `ofxGgmlClipInference` as a new bridge scaffold for optional CLIP-style text/image embedding and ranking backends, now with a generic bridge surface plus an optional `clip.cpp` adapter path and compatibility helpers for older `ofxStableDiffusion`-style naming.
+- `ofxGgmlDiffusionInference` as a new bridge scaffold for optional image-generation backends, including a callback-friendly `ofxStableDiffusion` adapter surface.
 - Script mode now supports higher-level slash commands and quick actions such as `/review`, `/reviewfix`, `/nextedit`, `/summary`, and `Change Summary`.
 - Text-focused GUI modes now expose additional professional one-click actions, including executive briefs, action items, meeting notes, email replies, release notes, commit messages, and structured JSON replies.
 - The Speech panel now supports temporary microphone capture, including `Start Mic Recording`, `Stop + Run`, and `Use Last Recording` for direct transcribe / translate workflows from the default input device.
 - Speech inference now supports an optional OpenAI-compatible speech-server backend for `/v1/audio/transcriptions` and `/v1/audio/translations`, with automatic `whisper-cli` fallback when the server path fails.
 - Windows helpers now cover `whisper-server` too, including `scripts/build-whisper-server.ps1` and `scripts/start-whisper-server.ps1` for a local warm speech backend on port `8081`.
+- Local `whisper.cpp` runtime detection now covers both `whisper-cli` and `whisper-server`, and the Windows build helper installs both binaries into `libs/whisper/bin` so the GUI's CLI fallback and managed server share the same upstream runtime.
+- `llama.cpp` runtime helpers now install `llama-server`, `llama-completion`, and `llama-cli` together into `libs/llama/bin` on Windows and Linux/macOS, so the text server path and addon-local CLI fallback can share one local upstream runtime in the same way as Whisper.
 - The Vision panel now includes quick actions such as `Scene Describe`, `Screenshot Review`, and `Document OCR`, plus an optional sampled-video path that reuses the stable multimodal server backend directly from the GUI.
 - Video `Action` and `Emotion` tasks can now optionally call a temporal sidecar service, with structured request/response plumbing and dedicated Vision-panel presets for those workflows.
 
@@ -19,7 +23,7 @@ All notable changes to `ofxGgml` are documented in this file.
 - GUI live-source controls now use the more general `Live context` / `sources` wording instead of mixed `online` / `realtime` labels.
 - Local workspaces now keep `.github` available during script-source scans so repository instruction files can shape assistant and review prompts.
 - `ofxGgmlCodeAssistant` and `ofxGgmlCodeReview` now read local `AGENTS.md` and `.github` instruction files directly from the workspace for server-first coding and review flows.
-- Setup scripts now follow the faster server-first path by default: `ggml` still builds automatically, while `llama-cli` / `llama-completion` are opt-in via `--with-llama-cli` instead of being built on every `--auto` setup.
+- Setup scripts now follow the faster server-first path by default: `ggml` still builds automatically, while the local `llama.cpp` runtime remains opt-in via `--with-llama-cli` instead of being built on every `--auto` setup.
 - The GUI now presents `llama-server` as the recommended text backend and frames `llama-completion` as an optional local fallback instead of a required default component.
 - Server-backed text modes now auto-apply the old low-latency tuning defaults, auto-start the local server during app setup when the configured URL is local, and remove the manual `Check Server` / `Start Local Server` / `Stop Local Server` / `Tune For Server` buttons from the GUI.
 - The Speech panel now defaults to a local speech-server URL on `http://127.0.0.1:8081`, prefers a warm speech server first, and can auto-start a managed local `whisper-server` during setup when the configured URL is local.
@@ -30,7 +34,7 @@ All notable changes to `ofxGgml` are documented in this file.
 - Streamed text generation now treats server chunks as deltas consistently across the inference and GUI layers, so live `llama-server` output no longer duplicates partial prefixes in Chat or Script mode.
 
 ### Documentation
-- `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, repository instruction-file support, the new optional CLI build behavior, the microphone-driven speech workflow, the optional speech-server backend, `whisper-server` helper scripts, the upgraded vision / sampled-video workflows, and the optional temporal sidecar contract for video action / emotion analysis.
+- `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, repository instruction-file support, the new optional CLI build behavior, the microphone-driven speech workflow, the optional speech-server backend, the shared local `whisper.cpp` runtime helper path, the upgraded vision / sampled-video workflows, and the optional temporal sidecar contract for video action / emotion analysis.
 
 ## [1.0.2] - 2026-04-16
 

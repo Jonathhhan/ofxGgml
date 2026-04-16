@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 REM ---------------------------------------------------------------------------
 REM setup_windows.bat — One-command setup for ofxGgml on Windows.
 REM
-REM This script builds ggml and keeps llama.cpp CLI tools optional.
+REM This script builds ggml and keeps the local llama.cpp runtime optional.
 REM Model download is optional and disabled by default.
 REM
 REM Usage:
@@ -16,8 +16,8 @@ REM   --gpu, --cuda      Enable CUDA backend
 REM   --vulkan           Enable Vulkan backend
 REM   --with-debug       Also build ggml Debug libraries (default: Release only)
 REM   --skip-ggml        Skip building ggml
-REM   --with-llama-cli   Build optional llama.cpp CLI fallback tools
-REM   --skip-llama       Skip building llama.cpp CLI tools (legacy no-op)
+REM   --with-llama-cli   Build optional local llama.cpp runtime (server + CLI fallback)
+REM   --skip-llama       Skip building llama.cpp runtime tools (legacy no-op)
 REM   --skip-model       Skip downloading text model file(s)
 REM   --download-model   Download text model file(s)
 REM   --model-preset N   Download text preset 1 or 2 (default: both)
@@ -30,7 +30,7 @@ set "SCRIPT_DIR=%~dp0"
 set "ADDON_ROOT=%SCRIPT_DIR%.."
 set "MODEL_OUTPUT_DIR=%ADDON_ROOT%\ofxGgmlGuiExample\bin\data\models"
 set "MODEL_DOWNLOADER=%SCRIPT_DIR%download-model.ps1"
-set "LLAMA_BUILDER=%SCRIPT_DIR%build-llama-cli.sh"
+set "LLAMA_RUNTIME_BUILDER=%SCRIPT_DIR%build-llama-server.ps1"
 set "SKIP_GGML=0"
 set "SKIP_LLAMA=1"
 set "SKIP_MODEL=1"
@@ -148,8 +148,8 @@ echo   --gpu, --cuda      Enable CUDA backend
 echo   --vulkan           Enable Vulkan backend
 echo   --with-debug       Also build ggml Debug libraries ^(default: Release only^)
 echo   --skip-ggml        Skip building ggml
-echo   --with-llama-cli   Build optional llama.cpp CLI fallback tools
-echo   --skip-llama       Skip building llama.cpp CLI tools ^(legacy no-op^)
+echo   --with-llama-cli   Build optional local llama.cpp runtime ^(server + CLI fallback^)
+echo   --skip-llama       Skip building llama.cpp runtime tools ^(legacy no-op^)
 echo   --skip-model       Skip downloading text model files ^(default^)
 echo   --download-model   Download text model files
 echo   --model-preset N   Download text preset 1 or 2 ^(default: both^)
@@ -178,23 +178,21 @@ if "%SKIP_GGML%"=="0" (
 )
 
 if "%SKIP_LLAMA%"=="0" (
-    echo [2/3] Building optional llama.cpp CLI fallback tools...
-    where bash >nul 2>&1
+    echo [2/3] Building optional local llama.cpp runtime...
+    set "LLAMA_ARGS="
+    if /i "%LLAMA_GPU_FLAG%"=="--cuda" set "LLAMA_ARGS=!LLAMA_ARGS! -Cuda"
+    if /i "%LLAMA_GPU_FLAG%"=="--gpu" set "LLAMA_ARGS=!LLAMA_ARGS! -Cuda"
+    if /i "%GPU_FLAG%"=="--cpu-only" set "LLAMA_ARGS=!LLAMA_ARGS! -CpuOnly"
+    for /f "tokens=2" %%A in ("%JOBS_FLAG%") do set "LLAMA_JOBS=%%A"
+    if defined LLAMA_JOBS set "LLAMA_ARGS=!LLAMA_ARGS! -Jobs !LLAMA_JOBS!"
+    if defined CLEAN_FLAG set "LLAMA_ARGS=!LLAMA_ARGS! -Clean"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%LLAMA_RUNTIME_BUILDER%" !LLAMA_ARGS!
     if errorlevel 1 (
-        echo Warning: bash was not found in PATH. Install Git Bash or WSL, or omit --with-llama-cli.
+        echo Warning: llama.cpp runtime build failed.
         set "LLAMA_BUILD_FAILED=1"
-    ) else (
-        set "LLAMA_ARGS="
-        if defined LLAMA_GPU_FLAG set "LLAMA_ARGS=!LLAMA_GPU_FLAG!"
-        set "LLAMA_ARGS=!LLAMA_ARGS! %JOBS_FLAG% %CLEAN_FLAG%"
-        bash "%LLAMA_BUILDER%" !LLAMA_ARGS!
-        if errorlevel 1 (
-            echo Warning: llama.cpp CLI build failed.
-            set "LLAMA_BUILD_FAILED=1"
-        )
     )
 ) else (
-    echo [2/3] Skipping optional llama.cpp CLI tools ^(server-first default^).
+    echo [2/3] Skipping optional local llama.cpp runtime ^(server-first default^).
 )
 
 if "%SKIP_MODEL%"=="0" (
@@ -219,7 +217,7 @@ if "%GGML_BUILD_FAILED%"=="1" (
 
 if "%LLAMA_BUILD_FAILED%"=="1" (
     echo.
-    echo Setup partially completed: optional llama.cpp CLI build failed.
+    echo Setup partially completed: optional llama.cpp runtime build failed.
     echo.
     exit /b 1
 )
@@ -230,7 +228,7 @@ echo.
 echo Next steps:
 echo   1. Add ofxGgml to your project addons.make
 echo   2. Build and run your project
-echo   3. If you want local CLI fallback tools, rerun with --with-llama-cli
-echo   4. Use scripts\build-llama-server.ps1 when you want a local persistent server
+echo   3. If you want the local llama.cpp runtime, rerun with --with-llama-cli
+echo   4. Use scripts\start-llama-server.ps1 to launch the local server manually
 echo.
 exit /b 0

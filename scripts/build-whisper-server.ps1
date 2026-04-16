@@ -152,38 +152,47 @@ if ($useCuda) {
     $configureArgs += '-DGGML_CUDA=OFF'
 }
 
-Write-Step ("Configuring whisper.cpp for " + ($(if ($useCuda) { 'CUDA' } else { 'CPU-only' })) + " server build")
+Write-Step ("Configuring whisper.cpp for " + ($(if ($useCuda) { 'CUDA' } else { 'CPU-only' })) + " speech runtime build")
 if ($DryRun) {
     Write-Host "$cmake $($configureArgs -join ' ')"
 } else {
     & $cmake @configureArgs
 }
 
-$buildArgs = @(
-    '--build', $BuildDir,
-    '--config', 'Release',
-    '--target', 'whisper-server',
-    '--parallel', $Jobs
-)
+$buildTargets = @('whisper-cli', 'whisper-server')
+foreach ($target in $buildTargets) {
+    $buildArgs = @(
+        '--build', $BuildDir,
+        '--config', 'Release',
+        '--target', $target,
+        '--parallel', $Jobs
+    )
 
-Write-Step "Building whisper-server"
-if ($DryRun) {
-    Write-Host "$cmake $($buildArgs -join ' ')"
-} else {
-    & $cmake @buildArgs
+    Write-Step "Building $target"
+    if ($DryRun) {
+        Write-Host "$cmake $($buildArgs -join ' ')"
+    } else {
+        & $cmake @buildArgs
+    }
 }
 
 $releaseBinDir = Join-Path $BuildDir 'bin\Release'
+$cliExe = Join-Path $releaseBinDir 'whisper-cli.exe'
 $serverExe = Join-Path $releaseBinDir 'whisper-server.exe'
+if (-not $DryRun -and -not (Test-Path -LiteralPath $cliExe)) {
+    throw "Build finished but whisper-cli.exe was not found at $cliExe"
+}
 if (-not $DryRun -and -not (Test-Path -LiteralPath $serverExe)) {
     throw "Build finished but whisper-server.exe was not found at $serverExe"
 }
 
-Write-Step "Installing whisper-server runtime into $InstallDir"
+Write-Step "Installing whisper.cpp runtime into $InstallDir"
 if ($DryRun) {
+    Write-Host "Copy $cliExe -> $InstallDir"
     Write-Host "Copy $serverExe -> $InstallDir"
     Write-Host "Copy DLLs from $releaseBinDir -> $InstallDir"
 } else {
+    Copy-Item -LiteralPath $cliExe -Destination $InstallDir -Force
     Copy-Item -LiteralPath $serverExe -Destination $InstallDir -Force
     Get-ChildItem -LiteralPath $releaseBinDir -Filter '*.dll' | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $InstallDir -Force
@@ -191,9 +200,10 @@ if ($DryRun) {
 }
 
 Write-Host ""
-Write-Host "whisper-server build complete."
+Write-Host "whisper.cpp speech runtime build complete."
 Write-Host "  source:  $SourceDir"
 Write-Host "  build:   $BuildDir"
 Write-Host "  install: $InstallDir"
+Write-Host "  cli:     $(Join-Path $InstallDir 'whisper-cli.exe')"
 Write-Host "  server:  $(Join-Path $InstallDir 'whisper-server.exe')"
 Write-Host "  cuda:    $useCuda"

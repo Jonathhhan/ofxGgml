@@ -20,6 +20,10 @@ ofxGgmlBasicExample/*.sln
 ofxGgmlBasicExample/*.vcxproj
 ofxGgmlBasicExample/*.vcxproj.filters
 ofxGgmlBasicExample/icon.rc
+ofxGgmlGuiExample/*.sln
+ofxGgmlGuiExample/*.vcxproj
+ofxGgmlGuiExample/*.vcxproj.filters
+ofxGgmlGuiExample/icon.rc
 ofxGgmlNeuralExample/*.sln
 ofxGgmlNeuralExample/*.vcxproj
 ofxGgmlNeuralExample/*.vcxproj.filters
