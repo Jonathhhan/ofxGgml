@@ -2118,10 +2118,11 @@ ImGui::Separator();
 ImGui::Spacing();
 ImGui::Text("Mode:");
 ImGui::Spacing();
+const float modeMenuRowHeight = 24.0f;
 
 for (int i = 0; i < kModeCount; i++) {
 bool selected = (static_cast<int>(activeMode) == i);
-if (ImGui::Selectable(modeLabels[i], selected, ImGuiSelectableFlags_None, ImVec2(0, 28))) {
+if (ImGui::Selectable(modeLabels[i], selected, ImGuiSelectableFlags_None, ImVec2(0, modeMenuRowHeight))) {
 activeMode = static_cast<AiMode>(i);
 	if (useModeTokenBudgets) {
 		maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(i)], 32, 4096);
