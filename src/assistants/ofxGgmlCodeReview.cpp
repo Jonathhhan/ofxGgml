@@ -183,6 +183,20 @@ bool reportProgress(
 	return onProgress({stage, completed, total});
 }
 
+std::string finalizedReviewSection(
+	const ofxGgmlInferenceResult & inferenceResult,
+	const std::string & passLabel) {
+	if (!inferenceResult.success) {
+		return "[error] " + inferenceResult.error;
+	}
+	const std::string text = trimCopy(inferenceResult.text);
+	if (!text.empty()) {
+		return text;
+	}
+	return "[warning] " + passLabel +
+		" returned no findings. The model produced an empty response.";
+}
+
 } // namespace
 
 void ofxGgmlCodeReview::setCompletionExecutable(const std::string & path) {
@@ -499,9 +513,9 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 			"Highlight risky boundaries, missing invariants, and testing gaps. "
 			"Keep output concise and actionable.\n";
 		const auto architecture = m_inference.generate(modelPath, prompt, aggregateSettings);
-		result.architectureReview = architecture.success
-			? trimCopy(architecture.text)
-			: "[error] " + architecture.error;
+		result.architectureReview = finalizedReviewSection(
+			architecture,
+			"Architecture review");
 	}
 
 	if (!reportProgress(onProgress, "Integration review")) {
@@ -522,9 +536,9 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 			"shared state, and missing integration tests. "
 			"Propose cross-file actions and dependency trims.\n";
 		const auto integration = m_inference.generate(modelPath, prompt, aggregateSettings);
-		result.integrationReview = integration.success
-			? trimCopy(integration.text)
-			: "[error] " + integration.error;
+		result.integrationReview = finalizedReviewSection(
+			integration,
+			"Integration review");
 	}
 
 	std::ostringstream combined;

@@ -84,3 +84,35 @@ TEST_CASE("Code review pipeline handles local script sources", "[code_review]") 
 	REQUIRE(result.architectureReview.find("review-output") != std::string::npos);
 	REQUIRE(result.integrationReview.find("review-output") != std::string::npos);
 }
+
+TEST_CASE("Code review reports blank aggregate passes explicitly", "[code_review]") {
+	const auto sourceDir = makeUniqueCodeReviewDir("blank_sections");
+	{
+		std::ofstream file(sourceDir / "main.cpp");
+		file << "int main() { return 0; }\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	ofxGgmlCodeReview review;
+	review.setCompletionExecutable(createCodeReviewExecutable("echo."));
+	review.setEmbeddingExecutable(createCodeReviewExecutable("echo [0.1, 0.2, 0.3]"));
+
+	ofxGgmlCodeReviewSettings settings;
+	settings.maxTokens = 128;
+	settings.contextSize = 1024;
+	settings.maxEmbedParallelTasks = 1;
+	settings.maxSummaryParallelTasks = 1;
+
+	const auto result = review.reviewScriptSource(
+		createCodeReviewDummyModel(),
+		scriptSource,
+		"Review architecture output formatting.",
+		settings);
+
+	REQUIRE(result.success);
+	REQUIRE(result.architectureReview.find("[warning] Architecture review returned no findings.") != std::string::npos);
+	REQUIRE(result.integrationReview.find("[warning] Integration review returned no findings.") != std::string::npos);
+	REQUIRE(result.combinedReport.find("Second pass - architecture issues:\n[warning]") != std::string::npos);
+}
