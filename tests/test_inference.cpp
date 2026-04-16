@@ -474,8 +474,6 @@ TEST_CASE("Inference helper utilities", "[inference]") {
 		ofxGgmlRealtimeInfoSettings realtimeSettings;
 		realtimeSettings.enabled = false;
 		realtimeSettings.allowPromptUrlFetch = false;
-		realtimeSettings.allowSearchFallback = false;
-		realtimeSettings.allowWeatherLookup = false;
 
 		std::vector<ofxGgmlPromptSource> usedSources;
 		const std::string prompt = "Answer the user.";
