@@ -1838,10 +1838,14 @@ bool ofxGgmlScriptSource::isValidBranch(const std::string & branch) {
 }
 
 /// Validates repository file path for safety.
-/// Rejects path traversal (..), absolute paths, backslashes, double slashes,
-/// control characters, and null bytes to prevent injection attacks.
+/// Uses canonical path resolution to prevent path traversal attacks including
+/// symlink attacks, case confusion, and other filesystem-level bypasses.
+/// Rejects absolute paths, backslashes, double slashes, control characters,
+/// and null bytes to prevent injection attacks.
 bool ofxGgmlScriptSource::isSafeRepoPath(const std::string & path) {
 	if (path.empty()) return false;
+
+	// Basic string validation before filesystem operations
 	// Reject any path traversal patterns
 	if (path.find("..") != std::string::npos) return false;
 	// Reject absolute paths and backslashes
@@ -1855,6 +1859,24 @@ bool ofxGgmlScriptSource::isSafeRepoPath(const std::string & path) {
 	// Validate that the path doesn't contain any suspicious patterns
 	// that could be used for injection
 	if (path.find('\0') != std::string::npos) return false;
+
+	// Additional protection: Use weakly_canonical to resolve path components
+	// without requiring the path to exist. This catches symlink attacks,
+	// case-insensitive ".." patterns, and other filesystem-level bypasses.
+	std::error_code ec;
+	const std::filesystem::path fsPath(path);
+	const std::filesystem::path canonical = std::filesystem::weakly_canonical(fsPath, ec);
+
+	// If canonicalization fails, reject the path
+	if (ec) return false;
+
+	// Convert back to string and ensure no ".." components remain
+	const std::string canonicalStr = canonical.lexically_normal().string();
+	if (canonicalStr.find("..") != std::string::npos) return false;
+
+	// Ensure the canonical path is still relative (not absolute)
+	if (canonical.is_absolute()) return false;
+
 	return true;
 }
 

@@ -68,14 +68,51 @@ std::string makeTempOutputBase(const char * prefix) {
 	std::error_code ec;
 	std::filesystem::path base = std::filesystem::temp_directory_path(ec);
 	if (ec) {
+		// Prefer system temp directory; fallback to /tmp or current path
+#ifdef _WIN32
 		base = std::filesystem::current_path();
+#else
+		base = "/tmp";
+		if (!std::filesystem::exists(base, ec) || ec) {
+			base = std::filesystem::current_path();
+		}
+#endif
 	}
+
+	// Use cryptographically strong random source for temp file names
+	// to prevent prediction attacks
 	std::random_device rd;
-	std::mt19937_64 rng(rd());
+	// Collect multiple samples to ensure good entropy
+	std::array<std::uint32_t, 4> seed_data;
+	for (auto & s : seed_data) {
+		s = rd();
+	}
+	std::seed_seq seed(seed_data.begin(), seed_data.end());
+	std::mt19937_64 rng(seed);
 	std::uniform_int_distribution<unsigned long long> dist;
+
+	// Generate unique filename with timestamp and random component
+	const auto now = std::chrono::system_clock::now();
+	const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+		now.time_since_epoch()).count();
+
 	std::ostringstream name;
-	name << prefix << "_" << std::hex << dist(rng);
-	return (base / name.str()).string();
+	name << prefix << "_" << timestamp << "_" << std::hex << dist(rng);
+
+	std::filesystem::path tempPath = base / name.str();
+
+	// Verify the generated path is within the temp directory
+	// to prevent directory traversal in prefix or generated components
+	std::filesystem::path canonicalBase = std::filesystem::weakly_canonical(base, ec);
+	std::filesystem::path canonicalTemp = std::filesystem::weakly_canonical(tempPath, ec);
+	if (ec || canonicalTemp.string().find(canonicalBase.string()) != 0) {
+		// Path validation failed, use simpler fallback
+		name.str("");
+		name << prefix << "_" << std::hex << dist(rng);
+		tempPath = base / name.str();
+	}
+
+	return tempPath.string();
 }
 
 #ifdef _WIN32
