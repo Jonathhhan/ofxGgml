@@ -7,6 +7,7 @@
 #include "panels/DeviceInfoPanel.h"
 #include "panels/LogPanel.h"
 #include "panels/PerformancePanel.h"
+#include "panels/StatusBar.h"
 
 #include <atomic>
 #include <array>
@@ -84,6 +85,7 @@ private:
 	DeviceInfoPanel deviceInfoPanel;
 	LogPanel logPanel;
 	PerformancePanel performancePanel;
+	StatusBar statusBar;
 
 	// -- mode --
 	AiMode activeMode = AiMode::Chat;
