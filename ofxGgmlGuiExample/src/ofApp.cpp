@@ -401,6 +401,104 @@ std::string formatSpeechSegments(
 	return trim(out.str());
 }
 
+struct SpeechExecutionPlan {
+	ofxGgmlSpeechRequest request;
+	std::string effectiveExecutable;
+};
+
+bool buildSpeechExecutionPlan(
+	const ofxGgmlSpeechModelProfile & profileBase,
+	const std::string & audioPath,
+	const std::string & executable,
+	const std::string & modelPath,
+	const std::string & serverUrl,
+	const std::string & serverModel,
+	const std::string & prompt,
+	const std::string & languageHint,
+	int taskIndex,
+	bool returnTimestamps,
+	SpeechExecutionPlan & plan,
+	std::string & errorMessage) {
+	if (audioPath.empty()) {
+		errorMessage = "Select an audio file first.";
+		return false;
+	}
+
+	std::string effectiveExecutable =
+		executable.empty() ? trim(profileBase.executable) : executable;
+	if (effectiveExecutable.empty()) {
+		effectiveExecutable = "whisper-cli";
+	}
+	effectiveExecutable =
+		ofxGgmlSpeechInference::resolveWhisperCliExecutable(effectiveExecutable);
+
+	std::string effectiveModelPath = modelPath.empty()
+		? trim(profileBase.modelPath)
+		: modelPath;
+	if (effectiveModelPath.empty() && !trim(profileBase.modelFileHint).empty()) {
+		const std::filesystem::path suggested =
+			std::filesystem::path(ofToDataPath("models", true)) /
+			trim(profileBase.modelFileHint);
+		std::error_code ec;
+		if (std::filesystem::exists(suggested, ec) && !ec) {
+			effectiveModelPath = suggested.string();
+		}
+	}
+
+	plan.request.task = static_cast<ofxGgmlSpeechTask>(taskIndex);
+	plan.request.audioPath = audioPath;
+	plan.request.modelPath = effectiveModelPath;
+	plan.request.serverUrl = serverUrl;
+	plan.request.serverModel = serverModel;
+	plan.request.languageHint = languageHint;
+	plan.request.prompt = prompt;
+	plan.request.returnTimestamps = returnTimestamps;
+	plan.effectiveExecutable = effectiveExecutable;
+	return true;
+}
+
+ofxGgmlSpeechResult executeSpeechExecutionPlan(
+	const SpeechExecutionPlan & plan,
+	const std::function<void(const std::string &)> & statusCallback,
+	const std::function<void(ofLogLevel, const std::string &)> & logCallback) {
+	ofxGgmlSpeechInference localInference;
+	ofxGgmlSpeechResult result;
+	bool attemptedServer = false;
+
+	if (!plan.request.serverUrl.empty()) {
+		attemptedServer = true;
+		localInference.setBackend(
+			ofxGgmlSpeechInference::createWhisperServerBackend(
+				plan.request.serverUrl,
+				plan.request.serverModel));
+		if (statusCallback) {
+			statusCallback("Calling speech server...");
+		}
+		result = localInference.transcribe(plan.request);
+		if (!result.success && !plan.effectiveExecutable.empty() && logCallback) {
+			logCallback(
+				OF_LOG_WARNING,
+				"Speech server failed, falling back to " + plan.effectiveExecutable +
+					": " + result.error);
+		}
+	}
+
+	if (!result.success) {
+		localInference.setBackend(
+			ofxGgmlSpeechInference::createWhisperCliBackend(
+				plan.effectiveExecutable));
+		if (statusCallback) {
+			statusCallback(
+				attemptedServer
+					? "Falling back to " + plan.effectiveExecutable + "..."
+					: "Running " + plan.effectiveExecutable + "...");
+		}
+		result = localInference.transcribe(plan.request);
+	}
+
+	return result;
+}
+
 std::string makeTempMicRecordingPath() {
 	std::error_code ec;
 	std::filesystem::path base = std::filesystem::temp_directory_path(ec);
@@ -2926,6 +3024,8 @@ void ofApp::update() {
   if (!visionPreviewVideoLoadedPath.empty()) {
     visionPreviewVideo.update();
   }
+  applyLiveSpeechTranscriberSettings();
+  speechLiveTranscriber.update();
   if (deferredEngineInitPending) {
     deferredEngineInitPending = false;
     initializeBackendEngine(false);
@@ -3013,10 +3113,10 @@ void ofApp::exit() {
     visionPreviewVideo.stop();
     visionPreviewVideo.close();
   }
+  stopSpeechRecording(false);
   stopLocalTextServer(false);
   stopLocalSpeechServer(false);
 stopGeneration();
-stopSpeechRecording(false);
 ggml.close();
 gui.exit();
 }
@@ -5398,19 +5498,11 @@ ImGui::EndChild();
 }
 
 void ofApp::ensureVisionPreviewResources() {
-	const std::string imagePath = trim(visionImagePath);
-	if (imagePath != visionPreviewImageLoadedPath) {
-		visionPreviewImage.clear();
-		visionPreviewImageLoadedPath.clear();
-		visionPreviewImageError.clear();
-		if (!imagePath.empty()) {
-			if (visionPreviewImage.load(imagePath)) {
-				visionPreviewImageLoadedPath = imagePath;
-			} else {
-				visionPreviewImageError = "Unable to load image preview.";
-			}
-		}
-	}
+	ensureLocalImagePreview(
+		trim(visionImagePath),
+		visionPreviewImage,
+		visionPreviewImageLoadedPath,
+		visionPreviewImageError);
 
 	const std::string videoPath = trim(visionVideoPath);
 	if (videoPath != visionPreviewVideoLoadedPath) {
@@ -5437,7 +5529,27 @@ void ofApp::ensureVisionPreviewResources() {
 	}
 }
 
-void ofApp::drawVisionTexturePreview(const ofBaseHasTexture & previewTexture, const char * childId) {
+void ofApp::ensureLocalImagePreview(
+	const std::string & imagePath,
+	ofImage & previewImage,
+	std::string & loadedPath,
+	std::string & errorMessage) {
+	if (imagePath != loadedPath) {
+		previewImage.clear();
+		loadedPath.clear();
+		errorMessage.clear();
+		if (!imagePath.empty()) {
+			if (previewImage.load(imagePath)) {
+				loadedPath = imagePath;
+			} else {
+				loadedPath = imagePath;
+				errorMessage = "Unable to load image preview.";
+			}
+		}
+	}
+}
+
+void ofApp::drawMediaTexturePreview(const ofBaseHasTexture & previewTexture, const char * childId) {
 	const float availWidth = std::max(160.0f, ImGui::GetContentRegionAvail().x);
 	const float maxWidth = std::min(availWidth, 420.0f);
 	const float texWidth = std::max(1.0f, static_cast<float>(previewTexture.getTexture().getWidth()));
@@ -5452,23 +5564,38 @@ void ofApp::drawVisionTexturePreview(const ofBaseHasTexture & previewTexture, co
 	ImGui::EndChild();
 }
 
-void ofApp::drawVisionImagePreview(const std::string & imagePath) {
+void ofApp::drawLocalImagePreview(
+	const char * label,
+	const std::string & imagePath,
+	ofImage & previewImage,
+	const std::string & errorMessage,
+	const char * childId) {
 	if (imagePath.empty()) {
 		return;
 	}
-	if (!visionPreviewImageError.empty()) {
-		ImGui::TextDisabled("%s", visionPreviewImageError.c_str());
+	if (!errorMessage.empty()) {
+		ImGui::TextDisabled("%s", errorMessage.c_str());
 		return;
 	}
-	if (!visionPreviewImage.isAllocated() || !visionPreviewImage.getTexture().isAllocated()) {
+	if (!previewImage.isAllocated() || !previewImage.getTexture().isAllocated()) {
 		ImGui::TextDisabled("Image preview will appear here.");
 		return;
 	}
 	ImGui::TextDisabled(
-		"Image preview: %d x %d",
-		visionPreviewImage.getWidth(),
-		visionPreviewImage.getHeight());
-	drawVisionTexturePreview(visionPreviewImage, "##VisionImagePreview");
+		"%s: %d x %d",
+		label,
+		previewImage.getWidth(),
+		previewImage.getHeight());
+	drawMediaTexturePreview(previewImage, childId);
+}
+
+void ofApp::drawVisionImagePreview(const std::string & imagePath) {
+	drawLocalImagePreview(
+		"Image preview",
+		imagePath,
+		visionPreviewImage,
+		visionPreviewImageError,
+		"##VisionImagePreview");
 }
 
 void ofApp::drawVisionVideoPreview(const std::string & videoPath) {
@@ -5488,7 +5615,45 @@ void ofApp::drawVisionVideoPreview(const std::string & videoPath) {
 		"Video preview: %d x %d",
 		visionPreviewVideo.getWidth(),
 		visionPreviewVideo.getHeight());
-	drawVisionTexturePreview(visionPreviewVideo, "##VisionVideoPreview");
+	drawMediaTexturePreview(visionPreviewVideo, "##VisionVideoPreview");
+}
+
+void ofApp::ensureDiffusionPreviewResources() {
+	ensureLocalImagePreview(
+		trim(diffusionInitImagePath),
+		diffusionInitPreviewImage,
+		diffusionInitPreviewLoadedPath,
+		diffusionInitPreviewError);
+	ensureLocalImagePreview(
+		trim(diffusionMaskImagePath),
+		diffusionMaskPreviewImage,
+		diffusionMaskPreviewLoadedPath,
+		diffusionMaskPreviewError);
+
+	std::string outputPreviewPath;
+	for (const auto & image : diffusionGeneratedImages) {
+		if (image.selected && !trim(image.path).empty()) {
+			outputPreviewPath = trim(image.path);
+			break;
+		}
+	}
+	if (outputPreviewPath.empty() && !diffusionGeneratedImages.empty()) {
+		outputPreviewPath = trim(diffusionGeneratedImages.front().path);
+	}
+	ensureLocalImagePreview(
+		outputPreviewPath,
+		diffusionOutputPreviewImage,
+		diffusionOutputPreviewLoadedPath,
+		diffusionOutputPreviewError);
+}
+
+void ofApp::drawDiffusionImagePreview(
+	const char * label,
+	const std::string & imagePath,
+	ofImage & previewImage,
+	const std::string & errorMessage,
+	const char * childId) {
+	drawLocalImagePreview(label, imagePath, previewImage, errorMessage, childId);
 }
 
 void ofApp::drawVisionPanel() {
@@ -6032,6 +6197,43 @@ void ofApp::drawSpeechPanel() {
 		sizeof(speechPrompt),
 		ImVec2(-1, 90));
 
+	const bool liveToggleChanged =
+		ImGui::Checkbox("Live mic transcription", &speechLiveTranscriptionEnabled);
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip(
+			"Continuously transcribes the microphone while recording by sending short overlapping chunks to Whisper in the background.");
+	}
+	if (liveToggleChanged) {
+		applyLiveSpeechTranscriberSettings();
+		if (!speechLiveTranscriptionEnabled) {
+			speechLiveTranscriber.reset(false);
+		} else if (speechRecording) {
+			speechLiveTranscriber.beginCapture(false);
+		} else {
+			speechLiveTranscriber.reset(false);
+		}
+		autoSaveSession();
+	}
+
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Live interval", &speechLiveIntervalSeconds, 0.5f, 5.0f, "%.2f s");
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		applyLiveSpeechTranscriberSettings();
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Live window", &speechLiveWindowSeconds, 2.0f, 30.0f, "%.1f s");
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		applyLiveSpeechTranscriberSettings();
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Live overlap", &speechLiveOverlapSeconds, 0.0f, 3.0f, "%.2f s");
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		applyLiveSpeechTranscriberSettings();
+		autoSaveSession();
+	}
+
 	const double recordedSeconds = [&]() {
 		std::lock_guard<std::mutex> lock(speechRecordMutex);
 		if (speechInputSampleRate <= 0) return 0.0;
@@ -6107,6 +6309,38 @@ void ofApp::drawSpeechPanel() {
 		if (!speechSrtPath.empty()) {
 			ImGui::TextDisabled("Subtitle file: %s", speechSrtPath.c_str());
 		}
+	}
+
+	const ofxGgmlLiveSpeechSnapshot liveSnapshot = speechLiveTranscriber.getSnapshot();
+	const std::string & liveTranscript = liveSnapshot.transcript;
+	const std::string & liveStatus = liveSnapshot.status;
+	const std::string & liveDetectedLanguage = liveSnapshot.detectedLanguage;
+	if (speechLiveTranscriptionEnabled || !liveTranscript.empty()) {
+		ImGui::Separator();
+		ImGui::Text("Live Transcript:");
+		if (!liveTranscript.empty()) {
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Copy##SpeechLiveCopy")) copyToClipboard(liveTranscript);
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Clear##SpeechLiveClear")) {
+				speechLiveTranscriber.clearTranscript();
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("(%d chars)", static_cast<int>(liveTranscript.size()));
+		}
+		if (!liveStatus.empty()) {
+			ImGui::TextDisabled("%s", liveStatus.c_str());
+		}
+		if (!liveDetectedLanguage.empty()) {
+			ImGui::TextDisabled("Live detected language: %s", liveDetectedLanguage.c_str());
+		}
+		ImGui::BeginChild("##SpeechLiveOut", ImVec2(0, 120), true);
+		if (liveTranscript.empty()) {
+			ImGui::TextDisabled("Live microphone transcription appears here while recording.");
+		} else {
+			ImGui::TextWrapped("%s", liveTranscript.c_str());
+		}
+		ImGui::EndChild();
 	}
 
 	ImGui::Separator();
@@ -6571,6 +6805,7 @@ void ofApp::drawTtsPanel() {
 void ofApp::drawDiffusionPanel() {
 	drawPanelHeader("Diffusion", "optional image generation bridge for ofxStableDiffusion");
 	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
+	ensureDiffusionPreviewResources();
 
 	ImGui::TextWrapped(
 		"This panel is a thin bridge surface for stable-diffusion.cpp style backends. "
@@ -6857,6 +7092,12 @@ void ofApp::drawDiffusionPanel() {
 					result.getPath());
 			}
 		}
+		drawDiffusionImagePreview(
+			"Init preview",
+			trim(diffusionInitImagePath),
+			diffusionInitPreviewImage,
+			diffusionInitPreviewError,
+			"##DiffusionInitPreview");
 	}
 
 	if (needsMaskImage) {
@@ -6872,6 +7113,12 @@ void ofApp::drawDiffusionPanel() {
 					result.getPath());
 			}
 		}
+		drawDiffusionImagePreview(
+			"Mask preview",
+			trim(diffusionMaskImagePath),
+			diffusionMaskPreviewImage,
+			diffusionMaskPreviewError,
+			"##DiffusionMaskPreview");
 	}
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
@@ -6969,6 +7216,12 @@ void ofApp::drawDiffusionPanel() {
 			}
 			ImGui::BulletText("%s", label.c_str());
 		}
+		drawDiffusionImagePreview(
+			"Generated preview",
+			diffusionOutputPreviewLoadedPath,
+			diffusionOutputPreviewImage,
+			diffusionOutputPreviewError,
+			"##DiffusionOutputPreview");
 	}
 
 	if (generating.load() && activeGenerationMode == AiMode::Diffusion) {
@@ -7142,21 +7395,62 @@ void ofApp::drawClipPanel() {
 	}
 }
 
+ofxGgmlLiveSpeechSettings ofApp::makeLiveSpeechSettings() const {
+	ofxGgmlLiveSpeechSettings settings;
+	if (!speechProfiles.empty()) {
+		const int clampedIndex = std::clamp(
+			selectedSpeechProfileIndex,
+			0,
+			std::max(0, static_cast<int>(speechProfiles.size()) - 1));
+		settings.profile = speechProfiles[static_cast<size_t>(clampedIndex)];
+	}
+	settings.executable = trim(speechExecutable);
+	settings.modelPath = trim(speechModelPath);
+	settings.serverUrl = trim(speechServerUrl);
+	settings.serverModel = trim(speechServerModel);
+	settings.prompt = trim(speechPrompt);
+	settings.languageHint = trim(speechLanguageHint);
+	settings.task = static_cast<ofxGgmlSpeechTask>(std::clamp(speechTaskIndex, 0, 1));
+	settings.sampleRate = speechInputSampleRate;
+	settings.intervalSeconds = speechLiveIntervalSeconds;
+	settings.windowSeconds = speechLiveWindowSeconds;
+	settings.overlapSeconds = speechLiveOverlapSeconds;
+	settings.enabled = speechLiveTranscriptionEnabled;
+	settings.returnTimestamps = false;
+	return settings;
+}
+
+void ofApp::applyLiveSpeechTranscriberSettings() {
+	speechLiveTranscriber.setSettings(makeLiveSpeechSettings());
+	speechLiveTranscriber.setLogCallback(
+		[this](ofLogLevel level, const std::string & message) {
+			logWithLevel(level, message);
+		});
+}
+
 void ofApp::audioIn(ofSoundBuffer & input) {
 	if (!speechRecording) {
 		return;
 	}
 	const size_t channels = std::max<size_t>(1, input.getNumChannels());
 	const size_t frames = input.getNumFrames();
-	std::lock_guard<std::mutex> lock(speechRecordMutex);
-	speechRecordedSamples.reserve(speechRecordedSamples.size() + frames);
-	for (size_t frame = 0; frame < frames; ++frame) {
-		float mono = 0.0f;
-		for (size_t channel = 0; channel < channels; ++channel) {
-			mono += input[frame * channels + channel];
+	std::vector<float> monoSamples;
+	monoSamples.reserve(frames);
+	{
+		std::lock_guard<std::mutex> lock(speechRecordMutex);
+		speechRecordedSamples.reserve(speechRecordedSamples.size() + frames);
+		for (size_t frame = 0; frame < frames; ++frame) {
+			float mono = 0.0f;
+			for (size_t channel = 0; channel < channels; ++channel) {
+				mono += input[frame * channels + channel];
+			}
+			mono /= static_cast<float>(channels);
+			speechRecordedSamples.push_back(mono);
+			monoSamples.push_back(mono);
 		}
-		mono /= static_cast<float>(channels);
-		speechRecordedSamples.push_back(mono);
+	}
+	if (!monoSamples.empty()) {
+		speechLiveTranscriber.appendMonoSamples(monoSamples);
 	}
 }
 
@@ -7166,6 +7460,7 @@ bool ofApp::startSpeechRecording() {
 	}
 	try {
 		stopSpeechRecording(false);
+		applyLiveSpeechTranscriberSettings();
 		{
 			std::lock_guard<std::mutex> lock(speechRecordMutex);
 			speechRecordedSamples.clear();
@@ -7183,6 +7478,9 @@ bool ofApp::startSpeechRecording() {
 			return false;
 		}
 		speechRecording = true;
+		if (speechLiveTranscriptionEnabled) {
+			speechLiveTranscriber.beginCapture(true);
+		}
 		logWithLevel(OF_LOG_NOTICE, "Started microphone recording for speech mode.");
 		return true;
 	} catch (const std::exception & e) {
@@ -7204,6 +7502,11 @@ void ofApp::stopSpeechRecording(bool keepBufferedAudio) {
 		std::lock_guard<std::mutex> lock(speechRecordMutex);
 		speechRecordedSamples.clear();
 		speechRecordedTempPath.clear();
+	}
+	applyLiveSpeechTranscriberSettings();
+	speechLiveTranscriber.stopCapture(keepBufferedAudio);
+	if (!speechLiveTranscriptionEnabled) {
+		speechLiveTranscriber.reset(!keepBufferedAudio);
 	}
 }
 
@@ -7510,12 +7813,16 @@ out << "speechExecutable=" << escapeSessionText(speechExecutable) << "\n";
 out << "speechModelPath=" << escapeSessionText(speechModelPath) << "\n";
 out << "speechServerUrl=" << escapeSessionText(speechServerUrl) << "\n";
 out << "speechServerModel=" << escapeSessionText(speechServerModel) << "\n";
-  out << "speechPrompt=" << escapeSessionText(speechPrompt) << "\n";
-  out << "speechLanguageHint=" << escapeSessionText(speechLanguageHint) << "\n";
-  out << "speechTaskIndex=" << speechTaskIndex << "\n";
-  out << "speechProfileIndex=" << selectedSpeechProfileIndex << "\n";
-  out << "speechReturnTimestamps=" << (speechReturnTimestamps ? 1 : 0) << "\n";
-  out << "ttsInput=" << escapeSessionText(ttsInput) << "\n";
+out << "speechPrompt=" << escapeSessionText(speechPrompt) << "\n";
+out << "speechLanguageHint=" << escapeSessionText(speechLanguageHint) << "\n";
+out << "speechTaskIndex=" << speechTaskIndex << "\n";
+out << "speechProfileIndex=" << selectedSpeechProfileIndex << "\n";
+out << "speechReturnTimestamps=" << (speechReturnTimestamps ? 1 : 0) << "\n";
+out << "speechLiveTranscriptionEnabled=" << (speechLiveTranscriptionEnabled ? 1 : 0) << "\n";
+out << "speechLiveIntervalSeconds=" << speechLiveIntervalSeconds << "\n";
+out << "speechLiveWindowSeconds=" << speechLiveWindowSeconds << "\n";
+out << "speechLiveOverlapSeconds=" << speechLiveOverlapSeconds << "\n";
+out << "ttsInput=" << escapeSessionText(ttsInput) << "\n";
   out << "ttsExecutablePath=" << escapeSessionText(ttsExecutablePath) << "\n";
   out << "ttsModelPath=" << escapeSessionText(ttsModelPath) << "\n";
   out << "ttsSpeakerPath=" << escapeSessionText(ttsSpeakerPath) << "\n";
@@ -7681,6 +7988,45 @@ auto handleTtsSessionKey = [this, &copyToBuf, &safeStoi, &safeStof](
 	return true;
 };
 
+auto handleSpeechSessionKey = [this, &copyToBuf, &safeStoi, &safeStof](
+	const std::string & key,
+	const std::string & value) -> bool {
+	if (key == "speechAudioPath") {
+		copyToBuf(speechAudioPath, sizeof(speechAudioPath), value);
+	} else if (key == "speechExecutable") {
+		copyToBuf(speechExecutable, sizeof(speechExecutable), value);
+	} else if (key == "speechModelPath") {
+		copyToBuf(speechModelPath, sizeof(speechModelPath), value);
+	} else if (key == "speechServerUrl") {
+		copyToBuf(speechServerUrl, sizeof(speechServerUrl), value);
+	} else if (key == "speechServerModel") {
+		copyToBuf(speechServerModel, sizeof(speechServerModel), value);
+	} else if (key == "speechPrompt") {
+		copyToBuf(speechPrompt, sizeof(speechPrompt), value);
+	} else if (key == "speechLanguageHint") {
+		copyToBuf(speechLanguageHint, sizeof(speechLanguageHint), value);
+	} else if (key == "speechTaskIndex") {
+		speechTaskIndex = std::clamp(safeStoi(value), 0, 1);
+	} else if (key == "speechProfileIndex") {
+		selectedSpeechProfileIndex = std::max(0, safeStoi(value));
+	} else if (key == "speechReturnTimestamps") {
+		speechReturnTimestamps = (safeStoi(value, 0) != 0);
+	} else if (key == "speechLiveTranscriptionEnabled") {
+		speechLiveTranscriptionEnabled = (safeStoi(value, 0) != 0);
+	} else if (key == "speechLiveIntervalSeconds") {
+		speechLiveIntervalSeconds = std::clamp(safeStof(value, 1.25f), 0.5f, 5.0f);
+	} else if (key == "speechLiveWindowSeconds") {
+		speechLiveWindowSeconds = std::clamp(safeStof(value, 8.0f), 2.0f, 30.0f);
+	} else if (key == "speechLiveOverlapSeconds") {
+		speechLiveOverlapSeconds = std::clamp(safeStof(value, 0.75f), 0.0f, 3.0f);
+	} else if (key == "speechOutput") {
+		speechOutput = unescapeSessionText(value);
+	} else {
+		return false;
+	}
+	return true;
+};
+
 while (std::getline(in, line)) {
 if (line == "[/session_v1]") break;
 
@@ -7690,6 +8036,9 @@ std::string key = line.substr(0, eq);
 std::string value = line.substr(eq + 1);
 
 if (handleTtsSessionKey(key, value)) {
+	continue;
+}
+if (handleSpeechSessionKey(key, value)) {
 	continue;
 }
 
@@ -7830,17 +8179,7 @@ else if (key == "visionImagePath") copyToBuf(visionImagePath, sizeof(visionImage
 	else if (key == "videoTaskIndex") videoTaskIndex = std::clamp(safeStoi(value), 0, 4);
 	else if (key == "visionVideoMaxFrames") visionVideoMaxFrames = std::clamp(safeStoi(value, 6), 1, 12);
 else if (key == "visionProfileIndex") selectedVisionProfileIndex = std::max(0, safeStoi(value));
-else if (key == "speechAudioPath") copyToBuf(speechAudioPath, sizeof(speechAudioPath), value);
-else if (key == "speechExecutable") copyToBuf(speechExecutable, sizeof(speechExecutable), value);
-else if (key == "speechModelPath") copyToBuf(speechModelPath, sizeof(speechModelPath), value);
-else if (key == "speechServerUrl") copyToBuf(speechServerUrl, sizeof(speechServerUrl), value);
-  else if (key == "speechServerModel") copyToBuf(speechServerModel, sizeof(speechServerModel), value);
-  else if (key == "speechPrompt") copyToBuf(speechPrompt, sizeof(speechPrompt), value);
-    else if (key == "speechLanguageHint") copyToBuf(speechLanguageHint, sizeof(speechLanguageHint), value);
-    else if (key == "speechTaskIndex") speechTaskIndex = std::clamp(safeStoi(value), 0, 1);
-    else if (key == "speechProfileIndex") selectedSpeechProfileIndex = std::max(0, safeStoi(value));
-    else if (key == "speechReturnTimestamps") speechReturnTimestamps = (safeStoi(value, 0) != 0);
-    else if (key == "diffusionPrompt") copyToBuf(diffusionPrompt, sizeof(diffusionPrompt), value);
+else if (key == "diffusionPrompt") copyToBuf(diffusionPrompt, sizeof(diffusionPrompt), value);
   else if (key == "diffusionInstruction") copyToBuf(diffusionInstruction, sizeof(diffusionInstruction), value);
   else if (key == "diffusionNegativePrompt") copyToBuf(diffusionNegativePrompt, sizeof(diffusionNegativePrompt), value);
   else if (key == "diffusionRankingPrompt") copyToBuf(diffusionRankingPrompt, sizeof(diffusionRankingPrompt), value);
@@ -7875,7 +8214,6 @@ else if (key == "speechServerUrl") copyToBuf(speechServerUrl, sizeof(speechServe
   else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
   else if (key == "customOutput") customOutput = unescapeSessionText(value);
     else if (key == "visionOutput") visionOutput = unescapeSessionText(value);
-    else if (key == "speechOutput") speechOutput = unescapeSessionText(value);
     else if (key == "diffusionOutput") diffusionOutput = unescapeSessionText(value);
   else if (key == "clipOutput") clipOutput = unescapeSessionText(value);
 else if (key == "liveContextMode") {
@@ -8713,76 +9051,35 @@ void ofApp::runSpeechInference() {
 		};
 
 		try {
-			if (audioPath.empty()) {
-				setPending("[Error] Select an audio file first.");
+			SpeechExecutionPlan plan;
+			std::string planError;
+			if (!buildSpeechExecutionPlan(
+					profileBase,
+					audioPath,
+					executable,
+					modelPath,
+					serverUrl,
+					serverModel,
+					prompt,
+					languageHint,
+					taskIndex,
+					returnTimestamps,
+					plan,
+					planError)) {
+				setPending("[Error] " + planError);
 				generating.store(false);
 				return;
 			}
 
-			std::string effectiveExecutable =
-				executable.empty() ? trim(profileBase.executable) : executable;
-			if (effectiveExecutable.empty()) {
-				effectiveExecutable = "whisper-cli";
-			}
-			effectiveExecutable =
-				ofxGgmlSpeechInference::resolveWhisperCliExecutable(effectiveExecutable);
-
-			std::string effectiveModelPath = modelPath.empty()
-				? trim(profileBase.modelPath)
-				: modelPath;
-			if (effectiveModelPath.empty() && !trim(profileBase.modelFileHint).empty()) {
-				const std::filesystem::path suggested =
-					std::filesystem::path(ofToDataPath("models", true)) /
-					trim(profileBase.modelFileHint);
-				std::error_code ec;
-				if (std::filesystem::exists(suggested, ec) && !ec) {
-					effectiveModelPath = suggested.string();
-				}
-			}
-
-			ofxGgmlSpeechRequest request;
-			request.task = static_cast<ofxGgmlSpeechTask>(taskIndex);
-			request.audioPath = audioPath;
-			request.modelPath = effectiveModelPath;
-			request.serverUrl = serverUrl;
-			request.serverModel = serverModel;
-			request.languageHint = languageHint;
-			request.prompt = prompt;
-			request.returnTimestamps = returnTimestamps;
-
-			ofxGgmlSpeechResult result;
-			bool attemptedServer = false;
-			if (!serverUrl.empty()) {
-				attemptedServer = true;
-				speechInference.setBackend(
-					ofxGgmlSpeechInference::createWhisperServerBackend(
-						serverUrl,
-						serverModel));
-				{
+			const ofxGgmlSpeechResult result = executeSpeechExecutionPlan(
+				plan,
+				[this](const std::string & status) {
 					std::lock_guard<std::mutex> lock(streamMutex);
-					streamingOutput = "Calling speech server...";
-				}
-				result = speechInference.transcribe(request);
-				if (!result.success && !effectiveExecutable.empty()) {
-					logWithLevel(
-						OF_LOG_WARNING,
-						"Speech server failed, falling back to " + effectiveExecutable +
-							": " + result.error);
-				}
-			}
-
-			if (!result.success) {
-				speechInference.setBackend(
-					ofxGgmlSpeechInference::createWhisperCliBackend(
-						effectiveExecutable));
-				{
-					std::lock_guard<std::mutex> lock(streamMutex);
-					streamingOutput = attemptedServer
-						? "Falling back to " + effectiveExecutable + "..."
-						: "Running " + effectiveExecutable + "...";
-				}
-				result = speechInference.transcribe(request);
-			}
+					streamingOutput = status;
+				},
+				[this](ofLogLevel level, const std::string & message) {
+					logWithLevel(level, message);
+				});
 			if (cancelRequested.load()) {
 				setPending("[Cancelled] Speech request cancelled.");
 			} else if (result.success) {

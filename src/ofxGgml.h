@@ -15,6 +15,7 @@
 #include "inference/ofxGgmlClipInference.h"
 #include "inference/ofxGgmlClipCppAdapters.h"
 #include "inference/ofxGgmlDiffusionInference.h"
+#include "inference/ofxGgmlLiveSpeechTranscriber.h"
 #include "inference/ofxGgmlStableDiffusionAdapters.h"
 #include "inference/ofxGgmlSpeechInference.h"
 #include "inference/ofxGgmlChatLlmTtsAdapters.h"

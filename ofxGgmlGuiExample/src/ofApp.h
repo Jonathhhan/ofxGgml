@@ -235,6 +235,15 @@ private:
 	std::string visionPreviewVideoLoadedPath;
 	std::string visionPreviewVideoError;
 	bool visionPreviewVideoReady = false;
+	ofImage diffusionInitPreviewImage;
+	std::string diffusionInitPreviewLoadedPath;
+	std::string diffusionInitPreviewError;
+	ofImage diffusionMaskPreviewImage;
+	std::string diffusionMaskPreviewLoadedPath;
+	std::string diffusionMaskPreviewError;
+	ofImage diffusionOutputPreviewImage;
+	std::string diffusionOutputPreviewLoadedPath;
+	std::string diffusionOutputPreviewError;
 	std::string speechDetectedLanguage;
 	std::string speechTranscriptPath;
 	std::string speechSrtPath;
@@ -254,9 +263,14 @@ private:
 	std::vector<ofxGgmlClipSimilarityHit> clipHits;
 	std::string speechRecordedTempPath;
 	bool speechRecording = false;
+	bool speechLiveTranscriptionEnabled = false;
 	int speechInputSampleRate = 16000;
 	int speechInputChannels = 1;
 	int speechInputBufferSize = 512;
+	float speechLiveIntervalSeconds = 1.25f;
+	float speechLiveWindowSeconds = 8.0f;
+	float speechLiveOverlapSeconds = 0.75f;
+	ofxGgmlLiveSpeechTranscriber speechLiveTranscriber;
 	ofSoundStream speechInputStream;
 	std::vector<float> speechRecordedSamples;
 	std::mutex speechRecordMutex;
@@ -451,6 +465,8 @@ private:
 	void runTtsInference();
 	void runDiffusionInference();
 	void runClipInference();
+	ofxGgmlLiveSpeechSettings makeLiveSpeechSettings() const;
+	void applyLiveSpeechTranscriberSettings();
 	bool startSpeechRecording();
 	void stopSpeechRecording(bool keepBufferedAudio = true);
 	std::string flushSpeechRecordingToTempWav();
@@ -510,9 +526,27 @@ private:
 	void drawCustomPanel();
 	void drawVisionPanel();
 	void ensureVisionPreviewResources();
+	void ensureLocalImagePreview(
+		const std::string & imagePath,
+		ofImage & previewImage,
+		std::string & loadedPath,
+		std::string & errorMessage);
+	void drawLocalImagePreview(
+		const char * label,
+		const std::string & imagePath,
+		ofImage & previewImage,
+		const std::string & errorMessage,
+		const char * childId);
 	void drawVisionImagePreview(const std::string & imagePath);
 	void drawVisionVideoPreview(const std::string & videoPath);
-	void drawVisionTexturePreview(const ofBaseHasTexture & previewTexture, const char * childId);
+	void drawMediaTexturePreview(const ofBaseHasTexture & previewTexture, const char * childId);
+	void ensureDiffusionPreviewResources();
+	void drawDiffusionImagePreview(
+		const char * label,
+		const std::string & imagePath,
+		ofImage & previewImage,
+		const std::string & errorMessage,
+		const char * childId);
 	void drawSpeechPanel();
 	void drawTtsPanel();
 	void drawDiffusionPanel();
