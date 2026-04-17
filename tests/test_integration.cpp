@@ -412,7 +412,7 @@ TEST_CASE("Integration: Graph reuse and allocation", "[integration]") {
 	REQUIRE(r2.success);
 
 	std::vector<float> output(4);
-	ggml.getTensorData(result, output.data(), output.size() * sizeof(float));
+	ggml.getTensorData(graphResult, output.data(), output.size() * sizeof(float));
 
 	// Should have result from second computation
 	REQUIRE(std::abs(output[0] - 60.0f) < 0.001f);
@@ -449,7 +449,7 @@ TEST_CASE("Integration: Large tensor computation", "[integration][slow]") {
 
 	// Verify a sample of outputs
 	std::vector<float> output(10000);
-	ggml.getTensorData(result, output.data(), output.size() * sizeof(float));
+	ggml.getTensorData(graphResult, output.data(), output.size() * sizeof(float));
 
 	for (int i = 0; i < 100; i += 10) {
 		REQUIRE(std::abs(output[i] - 3.0f) < 0.001f);
