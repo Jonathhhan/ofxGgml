@@ -56,7 +56,7 @@ struct RuntimeOptions {
 	int threads = -1;
 	sd_type_t weightType = SD_TYPE_F16;
 	rng_type_t rngType = STD_DEFAULT_RNG;
-	schedule_t schedule = DEFAULT;
+	scheduler_t schedule = SCHEDULER_COUNT;
 	bool vaeDecodeOnly = false;
 	bool vaeTiling = false;
 	bool freeParamsImmediately = false;
@@ -90,15 +90,33 @@ inline sample_method_t parseSampleMethod(const std::string & sampler) {
 		lowered.push_back(static_cast<char>(std::tolower(
 			static_cast<unsigned char>(c))));
 	}
-	if (lowered.empty() || lowered == "eulera") return EULER_A;
-	if (lowered == "euler") return EULER;
-	if (lowered == "heun") return HEUN;
-	if (lowered == "dpm2") return DPM2;
-	if (lowered == "dpmpp2sa") return DPMPP2S_A;
-	if (lowered == "dpmpp2m") return DPMPP2M;
-	if (lowered == "dpmpp2mv2") return DPMPP2Mv2;
-	if (lowered == "lcm") return LCM;
-	return EULER_A;
+	if (lowered.empty() ||
+		lowered == "eulera" ||
+		lowered == "eulerasamplemethod") {
+		return EULER_A_SAMPLE_METHOD;
+	}
+	if (lowered == "euler" || lowered == "eulersamplemethod") {
+		return EULER_SAMPLE_METHOD;
+	}
+	if (lowered == "heun" || lowered == "heunsamplemethod") {
+		return HEUN_SAMPLE_METHOD;
+	}
+	if (lowered == "dpm2" || lowered == "dpm2samplemethod") {
+		return DPM2_SAMPLE_METHOD;
+	}
+	if (lowered == "dpmpp2sa" || lowered == "dpmpp2sasamplemethod") {
+		return DPMPP2S_A_SAMPLE_METHOD;
+	}
+	if (lowered == "dpmpp2m" || lowered == "dpmpp2msamplemethod") {
+		return DPMPP2M_SAMPLE_METHOD;
+	}
+	if (lowered == "dpmpp2mv2" || lowered == "dpmpp2mv2samplemethod") {
+		return DPMPP2Mv2_SAMPLE_METHOD;
+	}
+	if (lowered == "lcm" || lowered == "lcmsamplemethod") {
+		return LCM_SAMPLE_METHOD;
+	}
+	return EULER_A_SAMPLE_METHOD;
 }
 
 inline bool waitForIdle(
