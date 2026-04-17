@@ -7,6 +7,11 @@
 #include "utils/SpeechHelpers.h"
 #include "utils/AudioHelpers.h"
 #include "utils/ServerHelpers.h"
+#include "utils/VisionHelpers.h"
+#include "utils/ProcessHelpers.h"
+#include "utils/ConsoleHelpers.h"
+#include "utils/PathHelpers.h"
+#include "utils/BackendHelpers.h"
 #include "config/ModelPresets.h"
 #include "ofJson.h"
 #include "core/ofxGgmlWindowsUtf8.h"
@@ -68,249 +73,20 @@ struct TokenLiteral {
 	size_t len;
 };
 
-bool gConsoleAnsiEnabled = false;
 
-std::string findMatchingMmprojPath(const std::string & modelPath) {
-	if (trim(modelPath).empty()) {
-		return {};
-	}
-	std::error_code ec;
-	const std::filesystem::path modelFile(modelPath);
-	const std::filesystem::path modelDir = modelFile.parent_path();
-	if (modelDir.empty() || !std::filesystem::exists(modelDir, ec) || ec) {
-		return {};
-	}
 
-	std::vector<std::filesystem::path> mmprojCandidates;
-	for (const auto & entry : std::filesystem::directory_iterator(modelDir, ec)) {
-		if (ec || !entry.is_regular_file()) {
-			continue;
-		}
-		std::string name = entry.path().filename().string();
-		std::string lowerName = name;
-		std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
-			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		if (lowerName.find("mmproj") == std::string::npos &&
-			lowerName.find("projector") == std::string::npos) {
-			continue;
-		}
-		if (entry.path().extension() != ".gguf") {
-			continue;
-		}
-		mmprojCandidates.push_back(entry.path());
-	}
 
-	if (mmprojCandidates.empty()) {
-		return {};
-	}
-	std::sort(mmprojCandidates.begin(), mmprojCandidates.end());
-	return mmprojCandidates.front().string();
-}
 
-std::string visionCapabilityFailureDetail(
-	const std::string & configuredUrl,
-	const std::string & modelPath) {
-	const ofxGgmlServerProbeResult probe = ofxGgmlInference::probeServer(configuredUrl, true);
-	if (!probe.reachable) {
-		std::string detail = "Vision server is not reachable.";
-		if (!probe.error.empty()) {
-			detail += " " + probe.error;
-		}
-		return detail;
-	}
-	if (probe.visionCapable) {
-		return {};
-	}
 
-	std::string detail =
-		"Server is reachable but does not report multimodal capability.";
-	const std::string mmprojPath = findMatchingMmprojPath(modelPath);
-	if (mmprojPath.empty()) {
-		detail += " This model likely needs a matching mmproj .gguf file next to the model.";
-	} else {
-		detail += " Restart the local server with mmproj support: " +
-			ofFilePath::getFileName(mmprojPath) + ".";
-	}
-	if (!probe.activeModel.empty()) {
-		detail += " Active model: " + probe.activeModel + ".";
-	}
-	return detail;
-}
-
-std::string prepareVisionImageForUpload(
-	const std::string & imagePath,
-	std::string * note = nullptr) {
-	constexpr int kMaxVisionUploadDimension = 1024;
-	const std::string trimmedPath = trim(imagePath);
-	if (trimmedPath.empty()) {
-		return trimmedPath;
-	}
-
-	std::string lowerExt = std::filesystem::path(trimmedPath).extension().string();
-	std::transform(lowerExt.begin(), lowerExt.end(), lowerExt.begin(),
-		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-	ofImage image;
-	if (!image.load(trimmedPath)) {
-		return trimmedPath;
-	}
-
-	const int srcWidth = image.getWidth();
-	const int srcHeight = image.getHeight();
-	if (srcWidth <= 0 || srcHeight <= 0) {
-		return trimmedPath;
-	}
-
-	const bool shouldNormalize =
-		lowerExt == ".jpg" || lowerExt == ".jpeg" ||
-		srcWidth > kMaxVisionUploadDimension || srcHeight > kMaxVisionUploadDimension;
-	if (!shouldNormalize) {
-		return trimmedPath;
-	}
-
-	float scale = 1.0f;
-	const int maxDim = std::max(srcWidth, srcHeight);
-	if (maxDim > kMaxVisionUploadDimension) {
-		scale = static_cast<float>(kMaxVisionUploadDimension) / static_cast<float>(maxDim);
-	}
-
-	const int dstWidth = std::max(1, static_cast<int>(std::round(srcWidth * scale)));
-	const int dstHeight = std::max(1, static_cast<int>(std::round(srcHeight * scale)));
-	if (dstWidth != srcWidth || dstHeight != srcHeight) {
-		image.resize(dstWidth, dstHeight);
-	}
-
-	const std::string cacheDir = ofToDataPath("cache/vision_uploads", true);
-	std::error_code ec;
-	std::filesystem::create_directories(cacheDir, ec);
-	const std::string cacheKey =
-		trimmedPath + "|" +
-		std::to_string(static_cast<long long>(std::filesystem::file_size(trimmedPath, ec))) + "|" +
-		std::to_string(dstWidth) + "x" + std::to_string(dstHeight);
-	const std::string outputName =
-		ofFilePath::getBaseName(trimmedPath) + "_" +
-		std::to_string(std::hash<std::string>{}(cacheKey)) + ".png";
-	const std::string outputPath = ofFilePath::join(cacheDir, outputName);
-	std::error_code outEc;
-	if (!std::filesystem::exists(std::filesystem::path(outputPath), outEc) || outEc) {
-		ofSaveImage(image.getPixels(), std::filesystem::path(outputPath), OF_IMAGE_QUALITY_BEST);
-	}
-
-	if (note) {
-		*note =
-			"Normalized local image for Vision upload: " +
-			ofFilePath::getFileName(trimmedPath) + " -> " +
-			ofFilePath::getFileName(outputPath);
-	}
-	return outputPath;
-}
 
 #ifdef _WIN32
-std::string normalizeExecutablePathForCompare(const std::string & path) {
-	if (trim(path).empty()) {
-		return {};
-	}
-	std::error_code ec;
-	std::filesystem::path normalized = std::filesystem::weakly_canonical(std::filesystem::path(path), ec);
-	if (ec) {
-		normalized = std::filesystem::absolute(std::filesystem::path(path), ec);
-		if (ec) {
-			normalized = std::filesystem::path(path);
-		}
-	}
-	std::string value = normalized.string();
-	std::transform(value.begin(), value.end(), value.begin(),
-		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	return value;
-}
 
-std::string utf8FromWide(const std::wstring & text) {
-	if (text.empty()) {
-		return {};
-	}
 
-	const int utf8Size = WideCharToMultiByte(
-		CP_UTF8,
-		0,
-		text.data(),
-		static_cast<int>(text.size()),
-		nullptr,
-		0,
-		nullptr,
-		nullptr);
-	if (utf8Size <= 0) {
-		return std::string(text.begin(), text.end());
-	}
 
-	std::string utf8(static_cast<size_t>(utf8Size), '\0');
-	const int converted = WideCharToMultiByte(
-		CP_UTF8,
-		0,
-		text.data(),
-		static_cast<int>(text.size()),
-		utf8.data(),
-		utf8Size,
-		nullptr,
-		nullptr);
-	if (converted <= 0) {
-		return std::string(text.begin(), text.end());
-	}
-	return utf8;
-}
 
-bool terminateAddonLlamaServerProcesses(const std::string & serverExePath) {
-	const std::string normalizedTarget = normalizeExecutablePathForCompare(serverExePath);
-	if (normalizedTarget.empty()) {
-		return false;
-	}
 
-	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	if (snapshot == INVALID_HANDLE_VALUE) {
-		return false;
-	}
-
-	bool terminatedAny = false;
-	PROCESSENTRY32W entry{};
-	entry.dwSize = sizeof(entry);
-	if (Process32FirstW(snapshot, &entry)) {
-		do {
-			if (_wcsicmp(entry.szExeFile, L"llama-server.exe") != 0) {
-				continue;
-			}
-
-			HANDLE processHandle = OpenProcess(
-				PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
-				FALSE,
-				entry.th32ProcessID);
-			if (!processHandle) {
-				continue;
-			}
-
-			std::wstring imagePath(32768, L'\0');
-			DWORD imagePathSize = static_cast<DWORD>(imagePath.size());
-			if (QueryFullProcessImageNameW(processHandle, 0, imagePath.data(), &imagePathSize)) {
-				imagePath.resize(imagePathSize);
-				const std::string normalizedImagePath =
-					normalizeExecutablePathForCompare(utf8FromWide(imagePath));
-				if (normalizedImagePath == normalizedTarget) {
-					if (TerminateProcess(processHandle, 0)) {
-						WaitForSingleObject(processHandle, 5000);
-						terminatedAny = true;
-					}
-				}
-			}
-			CloseHandle(processHandle);
-		} while (Process32NextW(snapshot, &entry));
-	}
-
-	CloseHandle(snapshot);
-	return terminatedAny;
-}
 #else
-bool terminateAddonLlamaServerProcesses(const std::string & serverExePath) {
-	(void) serverExePath;
-	return false;
-}
+
 #endif
 
 std::pair<std::string, int> parseServerHostPort(const std::string & configuredUrl) {
@@ -341,67 +117,13 @@ std::pair<std::string, int> parseSpeechServerHostPort(const std::string & config
 	return {"127.0.0.1", 8081};
 }
 
-bool shouldManageLocalTextServer(const std::string & configuredUrl) {
-	const auto [host, port] = parseServerHostPort(configuredUrl);
-	(void)port;
-	std::string normalizedHost = trim(host);
-	std::transform(
-		normalizedHost.begin(),
-		normalizedHost.end(),
-		normalizedHost.begin(),
-		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	return normalizedHost.empty() ||
-		normalizedHost == "127.0.0.1" ||
-		normalizedHost == "localhost";
-}
 
-bool shouldManageLocalSpeechServer(const std::string & configuredUrl) {
-	if (trim(configuredUrl).empty()) {
-		return false;
-	}
-	const auto [host, port] = parseSpeechServerHostPort(configuredUrl);
-	(void)port;
-	std::string normalizedHost = trim(host);
-	std::transform(
-		normalizedHost.begin(),
-		normalizedHost.end(),
-		normalizedHost.begin(),
-		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	return normalizedHost.empty() ||
-		normalizedHost == "127.0.0.1" ||
-		normalizedHost == "localhost";
-}
 
-std::string probeServerExecutable(
-	const std::vector<std::filesystem::path> & candidates) {
-	for (const auto & candidate : candidates) {
-		std::error_code ec;
-		const auto normalized = std::filesystem::weakly_canonical(candidate, ec);
-		const auto & checkPath = ec ? candidate : normalized;
-		if (std::filesystem::exists(checkPath, ec) && !ec) {
-			return checkPath.string();
-		}
-	}
-	return {};
-}
 
-bool aiModeSupportsTextBackend(AiMode mode) {
-	switch (mode) {
-	case AiMode::Chat:
-	case AiMode::Script:
-	case AiMode::Summarize:
-	case AiMode::Write:
-	case AiMode::Translate:
-	case AiMode::Custom:
-		return true;
-	case AiMode::Vision:
-	case AiMode::Speech:
-	case AiMode::Diffusion:
-	case AiMode::Clip:
-		return false;
-	}
-	return false;
-}
+
+
+
+
 
 TextInferenceBackend clampTextInferenceBackend(int value) {
 	return value == static_cast<int>(TextInferenceBackend::LlamaServer)
@@ -409,76 +131,17 @@ TextInferenceBackend clampTextInferenceBackend(int value) {
 		: TextInferenceBackend::Cli;
 }
 
-bool pathExists(const std::string & path) {
-	if (path.empty()) {
-		return false;
-	}
-	std::error_code ec;
-	return std::filesystem::exists(path, ec) && !ec;
-}
 
-std::string suggestedModelPath(
-	const std::string & explicitPath,
-	const std::string & modelFileHint) {
-	const std::string trimmedExplicit = trim(explicitPath);
-	if (!trimmedExplicit.empty()) {
-		return trimmedExplicit;
-	}
-	const std::string trimmedFileHint = trim(modelFileHint);
-	if (trimmedFileHint.empty()) {
-		return "";
-	}
-	return ofToDataPath(ofFilePath::join("models", trimmedFileHint), true);
-}
 
-std::string suggestedModelDownloadUrl(
-	const std::string & modelRepoHint,
-	const std::string & modelFileHint) {
-	const std::string trimmedRepoHint = trim(modelRepoHint);
-	const std::string trimmedFileHint = trim(modelFileHint);
-	if (trimmedRepoHint.empty() || trimmedFileHint.empty()) {
-		return "";
-	}
-	return "https://huggingface.co/" + trimmedRepoHint +
-		"/resolve/main/" + trimmedFileHint;
-}
 
-std::string effectiveSuggestedModelDownloadUrl(
-	const std::string & explicitUrl,
-	const std::string & modelRepoHint,
-	const std::string & modelFileHint) {
-	const std::string trimmedExplicitUrl = trim(explicitUrl);
-	if (!trimmedExplicitUrl.empty()) {
-		return trimmedExplicitUrl;
-	}
-	return suggestedModelDownloadUrl(modelRepoHint, modelFileHint);
-}
 
-bool isDefaultWhisperCliExecutableHint(const std::string & executable) {
-	const std::string trimmed = trim(executable);
-	if (trimmed.empty()) {
-		return true;
-	}
-	if (trimmed.find('\\') != std::string::npos ||
-		trimmed.find('/') != std::string::npos) {
-		return false;
-	}
-	std::string fileName = std::filesystem::path(trimmed).filename().string();
-	std::transform(
-		fileName.begin(),
-		fileName.end(),
-		fileName.begin(),
-		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	return fileName == "whisper-cli" ||
-		fileName == "whisper-cli.exe" ||
-		fileName == "main" ||
-		fileName == "main.exe";
-}
 
-bool isEuRestrictedVisionProfile(const ofxGgmlVisionModelProfile & profile) {
-	const std::string repoHint = trim(profile.modelRepoHint);
-	return repoHint.find("meta-llama/Llama-3.2-11B-Vision") != std::string::npos;
-}
+
+
+
+
+
+
 
 std::vector<std::string> extractHttpUrls(const std::string & text) {
 	static const std::regex urlRegex(R"(https?://[^\s<>\"]+)", std::regex::icase);
@@ -519,98 +182,19 @@ std::vector<std::string> extractPathList(const std::string & text) {
 // llama-completion may emit around the actual generated text.
 // Examples of markers removed: "user", "assistant", "system",
 // "<|...|>" ChatML tokens, and leading/trailing ">" prompt chars.
-std::string formatConsoleLogText(const std::string & text, bool chatLike = false) {
-	std::string out = stripLiteralAnsiMarkers(stripAnsi(text));
-	if (chatLike) {
-		out = ofxGgmlInference::sanitizeGeneratedText(out);
-	}
 
-	std::string flattened;
-	flattened.reserve(out.size());
-	bool lastWasSpace = false;
-	for (unsigned char ch : out) {
-		if (ch == '\r' || ch == '\n' || ch == '\t') {
-			if (!flattened.empty() && !lastWasSpace) {
-				flattened.push_back(' ');
-				lastWasSpace = true;
-			}
-			continue;
-		}
-		if (std::iscntrl(ch)) {
-			continue;
-		}
-		flattened.push_back(static_cast<char>(ch));
-		lastWasSpace = (ch == ' ');
-	}
 
-	return trim(flattened);
-}
 
-bool enableConsoleAnsiFormatting() {
-#ifdef _WIN32
-	HANDLE handle = GetStdHandle(STD_ERROR_HANDLE);
-	if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
-		return false;
-	}
-	DWORD mode = 0;
-	if (!GetConsoleMode(handle, &mode)) {
-		return false;
-	}
-	if ((mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0) {
-		return true;
-	}
-	return SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
-#else
-	return ::isatty(fileno(stderr)) != 0;
-#endif
-}
 
-std::string styleConsoleText(const std::string & text, const char * ansiCode) {
-	if (!gConsoleAnsiEnabled || text.empty() || ansiCode == nullptr || *ansiCode == '\0') {
-		return text;
-	}
-	return std::string("\x1b[") + ansiCode + "m" + text + "\x1b[0m";
-}
 
-const char * consoleRoleAnsiCode(const std::string & role) {
-	if (role == "user" || role == "You") return "1;32";
-	if (role == "assistant" || role == "AI") return "1;36";
-	if (role == "system" || role == "System") return "1;90";
-	return "1;37";
-}
 
-const char * consoleChannelAnsiCode(const std::string & channel) {
-	if (channel == "ChatWindow") return "90";
-	if (channel == "Script") return "95";
-	if (channel == "Summarize") return "94";
-	if (channel == "Write") return "35";
-	if (channel == "Translate") return "96";
-	if (channel == "Custom") return "37";
-	if (channel == "Vision") return "93";
-	if (channel == "Speech") return "92";
-	return "90";
-}
 
-const char * consoleBodyAnsiCode(const std::string & text) {
-	const std::string trimmed = trim(text);
-	if (trimmed.rfind("[Error]", 0) == 0) return "1;31";
-	if (trimmed.rfind("[warning]", 0) == 0 || trimmed.rfind("[warn]", 0) == 0) return "33";
-	return "";
-}
 
-std::string formatConsoleLogLine(
-	const std::string & channel,
-	const std::string & roleLabel,
-	const std::string & text,
-	bool chatLike = false) {
-	const std::string formattedText = formatConsoleLogText(text, chatLike);
-	const std::string prefix = "[" + channel + "]";
-	const std::string role = roleLabel + ":";
-	const std::string styledPrefix = styleConsoleText(prefix, consoleChannelAnsiCode(channel));
-	const std::string styledRole = styleConsoleText(role, consoleRoleAnsiCode(roleLabel));
-	const std::string styledText = styleConsoleText(formattedText, consoleBodyAnsiCode(formattedText));
-	return styledPrefix + " " + styledRole + " " + styledText;
-}
+
+
+
+
+
 
 std::vector<std::string> splitStoredScriptSourceUrls(const std::string & packedUrls) {
 	if (packedUrls.empty()) {
@@ -622,46 +206,9 @@ std::vector<std::string> splitStoredScriptSourceUrls(const std::string & packedU
 // Translate well-known process crash/error exit codes into a short
 // human-readable description.  Returns an empty string for codes that
 // are not recognised so the caller can fall back to the numeric value.
-std::string describeExitCode(int code) {
-#ifdef _WIN32
-	switch (static_cast<unsigned int>(code)) {
-	case 0xC0000409: return "stack buffer overrun (0xC0000409)";
-	case 0xC0000005: return "access violation (0xC0000005)";
-	case 0xC00000FD: return "stack overflow (0xC00000FD)";
-	case 0xC0000135: return "DLL not found (0xC0000135)";
-	case 0xC000001D: return "illegal instruction (0xC000001D) — CPU may not support required features";
-	case 0xC0000374: return "heap corruption (0xC0000374)";
-	default: break;
-	}
-	// DWORD exit codes are stored as a signed int; match negative
-	// representations of the same NTSTATUS values.
-	switch (code) {
-	case -1073740791: return "stack buffer overrun (0xC0000409)";
-	case -1073741819: return "access violation (0xC0000005)";
-	case -1073741571: return "stack overflow (0xC00000FD)";
-	case -1073741515: return "DLL not found (0xC0000135)";
-	case -1073741795: return "illegal instruction (0xC000001D) — CPU may not support required features";
-	case -1073741676: return "heap corruption (0xC0000374)";
-	default: break;
-	}
-#endif
-	if (code >= 129 && code <= 159) {
-		int sig = code - 128;
-		return "killed by signal " + std::to_string(sig);
-	}
-	return "";
-}
 
-std::string promptCachePathFor(const std::string & modelPath, AiMode mode) {
-	const std::string cacheDir = ofToDataPath("cache", true);
-	std::error_code ec;
-	std::filesystem::create_directories(cacheDir, ec);
-	const size_t modelHash = std::hash<std::string>{}(modelPath);
-	const std::string filename = "prompt_cache_"
-		+ std::to_string(static_cast<int>(mode)) + "_"
-		+ std::to_string(modelHash) + ".bin";
-	return ofFilePath::join(cacheDir, filename);
-}
+
+
 
 constexpr size_t kMaxLogMessages = 500;
 constexpr size_t kExePathBufSize = 4096; // buffer for resolving the executable path
