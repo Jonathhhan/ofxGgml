@@ -60,7 +60,8 @@ namespace benchmark {
 static void setupBenchmarkRuntime(ofxGgml & ggml) {
 	ofxGgmlSettings settings;
 	settings.threads = 4;
-	REQUIRE(ggml.setup(settings));
+	auto result = ggml.setup(settings);
+	REQUIRE(result.isOk());
 }
 
 TEST_CASE("Benchmark: Tensor operations", "[benchmark][!hide]") {
@@ -79,7 +80,8 @@ TEST_CASE("Benchmark: Tensor operations", "[benchmark][!hide]") {
 			auto c = graph.add(a, b);
 			graph.setOutput(c);
 			graph.build(c);
-			REQUIRE(ggml.allocGraph(graph));
+			auto result = ggml.allocGraph(graph);
+	REQUIRE(result.isOk());
 
 			std::vector<float> data(size, 1.0f);
 			ggml.setTensorData(a, data.data(), data.size() * sizeof(float));
@@ -108,7 +110,8 @@ TEST_CASE("Benchmark: Tensor operations", "[benchmark][!hide]") {
 			auto b = graph.scale(a, 2.5f);
 			graph.setOutput(b);
 			graph.build(b);
-			REQUIRE(ggml.allocGraph(graph));
+			auto result = ggml.allocGraph(graph);
+	REQUIRE(result.isOk());
 
 			std::vector<float> data(size, 1.0f);
 			ggml.setTensorData(a, data.data(), data.size() * sizeof(float));
@@ -141,7 +144,8 @@ TEST_CASE("Benchmark: Matrix multiplication", "[benchmark][!hide]") {
 		auto c = graph.matMul(a, b);
 		graph.setOutput(c);
 		graph.build(c);
-		REQUIRE(ggml.allocGraph(graph));
+		auto result = ggml.allocGraph(graph);
+	REQUIRE(result.isOk());
 
 		std::vector<float> data(size * size, 1.0f);
 		ggml.setTensorData(a, data.data(), data.size() * sizeof(float));
@@ -179,7 +183,8 @@ TEST_CASE("Benchmark: Activation functions", "[benchmark][!hide]") {
 		auto output = activationFunc(graph, input);
 		graph.setOutput(output);
 		graph.build(output);
-		REQUIRE(ggml.allocGraph(graph));
+		auto result = ggml.allocGraph(graph);
+	REQUIRE(result.isOk());
 
 		std::vector<float> data(size, 0.5f);
 		ggml.setTensorData(input, data.data(), data.size() * sizeof(float));
@@ -214,7 +219,8 @@ TEST_CASE("Benchmark: Reduction operations", "[benchmark][!hide]") {
 		auto output = graph.sum(input);
 		graph.setOutput(output);
 		graph.build(output);
-		REQUIRE(ggml.allocGraph(graph));
+		auto result = ggml.allocGraph(graph);
+	REQUIRE(result.isOk());
 
 		std::vector<float> data(size, 1.0f);
 		ggml.setTensorData(input, data.data(), data.size() * sizeof(float));
@@ -258,10 +264,12 @@ TEST_CASE("Benchmark: Graph allocation", "[benchmark][!hide][manual]") {
 			ggml.close();
 			ofxGgmlSettings settings;
 			settings.threads = 4;
-			if (!ggml.setup(settings)) {
+			auto result = ggml.setup(settings);
+		if (!result.isOk()) {
 				throw std::runtime_error("benchmark setup failed");
 			}
-			if (!ggml.allocGraph(graph)) {
+			auto result = ggml.allocGraph(graph);
+			if (!result.isOk()) {
 				throw std::runtime_error("benchmark graph allocation failed");
 			}
 		}, 5);
@@ -288,7 +296,8 @@ TEST_CASE("Benchmark: Data transfer", "[benchmark][!hide]") {
 		auto output = graph.scale(tensor, 1.0f);
 		graph.setOutput(output);
 		graph.build(output);
-		REQUIRE(ggml.allocGraph(graph));
+		auto result = ggml.allocGraph(graph);
+	REQUIRE(result.isOk());
 
 		std::vector<float> data(numFloats, 1.0f);
 
@@ -319,7 +328,8 @@ TEST_CASE("Benchmark: Async vs Sync", "[benchmark][!hide]") {
 	auto c = graph.sqrt(b);
 	graph.setOutput(c);
 	graph.build(c);
-	REQUIRE(ggml.allocGraph(graph));
+	auto result = ggml.allocGraph(graph);
+	REQUIRE(result.isOk());
 
 	std::vector<float> data(10000, 2.0f);
 	ggml.setTensorData(a, data.data(), data.size() * sizeof(float));
@@ -349,7 +359,8 @@ TEST_CASE("Benchmark: Backend comparison", "[benchmark][!hide][manual]") {
 	// of results depending on available backends
 
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto result = ggml.setup();
+	REQUIRE(result.isOk());
 
 	auto devices = ggml.listDevices();
 	INFO("Available backends:");
@@ -366,7 +377,8 @@ TEST_CASE("Benchmark: Backend comparison", "[benchmark][!hide][manual]") {
 	auto c = graph.matMul(a, b);
 	graph.setOutput(c);
 	graph.build(c);
-	REQUIRE(ggml.allocGraph(graph));
+	auto result = ggml.allocGraph(graph);
+	REQUIRE(result.isOk());
 
 	std::vector<float> data(10000, 1.0f);
 	ggml.setTensorData(a, data.data(), data.size() * sizeof(float));
@@ -394,7 +406,8 @@ TEST_CASE("Benchmark: Memory operations", "[benchmark][!hide]") {
 		auto output = graph.scale(tensor, 1.0f);
 		graph.setOutput(output);
 		graph.build(output);
-		REQUIRE(ggml.allocGraph(graph));
+		auto result = ggml.allocGraph(graph);
+	REQUIRE(result.isOk());
 
 		std::vector<float> writeData(size, 1.0f);
 		std::vector<float> readData(size);
