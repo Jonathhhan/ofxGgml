@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# download-model.sh — Download a text GGUF model for use with ofxGgml.
+# download-model.sh â€” Download a GGUF model for use with ofxGgml.
 #
 # Usage:
 #   ./scripts/download-model.sh [--model URL] [--preset N] [--task NAME] [--both]
@@ -21,20 +21,21 @@
 #   --help         Show this help message
 #
 # Recommended models (small enough for development):
-#   1. Qwen2.5-1.5B Instruct Q4_K_M       (~1.0 GB) — chat, general
-#   2. Qwen2.5-Coder-1.5B Instruct Q4_K_M (~1.0 GB) — scripting, code generation
+#   1. Qwen2.5-1.5B Instruct Q4_K_M       (~1.0 GB) â€” chat, general
+#   2. Qwen2.5-Coder-1.5B Instruct Q4_K_M (~1.0 GB) â€” scripting, code generation
 #
 # Preferred models per example task:
-#   chat       → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
-#   script     → preset 2  Qwen2.5-Coder-1.5B Instruct Q4_K_M
-#   summarize  → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
-#   write      → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
-#   translate  → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
-#   custom     → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   chat       â†’ preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   script     â†’ preset 2  Qwen2.5-Coder-1.5B Instruct Q4_K_M
+#   summarize  â†’ preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   write      â†’ preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   translate  â†’ preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   custom     â†’ preset 1  Qwen2.5-1.5B Instruct Q4_K_M
 #
 # Note:
-#   Speech / Whisper and multimodal Vision models are configured separately in
-#   the addon and GUI example. This helper downloads only text-generation GGUFs.
+#   Speech / Whisper models are configured separately in the addon and GUI
+#   example. This helper can also fetch a few known companion runtime files for
+#   specific multimodal models.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -109,8 +110,26 @@ fi
 # Zero-based indices of presets downloaded by default / --both.
 RECOMMENDED_PRESET_INDICES=(0 1)
 
+download_companion_files() {
+	local primary_name="$1"
+	case "$primary_name" in
+		"LFM2.5-VL-1.6B-Q4_0.gguf")
+			write_step "Companion file required for $primary_name"
+			download_model \
+				"https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-GGUF/resolve/main/mmproj-LFM2.5-VL-1.6b-Q8_0.gguf" \
+				"mmproj-LFM2.5-VL-1.6b-Q8_0.gguf"
+			;;
+		"LFM2.5-VL-1.6B-Q8_0.gguf")
+			write_step "Companion file required for $primary_name"
+			download_model \
+				"https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-GGUF/resolve/main/mmproj-LFM2.5-VL-1.6b-Q8_0.gguf" \
+				"mmproj-LFM2.5-VL-1.6b-Q8_0.gguf"
+			;;
+	esac
+}
+
 # ---------------------------------------------------------------------------
-# Task → preferred preset mapping (matches GUI example AiMode enum)
+# Task â†’ preferred preset mapping (matches GUI example AiMode enum)
 # ---------------------------------------------------------------------------
 
 declare -A TASK_PRESET
@@ -160,7 +179,7 @@ list_models() {
 	for task in chat script summarize write translate custom; do
 		local p="${TASK_PRESET[$task]}"
 		local idx=$((p - 1))
-		printf "  %-12s → preset %d  %s\n" "$task" "$p" "${PRESET_NAMES[$idx]}"
+		printf "  %-12s â†’ preset %d  %s\n" "$task" "$p" "${PRESET_NAMES[$idx]}"
 	done
 	echo ""
 	echo "Usage:"
@@ -357,6 +376,7 @@ if [[ "$DOWNLOAD_BOTH" == true ]]; then
 			local_name="$(basename "${PRESET_URLS[$i]}")"
 		fi
 		download_model "${PRESET_URLS[$i]}" "$local_name" "${PRESET_SHA256[$i]:-}"
+		download_companion_files "$local_name"
 	done
 	write_step "Next steps:"
 	write_step "  1. Build ggml with scripts/build-ggml.sh (if not done)."
@@ -375,7 +395,7 @@ if [[ -n "$TASK_NAME" ]]; then
 		die "Cannot use both --task and --preset"
 	fi
 	PRESET_INDEX="${TASK_PRESET[$TASK_NAME]}"
-	write_step "Task '$TASK_NAME' → preset $PRESET_INDEX"
+	write_step "Task '$TASK_NAME' â†’ preset $PRESET_INDEX"
 fi
 
 # Resolve preset.
@@ -408,6 +428,7 @@ if [[ -z "$OUTPUT_NAME" ]]; then
 fi
 
 download_model "$MODEL_URL" "$OUTPUT_NAME" "$MODEL_CHECKSUM"
+download_companion_files "$OUTPUT_NAME"
 write_step "Next steps:"
 write_step "  1. Build ggml with scripts/build-ggml.sh (if not done)."
 write_step "  2. Build and run your OF project with ofxGgml."

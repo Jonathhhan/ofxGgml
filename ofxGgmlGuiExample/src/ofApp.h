@@ -107,6 +107,10 @@ private:
 	bool engineReady = false;
 	std::string engineStatus;
 	std::vector<ofxGgmlDeviceInfo> devices;
+	bool deferredEngineInitPending = true;
+	bool deferredPostInitPending = false;
+	bool deferredAutoLoadSessionPending = false;
+	bool deferredAutoLoadSessionArmed = false;
 
 	// -- ImGui --
 	ofxImGui::Gui gui;
@@ -143,7 +147,7 @@ private:
 	char speechAudioPath[1024] = {};
 	char speechExecutable[256] = "whisper-cli";
 	char speechModelPath[1024] = {};
-	char speechServerUrl[256] = "http://127.0.0.1:8081";
+	char speechServerUrl[256] = {};
 	char speechServerModel[128] = {};
 	char speechPrompt[1024] = {};
 	char speechLanguageHint[64] = "auto";
@@ -277,6 +281,10 @@ private:
 	bool textServerManagedByApp = false;
 	std::string cachedTextServerExecutable;
 	bool textServerExecutableCached = false;
+	bool deferredTextServerWarmupPending = false;
+	float deferredTextServerWarmupDeadline = 0.0f;
+	float deferredTextServerWarmupNextProbeTime = 0.0f;
+	std::string deferredTextServerWarmupUrl;
 #ifdef _WIN32
 	HANDLE textServerProcessHandle = nullptr;
 	DWORD textServerProcessId = 0;
@@ -344,6 +352,10 @@ private:
 	char scriptSourceGitHubToken[512] = {};          // optional token override (not persisted)
 	char scriptSourceInternetUrl[1024] = {};         // internet URL input
 	int selectedScriptFileIndex = -1;
+	bool deferredScriptSourceRestorePending = false;
+	ofxGgmlScriptSourceType deferredScriptSourceType = ofxGgmlScriptSourceType::None;
+	std::string deferredScriptSourcePath;
+	std::string deferredScriptSourceInternetUrls;
 	ofxGgmlChatAssistant chatAssistant;
 	ofxGgmlCodeAssistant scriptAssistant;
 	ofxGgmlWorkspaceAssistant scriptWorkspaceAssistant;
@@ -370,10 +382,13 @@ private:
 	bool loadSession(const std::string & path);
 	void autoSaveSession();
 	void autoLoadSession();
+	void clearDeferredScriptSourceRestore();
+	bool restoreDeferredScriptSourceIfNeeded();
 	std::string escapeSessionText(const std::string & text) const;
 	std::string unescapeSessionText(const std::string & text) const;
 
 	// -- graph execution helper --
+	void initializeBackendEngine(bool announceReinit = false);
 	void reinitBackend();
 	void syncSelectedBackendIndex();
 	void runInference(AiMode mode, const std::string & userText,
@@ -408,12 +423,22 @@ private:
 	TextInferenceBackend preferredTextBackendForMode(AiMode mode) const;
 	void rememberTextBackendForMode(AiMode mode, TextInferenceBackend backend);
 	void applyServerFriendlyDefaultsForMode(AiMode mode);
-	void syncTextBackendForActiveMode(bool announce = false);
+	void syncTextBackendForActiveMode(bool announce = false, bool allowBlockingEnsure = true);
+	void scheduleDeferredTextServerWarmup(const std::string & configuredUrl);
+	void updateDeferredTextServerWarmup();
 	void checkTextServerStatus(bool logResult = true);
 	bool ensureTextServerReady(bool logResult = false, bool allowLaunch = true);
+	bool ensureLlamaServerReadyForModel(
+		const std::string & configuredUrl,
+		const std::string & modelPath,
+		bool logResult = false,
+		bool allowLaunch = true);
 	std::string findLocalTextServerExecutable(bool refresh = false);
 	bool isManagedTextServerRunning();
 	void startLocalTextServer();
+	void startLocalLlamaServerForModel(
+		const std::string & configuredUrl,
+		const std::string & modelPath);
 	void stopLocalTextServer(bool logResult = true);
 	std::string findLocalSpeechCliExecutable(bool refresh = false);
 	std::string findLocalSpeechServerExecutable(bool refresh = false);

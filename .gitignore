@@ -11,6 +11,7 @@ obj/
 *.pdb
 *.ini
 libs/llama/bin/
+libs/whisper/bin/
 
 # Generated / cached data
 ofxGgmlGuiExample/bin/data/cache/

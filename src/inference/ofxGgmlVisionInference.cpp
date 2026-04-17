@@ -7,7 +7,20 @@
 #include <fstream>
 #include <sstream>
 
+#ifdef _WIN32
+#include "core/ofxGgmlWindowsUtf8.h"
+#include <windows.h>
+#include <winhttp.h>
+#pragma comment(lib, "winhttp.lib")
+#endif
+
 namespace {
+
+struct VisionHttpResult {
+	int status = -1;
+	std::string error;
+	std::string body;
+};
 
 std::string trimCopy(const std::string & s) {
 	size_t start = 0;
@@ -85,6 +98,165 @@ std::string readFileBinary(const std::string & path) {
 	buffer << input.rdbuf();
 	return buffer.str();
 }
+
+#ifdef _WIN32
+std::string winHttpErrorString(DWORD errorCode) {
+	return "WinHTTP error " + ofToString(static_cast<unsigned long long>(errorCode));
+}
+
+VisionHttpResult winHttpPostJson(
+	const std::string & url,
+	const std::string & requestBody,
+	int timeoutSeconds) {
+	VisionHttpResult result;
+
+	URL_COMPONENTSW components{};
+	components.dwStructSize = sizeof(components);
+	components.dwSchemeLength = static_cast<DWORD>(-1);
+	components.dwHostNameLength = static_cast<DWORD>(-1);
+	components.dwUrlPathLength = static_cast<DWORD>(-1);
+	components.dwExtraInfoLength = static_cast<DWORD>(-1);
+
+	std::wstring wideUrl = ofxGgmlWideFromUtf8(url);
+	if (wideUrl.empty() ||
+		!WinHttpCrackUrl(wideUrl.c_str(), static_cast<DWORD>(wideUrl.size()), 0, &components)) {
+		result.error = wideUrl.empty() ? "empty URL" : winHttpErrorString(GetLastError());
+		return result;
+	}
+
+	const bool isHttps = components.nScheme == INTERNET_SCHEME_HTTPS;
+	const std::wstring host(
+		components.lpszHostName,
+		components.dwHostNameLength);
+	std::wstring path(
+		components.lpszUrlPath ? components.lpszUrlPath : L"/",
+		components.dwUrlPathLength > 0 ? components.dwUrlPathLength : 1);
+	if (components.dwExtraInfoLength > 0 && components.lpszExtraInfo != nullptr) {
+		path.append(components.lpszExtraInfo, components.dwExtraInfoLength);
+	}
+	if (path.empty()) {
+		path = L"/";
+	}
+
+	HINTERNET session = WinHttpOpen(
+		L"ofxGgmlVision/1.0",
+		WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+		WINHTTP_NO_PROXY_NAME,
+		WINHTTP_NO_PROXY_BYPASS,
+		0);
+	if (!session) {
+		result.error = winHttpErrorString(GetLastError());
+		return result;
+	}
+
+	const auto closeHandle = [](HINTERNET handle) {
+		if (handle != nullptr) {
+			WinHttpCloseHandle(handle);
+		}
+	};
+
+	HINTERNET connection = nullptr;
+	HINTERNET request = nullptr;
+
+	const int timeoutMs = std::max(1, timeoutSeconds) * 1000;
+	if (!WinHttpSetTimeouts(session, timeoutMs, timeoutMs, timeoutMs, timeoutMs)) {
+		result.error = winHttpErrorString(GetLastError());
+		closeHandle(session);
+		return result;
+	}
+
+	connection = WinHttpConnect(session, host.c_str(), components.nPort, 0);
+	if (!connection) {
+		result.error = winHttpErrorString(GetLastError());
+		closeHandle(session);
+		return result;
+	}
+
+	request = WinHttpOpenRequest(
+		connection,
+		L"POST",
+		path.c_str(),
+		nullptr,
+		WINHTTP_NO_REFERER,
+		WINHTTP_DEFAULT_ACCEPT_TYPES,
+		isHttps ? WINHTTP_FLAG_SECURE : 0);
+	if (!request) {
+		result.error = winHttpErrorString(GetLastError());
+		closeHandle(connection);
+		closeHandle(session);
+		return result;
+	}
+
+	const std::wstring headers =
+		L"Content-Type: application/json\r\nAccept: application/json\r\n";
+	if (!WinHttpSendRequest(
+			request,
+			headers.c_str(),
+			static_cast<DWORD>(headers.size()),
+			reinterpret_cast<LPVOID>(const_cast<char *>(requestBody.data())),
+			static_cast<DWORD>(requestBody.size()),
+			static_cast<DWORD>(requestBody.size()),
+			0)) {
+		result.error = winHttpErrorString(GetLastError());
+		closeHandle(request);
+		closeHandle(connection);
+		closeHandle(session);
+		return result;
+	}
+
+	if (!WinHttpReceiveResponse(request, nullptr)) {
+		result.error = winHttpErrorString(GetLastError());
+		closeHandle(request);
+		closeHandle(connection);
+		closeHandle(session);
+		return result;
+	}
+
+	DWORD statusCode = 0;
+	DWORD statusCodeSize = sizeof(statusCode);
+	if (!WinHttpQueryHeaders(
+			request,
+			WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+			WINHTTP_HEADER_NAME_BY_INDEX,
+			&statusCode,
+			&statusCodeSize,
+			WINHTTP_NO_HEADER_INDEX)) {
+		result.error = winHttpErrorString(GetLastError());
+		closeHandle(request);
+		closeHandle(connection);
+		closeHandle(session);
+		return result;
+	}
+	result.status = static_cast<int>(statusCode);
+
+	for (;;) {
+		DWORD available = 0;
+		if (!WinHttpQueryDataAvailable(request, &available)) {
+			result.error = winHttpErrorString(GetLastError());
+			result.status = -1;
+			break;
+		}
+		if (available == 0) {
+			break;
+		}
+
+		std::string chunk(static_cast<size_t>(available), '\0');
+		DWORD bytesRead = 0;
+		if (!WinHttpReadData(request, chunk.data(), available, &bytesRead)) {
+			result.error = winHttpErrorString(GetLastError());
+			result.status = -1;
+			break;
+		}
+		chunk.resize(static_cast<size_t>(bytesRead));
+		result.body += chunk;
+	}
+
+	closeHandle(request);
+	closeHandle(connection);
+	closeHandle(session);
+	return result;
+}
+#endif
 
 std::string extractTextFromOpenAiResponse(const std::string & responseJson) {
 	if (trimCopy(responseJson).empty()) {
@@ -183,8 +355,8 @@ std::vector<ofxGgmlVisionModelProfile> ofxGgmlVisionInference::defaultProfiles()
 			"LFM2.5-VL (llama-server)",
 			"LFM2-VL",
 			"LiquidAI/LFM2.5-VL-1.6B-GGUF",
-			"LFM2.5-VL-1.6B-Q4_0.gguf",
-			"https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-GGUF/resolve/main/LFM2.5-VL-1.6B-Q4_0.gguf",
+			"LFM2.5-VL-1.6B-Q8_0.gguf",
+			"https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-GGUF/resolve/main/LFM2.5-VL-1.6B-Q8_0.gguf",
 			"",
 			"",
 			"http://127.0.0.1:8080",
@@ -325,6 +497,23 @@ std::string ofxGgmlVisionInference::normalizeServerUrl(const std::string & serve
 	return normalized;
 }
 
+namespace {
+std::string visionFallbackServerUrl(const std::string & serverUrl) {
+	const std::string normalized = ofxGgmlVisionInference::normalizeServerUrl(serverUrl);
+	const std::string v1Suffix = "/v1/chat/completions";
+	const std::string compatSuffix = "/chat/completions";
+	if (normalized.size() >= v1Suffix.size() &&
+		normalized.compare(normalized.size() - v1Suffix.size(), v1Suffix.size(), v1Suffix) == 0) {
+		return normalized.substr(0, normalized.size() - v1Suffix.size()) + compatSuffix;
+	}
+	if (normalized.size() >= compatSuffix.size() &&
+		normalized.compare(normalized.size() - compatSuffix.size(), compatSuffix.size(), compatSuffix) == 0) {
+		return normalized.substr(0, normalized.size() - compatSuffix.size()) + v1Suffix;
+	}
+	return std::string();
+}
+}
+
 std::string ofxGgmlVisionInference::buildChatCompletionsJson(
 	const ofxGgmlVisionModelProfile & profile,
 	const ofxGgmlVisionRequest & request) {
@@ -383,7 +572,8 @@ std::string ofxGgmlVisionInference::buildChatCompletionsJson(
 	json << "\"max_tokens\":" << std::max(1, request.maxTokens) << ",";
 	json << "\"temperature\":" << request.temperature;
 	if (!trimCopy(profile.modelPath).empty()) {
-		json << ",\"model\":\"" << jsonEscape(profile.modelPath) << "\"";
+		const std::string modelId = std::filesystem::path(profile.modelPath).filename().string();
+		json << ",\"model\":\"" << jsonEscape(modelId.empty() ? profile.modelPath : modelId) << "\"";
 	} else if (!trimCopy(profile.modelRepoHint).empty()) {
 		json << ",\"model\":\"" << jsonEscape(profile.modelRepoHint) << "\"";
 	}
@@ -417,24 +607,60 @@ ofxGgmlVisionResult ofxGgmlVisionInference::runServerRequest(
 	return result;
 #else
 	try {
-		ofHttpRequest httpRequest(result.usedServerUrl, "vision-request");
-		httpRequest.method = ofHttpRequest::POST;
-		httpRequest.body = result.requestJson;
-		httpRequest.contentType = "application/json";
-		httpRequest.headers["Accept"] = "application/json";
-		httpRequest.timeoutSeconds = 180;
+		auto performRequest = [&](const std::string & url) {
+			VisionHttpResult httpResponse;
+#ifdef _WIN32
+			httpResponse = winHttpPostJson(url, result.requestJson, 180);
+#else
+			ofHttpRequest httpRequest(url, "vision-request", false, true, false);
+			httpRequest.method = ofHttpRequest::POST;
+			httpRequest.body = result.requestJson;
+			httpRequest.contentType = "application/json";
+			httpRequest.headers["Accept"] = "application/json";
+			httpRequest.timeoutSeconds = 180;
 
-		ofURLFileLoader loader;
-		const ofHttpResponse httpResponse = loader.handleRequest(httpRequest);
-		result.responseJson = httpResponse.data.getText();
+			ofURLFileLoader loader;
+			ofHttpResponse response = loader.handleRequest(httpRequest);
+			httpResponse.status = response.status;
+			httpResponse.error = response.error;
+			httpResponse.body = response.data.getText();
+#endif
+			return httpResponse;
+		};
+
+		VisionHttpResult httpResponse = performRequest(result.usedServerUrl);
+		result.responseJson = httpResponse.body;
+
+		if (httpResponse.status == 404) {
+			const std::string fallbackUrl = visionFallbackServerUrl(result.usedServerUrl);
+			if (!fallbackUrl.empty() && fallbackUrl != result.usedServerUrl) {
+				ofLogNotice("ofxGgmlVisionInference")
+					<< "Vision endpoint returned 404 at " << result.usedServerUrl
+					<< ", retrying " << fallbackUrl;
+				httpResponse = performRequest(fallbackUrl);
+				result.usedServerUrl = fallbackUrl;
+				result.responseJson = httpResponse.body;
+			}
+		}
 
 		if (httpResponse.status < 200 || httpResponse.status >= 300) {
 			std::string detail = trimCopy(result.responseJson);
 			if (detail.empty()) {
 				detail = trimCopy(httpResponse.error);
 			}
+			if (httpResponse.status < 0) {
+				if (detail.empty()) {
+					detail = "Could not connect to server";
+				}
+				result.error =
+					"vision request could not reach " + result.usedServerUrl + ": " +
+					detail +
+					". Vision mode requires a running multimodal llama-server.";
+				return result;
+			}
 			result.error = "vision request failed with HTTP " +
-				ofToString(httpResponse.status) + ": " + detail;
+				ofToString(httpResponse.status) + " from " + result.usedServerUrl +
+				": " + detail;
 			return result;
 		}
 

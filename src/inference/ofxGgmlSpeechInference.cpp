@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cerrno>
 #include <cctype>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -396,10 +398,19 @@ bool runCommandCapture(
 	const std::vector<std::string> & args,
 	std::string & output,
 	int & exitCode,
-	bool mergeStderr = true) {
+	bool mergeStderr = true,
+	std::string * launchError = nullptr) {
 	output.clear();
 	exitCode = -1;
-	if (args.empty() || args.front().empty()) return false;
+	if (launchError) {
+		launchError->clear();
+	}
+	if (args.empty() || args.front().empty()) {
+		if (launchError) {
+			*launchError = "no executable was provided";
+		}
+		return false;
+	}
 
 #ifdef _WIN32
 	SECURITY_ATTRIBUTES sa {};
@@ -484,6 +495,10 @@ bool runCommandCapture(
 	if (nullErr != INVALID_HANDLE_VALUE) CloseHandle(nullErr);
 
 	if (!ok) {
+		if (launchError) {
+			*launchError = "CreateProcessW failed for \"" + resolvedExecutable +
+				"\" (Windows error " + std::to_string(static_cast<int>(GetLastError())) + ")";
+		}
 		CloseHandle(readPipe);
 		return false;
 	}
@@ -504,11 +519,17 @@ bool runCommandCapture(
 #else
 	int pipeFds[2] = {-1, -1};
 	if (pipe(pipeFds) != 0) {
+		if (launchError) {
+			*launchError = std::string("pipe failed: ") + std::strerror(errno);
+		}
 		return false;
 	}
 
 	const pid_t pid = fork();
 	if (pid < 0) {
+		if (launchError) {
+			*launchError = std::string("fork failed: ") + std::strerror(errno);
+		}
 		close(pipeFds[0]);
 		close(pipeFds[1]);
 		return false;
@@ -548,6 +569,9 @@ bool runCommandCapture(
 
 	int status = 0;
 	if (waitpid(pid, &status, 0) < 0) {
+		if (launchError) {
+			*launchError = std::string("waitpid failed: ") + std::strerror(errno);
+		}
 		return false;
 	}
 	if (WIFEXITED(status)) {
@@ -680,8 +704,12 @@ ofxGgmlSpeechResult ofxGgmlWhisperCliSpeechBackend::transcribe(
 
 	const auto t0 = std::chrono::steady_clock::now();
 	int exitCode = -1;
-	if (!runCommandCapture(args, result.rawOutput, exitCode, true)) {
+	std::string launchError;
+	if (!runCommandCapture(args, result.rawOutput, exitCode, true, &launchError)) {
 		result.error = "failed to start whisper CLI process";
+		if (!launchError.empty()) {
+			result.error += ": " + launchError;
+		}
 		return result;
 	}
 

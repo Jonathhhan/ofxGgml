@@ -74,10 +74,10 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $addonRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
 
 if ([string]::IsNullOrWhiteSpace($SourceDir)) {
-    $SourceDir = Join-Path $addonRoot 'build\llama.cpp-src'
+    $SourceDir = Join-Path $addonRoot 'build\llama-src'
 }
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
-    $BuildDir = Join-Path $addonRoot 'build\llama.cpp-build'
+    $BuildDir = Join-Path $addonRoot 'build\llama-bld'
 }
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     $InstallDir = Join-Path $addonRoot 'libs\llama\bin'
@@ -148,7 +148,8 @@ $configureArgs = @(
     '-DLLAMA_BUILD_SERVER=ON',
     '-DLLAMA_BUILD_TESTS=OFF',
     '-DLLAMA_BUILD_EXAMPLES=OFF',
-    '-DLLAMA_CURL=OFF'
+    '-DLLAMA_CURL=OFF',
+    '-DGGML_VULKAN=OFF'
 )
 if ($useCuda) {
     $configureArgs += @('-DGGML_CUDA=ON', "-DCMAKE_ASM_COMPILER=$asmCompiler")

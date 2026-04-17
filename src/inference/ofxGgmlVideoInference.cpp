@@ -18,6 +18,8 @@
 
 namespace {
 
+constexpr int kMaxVideoFrameDimension = 1024;
+
 struct NormalizedVideoRequest {
 	ofxGgmlVideoTask task = ofxGgmlVideoTask::Summarize;
 	std::string videoPath;
@@ -436,10 +438,24 @@ ofxGgmlVideoBackendSampleResult ofxGgmlSampledFramesVideoBackend::sampleFrames(
 			return result;
 		}
 
+		ofImage frameImage;
+		frameImage.setFromPixels(pixels);
+		const int width = frameImage.getWidth();
+		const int height = frameImage.getHeight();
+		const int maxDimension = std::max(width, height);
+		if (maxDimension > kMaxVideoFrameDimension && width > 0 && height > 0) {
+			const float scale =
+				static_cast<float>(kMaxVideoFrameDimension) /
+				static_cast<float>(maxDimension);
+			const int resizedWidth = std::max(1, static_cast<int>(std::round(width * scale)));
+			const int resizedHeight = std::max(1, static_cast<int>(std::round(height * scale)));
+			frameImage.resize(resizedWidth, resizedHeight);
+		}
+
 		std::ostringstream name;
 		name << "frame_" << i << ".png";
 		const std::filesystem::path framePath = frameDir / name.str();
-		if (!ofSaveImage(pixels, framePath, OF_IMAGE_QUALITY_BEST)) {
+		if (!ofSaveImage(frameImage.getPixels(), framePath, OF_IMAGE_QUALITY_BEST)) {
 			result.error = "failed to save sampled frame image";
 			return result;
 		}
@@ -471,18 +487,30 @@ std::vector<ofxGgmlSampledVideoFrame> ofxGgmlVideoInference::sampleFrames(
 ofxGgmlVideoResult ofxGgmlVideoInference::runServerRequest(
 	const ofxGgmlVisionModelProfile & profile,
 	const ofxGgmlVideoRequest & request) const {
+	const auto backend = m_backend ? m_backend : createSampledFramesBackend();
+	const ofxGgmlVideoBackendSampleResult sampled = backend->sampleFrames(request);
+	if (!sampled.success) {
+		ofxGgmlVideoResult result;
+		result.backendName = sampled.backendName;
+		result.sampledFrames = sampled.sampledFrames;
+		result.error = sampled.error;
+		return result;
+	}
+	ofxGgmlVideoResult result = runServerRequest(profile, request, sampled.sampledFrames);
+	result.backendName = sampled.backendName;
+	return result;
+}
+
+ofxGgmlVideoResult ofxGgmlVideoInference::runServerRequest(
+	const ofxGgmlVisionModelProfile & profile,
+	const ofxGgmlVideoRequest & request,
+	const std::vector<ofxGgmlSampledVideoFrame> & sampledFrames) const {
 	ofxGgmlVideoResult result;
 	const auto t0 = std::chrono::steady_clock::now();
 	const NormalizedVideoRequest normalized = normalizeVideoRequest(request);
 
-	const auto backend = m_backend ? m_backend : createSampledFramesBackend();
-	const ofxGgmlVideoBackendSampleResult sampled = backend->sampleFrames(request);
-	result.backendName = sampled.backendName;
-	result.sampledFrames = sampled.sampledFrames;
-	if (!sampled.success) {
-		result.error = sampled.error;
-		return result;
-	}
+	result.backendName = "SampledFrames";
+	result.sampledFrames = sampledFrames;
 	if (result.sampledFrames.empty()) {
 		result.error = "no frames were sampled from the video";
 		return result;
@@ -520,17 +548,28 @@ ofxGgmlVideoResult ofxGgmlVideoInference::runServerRequest(
 
 ofxGgmlVideoResult ofxGgmlVideoInference::runTemporalSidecarRequest(
 	const ofxGgmlVideoRequest & request) const {
-	ofxGgmlVideoResult result;
-	const auto t0 = std::chrono::steady_clock::now();
-
 	const auto backend = m_backend ? m_backend : createSampledFramesBackend();
 	const ofxGgmlVideoBackendSampleResult sampled = backend->sampleFrames(request);
-	result.backendName = "TemporalSidecar+" + sampled.backendName;
-	result.sampledFrames = sampled.sampledFrames;
 	if (!sampled.success) {
+		ofxGgmlVideoResult result;
+		result.backendName = "TemporalSidecar+" + sampled.backendName;
+		result.sampledFrames = sampled.sampledFrames;
 		result.error = sampled.error;
 		return result;
 	}
+	ofxGgmlVideoResult result = runTemporalSidecarRequest(request, sampled.sampledFrames);
+	result.backendName = "TemporalSidecar+" + sampled.backendName;
+	return result;
+}
+
+ofxGgmlVideoResult ofxGgmlVideoInference::runTemporalSidecarRequest(
+	const ofxGgmlVideoRequest & request,
+	const std::vector<ofxGgmlSampledVideoFrame> & sampledFrames) const {
+	ofxGgmlVideoResult result;
+	const auto t0 = std::chrono::steady_clock::now();
+
+	result.backendName = "TemporalSidecar+SampledFrames";
+	result.sampledFrames = sampledFrames;
 	if (result.sampledFrames.empty()) {
 		result.error = "no frames were sampled from the video";
 		return result;

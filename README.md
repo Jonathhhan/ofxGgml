@@ -189,12 +189,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-llama-server.ps1 -Cuda
 powershell -ExecutionPolicy Bypass -File .\scripts\build-llama-server.ps1 -CpuOnly
 ```
 
+```bat
+scripts\build-llama-server.bat
+scripts\build-llama-server.bat -Cuda
+scripts\build-llama-server.bat -CpuOnly
+```
+
 By default the script:
 
-- uses `build\llama.cpp-src` for the upstream source checkout
-- uses `build\llama.cpp-build` for the CMake build tree
+- uses `build\llama-src` for the upstream source checkout
+- uses `build\llama-bld` for the CMake build tree
 - installs `llama-server.exe`, `llama-completion.exe`, `llama-cli.exe`, and the required DLLs into `libs\llama\bin`
 - installs `llama-embedding.exe` too when that target is available in the upstream checkout
+- forces `GGML_VULKAN=OFF` in this Windows helper to avoid long-path MSBuild failures inside the Vulkan shader generator subtree
 
 That install location matches the GUI example's local server discovery and CLI fallback probing, so server-backed text modes can auto-launch the local server during app setup and still fall back to addon-local `llama-completion` / `llama-cli` from the same `llama.cpp` checkout.
 
@@ -390,6 +397,14 @@ For a local `whisper.cpp` speech workflow on Windows, use:
 powershell -ExecutionPolicy Bypass -File .\scripts\build-whisper-server.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\build-whisper-server.ps1 -Cuda
 powershell -ExecutionPolicy Bypass -File .\scripts\start-whisper-server.ps1
+```
+
+Or use the matching batch wrappers:
+
+```bat
+scripts\build-whisper-server.bat
+scripts\build-whisper-server.bat -Cuda
+scripts\start-whisper-server.bat
 ```
 
 `scripts/build-whisper-server.ps1` now builds and installs both `whisper-cli.exe` and `whisper-server.exe` into `libs/whisper/bin`, so the CLI fallback and the warm speech server come from the same local `whisper.cpp` checkout. The helper defaults to `http://127.0.0.1:8081`, which avoids colliding with the addon's default `llama-server` text backend on `8080`. The GUI now defaults the Speech server URL to that local endpoint, auto-detects the local `whisper-cli` / `whisper-server` runtime, and can auto-start a local `whisper-server` during setup when the configured URL points at localhost and a local server binary is available.

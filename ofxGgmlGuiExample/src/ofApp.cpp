@@ -2,6 +2,7 @@
 
 #include "ofJson.h"
 #include "core/ofxGgmlWindowsUtf8.h"
+#include "gguf.h"
 
 #include <algorithm>
 #include <array>
@@ -25,6 +26,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <tlhelp32.h>
 #else
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -64,6 +66,71 @@ struct LogLevelOption {
 	const char * label;
 	ofLogLevel level;
 };
+
+int detectGgufLayerCountMetadata(const std::string & modelPath) {
+	if (modelPath.empty()) {
+		return 0;
+	}
+
+	struct ggml_context * dataCtx = nullptr;
+	struct gguf_init_params params {};
+	params.no_alloc = true;
+	params.ctx = &dataCtx;
+
+	struct gguf_context * ggufCtx = gguf_init_from_file(modelPath.c_str(), params);
+	if (!ggufCtx) {
+		return 0;
+	}
+
+	auto readString = [&](const std::string & key) -> std::string {
+		const int64_t id = gguf_find_key(ggufCtx, key.c_str());
+		if (id < 0 || gguf_get_kv_type(ggufCtx, id) != GGUF_TYPE_STRING) {
+			return {};
+		}
+		const char * value = gguf_get_val_str(ggufCtx, id);
+		return value ? std::string(value) : std::string();
+	};
+
+	auto readInt = [&](const std::string & key) -> int32_t {
+		const int64_t id = gguf_find_key(ggufCtx, key.c_str());
+		if (id < 0) {
+			return 0;
+		}
+		const enum gguf_type type = gguf_get_kv_type(ggufCtx, id);
+		if (type == GGUF_TYPE_INT32) return gguf_get_val_i32(ggufCtx, id);
+		if (type == GGUF_TYPE_UINT32) return static_cast<int32_t>(gguf_get_val_u32(ggufCtx, id));
+		if (type == GGUF_TYPE_INT16) return static_cast<int32_t>(gguf_get_val_i16(ggufCtx, id));
+		if (type == GGUF_TYPE_UINT16) return static_cast<int32_t>(gguf_get_val_u16(ggufCtx, id));
+		if (type == GGUF_TYPE_INT8) return static_cast<int32_t>(gguf_get_val_i8(ggufCtx, id));
+		if (type == GGUF_TYPE_UINT8) return static_cast<int32_t>(gguf_get_val_u8(ggufCtx, id));
+		return 0;
+	};
+
+	int detectedLayers = 0;
+	const std::string arch = readString("general.architecture");
+	if (!arch.empty()) {
+		detectedLayers = readInt(arch + ".block_count");
+	}
+
+	if (detectedLayers == 0) {
+		const char * archNames[] = {
+			"llama", "qwen2", "gemma", "phi", "starcoder",
+			"gpt2", "mpt", "falcon", "bloom", "mistral"
+		};
+		for (const auto * name : archNames) {
+			detectedLayers = readInt(std::string(name) + ".block_count");
+			if (detectedLayers > 0) {
+				break;
+			}
+		}
+	}
+
+	gguf_free(ggufCtx);
+	if (dataCtx) {
+		ggml_free(dataCtx);
+	}
+	return detectedLayers;
+}
 
 void drawPanelHeader(const char * title, const char * subtitle) {
 	ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "%s", title);
@@ -258,14 +325,28 @@ std::string trim(const std::string & s) {
 	return s.substr(start, end - start);
 }
 
+std::string trimLogMessage(const std::string & s) {
+	if (s.empty()) {
+		return {};
+	}
+	size_t start = 0;
+	while (start < s.size() && (s[start] == '\r' || s[start] == '\n')) {
+		start++;
+	}
+	size_t end = s.size();
+	while (end > start && (s[end - 1] == '\r' || s[end - 1] == '\n')) {
+		end--;
+	}
+	return s.substr(start, end - start);
+}
+
 std::string effectiveTextServerUrl(const char * buffer) {
 	const std::string value = trim(buffer ? std::string(buffer) : std::string());
 	return value.empty() ? std::string(kDefaultTextServerUrl) : value;
 }
 
 std::string effectiveSpeechServerUrl(const char * buffer) {
-	const std::string value = trim(buffer ? std::string(buffer) : std::string());
-	return value.empty() ? std::string(kDefaultSpeechServerUrl) : value;
+	return trim(buffer ? std::string(buffer) : std::string());
 }
 
 std::string buildStructuredTextPrompt(
@@ -426,6 +507,249 @@ std::string speechServerBaseUrlFromConfiguredUrl(const std::string & configuredU
 	return value.empty() ? std::string(kDefaultSpeechServerUrl) : value;
 }
 
+std::string findMatchingMmprojPath(const std::string & modelPath) {
+	if (trim(modelPath).empty()) {
+		return {};
+	}
+	std::error_code ec;
+	const std::filesystem::path modelFile(modelPath);
+	const std::filesystem::path modelDir = modelFile.parent_path();
+	if (modelDir.empty() || !std::filesystem::exists(modelDir, ec) || ec) {
+		return {};
+	}
+
+	std::vector<std::filesystem::path> mmprojCandidates;
+	for (const auto & entry : std::filesystem::directory_iterator(modelDir, ec)) {
+		if (ec || !entry.is_regular_file()) {
+			continue;
+		}
+		std::string name = entry.path().filename().string();
+		std::string lowerName = name;
+		std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		if (lowerName.find("mmproj") == std::string::npos &&
+			lowerName.find("projector") == std::string::npos) {
+			continue;
+		}
+		if (entry.path().extension() != ".gguf") {
+			continue;
+		}
+		mmprojCandidates.push_back(entry.path());
+	}
+
+	if (mmprojCandidates.empty()) {
+		return {};
+	}
+	std::sort(mmprojCandidates.begin(), mmprojCandidates.end());
+	return mmprojCandidates.front().string();
+}
+
+std::string visionCapabilityFailureDetail(
+	const std::string & configuredUrl,
+	const std::string & modelPath) {
+	const ofxGgmlServerProbeResult probe = ofxGgmlInference::probeServer(configuredUrl, true);
+	if (!probe.reachable) {
+		std::string detail = "Vision server is not reachable.";
+		if (!probe.error.empty()) {
+			detail += " " + probe.error;
+		}
+		return detail;
+	}
+	if (probe.visionCapable) {
+		return {};
+	}
+
+	std::string detail =
+		"Server is reachable but does not report multimodal capability.";
+	const std::string mmprojPath = findMatchingMmprojPath(modelPath);
+	if (mmprojPath.empty()) {
+		detail += " This model likely needs a matching mmproj .gguf file next to the model.";
+	} else {
+		detail += " Restart the local server with mmproj support: " +
+			ofFilePath::getFileName(mmprojPath) + ".";
+	}
+	if (!probe.activeModel.empty()) {
+		detail += " Active model: " + probe.activeModel + ".";
+	}
+	return detail;
+}
+
+std::string prepareVisionImageForUpload(
+	const std::string & imagePath,
+	std::string * note = nullptr) {
+	constexpr int kMaxVisionUploadDimension = 1024;
+	const std::string trimmedPath = trim(imagePath);
+	if (trimmedPath.empty()) {
+		return trimmedPath;
+	}
+
+	std::string lowerExt = std::filesystem::path(trimmedPath).extension().string();
+	std::transform(lowerExt.begin(), lowerExt.end(), lowerExt.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+	ofImage image;
+	if (!image.load(trimmedPath)) {
+		return trimmedPath;
+	}
+
+	const int srcWidth = image.getWidth();
+	const int srcHeight = image.getHeight();
+	if (srcWidth <= 0 || srcHeight <= 0) {
+		return trimmedPath;
+	}
+
+	const bool shouldNormalize =
+		lowerExt == ".jpg" || lowerExt == ".jpeg" ||
+		srcWidth > kMaxVisionUploadDimension || srcHeight > kMaxVisionUploadDimension;
+	if (!shouldNormalize) {
+		return trimmedPath;
+	}
+
+	float scale = 1.0f;
+	const int maxDim = std::max(srcWidth, srcHeight);
+	if (maxDim > kMaxVisionUploadDimension) {
+		scale = static_cast<float>(kMaxVisionUploadDimension) / static_cast<float>(maxDim);
+	}
+
+	const int dstWidth = std::max(1, static_cast<int>(std::round(srcWidth * scale)));
+	const int dstHeight = std::max(1, static_cast<int>(std::round(srcHeight * scale)));
+	if (dstWidth != srcWidth || dstHeight != srcHeight) {
+		image.resize(dstWidth, dstHeight);
+	}
+
+	const std::string cacheDir = ofToDataPath("cache/vision_uploads", true);
+	std::error_code ec;
+	std::filesystem::create_directories(cacheDir, ec);
+	const std::string cacheKey =
+		trimmedPath + "|" +
+		std::to_string(static_cast<long long>(std::filesystem::file_size(trimmedPath, ec))) + "|" +
+		std::to_string(dstWidth) + "x" + std::to_string(dstHeight);
+	const std::string outputName =
+		ofFilePath::getBaseName(trimmedPath) + "_" +
+		std::to_string(std::hash<std::string>{}(cacheKey)) + ".png";
+	const std::string outputPath = ofFilePath::join(cacheDir, outputName);
+	std::error_code outEc;
+	if (!std::filesystem::exists(std::filesystem::path(outputPath), outEc) || outEc) {
+		ofSaveImage(image.getPixels(), std::filesystem::path(outputPath), OF_IMAGE_QUALITY_BEST);
+	}
+
+	if (note) {
+		*note =
+			"Normalized local image for Vision upload: " +
+			ofFilePath::getFileName(trimmedPath) + " -> " +
+			ofFilePath::getFileName(outputPath);
+	}
+	return outputPath;
+}
+
+#ifdef _WIN32
+std::string normalizeExecutablePathForCompare(const std::string & path) {
+	if (trim(path).empty()) {
+		return {};
+	}
+	std::error_code ec;
+	std::filesystem::path normalized = std::filesystem::weakly_canonical(std::filesystem::path(path), ec);
+	if (ec) {
+		normalized = std::filesystem::absolute(std::filesystem::path(path), ec);
+		if (ec) {
+			normalized = std::filesystem::path(path);
+		}
+	}
+	std::string value = normalized.string();
+	std::transform(value.begin(), value.end(), value.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return value;
+}
+
+std::string utf8FromWide(const std::wstring & text) {
+	if (text.empty()) {
+		return {};
+	}
+
+	const int utf8Size = WideCharToMultiByte(
+		CP_UTF8,
+		0,
+		text.data(),
+		static_cast<int>(text.size()),
+		nullptr,
+		0,
+		nullptr,
+		nullptr);
+	if (utf8Size <= 0) {
+		return std::string(text.begin(), text.end());
+	}
+
+	std::string utf8(static_cast<size_t>(utf8Size), '\0');
+	const int converted = WideCharToMultiByte(
+		CP_UTF8,
+		0,
+		text.data(),
+		static_cast<int>(text.size()),
+		utf8.data(),
+		utf8Size,
+		nullptr,
+		nullptr);
+	if (converted <= 0) {
+		return std::string(text.begin(), text.end());
+	}
+	return utf8;
+}
+
+bool terminateAddonLlamaServerProcesses(const std::string & serverExePath) {
+	const std::string normalizedTarget = normalizeExecutablePathForCompare(serverExePath);
+	if (normalizedTarget.empty()) {
+		return false;
+	}
+
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (snapshot == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+
+	bool terminatedAny = false;
+	PROCESSENTRY32W entry{};
+	entry.dwSize = sizeof(entry);
+	if (Process32FirstW(snapshot, &entry)) {
+		do {
+			if (_wcsicmp(entry.szExeFile, L"llama-server.exe") != 0) {
+				continue;
+			}
+
+			HANDLE processHandle = OpenProcess(
+				PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
+				FALSE,
+				entry.th32ProcessID);
+			if (!processHandle) {
+				continue;
+			}
+
+			std::wstring imagePath(32768, L'\0');
+			DWORD imagePathSize = static_cast<DWORD>(imagePath.size());
+			if (QueryFullProcessImageNameW(processHandle, 0, imagePath.data(), &imagePathSize)) {
+				imagePath.resize(imagePathSize);
+				const std::string normalizedImagePath =
+					normalizeExecutablePathForCompare(utf8FromWide(imagePath));
+				if (normalizedImagePath == normalizedTarget) {
+					if (TerminateProcess(processHandle, 0)) {
+						WaitForSingleObject(processHandle, 5000);
+						terminatedAny = true;
+					}
+				}
+			}
+			CloseHandle(processHandle);
+		} while (Process32NextW(snapshot, &entry));
+	}
+
+	CloseHandle(snapshot);
+	return terminatedAny;
+}
+#else
+bool terminateAddonLlamaServerProcesses(const std::string & serverExePath) {
+	(void) serverExePath;
+	return false;
+}
+#endif
+
 std::pair<std::string, int> parseServerHostPort(const std::string & configuredUrl) {
 	const std::string baseUrl = serverBaseUrlFromConfiguredUrl(configuredUrl);
 	static const std::regex hostPortRe(R"(^https?://([^/:]+)(?::(\d+))?.*$)", std::regex::icase);
@@ -469,6 +793,9 @@ bool shouldManageLocalTextServer(const std::string & configuredUrl) {
 }
 
 bool shouldManageLocalSpeechServer(const std::string & configuredUrl) {
+	if (trim(configuredUrl).empty()) {
+		return false;
+	}
 	const auto [host, port] = parseSpeechServerHostPort(configuredUrl);
 	(void)port;
 	std::string normalizedHost = trim(host);
@@ -724,6 +1051,13 @@ std::string formatConsoleLogLine(
 	const std::string styledRole = styleConsoleText(role, consoleRoleAnsiCode(roleLabel));
 	const std::string styledText = styleConsoleText(formattedText, consoleBodyAnsiCode(formattedText));
 	return styledPrefix + " " + styledRole + " " + styledText;
+}
+
+std::vector<std::string> splitStoredScriptSourceUrls(const std::string & packedUrls) {
+	if (packedUrls.empty()) {
+		return {};
+	}
+	return ofSplitString(packedUrls, "\n", true, true);
 }
 
 // Translate well-known process crash/error exit codes into a short
@@ -1462,9 +1796,11 @@ bool ofApp::shouldLog(ofLogLevel level) const {
 
 void ofApp::logWithLevel(ofLogLevel level, const std::string & message) {
 	if (!shouldLog(level) || message.empty()) return;
-	ofLog(level, message);
+	const std::string normalizedMessage = trimLogMessage(message);
+	if (normalizedMessage.empty()) return;
+	ofLog(level, normalizedMessage);
 	std::lock_guard<std::mutex> lock(logMutex);
-	std::string entry = "[" + std::string(logLevelLabel(level)) + "] " + message;
+	std::string entry = "[" + std::string(logLevelLabel(level)) + "] " + normalizedMessage;
 	logMessages.push_back(entry);
 	if (logMessages.size() > kMaxLogMessages) {
 		logMessages.pop_front();
@@ -1552,7 +1888,7 @@ void ofApp::applyServerFriendlyDefaultsForMode(AiMode mode) {
 	usePromptCache = false;
 }
 
-void ofApp::syncTextBackendForActiveMode(bool announce) {
+void ofApp::syncTextBackendForActiveMode(bool announce, bool allowBlockingEnsure) {
 	if (!aiModeSupportsTextBackend(activeMode)) {
 		return;
 	}
@@ -1563,9 +1899,16 @@ void ofApp::syncTextBackendForActiveMode(bool announce) {
 				copyStringToBuffer(textServerUrl, sizeof(textServerUrl), kDefaultTextServerUrl);
 			}
 			applyServerFriendlyDefaultsForMode(activeMode);
-			ensureTextServerReady(
-				false,
-				shouldManageLocalTextServer(effectiveTextServerUrl(textServerUrl)));
+			const std::string effectiveUrl = effectiveTextServerUrl(textServerUrl);
+			if (allowBlockingEnsure) {
+				ensureTextServerReady(
+					false,
+					shouldManageLocalTextServer(effectiveUrl));
+			} else {
+				textServerStatus = ServerStatusState::Unknown;
+				textServerStatusMessage = "Server-backed mode selected. Local server startup is deferred until first request.";
+				textServerCapabilityHint.clear();
+			}
 		}
 		return;
 	}
@@ -1580,13 +1923,63 @@ void ofApp::syncTextBackendForActiveMode(bool announce) {
 	if (announce) {
 		announceTextBackendChange();
 	} else if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
-		ensureTextServerReady(
-			false,
-			shouldManageLocalTextServer(effectiveTextServerUrl(textServerUrl)));
+		const std::string effectiveUrl = effectiveTextServerUrl(textServerUrl);
+		if (allowBlockingEnsure) {
+			ensureTextServerReady(
+				false,
+				shouldManageLocalTextServer(effectiveUrl));
+		} else {
+			textServerStatus = ServerStatusState::Unknown;
+			textServerStatusMessage = "Server-backed mode selected. Local server startup is deferred until first request.";
+			textServerCapabilityHint.clear();
+		}
 	} else {
 		textServerStatus = ServerStatusState::Unknown;
 		textServerStatusMessage.clear();
 		textServerCapabilityHint.clear();
+	}
+}
+
+void ofApp::scheduleDeferredTextServerWarmup(const std::string & configuredUrl) {
+	const std::string effectiveUrl = trim(configuredUrl).empty()
+		? std::string(kDefaultTextServerUrl)
+		: trim(configuredUrl);
+	deferredTextServerWarmupPending = true;
+	deferredTextServerWarmupUrl = effectiveUrl;
+	deferredTextServerWarmupDeadline = ofGetElapsedTimef() + 3.5f;
+	deferredTextServerWarmupNextProbeTime = ofGetElapsedTimef() + 0.15f;
+	textServerStatus = ServerStatusState::Unknown;
+	textServerStatusMessage = "Local llama-server is starting...";
+	textServerCapabilityHint.clear();
+}
+
+void ofApp::updateDeferredTextServerWarmup() {
+	if (!deferredTextServerWarmupPending) {
+		return;
+	}
+
+	if (effectiveTextServerUrl(textServerUrl) != deferredTextServerWarmupUrl) {
+		deferredTextServerWarmupPending = false;
+		return;
+	}
+
+	const float now = ofGetElapsedTimef();
+	if (now < deferredTextServerWarmupNextProbeTime) {
+		return;
+	}
+	deferredTextServerWarmupNextProbeTime = now + 0.15f;
+
+	checkTextServerStatus(false);
+	if (textServerStatus == ServerStatusState::Reachable) {
+		deferredTextServerWarmupPending = false;
+		return;
+	}
+
+	if (now >= deferredTextServerWarmupDeadline) {
+		deferredTextServerWarmupPending = false;
+		if (!textServerStatusMessage.empty()) {
+			logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
+		}
 	}
 }
 
@@ -1634,20 +2027,109 @@ bool ofApp::ensureTextServerReady(bool logResult, bool allowLaunch) {
 		return false;
 	}
 
+	return ensureLlamaServerReadyForModel(
+		effectiveTextServerUrl(textServerUrl),
+		getSelectedModelPath(),
+		logResult,
+		allowLaunch);
+}
+
+bool ofApp::ensureLlamaServerReadyForModel(
+	const std::string & configuredUrl,
+	const std::string & modelPath,
+	bool logResult,
+	bool allowLaunch) {
+	const std::string effectiveUrl = trim(configuredUrl).empty()
+		? std::string(kDefaultTextServerUrl)
+		: trim(configuredUrl);
+
+	const std::string savedTextServerUrl = textServerUrl;
+	copyStringToBuffer(textServerUrl, sizeof(textServerUrl), effectiveUrl);
+	checkTextServerStatus(logResult);
+	const bool reachable = (textServerStatus == ServerStatusState::Reachable);
+	copyStringToBuffer(textServerUrl, sizeof(textServerUrl), savedTextServerUrl);
+
+	bool needsManagedRestartForModelChange = false;
+	if (reachable && allowLaunch && shouldManageLocalTextServer(effectiveUrl) && !trim(modelPath).empty()) {
+		const ofxGgmlServerProbeResult probe = ofxGgmlInference::probeServer(effectiveUrl, true);
+		const std::string requestedModel = ofFilePath::getFileName(modelPath);
+		if (probe.reachable &&
+			!requestedModel.empty() &&
+			!probe.activeModel.empty() &&
+			probe.activeModel != requestedModel) {
+			needsManagedRestartForModelChange = true;
+			if (logResult) {
+				logWithLevel(
+					OF_LOG_NOTICE,
+					"Restarting local llama-server to switch models from " +
+						probe.activeModel + " to " + requestedModel + ".");
+			}
+			if (textServerManagedByApp) {
+				stopLocalTextServer(false);
+			} else {
+				const std::string serverExe = findLocalTextServerExecutable();
+				const bool terminatedStaleProcess = terminateAddonLlamaServerProcesses(serverExe);
+				if (!terminatedStaleProcess) {
+					textServerStatus = ServerStatusState::Unreachable;
+					textServerStatusMessage =
+						"A local llama-server is already running with model " +
+						probe.activeModel +
+						". Stop it manually or point Vision at a different server URL.";
+					textServerCapabilityHint.clear();
+					return false;
+				}
+			}
+			textServerStatus = ServerStatusState::Unknown;
+			textServerStatusMessage =
+				"Requested model differs from the running local server; restarting.";
+			textServerCapabilityHint.clear();
+		}
+	}
+
+	if (reachable && !needsManagedRestartForModelChange) {
+		return true;
+	}
+
+	if (!allowLaunch) {
+		return false;
+	}
+
 	const std::string serverExe = findLocalTextServerExecutable();
-	const std::string modelPath = getSelectedModelPath();
-	if (serverExe.empty() || modelPath.empty() || !std::filesystem::exists(modelPath)) {
+	if (serverExe.empty()) {
+		textServerStatus = ServerStatusState::Unreachable;
+		textServerStatusMessage = "Local llama-server executable not found.";
+		textServerCapabilityHint.clear();
+		if (logResult) {
+			logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
+		}
+		return false;
+	}
+
+	std::error_code modelEc;
+	if (modelPath.empty() ||
+		!std::filesystem::exists(modelPath, modelEc) ||
+		modelEc) {
+		textServerStatus = ServerStatusState::Unreachable;
+		textServerStatusMessage = "Selected GGUF model is missing; local server was not started.";
+		textServerCapabilityHint.clear();
+		if (logResult) {
+			logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
+		}
 		return false;
 	}
 
 	if (!isManagedTextServerRunning()) {
-		startLocalTextServer();
+		startLocalLlamaServerForModel(effectiveUrl, modelPath);
 	}
 
 	for (int attempt = 0; attempt < 20; ++attempt) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(150));
+		const std::string probeSavedTextServerUrl = textServerUrl;
+		copyStringToBuffer(textServerUrl, sizeof(textServerUrl), effectiveUrl);
 		checkTextServerStatus(false);
-		if (textServerStatus == ServerStatusState::Reachable) {
+		const bool probeReachable = (textServerStatus == ServerStatusState::Reachable);
+		copyStringToBuffer(textServerUrl, sizeof(textServerUrl), probeSavedTextServerUrl);
+		if (probeReachable) {
 			if (logResult) {
 				logWithLevel(OF_LOG_NOTICE, textServerStatusMessage);
 			}
@@ -1722,6 +2204,23 @@ void ofApp::startLocalTextServer() {
 		return;
 	}
 
+	startLocalLlamaServerForModel(
+		effectiveTextServerUrl(textServerUrl),
+		getSelectedModelPath());
+}
+
+void ofApp::startLocalLlamaServerForModel(
+	const std::string & configuredUrl,
+	const std::string & modelPath) {
+	if (isManagedTextServerRunning()) {
+		logWithLevel(OF_LOG_NOTICE, "Local llama-server is already running.");
+		const std::string savedTextServerUrl = textServerUrl;
+		copyStringToBuffer(textServerUrl, sizeof(textServerUrl), configuredUrl);
+		checkTextServerStatus(false);
+		copyStringToBuffer(textServerUrl, sizeof(textServerUrl), savedTextServerUrl);
+		return;
+	}
+
 	const std::string serverExe = findLocalTextServerExecutable(true);
 	if (serverExe.empty()) {
 		logWithLevel(OF_LOG_ERROR, "No local llama-server executable was found. Build or copy llama-server into libs/llama/bin first.");
@@ -1731,7 +2230,6 @@ void ofApp::startLocalTextServer() {
 		return;
 	}
 
-	const std::string modelPath = getSelectedModelPath();
 	if (modelPath.empty() || !std::filesystem::exists(modelPath)) {
 		logWithLevel(OF_LOG_ERROR, "Cannot start local llama-server because the selected GGUF model is missing.");
 		textServerStatus = ServerStatusState::Unreachable;
@@ -1740,8 +2238,9 @@ void ofApp::startLocalTextServer() {
 		return;
 	}
 
-	const auto [host, port] = parseServerHostPort(effectiveTextServerUrl(textServerUrl));
+	const auto [host, port] = parseServerHostPort(configuredUrl);
 	const int gpuLayerCount = std::max(0, gpuLayers > 0 ? gpuLayers : detectedModelLayers);
+	const std::string mmprojPath = findMatchingMmprojPath(modelPath);
 
 #ifdef _WIN32
 	std::vector<std::string> args = {
@@ -1751,6 +2250,10 @@ void ofApp::startLocalTextServer() {
 		"--port", ofToString(port),
 		"-ngl", ofToString(gpuLayerCount)
 	};
+	if (!mmprojPath.empty()) {
+		args.emplace_back("--mmproj");
+		args.emplace_back(mmprojPath);
+	}
 	if (contextSize > 0) {
 		args.emplace_back("-c");
 		args.emplace_back(ofToString(contextSize));
@@ -1818,6 +2321,10 @@ void ofApp::startLocalTextServer() {
 		"--port", ofToString(port),
 		"-ngl", ofToString(gpuLayerCount)
 	};
+	if (!mmprojPath.empty()) {
+		args.emplace_back("--mmproj");
+		args.emplace_back(mmprojPath);
+	}
 	if (contextSize > 0) {
 		args.emplace_back("-c");
 		args.emplace_back(ofToString(contextSize));
@@ -1849,6 +2356,11 @@ void ofApp::startLocalTextServer() {
 		OF_LOG_NOTICE,
 		"Started local llama-server on " + host + ":" + ofToString(port) +
 		" using model " + ofFilePath::getFileName(modelPath) + ".");
+	if (!mmprojPath.empty()) {
+		logWithLevel(
+			OF_LOG_NOTICE,
+			"Using multimodal projector " + ofFilePath::getFileName(mmprojPath) + ".");
+	}
 }
 
 void ofApp::stopLocalTextServer(bool logResult) {
@@ -2352,38 +2864,6 @@ std::error_code ec;
 std::filesystem::create_directories(sessionDir, ec);
 lastSessionPath = ofFilePath::join(sessionDir, "autosave.session");
 
-// Initialize ggml with the selected backend preference.
-ofxGgmlSettings settings;
-settings.threads = numThreads;
-if (selectedBackendIndex >= 0 &&
-	selectedBackendIndex < static_cast<int>(backendNames.size())) {
-	settings.preferredBackendName = backendNames[selectedBackendIndex];
-}
-setVulkanRuntimeDisabled(
-	shouldDisableVulkanForCurrentSelection(backendNames, selectedBackendIndex));
-settings.graphSize = static_cast<size_t>(contextSize);
-engineReady = ggml.setup(settings);
-if (engineReady) {
-engineStatus = "Ready (" + ggml.getBackendName() + ")";
-devices = ggml.listDevices();
-lastBackendUsed = ggml.getBackendName();
-// Populate backend names from discovered devices.
-backendNames.clear();
-for (const auto & d : devices) {
-	backendNames.push_back(d.name);
-}
-// Auto-select the device that matches the *actual* running backend.
-// Previous code blindly picked the first GPU device, but the engine
-// may have fallen back to CPU (e.g. when the GPU driver is present
-// but cannot create a working context).  Matching by name avoids
-// the mismatch where the dropdown says "GPU" but the engine is on
-// CPU, and prevents a user from accidentally triggering a reinit
-// that crashes.
-syncSelectedBackendIndex();
-} else {
-engineStatus = "Failed to initialize ggml engine";
-}
-
 // Log callback.
 ggml.setLogCallback([this](int level, const std::string & msg) {
 	const ofLogLevel mapped = mapGgmlLogLevel(level);
@@ -2391,9 +2871,10 @@ ggml.setLogCallback([this](int level, const std::string & msg) {
 		logWithLevel(mapped, msg);
 	}
 });
+engineStatus = "Initializing ggml engine...";
 
 // Auto-load last session if available.
-autoLoadSession();
+deferredAutoLoadSessionPending = true;
 
 {
 	const std::string configuredSpeechExecutable = trim(speechExecutable);
@@ -2411,37 +2892,6 @@ if (useModeTokenBudgets) {
 	maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(activeMode)], 32, 4096);
 }
 
-// Detect llama-completion / llama-cli / llama at startup.
-probeLlamaCli();
-
-// Detect model layer count for GPU layers slider.
-detectModelLayers();
-{
-	if (gpuLayers == 0 && detectedModelLayers > 0) {
-		// Default GPU layers to all if a model is loaded and the user
-		// hasn't explicitly set them to 0 from a previous session.
-		gpuLayers = detectedModelLayers;
-	}
-}
-syncTextBackendForActiveMode(false);
-for (int i = 0; i < kModeCount; ++i) {
-	const AiMode mode = static_cast<AiMode>(i);
-	if (!aiModeSupportsTextBackend(mode)) {
-		continue;
-	}
-	if (preferredTextBackendForMode(mode) == TextInferenceBackend::LlamaServer) {
-		if (trim(textServerUrl).empty()) {
-			copyStringToBuffer(textServerUrl, sizeof(textServerUrl), kDefaultTextServerUrl);
-		}
-		ensureTextServerReady(
-			false,
-			shouldManageLocalTextServer(effectiveTextServerUrl(textServerUrl)));
-		break;
-	}
-}
-if (trim(speechServerUrl).empty()) {
-	copyStringToBuffer(speechServerUrl, sizeof(speechServerUrl), kDefaultSpeechServerUrl);
-}
 if (trim(diffusionOutputDir).empty()) {
 	copyStringToBuffer(
 		diffusionOutputDir,
@@ -2455,17 +2905,56 @@ if (shouldManageLocalSpeechServer(effectiveSpeechServerUrl(speechServerUrl)) &&
 
 // Pre-fill example system prompt only if not restored from session.
 if (customSystemPrompt[0] == '\0') {
-copyStringToBuffer(
-	customSystemPrompt,
-	sizeof(customSystemPrompt),
-	"You are a helpful assistant. Respond concisely.");
+	copyStringToBuffer(
+		customSystemPrompt,
+		sizeof(customSystemPrompt),
+		"You are a helpful assistant. Respond concisely.");
 }
-
 // Apply default theme.
 applyTheme(themeIndex);
 }
 
 void ofApp::update() {
+if (deferredEngineInitPending) {
+	deferredEngineInitPending = false;
+	initializeBackendEngine(false);
+	deferredPostInitPending = true;
+}
+
+if (deferredPostInitPending) {
+	deferredPostInitPending = false;
+	probeLlamaCli();
+	detectModelLayers();
+	if (gpuLayers == 0 && detectedModelLayers > 0) {
+		gpuLayers = detectedModelLayers;
+	}
+	textInferenceBackend = preferredTextBackendForMode(activeMode);
+	if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
+		if (trim(textServerUrl).empty()) {
+			copyStringToBuffer(textServerUrl, sizeof(textServerUrl), kDefaultTextServerUrl);
+		}
+		applyServerFriendlyDefaultsForMode(activeMode);
+	} else {
+		textServerStatus = ServerStatusState::Unknown;
+		textServerStatusMessage.clear();
+		textServerCapabilityHint.clear();
+	}
+}
+
+updateDeferredTextServerWarmup();
+if (deferredAutoLoadSessionPending && deferredAutoLoadSessionArmed) {
+	deferredAutoLoadSessionPending = false;
+	autoLoadSession();
+	const std::string configuredSpeechExecutable = trim(speechExecutable);
+	const std::string localSpeechCliExecutable = findLocalSpeechCliExecutable(true);
+	if (!localSpeechCliExecutable.empty() &&
+		isDefaultWhisperCliExecutableHint(configuredSpeechExecutable)) {
+		copyStringToBuffer(
+			speechExecutable,
+			sizeof(speechExecutable),
+			localSpeechCliExecutable);
+	}
+}
 applyPendingOutput();
 }
 
@@ -2498,6 +2987,10 @@ drawStatusBar();
 // Optional floating windows.
 if (showDeviceInfo) drawDeviceInfoWindow();
 if (showLog) drawLogWindow();
+
+if (deferredAutoLoadSessionPending) {
+	deferredAutoLoadSessionArmed = true;
+}
 if (showPerformance) drawPerformanceWindow();
 
 gui.end();
@@ -2608,7 +3101,7 @@ activeMode = static_cast<AiMode>(i);
 	if (useModeTokenBudgets) {
 		maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(i)], 32, 4096);
 	}
-	syncTextBackendForActiveMode(false);
+	syncTextBackendForActiveMode(false, false);
 }
 }
 
@@ -3257,6 +3750,9 @@ ImGui::SameLine();
 
 // Source type buttons.
 ofxGgmlScriptSourceType sourceType = scriptSource.getSourceType();
+if (sourceType == ofxGgmlScriptSourceType::None && deferredScriptSourceRestorePending) {
+	sourceType = deferredScriptSourceType;
+}
 bool isNone = (sourceType == ofxGgmlScriptSourceType::None);
 bool isLocal = (sourceType == ofxGgmlScriptSourceType::LocalFolder);
 bool isGitHub = (sourceType == ofxGgmlScriptSourceType::GitHubRepo);
@@ -3264,6 +3760,7 @@ bool isInternet = (sourceType == ofxGgmlScriptSourceType::Internet);
 
 if (isNone) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.35f, 1.0f));
 if (ImGui::SmallButton("None")) {
+	clearDeferredScriptSourceRestore();
 	scriptSource.clear();
 	selectedScriptFileIndex = -1;
 }
@@ -3274,6 +3771,7 @@ if (isLocal) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.3f, 1.0
 if (ImGui::SmallButton("Local Folder")) {
 ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
 if (result.bSuccess) {
+	clearDeferredScriptSourceRestore();
 	selectedScriptFileIndex = -1;
 	if (!scriptLanguages.empty()) {
 		scriptSource.setPreferredExtension(
@@ -3287,13 +3785,14 @@ ImGui::SameLine();
 
 const auto localWorkspaceInfo = scriptSource.getWorkspaceInfo();
 const bool isVisualStudioWorkspace =
-	isLocal &&
+	(scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder) &&
 	(localWorkspaceInfo.hasVisualStudioSolution ||
 	 !localWorkspaceInfo.visualStudioProjectPaths.empty());
 if (isVisualStudioWorkspace) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.45f, 0.35f, 0.7f, 1.0f));
 if (ImGui::SmallButton("Visual Studio")) {
 	ofFileDialogResult result = ofSystemLoadDialog("Select Visual Studio .sln or .vcxproj", false);
 	if (result.bSuccess) {
+		clearDeferredScriptSourceRestore();
 		selectedScriptFileIndex = -1;
 		if (!scriptLanguages.empty()) {
 			scriptSource.setPreferredExtension(
@@ -3307,6 +3806,7 @@ ImGui::SameLine();
 
 if (isGitHub) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.6f, 1.0f));
 if (ImGui::SmallButton("GitHub")) {
+	clearDeferredScriptSourceRestore();
 	selectedScriptFileIndex = -1;
 	scriptSource.setGitHubMode();
 }
@@ -3315,19 +3815,50 @@ ImGui::SameLine();
 
 if (isInternet) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.5f, 0.7f, 1.0f));
 if (ImGui::SmallButton("Internet")) {
+	clearDeferredScriptSourceRestore();
 	selectedScriptFileIndex = -1;
 	scriptSource.setInternetMode();
 }
 if (isInternet) ImGui::PopStyleColor();
 
+if (deferredScriptSourceRestorePending &&
+	scriptSource.getSourceType() == ofxGgmlScriptSourceType::None) {
+	ImGui::Separator();
+	if (deferredScriptSourceType == ofxGgmlScriptSourceType::LocalFolder) {
+		ImGui::TextDisabled("Saved local workspace is available but not loaded yet.");
+		if (!deferredScriptSourcePath.empty()) {
+			ImGui::TextWrapped("Path: %s", deferredScriptSourcePath.c_str());
+		}
+	} else if (deferredScriptSourceType == ofxGgmlScriptSourceType::GitHubRepo) {
+		ImGui::TextDisabled("Saved GitHub source is available but not loaded yet.");
+		if (std::strlen(scriptSourceGitHub) > 0) {
+			ImGui::TextWrapped(
+				"Repo: %s%s%s",
+				scriptSourceGitHub,
+				std::strlen(scriptSourceBranch) > 0 ? " @ " : "",
+				std::strlen(scriptSourceBranch) > 0 ? scriptSourceBranch : "");
+		}
+	} else if (deferredScriptSourceType == ofxGgmlScriptSourceType::Internet) {
+		const auto pendingUrls = splitStoredScriptSourceUrls(deferredScriptSourceInternetUrls);
+		ImGui::TextDisabled("Saved internet sources are available but not loaded yet.");
+		ImGui::TextWrapped("URLs: %d", static_cast<int>(pendingUrls.size()));
+	}
+	if (ImGui::Button("Load Saved Source", ImVec2(160, 0))) {
+		restoreDeferredScriptSourceIfNeeded();
+	}
+	if (sourceType != ofxGgmlScriptSourceType::None) {
+		ImGui::SameLine();
+	}
+}
+
 // Script source file browser (inline when active).
 const auto scriptSourceFiles = scriptSource.getFiles();
-if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
+if (scriptSource.getSourceType() != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 ImGui::BeginChild("##ScriptFiles", ImVec2(-1, 80), true);
-if (sourceType == ofxGgmlScriptSourceType::LocalFolder) {
+if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder) {
 const std::string localPath = scriptSource.getLocalFolderPath();
 ImGui::TextDisabled("Folder: %s", localPath.c_str());
-} else if (sourceType == ofxGgmlScriptSourceType::GitHubRepo) {
+} else if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::GitHubRepo) {
 const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
 const std::string branch = scriptSource.getGitHubBranch();
 ImGui::TextDisabled("GitHub: %s (%s)", ownerRepo.c_str(), branch.c_str());
@@ -3347,7 +3878,7 @@ ImGui::PopID();
 ImGui::EndChild();
 }
 
-	if (sourceType != ofxGgmlScriptSourceType::None) {
+	if (scriptSource.getSourceType() != ofxGgmlScriptSourceType::None) {
 		drawScriptSourcePanel();
 	}
 
@@ -4926,10 +5457,15 @@ if (!visionProfiles.empty()) {
 				: "Recommended model is not downloaded yet.");
 		ImGui::BeginDisabled(trim(visionModelPath) == recommendedModelPath);
 		if (ImGui::SmallButton("Use recommended path##Vision")) {
+			const std::string previousVisionModelPath = trim(visionModelPath);
 			copyStringToBuffer(
 				visionModelPath,
 				sizeof(visionModelPath),
 				recommendedModelPath);
+			if (previousVisionModelPath != trim(visionModelPath) &&
+				shouldManageLocalTextServer(trim(visionServerUrl).empty() ? profile.serverUrl : trim(visionServerUrl))) {
+				stopLocalTextServer(false);
+			}
 		}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
@@ -4963,6 +5499,12 @@ if (!visionProfiles.empty()) {
 		profile.supportsMultipleImages ? "supported" : "single-image oriented");
 }
 
+const bool visionProfileMayRequireMmproj =
+	!visionProfiles.empty() &&
+	selectedVisionProfileIndex >= 0 &&
+	selectedVisionProfileIndex < static_cast<int>(visionProfiles.size()) &&
+	visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)].mayRequireMmproj;
+
 ImGui::SetNextItemWidth(compactModeFieldWidth);
 ImGui::InputText("Server URL", visionServerUrl, sizeof(visionServerUrl));
 if (ImGui::IsItemHovered()) {
@@ -4975,7 +5517,28 @@ ImGui::SameLine();
 if (ImGui::Button("Browse model...", ImVec2(110, 0))) {
 	ofFileDialogResult result = ofSystemLoadDialog("Select vision model", false);
 	if (result.bSuccess) {
+		const std::string previousVisionModelPath = trim(visionModelPath);
 		copyStringToBuffer(visionModelPath, sizeof(visionModelPath), result.getPath());
+		if (previousVisionModelPath != trim(visionModelPath) &&
+			shouldManageLocalTextServer(trim(visionServerUrl))) {
+			stopLocalTextServer(false);
+		}
+	}
+}
+if (visionProfileMayRequireMmproj && !trim(visionModelPath).empty()) {
+	const std::string mmprojPath = findMatchingMmprojPath(trim(visionModelPath));
+	if (mmprojPath.empty()) {
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.65f, 0.25f, 1.0f),
+			"No matching mmproj .gguf found next to the selected model.");
+		drawHelpMarker(
+			"Many local multimodal llama.cpp models need a separate mmproj projector file in the same folder. "
+			"The local server launcher will add --mmproj automatically when it finds one.");
+	} else {
+		ImGui::TextColored(
+			ImVec4(0.35f, 0.8f, 0.45f, 1.0f),
+			"Using mmproj: %s",
+			ofFilePath::getFileName(mmprojPath).c_str());
 	}
 }
 
@@ -5070,11 +5633,15 @@ ImGui::InputTextMultiline(
 	ImGui::Combo("Video task", &videoTaskIndex, videoTaskLabels, 5);
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Video path", visionVideoPath, sizeof(visionVideoPath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
 	ImGui::SameLine();
 	if (ImGui::Button("Browse video...", ImVec2(110, 0))) {
 		ofFileDialogResult result = ofSystemLoadDialog("Select video", false);
 		if (result.bSuccess) {
 			copyStringToBuffer(visionVideoPath, sizeof(visionVideoPath), result.getPath());
+			autoSaveSession();
 		}
 	}
 	ImGui::SetNextItemWidth(180);
@@ -5265,7 +5832,7 @@ void ofApp::drawSpeechPanel() {
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Server URL", speechServerUrl, sizeof(speechServerUrl));
 	if (ImGui::IsItemHovered()) {
-		showWrappedTooltip("Optional OpenAI-compatible speech server. Example: http://127.0.0.1:8081 or http://127.0.0.1:8081/v1");
+		showWrappedTooltip("Optional OpenAI-compatible speech server. Leave blank to use whisper-cli only. Example: http://127.0.0.1:8081 or http://127.0.0.1:8081/v1");
 	}
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
@@ -6261,16 +6828,24 @@ for (int i = 0; i < kModeCount; i++) {
 out << "logLevel=" << static_cast<int>(logLevel) << "\n";
 
 // Script source.
-out << "scriptSourceType=" << static_cast<int>(scriptSource.getSourceType()) << "\n";
-out << "scriptSourcePath=" << escapeSessionText(scriptSource.getLocalFolderPath()) << "\n";
+const ofxGgmlScriptSourceType savedScriptSourceType =
+	deferredScriptSourceRestorePending ? deferredScriptSourceType : scriptSource.getSourceType();
+const std::string savedScriptSourcePath =
+	deferredScriptSourceRestorePending ? deferredScriptSourcePath : scriptSource.getLocalFolderPath();
+out << "scriptSourceType=" << static_cast<int>(savedScriptSourceType) << "\n";
+out << "scriptSourcePath=" << escapeSessionText(savedScriptSourcePath) << "\n";
 out << "scriptSourceGitHub=" << escapeSessionText(scriptSourceGitHub) << "\n";
 out << "scriptSourceBranch=" << escapeSessionText(scriptSourceBranch) << "\n";
 {
-	const auto internetUrls = scriptSource.getInternetUrls();
-	std::string packed;
-	for (size_t i = 0; i < internetUrls.size(); i++) {
-		if (i > 0) packed += "\n";
-		packed += internetUrls[i];
+	std::string packed = deferredScriptSourceRestorePending
+		? deferredScriptSourceInternetUrls
+		: std::string();
+	if (!deferredScriptSourceRestorePending) {
+		const auto internetUrls = scriptSource.getInternetUrls();
+		for (size_t i = 0; i < internetUrls.size(); i++) {
+			if (i > 0) packed += "\n";
+			packed += internetUrls[i];
+		}
 	}
 	out << "scriptSourceInternetUrls=" << escapeSessionText(packed) << "\n";
 }
@@ -6623,29 +7198,22 @@ if (!scriptLanguages.empty()) {
 	scriptSource.setPreferredExtension(
 		scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
 }
-if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::LocalFolder) &&
-	!loadedScriptSourcePath.empty()) {
-	scriptSource.setLocalFolder(loadedScriptSourcePath);
-	selectedScriptFileIndex = -1;
-} else if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::GitHubRepo)) {
-	scriptSource.setGitHubMode();
-	std::string ownerRepo = scriptSourceGitHub;
-	std::string branch = std::strlen(scriptSourceBranch) > 0
-		? std::string(scriptSourceBranch) : std::string();
-	if (!ownerRepo.empty()) {
-		scriptSource.setGitHubRepoFromInput(ownerRepo, branch);
-	}
-	selectedScriptFileIndex = -1;
-} else if (loadedScriptSourceType == static_cast<int>(ofxGgmlScriptSourceType::Internet)) {
-	std::vector<std::string> urls;
-	if (!loadedScriptSourceInternetUrls.empty()) {
-		urls = ofSplitString(loadedScriptSourceInternetUrls, "\n", true, true);
-	}
-	scriptSource.setInternetUrls(urls);
-	selectedScriptFileIndex = -1;
-} else {
-	scriptSource.clear();
-	selectedScriptFileIndex = -1;
+clearDeferredScriptSourceRestore();
+scriptSource.clear();
+selectedScriptFileIndex = -1;
+deferredScriptSourceType =
+	static_cast<ofxGgmlScriptSourceType>(loadedScriptSourceType);
+deferredScriptSourcePath = loadedScriptSourcePath;
+deferredScriptSourceInternetUrls = loadedScriptSourceInternetUrls;
+if (deferredScriptSourceType == ofxGgmlScriptSourceType::LocalFolder &&
+	!deferredScriptSourcePath.empty()) {
+	deferredScriptSourceRestorePending = true;
+} else if (deferredScriptSourceType == ofxGgmlScriptSourceType::GitHubRepo &&
+	std::strlen(scriptSourceGitHub) > 0) {
+	deferredScriptSourceRestorePending = true;
+} else if (deferredScriptSourceType == ofxGgmlScriptSourceType::Internet &&
+	!deferredScriptSourceInternetUrls.empty()) {
+	deferredScriptSourceRestorePending = true;
 }
 
 if (!modeTextBackendsSpecified) {
@@ -6662,13 +7230,65 @@ if (useModeTokenBudgets) {
 } else {
 	modeMaxTokens[static_cast<size_t>(activeMode)] = std::clamp(maxTokens, 32, 4096);
 }
-syncTextBackendForActiveMode(false);
+	syncTextBackendForActiveMode(false, false);
 
-return true;
+ return true;
 }
 
 void ofApp::autoSaveSession() {
 saveSession(lastSessionPath);
+}
+
+void ofApp::clearDeferredScriptSourceRestore() {
+	deferredScriptSourceRestorePending = false;
+	deferredScriptSourceType = ofxGgmlScriptSourceType::None;
+	deferredScriptSourcePath.clear();
+	deferredScriptSourceInternetUrls.clear();
+}
+
+bool ofApp::restoreDeferredScriptSourceIfNeeded() {
+	if (!deferredScriptSourceRestorePending) {
+		return true;
+	}
+
+	bool success = true;
+	switch (deferredScriptSourceType) {
+	case ofxGgmlScriptSourceType::LocalFolder:
+		if (!scriptLanguages.empty()) {
+			scriptSource.setPreferredExtension(
+				scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
+		}
+		success = !deferredScriptSourcePath.empty() &&
+			scriptSource.setLocalFolder(deferredScriptSourcePath);
+		break;
+	case ofxGgmlScriptSourceType::GitHubRepo: {
+		scriptSource.setGitHubMode();
+		const std::string ownerRepo = trim(scriptSourceGitHub);
+		const std::string branch = trim(scriptSourceBranch);
+		success = ownerRepo.empty() ||
+			scriptSource.setGitHubRepoFromInput(ownerRepo, branch);
+		break;
+	}
+	case ofxGgmlScriptSourceType::Internet:
+		scriptSource.setInternetUrls(
+			splitStoredScriptSourceUrls(deferredScriptSourceInternetUrls));
+		success = true;
+		break;
+	default:
+		scriptSource.clear();
+		success = true;
+		break;
+	}
+
+	selectedScriptFileIndex = -1;
+	if (success) {
+		clearDeferredScriptSourceRestore();
+	} else {
+		logWithLevel(
+			OF_LOG_WARNING,
+			"Saved script source could not be restored. You can re-select it from the Script panel.");
+	}
+	return success;
 }
 
 void ofApp::autoLoadSession() {
@@ -6702,47 +7322,13 @@ void ofApp::detectModelLayers() {
 	std::error_code ec;
 	if (!std::filesystem::exists(modelPath, ec) || ec) return;
 
-	// Use ofxGgmlModel to read GGUF metadata without loading tensor data.
-	// Common metadata keys for layer count:
-	//   <arch>.block_count  (e.g., llama.block_count, qwen2.block_count)
-	ofxGgmlModel model;
-	if (!model.load(modelPath)) return;
-
-	// Try to find the architecture name first.
-	std::string arch = model.getMetadataString("general.architecture");
-	if (!arch.empty()) {
-		int32_t layers = model.getMetadataInt32(arch + ".block_count", 0);
-		if (layers > 0) {
-			detectedModelLayers = layers;
-			if (shouldLog(OF_LOG_VERBOSE)) {
-				logWithLevel(OF_LOG_VERBOSE,
-					"Detected " + ofToString(detectedModelLayers) + " layers in model (" + arch + ")");
-			}
-		}
+	detectedModelLayers = detectGgufLayerCountMetadata(modelPath);
+	if (detectedModelLayers > 0 && shouldLog(OF_LOG_VERBOSE)) {
+		logWithLevel(
+			OF_LOG_VERBOSE,
+			"Detected " + ofToString(detectedModelLayers) +
+				" layers from GGUF metadata.");
 	}
-
-	// Fallback: try common architecture names.
-	// These are well-known GGUF architecture identifiers from llama.cpp.
-	// Update this list when new architectures are added to llama.cpp.
-	if (detectedModelLayers == 0) {
-		const char * archNames[] = {
-			"llama", "qwen2", "gemma", "phi", "starcoder",
-			"gpt2", "mpt", "falcon", "bloom", "mistral"
-		};
-		for (const auto & name : archNames) {
-			int32_t layers = model.getMetadataInt32(std::string(name) + ".block_count", 0);
-			if (layers > 0) {
-				detectedModelLayers = layers;
-				if (shouldLog(OF_LOG_VERBOSE)) {
-					logWithLevel(OF_LOG_VERBOSE,
-						"Detected " + ofToString(detectedModelLayers) + " layers in model (" + name + ")");
-				}
-				break;
-			}
-		}
-	}
-
-	model.close();
 }
 
 void ofApp::runHierarchicalReview(const std::string & overrideQuery) {
@@ -7052,6 +7638,37 @@ void ofApp::runVisionInference() {
 					profile.modelPath = suggested.string();
 				}
 			}
+			const std::string effectiveServerUrl = trim(profile.serverUrl).empty()
+				? std::string(kDefaultTextServerUrl)
+				: trim(profile.serverUrl);
+			const bool serverReady = ensureLlamaServerReadyForModel(
+				effectiveServerUrl,
+				profile.modelPath,
+				false,
+				shouldManageLocalTextServer(effectiveServerUrl));
+			if (!serverReady) {
+				std::string detail = textServerStatusMessage;
+				if (detail.empty() && shouldManageLocalTextServer(effectiveServerUrl)) {
+					if (profile.modelPath.empty()) {
+						detail = "Select a multimodal GGUF model first, or start llama-server manually.";
+					} else {
+						detail = "Local multimodal llama-server is not ready.";
+					}
+				}
+				if (detail.empty()) {
+					detail = "Vision server is not reachable.";
+				}
+				setPending("[Error] " + detail);
+				generating.store(false);
+				return;
+			}
+			const std::string capabilityDetail =
+				visionCapabilityFailureDetail(effectiveServerUrl, profile.modelPath);
+			if (!capabilityDetail.empty()) {
+				setPending("[Error] " + capabilityDetail);
+				generating.store(false);
+				return;
+			}
 
 			ofxGgmlVisionRequest request;
 			request.task = static_cast<ofxGgmlVisionTask>(taskIndex);
@@ -7064,12 +7681,18 @@ void ofApp::runVisionInference() {
 				request.responseLanguage =
 					chatLanguages[static_cast<size_t>(chatLanguageIndex)].name;
 			}
-			request.images.push_back({imagePath, "Input image", ""});
+			std::string imageUploadNote;
+			const std::string preparedImagePath =
+				prepareVisionImageForUpload(imagePath, &imageUploadNote);
+			if (!imageUploadNote.empty()) {
+				logWithLevel(OF_LOG_NOTICE, imageUploadNote);
+			}
+			request.images.push_back({preparedImagePath, "Input image", ""});
 
 			{
 				std::lock_guard<std::mutex> lock(streamMutex);
 				streamingOutput =
-					"Contacting " + ofxGgmlVisionInference::normalizeServerUrl(profile.serverUrl);
+					"Contacting " + ofxGgmlVisionInference::normalizeServerUrl(effectiveServerUrl);
 			}
 
 			const ofxGgmlVisionResult result = visionInference.runServerRequest(profile, request);
@@ -7148,7 +7771,61 @@ void ofApp::runVideoInference() {
 		: 0.2f;
 	const int sampledFrames = std::clamp(visionVideoMaxFrames, 1, 12);
 
-	workerThread = std::thread([this, profileBase, prompt, videoPath, modelPath, serverUrl, sidecarUrl, sidecarModel, systemPrompt, taskIndex, requestedMaxTokens, requestedTemperature, sampledFrames]() {
+	if (videoPath.empty()) {
+		visionOutput = "[Error] Select a video first.";
+		generating.store(false);
+		return;
+	}
+
+	ofxGgmlVideoRequest requestBase;
+	requestBase.task = static_cast<ofxGgmlVideoTask>(taskIndex);
+	requestBase.videoPath = videoPath;
+	requestBase.prompt = prompt;
+	requestBase.systemPrompt = systemPrompt;
+	requestBase.sidecarUrl = sidecarUrl;
+	requestBase.sidecarModel = sidecarModel;
+	requestBase.maxTokens = requestedMaxTokens;
+	requestBase.temperature = requestedTemperature;
+	const int effectiveFrames = profileBase.supportsMultipleImages
+		? sampledFrames
+		: 1;
+	requestBase.maxFrames = effectiveFrames;
+	if (chatLanguageIndex > 0 &&
+		chatLanguageIndex < static_cast<int>(chatLanguages.size())) {
+		requestBase.responseLanguage =
+			chatLanguages[static_cast<size_t>(chatLanguageIndex)].name;
+	}
+
+	std::string samplingError;
+	std::vector<ofxGgmlSampledVideoFrame> preSampledFrames;
+	try {
+		preSampledFrames = videoInference.sampleFrames(requestBase, samplingError);
+	} catch (const std::exception & e) {
+		visionOutput = std::string("[Error] Video frame sampling failed: ") + e.what();
+		generating.store(false);
+		return;
+	} catch (...) {
+		visionOutput = "[Error] Unknown failure while sampling video frames.";
+		generating.store(false);
+		return;
+	}
+
+	if (preSampledFrames.empty()) {
+		visionOutput = "[Error] " +
+			(samplingError.empty() ? std::string("no frames were sampled from the video") : samplingError);
+		generating.store(false);
+		return;
+	}
+
+	workerThread = std::thread([
+		this,
+		profileBase,
+		modelPath,
+		serverUrl,
+		sampledFrames,
+		requestBase,
+		preSampledFrames = std::move(preSampledFrames)
+	]() {
 		auto setPending = [this](const std::string & text) {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingOutput = text;
@@ -7157,38 +7834,55 @@ void ofApp::runVideoInference() {
 		};
 
 		try {
-			if (videoPath.empty()) {
-				setPending("[Error] Select a video first.");
-				generating.store(false);
-				return;
-			}
-
 			ofxGgmlVisionModelProfile profile = profileBase;
 			if (!serverUrl.empty()) {
 				profile.serverUrl = serverUrl;
 			}
 			if (!modelPath.empty()) {
 				profile.modelPath = modelPath;
+			} else if (trim(profile.modelPath).empty() &&
+				!trim(profile.modelFileHint).empty()) {
+				const std::filesystem::path suggested =
+					std::filesystem::path(ofToDataPath("models", true)) /
+					trim(profile.modelFileHint);
+				std::error_code ec;
+				if (std::filesystem::exists(suggested, ec) && !ec) {
+					profile.modelPath = suggested.string();
+				}
+			}
+			const std::string effectiveServerUrl = trim(profile.serverUrl).empty()
+				? std::string(kDefaultTextServerUrl)
+				: trim(profile.serverUrl);
+			const bool serverReady = ensureLlamaServerReadyForModel(
+				effectiveServerUrl,
+				profile.modelPath,
+				false,
+				shouldManageLocalTextServer(effectiveServerUrl));
+			if (!serverReady) {
+				std::string detail = textServerStatusMessage;
+				if (detail.empty() && shouldManageLocalTextServer(effectiveServerUrl)) {
+					if (profile.modelPath.empty()) {
+						detail = "Select a multimodal GGUF model first, or start llama-server manually.";
+					} else {
+						detail = "Local multimodal llama-server is not ready.";
+					}
+				}
+				if (detail.empty()) {
+					detail = "Vision server is not reachable.";
+				}
+				setPending("[Error] " + detail);
+				generating.store(false);
+				return;
+			}
+			const std::string capabilityDetail =
+				visionCapabilityFailureDetail(effectiveServerUrl, profile.modelPath);
+			if (!capabilityDetail.empty()) {
+				setPending("[Error] " + capabilityDetail);
+				generating.store(false);
+				return;
 			}
 
-			ofxGgmlVideoRequest request;
-			request.task = static_cast<ofxGgmlVideoTask>(taskIndex);
-			request.videoPath = videoPath;
-			request.prompt = prompt;
-			request.systemPrompt = systemPrompt;
-			request.sidecarUrl = sidecarUrl;
-			request.sidecarModel = sidecarModel;
-			request.maxTokens = requestedMaxTokens;
-			request.temperature = requestedTemperature;
-			const int effectiveFrames = profile.supportsMultipleImages
-				? sampledFrames
-				: 1;
-			request.maxFrames = effectiveFrames;
-			if (chatLanguageIndex > 0 &&
-				chatLanguageIndex < static_cast<int>(chatLanguages.size())) {
-				request.responseLanguage =
-					chatLanguages[static_cast<size_t>(chatLanguageIndex)].name;
-			}
+			ofxGgmlVideoRequest request = requestBase;
 
 			{
 				std::lock_guard<std::mutex> lock(streamMutex);
@@ -7197,8 +7891,8 @@ void ofApp::runVideoInference() {
 					 request.task == ofxGgmlVideoTask::Emotion) &&
 					!trim(request.sidecarUrl).empty();
 				streamingOutput = prefersTemporalSidecar
-					? "Sampling frames and contacting " + ofxGgmlVideoInference::normalizeSidecarUrl(request.sidecarUrl)
-					: "Sampling frames and contacting " + ofxGgmlVisionInference::normalizeServerUrl(profile.serverUrl);
+					? "Contacting " + ofxGgmlVideoInference::normalizeSidecarUrl(request.sidecarUrl)
+					: "Contacting " + ofxGgmlVisionInference::normalizeServerUrl(effectiveServerUrl);
 			}
 
 			const bool prefersTemporalSidecar =
@@ -7206,8 +7900,8 @@ void ofApp::runVideoInference() {
 				 request.task == ofxGgmlVideoTask::Emotion) &&
 				!trim(request.sidecarUrl).empty();
 			const ofxGgmlVideoResult result = prefersTemporalSidecar
-				? videoInference.runTemporalSidecarRequest(request)
-				: videoInference.runServerRequest(profile, request);
+				? videoInference.runTemporalSidecarRequest(request, preSampledFrames)
+				: videoInference.runServerRequest(profile, request, preSampledFrames);
 			if (cancelRequested.load()) {
 				setPending("[Cancelled] Video request cancelled.");
 			} else if (result.success) {
@@ -8299,41 +8993,42 @@ const float safeMinP = (std::isfinite(minP) ? std::clamp(minP, 0.0f, 1.0f) : 0.0
 // Backend reinitialization — called when the user changes backend or device.
 // ---------------------------------------------------------------------------
 
-void ofApp::reinitBackend() {
-if (generating.load()) return;
+void ofApp::initializeBackendEngine(bool announceReinit) {
+	ggml.close();
 
-ggml.close();
-
-ofxGgmlSettings settings;
-settings.threads = numThreads;
-if (selectedBackendIndex >= 0 &&
-	selectedBackendIndex < static_cast<int>(backendNames.size())) {
-	settings.preferredBackendName = backendNames[selectedBackendIndex];
-}
-setVulkanRuntimeDisabled(
-	shouldDisableVulkanForCurrentSelection(backendNames, selectedBackendIndex));
-settings.graphSize = static_cast<size_t>(contextSize);
-
-engineReady = ggml.setup(settings);
-if (engineReady) {
-	engineStatus = "Ready (" + ggml.getBackendName() + ")";
-	devices = ggml.listDevices();
-	lastBackendUsed = ggml.getBackendName();
-	// Refresh backend names from discovered devices.
-	backendNames.clear();
-	for (const auto & d : devices) {
-		backendNames.push_back(d.name);
+	ofxGgmlSettings settings;
+	settings.threads = numThreads;
+	if (selectedBackendIndex >= 0 &&
+		selectedBackendIndex < static_cast<int>(backendNames.size())) {
+		settings.preferredBackendName = backendNames[selectedBackendIndex];
 	}
-	// Update the dropdown to match the *actual* running backend.
-	// The engine may have fallen back to CPU if the requested GPU
-	// backend could not be initialised.
-	syncSelectedBackendIndex();
-} else {
-	engineStatus = "Failed to initialize ggml engine";
-	devices.clear();
+	setVulkanRuntimeDisabled(
+		shouldDisableVulkanForCurrentSelection(backendNames, selectedBackendIndex));
+	settings.graphSize = static_cast<size_t>(contextSize);
+
+	engineReady = ggml.setup(settings);
+	if (engineReady) {
+		engineStatus = "Ready (" + ggml.getBackendName() + ")";
+		devices = ggml.listDevices();
+		lastBackendUsed = ggml.getBackendName();
+		backendNames.clear();
+		for (const auto & d : devices) {
+			backendNames.push_back(d.name);
+		}
+		syncSelectedBackendIndex();
+	} else {
+		engineStatus = "Failed to initialize ggml engine";
+		devices.clear();
+	}
+
+	if (announceReinit) {
+		logWithLevel(OF_LOG_NOTICE, "Backend reinitialized: " + engineStatus);
+	}
 }
 
-	logWithLevel(OF_LOG_NOTICE, "Backend reinitialized: " + engineStatus);
+void ofApp::reinitBackend() {
+ if (generating.load()) return;
+ initializeBackendEngine(true);
 }
 
 void ofApp::syncSelectedBackendIndex() {

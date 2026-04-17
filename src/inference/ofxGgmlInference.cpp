@@ -214,12 +214,9 @@ static bool detectVisionCapabilityFromServerResponse(const std::string & respons
 #else
 	try {
 		const ofJson parsed = ofJson::parse(responseJson);
-		if (!parsed.contains("data") || !parsed["data"].is_array()) {
-			return false;
-		}
-		for (const auto & item : parsed["data"]) {
+		auto itemHasVisionCapability = [](const ofJson & item) {
 			if (!item.is_object()) {
-				continue;
+				return false;
 			}
 			if (item.contains("modalities") && item["modalities"].is_object()) {
 				const auto & modalities = item["modalities"];
@@ -231,6 +228,33 @@ static bool detectVisionCapabilityFromServerResponse(const std::string & respons
 			}
 			if (item.value("multimodal", false)) {
 				return true;
+			}
+			if (item.contains("capabilities") && item["capabilities"].is_array()) {
+				for (const auto & capability : item["capabilities"]) {
+					if (!capability.is_string()) {
+						continue;
+					}
+					const std::string name = capability.get<std::string>();
+					if (name == "vision" || name == "image" || name == "multimodal") {
+						return true;
+					}
+				}
+			}
+			return false;
+		};
+
+		if (parsed.contains("data") && parsed["data"].is_array()) {
+			for (const auto & item : parsed["data"]) {
+				if (itemHasVisionCapability(item)) {
+					return true;
+				}
+			}
+		}
+		if (parsed.contains("models") && parsed["models"].is_array()) {
+			for (const auto & item : parsed["models"]) {
+				if (itemHasVisionCapability(item)) {
+					return true;
+				}
 			}
 		}
 	} catch (...) {

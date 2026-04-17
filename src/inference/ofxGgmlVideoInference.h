@@ -118,8 +118,15 @@ public:
 	ofxGgmlVideoResult runServerRequest(
 		const ofxGgmlVisionModelProfile & profile,
 		const ofxGgmlVideoRequest & request) const;
+	ofxGgmlVideoResult runServerRequest(
+		const ofxGgmlVisionModelProfile & profile,
+		const ofxGgmlVideoRequest & request,
+		const std::vector<ofxGgmlSampledVideoFrame> & sampledFrames) const;
 	ofxGgmlVideoResult runTemporalSidecarRequest(
 		const ofxGgmlVideoRequest & request) const;
+	ofxGgmlVideoResult runTemporalSidecarRequest(
+		const ofxGgmlVideoRequest & request,
+		const std::vector<ofxGgmlSampledVideoFrame> & sampledFrames) const;
 
 private:
 	std::shared_ptr<ofxGgmlVideoBackend> m_backend;

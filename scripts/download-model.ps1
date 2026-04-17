@@ -6,8 +6,8 @@ param(
     [int]$TimeoutSec = 1800
 )
 
-# Downloads only text-generation GGUF presets.
-# Whisper / speech and multimodal vision models are configured separately.
+# Downloads recommended GGUF presets and a few known companion runtime files.
+# Whisper / speech models are configured separately.
 
 $ErrorActionPreference = 'Stop'
 
@@ -21,6 +21,21 @@ $models = @(
     @{ Id = '1'; Name = 'qwen2.5-1.5b-instruct-q4_k_m.gguf'; Url = 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf' },
     @{ Id = '2'; Name = 'qwen2.5-coder-1.5b-instruct-q4_k_m.gguf'; Url = 'https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf' }
 )
+
+$knownCompanionFiles = @{
+    'LFM2.5-VL-1.6B-Q4_0.gguf' = @(
+        @{
+            Name = 'mmproj-LFM2.5-VL-1.6b-Q8_0.gguf'
+            Url = 'https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-GGUF/resolve/main/mmproj-LFM2.5-VL-1.6b-Q8_0.gguf'
+        }
+    )
+    'LFM2.5-VL-1.6B-Q8_0.gguf' = @(
+        @{
+            Name = 'mmproj-LFM2.5-VL-1.6b-Q8_0.gguf'
+            Url = 'https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-GGUF/resolve/main/mmproj-LFM2.5-VL-1.6b-Q8_0.gguf'
+        }
+    )
+}
 
 if ($Preset -eq 'both') {
     $targets = $models
@@ -69,8 +84,28 @@ function Download-Model {
     }
 }
 
+function Download-CompanionFiles {
+    param(
+        [Parameter(Mandatory=$true)][string]$PrimaryName,
+        [Parameter(Mandatory=$true)][string]$Directory,
+        [Parameter(Mandatory=$true)][int]$RetryCount,
+        [Parameter(Mandatory=$true)][int]$Timeout
+    )
+
+    $companions = $knownCompanionFiles[$PrimaryName]
+    if (-not $companions) {
+        return
+    }
+
+    foreach ($companion in $companions) {
+        Write-Host "  - Companion file required for $PrimaryName: $($companion.Name)"
+        Download-Model -Model $companion -Directory $Directory -RetryCount $RetryCount -Timeout $Timeout
+    }
+}
+
 foreach ($model in $targets) {
     Download-Model -Model $model -Directory $OutputDir -RetryCount $Retries -Timeout $TimeoutSec
+    Download-CompanionFiles -PrimaryName $model.Name -Directory $OutputDir -RetryCount $Retries -Timeout $TimeoutSec
 }
 
 Write-Host "Model download complete."
