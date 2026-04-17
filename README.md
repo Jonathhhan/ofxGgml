@@ -31,6 +31,7 @@ This addon is released under the [MIT License](LICENSE).
 - server-streamed text output now uses delta-based chunk handling so Chat and Script mode no longer duplicate partial text while `llama-server` replies are still arriving
 - addon-level `Live context` support for loaded sources, domain-provider grounding, generic search fallback, and stricter citation-oriented response modes
 - `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
+- `ofxGgmlTtsInference` as a lightweight text-to-speech bridge layer for optional `chatllm.cpp`-backed OuteTTS workflows and speaker-profile handling
 - `ofxGgmlClipInference` as a lightweight CLIP-style embedding and ranking bridge layer for text/image similarity workflows, with an optional `clip.cpp` adapter path
 - `ofxGgmlDiffusionInference` as a lightweight image-generation bridge layer that can host an `ofxStableDiffusion` adapter without coupling diffusion internals into the core addon
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
@@ -58,7 +59,7 @@ Core implementation is split by concern:
 - `src/compute/` for tensors and graph building
 - `src/model/` for GGUF model loading
 - `src/inference/` for completion execution, grounded prompt assembly, and speech / vision / video inference helpers
-- `src/inference/` also now includes bridge scaffolds for optional CLIP-style ranking and diffusion/image-generation backends such as `clip.cpp` and `ofxStableDiffusion`
+- `src/inference/` also now includes bridge scaffolds for optional CLIP-style ranking, TTS, and diffusion/image-generation backends such as `clip.cpp`, OuteTTS, and `ofxStableDiffusion`
 - `src/assistants/` for chat, code, workspace, review, and text-task helpers
 - `src/support/` for script sources and project memory
 
@@ -421,6 +422,12 @@ The Speech panel now supports a simple microphone workflow directly in the GUI:
 - `Start Mic Recording` captures from the default input device
 - `Stop + Run` writes a temporary WAV and runs the current speech task immediately
 - `Use Last Recording` lets you retry the same captured audio after changing prompt, language hint, or `Transcribe` / `Translate` task settings
+
+## TTS Helpers
+
+`ofxGgmlTtsInference` adds a parallel addon-level text-to-speech layer for synthesis workflows that should stay separate from Whisper-style speech transcription. The initial scaffold is backend-agnostic and now ships with a ready-to-attach `chatllm.cpp` adapter for OuteTTS models, including speaker-profile paths and the sampler controls that matter for llama-backed TTS models.
+
+Use it when an app wants local speech generation without baking a specific TTS runtime into its UI layer. The bridge exposes `Synthesize`, `Clone Voice`, and `Continue Speech` task labels, ships with starter OuteTTS profile hints, and can attach a runtime callback through `createChatLlmTtsBridgeBackend(...)`, `createOuteTtsBridgeBackend(...)`, or `createTtsBridgeBackend(...)`.
 
 ## Vision Helpers
 

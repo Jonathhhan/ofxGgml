@@ -43,7 +43,7 @@
 // ---------------------------------------------------------------------------
 
 const char * ofApp::modeLabels[kModeCount] = {
-	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Vision", "Speech", "Diffusion", "CLIP"
+	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Vision", "Speech", "TTS", "Diffusion", "CLIP"
 };
 
 const char * const kTextBackendLabels[] = {
@@ -3045,14 +3045,20 @@ writeOutput.clear();
 translateOutput.clear();
 customOutput.clear();
 visionOutput.clear();
-speechOutput.clear();
-diffusionOutput.clear();
-clipOutput.clear();
-speechDetectedLanguage.clear();
-speechTranscriptPath.clear();
-speechSrtPath.clear();
-speechSegmentCount = 0;
-diffusionBackendName.clear();
+	speechOutput.clear();
+	ttsOutput.clear();
+	diffusionOutput.clear();
+	clipOutput.clear();
+	speechDetectedLanguage.clear();
+	speechTranscriptPath.clear();
+	speechSrtPath.clear();
+	speechSegmentCount = 0;
+	ttsBackendName.clear();
+	ttsElapsedMs = 0.0f;
+	ttsResolvedSpeakerPath.clear();
+	ttsAudioFiles.clear();
+	ttsMetadata.clear();
+	diffusionBackendName.clear();
 diffusionElapsedMs = 0.0f;
 diffusionGeneratedImages.clear();
 diffusionMetadata.clear();
@@ -3534,6 +3540,7 @@ case AiMode::Summarize: drawSummarizePanel(); break;
 	case AiMode::Custom:    drawCustomPanel();    break;
 	case AiMode::Vision:    drawVisionPanel();    break;
 	case AiMode::Speech:    drawSpeechPanel();    break;
+	case AiMode::Tts:       drawTtsPanel();       break;
 	case AiMode::Diffusion: drawDiffusionPanel(); break;
 	case AiMode::Clip:      drawClipPanel();      break;
 	}
@@ -6031,6 +6038,356 @@ void ofApp::drawSpeechPanel() {
 	}
 }
 
+void ofApp::drawTtsPanel() {
+	drawPanelHeader("TTS", "optional text-to-speech bridge for chatllm.cpp-backed OuteTTS models");
+	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
+
+	ImGui::TextWrapped(
+		"This panel is a thin bridge surface for local or wrapped text-to-speech runtimes. "
+		"It keeps the UI, session state, and output artifacts in the example app while leaving "
+		"the actual synthesis backend optional.");
+
+	const auto applyTtsProfileDefaults =
+		[this](const ofxGgmlTtsModelProfile & profile, bool onlyWhenEmpty) {
+			const std::string suggestedPath =
+				suggestedModelPath(profile.modelPath, profile.modelFileHint);
+			if (!suggestedPath.empty() &&
+				(!onlyWhenEmpty || trim(ttsModelPath).empty())) {
+				copyStringToBuffer(
+					ttsModelPath,
+					sizeof(ttsModelPath),
+					suggestedPath);
+			}
+			const std::string suggestedSpeakerPath =
+				suggestedModelPath(profile.speakerPath, profile.speakerFileHint);
+			if (!suggestedSpeakerPath.empty() &&
+				(!onlyWhenEmpty || trim(ttsSpeakerPath).empty())) {
+				copyStringToBuffer(
+					ttsSpeakerPath,
+					sizeof(ttsSpeakerPath),
+					suggestedSpeakerPath);
+			}
+			if (trim(ttsOutputPath).empty()) {
+				copyStringToBuffer(
+					ttsOutputPath,
+					sizeof(ttsOutputPath),
+					ofToDataPath("generated/tts_output.wav", true));
+			}
+		};
+
+	bool loadedTtsProfiles = false;
+	if (ttsProfiles.empty()) {
+		ttsProfiles = ofxGgmlTtsInference::defaultProfiles();
+		loadedTtsProfiles = !ttsProfiles.empty();
+	}
+	selectedTtsProfileIndex = std::clamp(
+		selectedTtsProfileIndex,
+		0,
+		std::max(0, static_cast<int>(ttsProfiles.size()) - 1));
+	if (loadedTtsProfiles && !ttsProfiles.empty()) {
+		applyTtsProfileDefaults(
+			ttsProfiles[static_cast<size_t>(selectedTtsProfileIndex)],
+			true);
+	}
+
+	const ofxGgmlTtsModelProfile activeProfile =
+		ttsProfiles.empty()
+			? ofxGgmlTtsModelProfile{}
+			: ttsProfiles[static_cast<size_t>(selectedTtsProfileIndex)];
+	const auto activeTask =
+		static_cast<ofxGgmlTtsTask>(std::clamp(ttsTaskIndex, 0, 2));
+	const auto existingBridge =
+		std::dynamic_pointer_cast<ofxGgmlTtsBridgeBackend>(
+			ttsInference.getBackend());
+	if (!existingBridge || !existingBridge->isConfigured()) {
+		ofxGgmlChatLlmTtsAdapters::RuntimeOptions runtimeOptions;
+		ofxGgmlChatLlmTtsAdapters::attachBackend(
+			ttsInference,
+			runtimeOptions,
+			"ChatLLM TTS");
+	}
+	const auto configuredBridge =
+		std::dynamic_pointer_cast<ofxGgmlTtsBridgeBackend>(
+			ttsInference.getBackend());
+	const bool bridgeConfigured =
+		!configuredBridge || configuredBridge->isConfigured();
+	const std::string ttsBackendLabel =
+		ttsInference.getBackend()
+			? ttsInference.getBackend()->backendName()
+			: std::string("(none)");
+
+	ImGui::TextDisabled("Backend: %s", ttsBackendLabel.c_str());
+	if (!bridgeConfigured) {
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.65f, 0.25f, 1.0f),
+			"Bridge scaffold only: attach a chatllm.cpp adapter callback to enable synthesis.");
+	}
+
+	if (!ttsProfiles.empty()) {
+		std::vector<const char *> profileNames;
+		profileNames.reserve(ttsProfiles.size());
+		for (const auto & profile : ttsProfiles) {
+			profileNames.push_back(profile.name.c_str());
+		}
+		ImGui::SetNextItemWidth(280);
+		if (ImGui::Combo(
+			"TTS profile",
+			&selectedTtsProfileIndex,
+			profileNames.data(),
+			static_cast<int>(profileNames.size()))) {
+			const auto & profile = ttsProfiles[static_cast<size_t>(selectedTtsProfileIndex)];
+			applyTtsProfileDefaults(profile, false);
+			if (!profile.supportsVoiceCloning &&
+				activeTask == ofxGgmlTtsTask::CloneVoice) {
+				ttsTaskIndex = static_cast<int>(ofxGgmlTtsTask::Synthesize);
+			}
+			if (!profile.supportsStreaming) {
+				ttsStreamAudio = false;
+			}
+		}
+
+		const std::string recommendedModelPath =
+			suggestedModelPath(activeProfile.modelPath, activeProfile.modelFileHint);
+		const std::string recommendedModelUrl =
+			suggestedModelDownloadUrl(activeProfile.modelRepoHint, activeProfile.modelFileHint);
+		const std::string recommendedSpeakerPath =
+			suggestedModelPath(activeProfile.speakerPath, activeProfile.speakerFileHint);
+		const std::string recommendedSpeakerUrl =
+			suggestedModelDownloadUrl(activeProfile.speakerRepoHint, activeProfile.speakerFileHint);
+		ImGui::TextDisabled("Architecture: %s", activeProfile.architecture.c_str());
+		if (!activeProfile.modelRepoHint.empty()) {
+			ImGui::TextDisabled("Recommended repo: %s", activeProfile.modelRepoHint.c_str());
+		}
+		if (!activeProfile.modelFileHint.empty()) {
+			ImGui::TextDisabled("Recommended file: %s", activeProfile.modelFileHint.c_str());
+		}
+		if (!recommendedModelPath.empty()) {
+			ImGui::TextDisabled("Recommended local path: %s", recommendedModelPath.c_str());
+			ImGui::TextDisabled(
+				pathExists(recommendedModelPath)
+					? "Recommended model is already present."
+					: "Recommended model is not downloaded yet.");
+			ImGui::BeginDisabled(trim(ttsModelPath) == recommendedModelPath);
+			if (ImGui::SmallButton("Use recommended path##TtsModel")) {
+				copyStringToBuffer(
+					ttsModelPath,
+					sizeof(ttsModelPath),
+					recommendedModelPath);
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			ImGui::BeginDisabled(recommendedModelUrl.empty());
+			if (ImGui::SmallButton("Download model##Tts")) {
+				ofLaunchBrowser(recommendedModelUrl);
+			}
+			ImGui::EndDisabled();
+		}
+		if (!recommendedSpeakerPath.empty()) {
+			ImGui::TextDisabled("Recommended speaker path: %s", recommendedSpeakerPath.c_str());
+			ImGui::BeginDisabled(trim(ttsSpeakerPath) == recommendedSpeakerPath);
+			if (ImGui::SmallButton("Use speaker path##Tts")) {
+				copyStringToBuffer(
+					ttsSpeakerPath,
+					sizeof(ttsSpeakerPath),
+					recommendedSpeakerPath);
+			}
+			ImGui::EndDisabled();
+			if (!recommendedSpeakerUrl.empty()) {
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Download speaker##Tts")) {
+					ofLaunchBrowser(recommendedSpeakerUrl);
+				}
+			}
+		}
+	}
+
+	ImGui::SetNextItemWidth(220);
+	if (ImGui::BeginCombo("Task", ofxGgmlTtsInference::taskLabel(activeTask))) {
+		for (int i = 0; i <= 2; ++i) {
+			const auto task = static_cast<ofxGgmlTtsTask>(i);
+			const bool selected = (ttsTaskIndex == i);
+			if (ImGui::Selectable(ofxGgmlTtsInference::taskLabel(task), selected)) {
+				ttsTaskIndex = i;
+			}
+			if (selected) ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+
+	ImGui::InputTextMultiline(
+		"Text",
+		ttsInput,
+		sizeof(ttsInput),
+		ImVec2(-1, 110));
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Model path", ttsModelPath, sizeof(ttsModelPath));
+	ImGui::SameLine();
+	if (ImGui::Button("Browse model##Tts", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select TTS model", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(ttsModelPath, sizeof(ttsModelPath), result.getPath());
+		}
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Speaker profile", ttsSpeakerPath, sizeof(ttsSpeakerPath));
+	ImGui::SameLine();
+	if (ImGui::Button("Browse speaker...", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select speaker profile", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(ttsSpeakerPath, sizeof(ttsSpeakerPath), result.getPath());
+		}
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Reference audio", ttsSpeakerReferencePath, sizeof(ttsSpeakerReferencePath));
+	ImGui::SameLine();
+	if (ImGui::Button("Browse ref...", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select reference audio", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(
+				ttsSpeakerReferencePath,
+				sizeof(ttsSpeakerReferencePath),
+				result.getPath());
+		}
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Prompt audio", ttsPromptAudioPath, sizeof(ttsPromptAudioPath));
+	ImGui::SameLine();
+	if (ImGui::Button("Browse prompt...", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select prompt audio", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(ttsPromptAudioPath, sizeof(ttsPromptAudioPath), result.getPath());
+		}
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Output path", ttsOutputPath, sizeof(ttsOutputPath));
+	ImGui::SameLine();
+	if (ImGui::Button("Browse output...", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemSaveDialog(
+			trim(ttsOutputPath).empty() ? "tts_output.wav" : trim(ttsOutputPath),
+			"Save synthesized audio");
+		if (result.bSuccess) {
+			copyStringToBuffer(ttsOutputPath, sizeof(ttsOutputPath), result.getPath());
+		}
+	}
+
+	ImGui::SetNextItemWidth(180);
+	ImGui::InputText("Language", ttsLanguage, sizeof(ttsLanguage));
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Optional language hint for the TTS backend.");
+	}
+
+	ImGui::SetNextItemWidth(160);
+	ImGui::InputInt("Seed", &ttsSeed);
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(160);
+	ImGui::InputInt("Max tokens", &ttsMaxTokens);
+
+	ImGui::SliderFloat("Temperature", &ttsTemperature, 0.0f, 2.0f, "%.2f");
+	ImGui::SliderFloat("Repeat penalty", &ttsRepetitionPenalty, 1.0f, 2.0f, "%.2f");
+	ImGui::SliderInt("Repeat range", &ttsRepetitionRange, 0, 256);
+	ImGui::SliderInt("Top-K", &ttsTopK, 0, 200);
+	ImGui::SliderFloat("Top-P", &ttsTopP, 0.0f, 1.0f, "%.2f");
+	ImGui::SliderFloat("Min-P", &ttsMinP, 0.0f, 1.0f, "%.2f");
+	ImGui::Checkbox("Normalize text", &ttsNormalizeText);
+	ImGui::BeginDisabled(!activeProfile.supportsStreaming);
+	ImGui::Checkbox("Stream audio", &ttsStreamAudio);
+	ImGui::EndDisabled();
+
+	const bool needsReferenceAudio = activeTask == ofxGgmlTtsTask::CloneVoice;
+	const bool needsPromptAudio = activeTask == ofxGgmlTtsTask::ContinueSpeech;
+
+	ImGui::BeginDisabled(generating.load());
+	if (ImGui::Button("Run TTS", ImVec2(140, 0))) {
+		runTtsInference();
+	}
+	ImGui::EndDisabled();
+	if (!bridgeConfigured) {
+		ImGui::SameLine();
+		ImGui::TextDisabled("(waiting for backend adapter)");
+	}
+	if (needsReferenceAudio && trim(ttsSpeakerReferencePath).empty()) {
+		ImGui::TextDisabled("Clone Voice expects a reference audio file.");
+	}
+	if (needsPromptAudio && trim(ttsPromptAudioPath).empty()) {
+		ImGui::TextDisabled("Continue Speech expects prompt audio.");
+	}
+
+	ImGui::Separator();
+	ImGui::Text("Output:");
+	if (!ttsOutput.empty()) {
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Copy##TtsCopy")) copyToClipboard(ttsOutput);
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Clear##TtsClear")) {
+			ttsOutput.clear();
+			ttsBackendName.clear();
+			ttsElapsedMs = 0.0f;
+			ttsResolvedSpeakerPath.clear();
+			ttsAudioFiles.clear();
+			ttsMetadata.clear();
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("(%d chars)", static_cast<int>(ttsOutput.size()));
+	}
+	if (!ttsBackendName.empty()) {
+		ImGui::TextDisabled(
+			"Last backend: %s%s",
+			ttsBackendName.c_str(),
+			ttsElapsedMs > 0.0f
+				? (" in " + ofxGgmlHelpers::formatDurationMs(ttsElapsedMs)).c_str()
+				: "");
+	}
+	if (!ttsResolvedSpeakerPath.empty()) {
+		ImGui::TextDisabled("Speaker profile: %s", ttsResolvedSpeakerPath.c_str());
+	}
+	if (!ttsAudioFiles.empty()) {
+		ImGui::TextDisabled("Generated audio:");
+		for (const auto & artifact : ttsAudioFiles) {
+			std::ostringstream line;
+			line << artifact.path;
+			if (artifact.sampleRate > 0) {
+				line << " | " << artifact.sampleRate << " Hz";
+			}
+			if (artifact.channels > 0) {
+				line << " | " << artifact.channels << " ch";
+			}
+			if (artifact.durationSeconds > 0.0f) {
+				line << " | " << ofToString(artifact.durationSeconds, 2) << " s";
+			}
+			ImGui::BulletText("%s", line.str().c_str());
+		}
+	}
+
+	if (generating.load() && activeGenerationMode == AiMode::Tts) {
+		ImGui::BeginChild("##TtsOut", ImVec2(0, 0), true);
+		std::string partial;
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			partial = streamingOutput;
+		}
+		if (partial.empty()) {
+			int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+			ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
+		} else {
+			ImGui::TextWrapped("%s", partial.c_str());
+		}
+		ImGui::EndChild();
+	} else {
+		ImGui::BeginChild("##TtsOut", ImVec2(0, 0), true);
+		if (ttsOutput.empty()) {
+			ImGui::TextDisabled("TTS synthesis results appear here.");
+		} else {
+			ImGui::TextWrapped("%s", ttsOutput.c_str());
+		}
+		ImGui::EndChild();
+	}
+}
+
 void ofApp::drawDiffusionPanel() {
 	drawPanelHeader("Diffusion", "optional image generation bridge for ofxStableDiffusion");
 	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
@@ -6885,6 +7242,25 @@ out << "speechServerModel=" << escapeSessionText(speechServerModel) << "\n";
   out << "speechTaskIndex=" << speechTaskIndex << "\n";
   out << "speechProfileIndex=" << selectedSpeechProfileIndex << "\n";
   out << "speechReturnTimestamps=" << (speechReturnTimestamps ? 1 : 0) << "\n";
+  out << "ttsInput=" << escapeSessionText(ttsInput) << "\n";
+  out << "ttsModelPath=" << escapeSessionText(ttsModelPath) << "\n";
+  out << "ttsSpeakerPath=" << escapeSessionText(ttsSpeakerPath) << "\n";
+  out << "ttsSpeakerReferencePath=" << escapeSessionText(ttsSpeakerReferencePath) << "\n";
+  out << "ttsOutputPath=" << escapeSessionText(ttsOutputPath) << "\n";
+  out << "ttsPromptAudioPath=" << escapeSessionText(ttsPromptAudioPath) << "\n";
+  out << "ttsLanguage=" << escapeSessionText(ttsLanguage) << "\n";
+  out << "ttsTaskIndex=" << ttsTaskIndex << "\n";
+  out << "ttsProfileIndex=" << selectedTtsProfileIndex << "\n";
+  out << "ttsSeed=" << ttsSeed << "\n";
+  out << "ttsMaxTokens=" << ttsMaxTokens << "\n";
+  out << "ttsTemperature=" << ofToString(ttsTemperature, 4) << "\n";
+  out << "ttsRepetitionPenalty=" << ofToString(ttsRepetitionPenalty, 4) << "\n";
+  out << "ttsRepetitionRange=" << ttsRepetitionRange << "\n";
+  out << "ttsTopK=" << ttsTopK << "\n";
+  out << "ttsTopP=" << ofToString(ttsTopP, 4) << "\n";
+  out << "ttsMinP=" << ofToString(ttsMinP, 4) << "\n";
+  out << "ttsStreamAudio=" << (ttsStreamAudio ? 1 : 0) << "\n";
+  out << "ttsNormalizeText=" << (ttsNormalizeText ? 1 : 0) << "\n";
   out << "diffusionPrompt=" << escapeSessionText(diffusionPrompt) << "\n";
   out << "diffusionNegativePrompt=" << escapeSessionText(diffusionNegativePrompt) << "\n";
   out << "diffusionModelPath=" << escapeSessionText(diffusionModelPath) << "\n";
@@ -6917,9 +7293,10 @@ out << "speechServerModel=" << escapeSessionText(speechServerModel) << "\n";
   out << "writeOutput=" << escapeSessionText(writeOutput) << "\n";
 out << "translateOutput=" << escapeSessionText(translateOutput) << "\n";
   out << "customOutput=" << escapeSessionText(customOutput) << "\n";
-  out << "visionOutput=" << escapeSessionText(visionOutput) << "\n";
-  out << "speechOutput=" << escapeSessionText(speechOutput) << "\n";
-  out << "diffusionOutput=" << escapeSessionText(diffusionOutput) << "\n";
+    out << "visionOutput=" << escapeSessionText(visionOutput) << "\n";
+    out << "speechOutput=" << escapeSessionText(speechOutput) << "\n";
+    out << "ttsOutput=" << escapeSessionText(ttsOutput) << "\n";
+    out << "diffusionOutput=" << escapeSessionText(diffusionOutput) << "\n";
   out << "clipOutput=" << escapeSessionText(clipOutput) << "\n";
 out << "liveContextMode=" << static_cast<int>(liveContextMode) << "\n";
 out << "liveContextAllowPromptUrls=" << (liveContextAllowPromptUrls ? 1 : 0) << "\n";
@@ -6975,6 +7352,55 @@ auto safeStof = [](const std::string & s, float fallback = 0.0f) -> float {
 try { return std::stof(s); } catch (...) { return fallback; }
 };
 
+auto handleTtsSessionKey = [this, &copyToBuf, &safeStoi, &safeStof](
+	const std::string & key,
+	const std::string & value) -> bool {
+	if (key == "ttsInput") {
+		copyToBuf(ttsInput, sizeof(ttsInput), value);
+	} else if (key == "ttsModelPath") {
+		copyToBuf(ttsModelPath, sizeof(ttsModelPath), value);
+	} else if (key == "ttsSpeakerPath") {
+		copyToBuf(ttsSpeakerPath, sizeof(ttsSpeakerPath), value);
+	} else if (key == "ttsSpeakerReferencePath") {
+		copyToBuf(ttsSpeakerReferencePath, sizeof(ttsSpeakerReferencePath), value);
+	} else if (key == "ttsOutputPath") {
+		copyToBuf(ttsOutputPath, sizeof(ttsOutputPath), value);
+	} else if (key == "ttsPromptAudioPath") {
+		copyToBuf(ttsPromptAudioPath, sizeof(ttsPromptAudioPath), value);
+	} else if (key == "ttsLanguage") {
+		copyToBuf(ttsLanguage, sizeof(ttsLanguage), value);
+	} else if (key == "ttsTaskIndex") {
+		ttsTaskIndex = std::clamp(safeStoi(value), 0, 2);
+	} else if (key == "ttsProfileIndex") {
+		selectedTtsProfileIndex = std::max(0, safeStoi(value));
+	} else if (key == "ttsSeed") {
+		ttsSeed = std::clamp(safeStoi(value, -1), -1, 2147483647);
+	} else if (key == "ttsMaxTokens") {
+		ttsMaxTokens = std::max(0, safeStoi(value, 0));
+	} else if (key == "ttsTemperature") {
+		ttsTemperature = std::clamp(safeStof(value, 0.4f), 0.0f, 2.0f);
+	} else if (key == "ttsRepetitionPenalty") {
+		ttsRepetitionPenalty = std::clamp(safeStof(value, 1.1f), 1.0f, 3.0f);
+	} else if (key == "ttsRepetitionRange") {
+		ttsRepetitionRange = std::clamp(safeStoi(value, 64), 0, 512);
+	} else if (key == "ttsTopK") {
+		ttsTopK = std::clamp(safeStoi(value, 40), 0, 200);
+	} else if (key == "ttsTopP") {
+		ttsTopP = std::clamp(safeStof(value, 0.9f), 0.0f, 1.0f);
+	} else if (key == "ttsMinP") {
+		ttsMinP = std::clamp(safeStof(value, 0.05f), 0.0f, 1.0f);
+	} else if (key == "ttsStreamAudio") {
+		ttsStreamAudio = (safeStoi(value, 0) != 0);
+	} else if (key == "ttsNormalizeText") {
+		ttsNormalizeText = (safeStoi(value, 1) != 0);
+	} else if (key == "ttsOutput") {
+		ttsOutput = unescapeSessionText(value);
+	} else {
+		return false;
+	}
+	return true;
+};
+
 while (std::getline(in, line)) {
 if (line == "[/session_v1]") break;
 
@@ -6982,6 +7408,10 @@ size_t eq = line.find('=');
 if (eq == std::string::npos) continue;
 std::string key = line.substr(0, eq);
 std::string value = line.substr(eq + 1);
+
+if (handleTtsSessionKey(key, value)) {
+	continue;
+}
 
 if (key == "mode") {
 	int m = std::clamp(safeStoi(value), 0, kModeCount - 1);
@@ -7126,11 +7556,11 @@ else if (key == "speechModelPath") copyToBuf(speechModelPath, sizeof(speechModel
 else if (key == "speechServerUrl") copyToBuf(speechServerUrl, sizeof(speechServerUrl), value);
   else if (key == "speechServerModel") copyToBuf(speechServerModel, sizeof(speechServerModel), value);
   else if (key == "speechPrompt") copyToBuf(speechPrompt, sizeof(speechPrompt), value);
-  else if (key == "speechLanguageHint") copyToBuf(speechLanguageHint, sizeof(speechLanguageHint), value);
-  else if (key == "speechTaskIndex") speechTaskIndex = std::clamp(safeStoi(value), 0, 1);
-  else if (key == "speechProfileIndex") selectedSpeechProfileIndex = std::max(0, safeStoi(value));
-  else if (key == "speechReturnTimestamps") speechReturnTimestamps = (safeStoi(value, 0) != 0);
-  else if (key == "diffusionPrompt") copyToBuf(diffusionPrompt, sizeof(diffusionPrompt), value);
+    else if (key == "speechLanguageHint") copyToBuf(speechLanguageHint, sizeof(speechLanguageHint), value);
+    else if (key == "speechTaskIndex") speechTaskIndex = std::clamp(safeStoi(value), 0, 1);
+    else if (key == "speechProfileIndex") selectedSpeechProfileIndex = std::max(0, safeStoi(value));
+    else if (key == "speechReturnTimestamps") speechReturnTimestamps = (safeStoi(value, 0) != 0);
+    else if (key == "diffusionPrompt") copyToBuf(diffusionPrompt, sizeof(diffusionPrompt), value);
   else if (key == "diffusionNegativePrompt") copyToBuf(diffusionNegativePrompt, sizeof(diffusionNegativePrompt), value);
   else if (key == "diffusionModelPath") copyToBuf(diffusionModelPath, sizeof(diffusionModelPath), value);
   else if (key == "diffusionVaePath") copyToBuf(diffusionVaePath, sizeof(diffusionVaePath), value);
@@ -7160,9 +7590,9 @@ else if (key == "speechServerUrl") copyToBuf(speechServerUrl, sizeof(speechServe
   else if (key == "writeOutput") writeOutput = unescapeSessionText(value);
   else if (key == "translateOutput") translateOutput = unescapeSessionText(value);
   else if (key == "customOutput") customOutput = unescapeSessionText(value);
-  else if (key == "visionOutput") visionOutput = unescapeSessionText(value);
-  else if (key == "speechOutput") speechOutput = unescapeSessionText(value);
-  else if (key == "diffusionOutput") diffusionOutput = unescapeSessionText(value);
+    else if (key == "visionOutput") visionOutput = unescapeSessionText(value);
+    else if (key == "speechOutput") speechOutput = unescapeSessionText(value);
+    else if (key == "diffusionOutput") diffusionOutput = unescapeSessionText(value);
   else if (key == "clipOutput") clipOutput = unescapeSessionText(value);
 else if (key == "liveContextMode") {
 	liveContextMode = static_cast<LiveContextMode>(std::clamp(safeStoi(value, 0), 0, 3));
@@ -8127,6 +8557,213 @@ void ofApp::runSpeechInference() {
 			std::lock_guard<std::mutex> lock(streamMutex);
 			streamingOutput.clear();
 		}
+		generating.store(false);
+	});
+}
+
+void ofApp::runTtsInference() {
+	if (generating.load()) return;
+
+	if (ttsProfiles.empty()) {
+		ttsProfiles = ofxGgmlTtsInference::defaultProfiles();
+	}
+	selectedTtsProfileIndex = std::clamp(
+		selectedTtsProfileIndex,
+		0,
+		std::max(0, static_cast<int>(ttsProfiles.size()) - 1));
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::Tts;
+	generationStartTime = ofGetElapsedTimef();
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput = "Preparing TTS synthesis request...";
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	const ofxGgmlTtsModelProfile profileBase =
+		ttsProfiles.empty()
+			? ofxGgmlTtsModelProfile{}
+			: ttsProfiles[static_cast<size_t>(selectedTtsProfileIndex)];
+	const std::string text = trim(ttsInput);
+	const std::string modelPath = trim(ttsModelPath);
+	const std::string speakerPath = trim(ttsSpeakerPath);
+	const std::string speakerReferencePath = trim(ttsSpeakerReferencePath);
+	const std::string outputPath = trim(ttsOutputPath);
+	const std::string promptAudioPath = trim(ttsPromptAudioPath);
+	const std::string language = trim(ttsLanguage);
+	const int taskIndex = std::clamp(ttsTaskIndex, 0, 2);
+	const int requestSeed = ttsSeed;
+	const int requestMaxTokens = std::max(0, ttsMaxTokens);
+	const float requestTemperature = std::isfinite(ttsTemperature)
+		? std::clamp(ttsTemperature, 0.0f, 2.0f)
+		: 0.4f;
+	const float requestPenalty = std::isfinite(ttsRepetitionPenalty)
+		? std::clamp(ttsRepetitionPenalty, 1.0f, 3.0f)
+		: 1.1f;
+	const int requestRange = std::clamp(ttsRepetitionRange, 0, 512);
+	const int requestTopK = std::clamp(ttsTopK, 0, 200);
+	const float requestTopP = std::isfinite(ttsTopP)
+		? std::clamp(ttsTopP, 0.0f, 1.0f)
+		: 0.9f;
+	const float requestMinP = std::isfinite(ttsMinP)
+		? std::clamp(ttsMinP, 0.0f, 1.0f)
+		: 0.05f;
+	const bool requestStreamAudio = ttsStreamAudio;
+	const bool requestNormalizeText = ttsNormalizeText;
+
+	workerThread = std::thread([this, profileBase, text, modelPath, speakerPath, speakerReferencePath, outputPath, promptAudioPath, language, taskIndex, requestSeed, requestMaxTokens, requestTemperature, requestPenalty, requestRange, requestTopK, requestTopP, requestMinP, requestStreamAudio, requestNormalizeText]() {
+		auto setPending = [this](const std::string & textValue) {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingOutput = textValue;
+			pendingRole = "assistant";
+			pendingMode = AiMode::Tts;
+		};
+
+		auto clearPendingTtsArtifacts = [this]() {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingTtsBackendName.clear();
+			pendingTtsElapsedMs = 0.0f;
+			pendingTtsResolvedSpeakerPath.clear();
+			pendingTtsAudioFiles.clear();
+			pendingTtsMetadata.clear();
+		};
+
+		try {
+			const auto task = static_cast<ofxGgmlTtsTask>(taskIndex);
+			if (text.empty()) {
+				clearPendingTtsArtifacts();
+				setPending("[Error] Enter text to synthesize first.");
+				generating.store(false);
+				return;
+			}
+			if (task == ofxGgmlTtsTask::CloneVoice && speakerReferencePath.empty()) {
+				clearPendingTtsArtifacts();
+				setPending("[Error] Select a reference audio file for Clone Voice.");
+				generating.store(false);
+				return;
+			}
+			if (task == ofxGgmlTtsTask::ContinueSpeech && promptAudioPath.empty()) {
+				clearPendingTtsArtifacts();
+				setPending("[Error] Select prompt audio for Continue Speech.");
+				generating.store(false);
+				return;
+			}
+
+			const std::string effectiveModelPath = modelPath.empty()
+				? suggestedModelPath(profileBase.modelPath, profileBase.modelFileHint)
+				: modelPath;
+			const std::string effectiveSpeakerPath = speakerPath.empty()
+				? suggestedModelPath(profileBase.speakerPath, profileBase.speakerFileHint)
+				: speakerPath;
+			std::string effectiveOutputPath = outputPath;
+			if (effectiveOutputPath.empty()) {
+				effectiveOutputPath = ofToDataPath("generated/tts_output.wav", true);
+			}
+
+			const std::filesystem::path outputDir =
+				std::filesystem::path(effectiveOutputPath).parent_path();
+			if (!outputDir.empty()) {
+				std::error_code dirEc;
+				std::filesystem::create_directories(outputDir, dirEc);
+				if (dirEc) {
+					clearPendingTtsArtifacts();
+					setPending("[Error] Failed to create TTS output directory: " + outputDir.string());
+					generating.store(false);
+					return;
+				}
+			}
+
+			ofxGgmlTtsRequest request;
+			request.task = task;
+			request.text = text;
+			request.modelPath = effectiveModelPath;
+			request.speakerPath = effectiveSpeakerPath;
+			request.speakerReferencePath = speakerReferencePath;
+			request.language = language;
+			request.outputPath = effectiveOutputPath;
+			request.promptAudioPath = promptAudioPath;
+			request.seed = requestSeed;
+			request.maxTokens = requestMaxTokens;
+			request.temperature = requestTemperature;
+			request.repetitionPenalty = requestPenalty;
+			request.repetitionRange = requestRange;
+			request.topK = requestTopK;
+			request.topP = requestTopP;
+			request.minP = requestMinP;
+			request.streamAudio = requestStreamAudio;
+			request.normalizeText = requestNormalizeText;
+
+			{
+				ofxGgmlChatLlmTtsAdapters::RuntimeOptions runtimeOptions;
+				ofxGgmlChatLlmTtsAdapters::attachBackend(
+					ttsInference,
+					runtimeOptions,
+					"ChatLLM TTS");
+
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = "Calling " +
+					(ttsInference.getBackend()
+						? ttsInference.getBackend()->backendName()
+						: std::string("TTS backend")) +
+					"...";
+			}
+
+			const ofxGgmlTtsResult result = ttsInference.synthesize(request);
+			if (cancelRequested.load()) {
+				clearPendingTtsArtifacts();
+				setPending("[Cancelled] TTS synthesis cancelled.");
+			} else if (result.success) {
+				std::ostringstream summary;
+				summary << "Synthesized audio";
+				if (!result.backendName.empty()) {
+					summary << " via " << result.backendName;
+				}
+				if (result.elapsedMs > 0.0f) {
+					summary << " in " << ofxGgmlHelpers::formatDurationMs(result.elapsedMs);
+				}
+				summary << ".";
+				if (!result.audioFiles.empty()) {
+					summary << "\n\nGenerated audio:";
+					for (const auto & artifact : result.audioFiles) {
+						summary << "\n- " << artifact.path;
+					}
+				} else if (!effectiveOutputPath.empty()) {
+					summary << "\n\nRequested output: " << effectiveOutputPath;
+				}
+				if (!result.rawOutput.empty()) {
+					summary << "\n\n" << result.rawOutput;
+				}
+
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingTtsBackendName = result.backendName;
+					pendingTtsElapsedMs = result.elapsedMs;
+					pendingTtsResolvedSpeakerPath = result.speakerPath;
+					pendingTtsAudioFiles = result.audioFiles;
+					pendingTtsMetadata = result.metadata;
+				}
+				setPending(summary.str());
+			} else {
+				clearPendingTtsArtifacts();
+				const std::string message = result.error.empty()
+					? "TTS synthesis failed."
+					: result.error;
+				setPending("[Error] " + message);
+			}
+		} catch (const std::exception & e) {
+			clearPendingTtsArtifacts();
+			setPending(std::string("[Error] TTS synthesis failed: ") + e.what());
+		} catch (...) {
+			clearPendingTtsArtifacts();
+			setPending("[Error] TTS synthesis failed.");
+		}
+
 		generating.store(false);
 	});
 }
@@ -9480,17 +10117,26 @@ case AiMode::Vision:
 visionOutput = pendingOutput;
 fprintf(stderr, "%s\n", formatConsoleLogLine("Vision", "AI", pendingOutput, true).c_str());
 break;
-  case AiMode::Speech:
-  speechOutput = pendingOutput;
-  speechDetectedLanguage = pendingSpeechDetectedLanguage;
-  speechTranscriptPath = pendingSpeechTranscriptPath;
-  speechSrtPath = pendingSpeechSrtPath;
-  speechSegmentCount = pendingSpeechSegmentCount;
-  fprintf(stderr, "%s\n", formatConsoleLogLine("Speech", "AI", pendingOutput, true).c_str());
-  break;
-  case AiMode::Diffusion:
-  diffusionOutput = pendingOutput;
-  diffusionBackendName = pendingDiffusionBackendName;
+    case AiMode::Speech:
+    speechOutput = pendingOutput;
+    speechDetectedLanguage = pendingSpeechDetectedLanguage;
+    speechTranscriptPath = pendingSpeechTranscriptPath;
+    speechSrtPath = pendingSpeechSrtPath;
+    speechSegmentCount = pendingSpeechSegmentCount;
+    fprintf(stderr, "%s\n", formatConsoleLogLine("Speech", "AI", pendingOutput, true).c_str());
+    break;
+    case AiMode::Tts:
+    ttsOutput = pendingOutput;
+    ttsBackendName = pendingTtsBackendName;
+    ttsElapsedMs = pendingTtsElapsedMs;
+    ttsResolvedSpeakerPath = pendingTtsResolvedSpeakerPath;
+    ttsAudioFiles = pendingTtsAudioFiles;
+    ttsMetadata = pendingTtsMetadata;
+    fprintf(stderr, "%s\n", formatConsoleLogLine("TTS", "AI", pendingOutput, true).c_str());
+    break;
+    case AiMode::Diffusion:
+    diffusionOutput = pendingOutput;
+    diffusionBackendName = pendingDiffusionBackendName;
   diffusionElapsedMs = pendingDiffusionElapsedMs;
   diffusionGeneratedImages = pendingDiffusionImages;
   diffusionMetadata = pendingDiffusionMetadata;
@@ -9506,11 +10152,16 @@ break;
   break;
   }
   pendingOutput.clear();
-  pendingSpeechDetectedLanguage.clear();
-  pendingSpeechTranscriptPath.clear();
-  pendingSpeechSrtPath.clear();
-  pendingSpeechSegmentCount = 0;
-  pendingDiffusionBackendName.clear();
+    pendingSpeechDetectedLanguage.clear();
+    pendingSpeechTranscriptPath.clear();
+    pendingSpeechSrtPath.clear();
+    pendingSpeechSegmentCount = 0;
+    pendingTtsBackendName.clear();
+    pendingTtsElapsedMs = 0.0f;
+    pendingTtsResolvedSpeakerPath.clear();
+    pendingTtsAudioFiles.clear();
+    pendingTtsMetadata.clear();
+    pendingDiffusionBackendName.clear();
   pendingDiffusionElapsedMs = 0.0f;
   pendingDiffusionImages.clear();
   pendingDiffusionMetadata.clear();

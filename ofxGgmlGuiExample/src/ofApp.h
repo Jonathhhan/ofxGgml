@@ -34,6 +34,7 @@ enum class AiMode {
 	Custom,
 	Vision,
 	Speech,
+	Tts,
 	Diffusion,
 	Clip
 };
@@ -117,7 +118,7 @@ private:
 
 	// -- mode --
 	AiMode activeMode = AiMode::Chat;
-	static constexpr int kModeCount = 10;
+	static constexpr int kModeCount = 11;
 	static const char * modeLabels[kModeCount];
 
 	// -- input buffers --
@@ -153,6 +154,24 @@ private:
 	char speechLanguageHint[64] = "auto";
 	int speechTaskIndex = 0;
 	bool speechReturnTimestamps = false;
+	char ttsInput[4096] = {};
+	char ttsModelPath[1024] = {};
+	char ttsSpeakerPath[1024] = {};
+	char ttsSpeakerReferencePath[1024] = {};
+	char ttsOutputPath[1024] = {};
+	char ttsPromptAudioPath[1024] = {};
+	char ttsLanguage[64] = {};
+	int ttsTaskIndex = 0;
+	int ttsSeed = -1;
+	int ttsMaxTokens = 0;
+	float ttsTemperature = 0.4f;
+	float ttsRepetitionPenalty = 1.1f;
+	int ttsRepetitionRange = 64;
+	int ttsTopK = 40;
+	float ttsTopP = 0.9f;
+	float ttsMinP = 0.05f;
+	bool ttsStreamAudio = false;
+	bool ttsNormalizeText = true;
 	char diffusionPrompt[4096] = {};
 	char diffusionNegativePrompt[4096] = {};
 	char diffusionModelPath[1024] = {};
@@ -201,12 +220,18 @@ private:
 	std::string customOutput;
 	std::string visionOutput;
 	std::string speechOutput;
+	std::string ttsOutput;
 	std::string diffusionOutput;
 	std::string clipOutput;
 	std::string speechDetectedLanguage;
 	std::string speechTranscriptPath;
 	std::string speechSrtPath;
 	int speechSegmentCount = 0;
+	std::string ttsBackendName;
+	float ttsElapsedMs = 0.0f;
+	std::string ttsResolvedSpeakerPath;
+	std::vector<ofxGgmlTtsAudioArtifact> ttsAudioFiles;
+	std::vector<std::pair<std::string, std::string>> ttsMetadata;
 	std::string diffusionBackendName;
 	float diffusionElapsedMs = 0.0f;
 	std::vector<ofxGgmlGeneratedImage> diffusionGeneratedImages;
@@ -237,6 +262,11 @@ private:
 	std::string pendingSpeechTranscriptPath;
 	std::string pendingSpeechSrtPath;
 	int pendingSpeechSegmentCount = 0;
+	std::string pendingTtsBackendName;
+	float pendingTtsElapsedMs = 0.0f;
+	std::string pendingTtsResolvedSpeakerPath;
+	std::vector<ofxGgmlTtsAudioArtifact> pendingTtsAudioFiles;
+	std::vector<std::pair<std::string, std::string>> pendingTtsMetadata;
 	std::string pendingDiffusionBackendName;
 	float pendingDiffusionElapsedMs = 0.0f;
 	std::vector<ofxGgmlGeneratedImage> pendingDiffusionImages;
@@ -272,8 +302,8 @@ private:
 	float mirostatTau = 5.0f;
 	float mirostatEta = 0.1f;
 	int chatLanguageIndex = 0;                       // 0=Auto, otherwise force response language
-	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 384, 512, 512, 384};
-	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 1, 1, 1, 1, 0, 0, 0, 0};
+	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 384, 512, 512, 512, 384};
+	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0};
 	TextInferenceBackend textInferenceBackend = TextInferenceBackend::LlamaServer;
 	ServerStatusState textServerStatus = ServerStatusState::Unknown;
 	std::string textServerStatusMessage;
@@ -341,6 +371,8 @@ private:
 	int selectedVisionProfileIndex = 0;
 	std::vector<ofxGgmlSpeechModelProfile> speechProfiles;
 	int selectedSpeechProfileIndex = 0;
+	std::vector<ofxGgmlTtsModelProfile> ttsProfiles;
+	int selectedTtsProfileIndex = 0;
 	std::vector<ofxGgmlImageGenerationModelProfile> diffusionProfiles;
 	int selectedDiffusionProfileIndex = 0;
 	void initPromptTemplates();
@@ -363,6 +395,7 @@ private:
 	ofxGgmlVisionInference visionInference;
 	ofxGgmlVideoInference videoInference;
 	ofxGgmlSpeechInference speechInference;
+	ofxGgmlTtsInference ttsInference;
 	ofxGgmlDiffusionInference diffusionInference;
 	ofxGgmlClipInference clipInference;
 	ofxGgmlInference llmInference;
@@ -403,6 +436,7 @@ private:
 	void runVisionInference();
 	void runVideoInference();
 	void runSpeechInference();
+	void runTtsInference();
 	void runDiffusionInference();
 	void runClipInference();
 	bool startSpeechRecording();
@@ -462,6 +496,7 @@ private:
 	void drawCustomPanel();
 	void drawVisionPanel();
 	void drawSpeechPanel();
+	void drawTtsPanel();
 	void drawDiffusionPanel();
 	void drawClipPanel();
 	void drawStatusBar();
