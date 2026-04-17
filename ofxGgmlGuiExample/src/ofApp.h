@@ -155,6 +155,7 @@ private:
 	int speechTaskIndex = 0;
 	bool speechReturnTimestamps = false;
 	char ttsInput[4096] = {};
+	char ttsExecutablePath[1024] = {};
 	char ttsModelPath[1024] = {};
 	char ttsSpeakerPath[1024] = {};
 	char ttsSpeakerReferencePath[1024] = {};
@@ -499,6 +500,14 @@ private:
 	void drawTtsPanel();
 	void drawDiffusionPanel();
 	void drawClipPanel();
+	bool ensureTtsProfilesLoaded();
+	ofxGgmlTtsModelProfile getSelectedTtsProfile() const;
+	void applyTtsProfileDefaults(
+		const ofxGgmlTtsModelProfile & profile,
+		bool onlyWhenEmpty);
+	std::string resolveConfiguredTtsExecutable() const;
+	std::shared_ptr<ofxGgmlTtsBackend> createConfiguredTtsBackend(
+		const std::string & executableHint = "") const;
 	void drawStatusBar();
 	void drawDeviceInfoWindow();
 	void drawLogWindow();

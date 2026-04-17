@@ -6038,6 +6038,77 @@ void ofApp::drawSpeechPanel() {
 	}
 }
 
+bool ofApp::ensureTtsProfilesLoaded() {
+	if (ttsProfiles.empty()) {
+		ttsProfiles = ofxGgmlTtsInference::defaultProfiles();
+		selectedTtsProfileIndex = 0;
+	}
+	if (ttsProfiles.empty()) {
+		selectedTtsProfileIndex = 0;
+		return false;
+	}
+	selectedTtsProfileIndex = std::clamp(
+		selectedTtsProfileIndex,
+		0,
+		std::max(0, static_cast<int>(ttsProfiles.size()) - 1));
+	return true;
+}
+
+ofxGgmlTtsModelProfile ofApp::getSelectedTtsProfile() const {
+	if (ttsProfiles.empty()) {
+		return {};
+	}
+	const int clampedIndex = std::clamp(
+		selectedTtsProfileIndex,
+		0,
+		std::max(0, static_cast<int>(ttsProfiles.size()) - 1));
+	return ttsProfiles[static_cast<size_t>(clampedIndex)];
+}
+
+void ofApp::applyTtsProfileDefaults(
+	const ofxGgmlTtsModelProfile & profile,
+	bool onlyWhenEmpty) {
+	const std::string suggestedPath =
+		suggestedModelPath(profile.modelPath, profile.modelFileHint);
+	if (!suggestedPath.empty() &&
+		(!onlyWhenEmpty || trim(ttsModelPath).empty())) {
+		copyStringToBuffer(
+			ttsModelPath,
+			sizeof(ttsModelPath),
+			suggestedPath);
+	}
+	const std::string suggestedSpeakerPath =
+		suggestedModelPath(profile.speakerPath, profile.speakerFileHint);
+	if (!suggestedSpeakerPath.empty() &&
+		(!onlyWhenEmpty || trim(ttsSpeakerPath).empty())) {
+		copyStringToBuffer(
+			ttsSpeakerPath,
+			sizeof(ttsSpeakerPath),
+			suggestedSpeakerPath);
+	}
+	if (trim(ttsOutputPath).empty()) {
+		copyStringToBuffer(
+			ttsOutputPath,
+			sizeof(ttsOutputPath),
+			ofToDataPath("generated/tts_output.wav", true));
+	}
+}
+
+std::string ofApp::resolveConfiguredTtsExecutable() const {
+	return ofxGgmlChatLlmTtsAdapters::resolveChatLlmExecutable(
+		trim(ttsExecutablePath));
+}
+
+std::shared_ptr<ofxGgmlTtsBackend> ofApp::createConfiguredTtsBackend(
+	const std::string & executableHint) const {
+	ofxGgmlChatLlmTtsAdapters::RuntimeOptions runtimeOptions;
+	runtimeOptions.executablePath =
+		executableHint.empty() ? trim(ttsExecutablePath) : executableHint;
+	return ofxGgmlChatLlmTtsAdapters::createBackend(
+		runtimeOptions,
+		"ChatLLM TTS");
+}
+
 void ofApp::drawTtsPanel() {
 	drawPanelHeader("TTS", "optional text-to-speech bridge for chatllm.cpp-backed OuteTTS models");
 	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
@@ -6047,80 +6118,78 @@ void ofApp::drawTtsPanel() {
 		"It keeps the UI, session state, and output artifacts in the example app while leaving "
 		"the actual synthesis backend optional.");
 
-	const auto applyTtsProfileDefaults =
-		[this](const ofxGgmlTtsModelProfile & profile, bool onlyWhenEmpty) {
-			const std::string suggestedPath =
-				suggestedModelPath(profile.modelPath, profile.modelFileHint);
-			if (!suggestedPath.empty() &&
-				(!onlyWhenEmpty || trim(ttsModelPath).empty())) {
-				copyStringToBuffer(
-					ttsModelPath,
-					sizeof(ttsModelPath),
-					suggestedPath);
-			}
-			const std::string suggestedSpeakerPath =
-				suggestedModelPath(profile.speakerPath, profile.speakerFileHint);
-			if (!suggestedSpeakerPath.empty() &&
-				(!onlyWhenEmpty || trim(ttsSpeakerPath).empty())) {
-				copyStringToBuffer(
-					ttsSpeakerPath,
-					sizeof(ttsSpeakerPath),
-					suggestedSpeakerPath);
-			}
-			if (trim(ttsOutputPath).empty()) {
-				copyStringToBuffer(
-					ttsOutputPath,
-					sizeof(ttsOutputPath),
-					ofToDataPath("generated/tts_output.wav", true));
-			}
-		};
-
-	bool loadedTtsProfiles = false;
-	if (ttsProfiles.empty()) {
-		ttsProfiles = ofxGgmlTtsInference::defaultProfiles();
-		loadedTtsProfiles = !ttsProfiles.empty();
-	}
-	selectedTtsProfileIndex = std::clamp(
-		selectedTtsProfileIndex,
-		0,
-		std::max(0, static_cast<int>(ttsProfiles.size()) - 1));
+	const bool loadedTtsProfiles = ensureTtsProfilesLoaded();
 	if (loadedTtsProfiles && !ttsProfiles.empty()) {
-		applyTtsProfileDefaults(
-			ttsProfiles[static_cast<size_t>(selectedTtsProfileIndex)],
-			true);
+		applyTtsProfileDefaults(getSelectedTtsProfile(), true);
+	}
+	if (trim(ttsExecutablePath).empty()) {
+		copyStringToBuffer(
+			ttsExecutablePath,
+			sizeof(ttsExecutablePath),
+			ofxGgmlChatLlmTtsAdapters::preferredLocalExecutablePath());
 	}
 
-	const ofxGgmlTtsModelProfile activeProfile =
-		ttsProfiles.empty()
-			? ofxGgmlTtsModelProfile{}
-			: ttsProfiles[static_cast<size_t>(selectedTtsProfileIndex)];
+	const ofxGgmlTtsModelProfile activeProfile = getSelectedTtsProfile();
 	const auto activeTask =
 		static_cast<ofxGgmlTtsTask>(std::clamp(ttsTaskIndex, 0, 2));
-	const auto existingBridge =
-		std::dynamic_pointer_cast<ofxGgmlTtsBridgeBackend>(
-			ttsInference.getBackend());
-	if (!existingBridge || !existingBridge->isConfigured()) {
-		ofxGgmlChatLlmTtsAdapters::RuntimeOptions runtimeOptions;
-		ofxGgmlChatLlmTtsAdapters::attachBackend(
-			ttsInference,
-			runtimeOptions,
-			"ChatLLM TTS");
-	}
-	const auto configuredBridge =
-		std::dynamic_pointer_cast<ofxGgmlTtsBridgeBackend>(
-			ttsInference.getBackend());
-	const bool bridgeConfigured =
-		!configuredBridge || configuredBridge->isConfigured();
-	const std::string ttsBackendLabel =
-		ttsInference.getBackend()
-			? ttsInference.getBackend()->backendName()
-			: std::string("(none)");
+	const std::string ttsBackendLabel = "ChatLLM TTS";
+	const std::string configuredExecutableHint = trim(ttsExecutablePath);
+	const std::string resolvedTtsExecutable = resolveConfiguredTtsExecutable();
+	const bool resolvedTtsExecutableLooksLocal =
+		ofxGgmlChatLlmTtsAdapters::hasPathSeparator(resolvedTtsExecutable) ||
+		std::filesystem::path(resolvedTtsExecutable).is_absolute();
+	const bool configuredExecutableIsExplicit =
+		ofxGgmlChatLlmTtsAdapters::isExplicitExecutablePath(configuredExecutableHint);
+	const bool resolvedExplicitExecutableExists = [&]() {
+		if (!configuredExecutableIsExplicit) {
+			return false;
+		}
+		std::error_code ec;
+		return std::filesystem::exists(std::filesystem::path(resolvedTtsExecutable), ec) && !ec;
+	}();
 
 	ImGui::TextDisabled("Backend: %s", ttsBackendLabel.c_str());
-	if (!bridgeConfigured) {
-		ImGui::TextColored(
-			ImVec4(0.95f, 0.65f, 0.25f, 1.0f),
-			"Bridge scaffold only: attach a chatllm.cpp adapter callback to enable synthesis.");
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Executable", ttsExecutablePath, sizeof(ttsExecutablePath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Browse exe##Tts", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select chatllm executable", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(
+				ttsExecutablePath,
+				sizeof(ttsExecutablePath),
+				result.getPath());
+			autoSaveSession();
+		}
+	}
+	if (configuredExecutableHint.empty()) {
+		ImGui::TextDisabled(
+			resolvedTtsExecutableLooksLocal
+				? "Detected local executable: %s"
+				: "Executable hint will use PATH lookup: %s",
+			resolvedTtsExecutable.c_str());
+		if (resolvedTtsExecutableLooksLocal) {
+			ImGui::BeginDisabled(trim(ttsExecutablePath) == resolvedTtsExecutable);
+			if (ImGui::SmallButton("Use detected executable##Tts")) {
+				copyStringToBuffer(
+					ttsExecutablePath,
+					sizeof(ttsExecutablePath),
+					resolvedTtsExecutable);
+				autoSaveSession();
+			}
+			ImGui::EndDisabled();
+		}
+	} else {
+		ImGui::TextDisabled("Resolved executable: %s", resolvedTtsExecutable.c_str());
+		if (configuredExecutableIsExplicit && !resolvedExplicitExecutableExists) {
+			ImGui::TextColored(
+				ImVec4(0.95f, 0.55f, 0.25f, 1.0f),
+				"The configured executable path does not exist yet.");
+		}
 	}
 
 	if (!ttsProfiles.empty()) {
@@ -6135,7 +6204,7 @@ void ofApp::drawTtsPanel() {
 			&selectedTtsProfileIndex,
 			profileNames.data(),
 			static_cast<int>(profileNames.size()))) {
-			const auto & profile = ttsProfiles[static_cast<size_t>(selectedTtsProfileIndex)];
+			const auto profile = getSelectedTtsProfile();
 			applyTtsProfileDefaults(profile, false);
 			if (!profile.supportsVoiceCloning &&
 				activeTask == ofxGgmlTtsTask::CloneVoice) {
@@ -6306,12 +6375,11 @@ void ofApp::drawTtsPanel() {
 		runTtsInference();
 	}
 	ImGui::EndDisabled();
-	if (!bridgeConfigured) {
-		ImGui::SameLine();
-		ImGui::TextDisabled("(waiting for backend adapter)");
-	}
 	if (needsReferenceAudio && trim(ttsSpeakerReferencePath).empty()) {
 		ImGui::TextDisabled("Clone Voice expects a reference audio file.");
+	}
+	if (activeTask == ofxGgmlTtsTask::CloneVoice && trim(ttsSpeakerPath).empty()) {
+		ImGui::TextDisabled("chatllm.cpp currently expects a prepared speaker.json profile for Clone Voice.");
 	}
 	if (needsPromptAudio && trim(ttsPromptAudioPath).empty()) {
 		ImGui::TextDisabled("Continue Speech expects prompt audio.");
@@ -7243,6 +7311,7 @@ out << "speechServerModel=" << escapeSessionText(speechServerModel) << "\n";
   out << "speechProfileIndex=" << selectedSpeechProfileIndex << "\n";
   out << "speechReturnTimestamps=" << (speechReturnTimestamps ? 1 : 0) << "\n";
   out << "ttsInput=" << escapeSessionText(ttsInput) << "\n";
+  out << "ttsExecutablePath=" << escapeSessionText(ttsExecutablePath) << "\n";
   out << "ttsModelPath=" << escapeSessionText(ttsModelPath) << "\n";
   out << "ttsSpeakerPath=" << escapeSessionText(ttsSpeakerPath) << "\n";
   out << "ttsSpeakerReferencePath=" << escapeSessionText(ttsSpeakerReferencePath) << "\n";
@@ -7357,6 +7426,8 @@ auto handleTtsSessionKey = [this, &copyToBuf, &safeStoi, &safeStof](
 	const std::string & value) -> bool {
 	if (key == "ttsInput") {
 		copyToBuf(ttsInput, sizeof(ttsInput), value);
+	} else if (key == "ttsExecutablePath") {
+		copyToBuf(ttsExecutablePath, sizeof(ttsExecutablePath), value);
 	} else if (key == "ttsModelPath") {
 		copyToBuf(ttsModelPath, sizeof(ttsModelPath), value);
 	} else if (key == "ttsSpeakerPath") {
@@ -8564,13 +8635,7 @@ void ofApp::runSpeechInference() {
 void ofApp::runTtsInference() {
 	if (generating.load()) return;
 
-	if (ttsProfiles.empty()) {
-		ttsProfiles = ofxGgmlTtsInference::defaultProfiles();
-	}
-	selectedTtsProfileIndex = std::clamp(
-		selectedTtsProfileIndex,
-		0,
-		std::max(0, static_cast<int>(ttsProfiles.size()) - 1));
+	ensureTtsProfilesLoaded();
 
 	generating.store(true);
 	cancelRequested.store(false);
@@ -8586,11 +8651,9 @@ void ofApp::runTtsInference() {
 		workerThread.join();
 	}
 
-	const ofxGgmlTtsModelProfile profileBase =
-		ttsProfiles.empty()
-			? ofxGgmlTtsModelProfile{}
-			: ttsProfiles[static_cast<size_t>(selectedTtsProfileIndex)];
+	const ofxGgmlTtsModelProfile profileBase = getSelectedTtsProfile();
 	const std::string text = trim(ttsInput);
+	const std::string executablePath = trim(ttsExecutablePath);
 	const std::string modelPath = trim(ttsModelPath);
 	const std::string speakerPath = trim(ttsSpeakerPath);
 	const std::string speakerReferencePath = trim(ttsSpeakerReferencePath);
@@ -8616,8 +8679,11 @@ void ofApp::runTtsInference() {
 		: 0.05f;
 	const bool requestStreamAudio = ttsStreamAudio;
 	const bool requestNormalizeText = ttsNormalizeText;
+	const auto backend = createConfiguredTtsBackend(executablePath);
+	const std::string backendLabel =
+		backend ? backend->backendName() : std::string("TTS backend");
 
-	workerThread = std::thread([this, profileBase, text, modelPath, speakerPath, speakerReferencePath, outputPath, promptAudioPath, language, taskIndex, requestSeed, requestMaxTokens, requestTemperature, requestPenalty, requestRange, requestTopK, requestTopP, requestMinP, requestStreamAudio, requestNormalizeText]() {
+	workerThread = std::thread([this, backend, backendLabel, profileBase, text, modelPath, speakerPath, speakerReferencePath, outputPath, promptAudioPath, language, taskIndex, requestSeed, requestMaxTokens, requestTemperature, requestPenalty, requestRange, requestTopK, requestTopP, requestMinP, requestStreamAudio, requestNormalizeText]() {
 		auto setPending = [this](const std::string & textValue) {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingOutput = textValue;
@@ -8700,21 +8766,18 @@ void ofApp::runTtsInference() {
 			request.normalizeText = requestNormalizeText;
 
 			{
-				ofxGgmlChatLlmTtsAdapters::RuntimeOptions runtimeOptions;
-				ofxGgmlChatLlmTtsAdapters::attachBackend(
-					ttsInference,
-					runtimeOptions,
-					"ChatLLM TTS");
-
 				std::lock_guard<std::mutex> lock(streamMutex);
-				streamingOutput = "Calling " +
-					(ttsInference.getBackend()
-						? ttsInference.getBackend()->backendName()
-						: std::string("TTS backend")) +
-					"...";
+				streamingOutput = "Calling " + backendLabel + "...";
 			}
 
-			const ofxGgmlTtsResult result = ttsInference.synthesize(request);
+			if (!backend) {
+				clearPendingTtsArtifacts();
+				setPending("[Error] TTS backend is not available.");
+				generating.store(false);
+				return;
+			}
+
+			const ofxGgmlTtsResult result = backend->synthesize(request);
 			if (cancelRequested.load()) {
 				clearPendingTtsArtifacts();
 				setPending("[Cancelled] TTS synthesis cancelled.");

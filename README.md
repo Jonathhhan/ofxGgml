@@ -427,7 +427,7 @@ The Speech panel now supports a simple microphone workflow directly in the GUI:
 
 `ofxGgmlTtsInference` adds a parallel addon-level text-to-speech layer for synthesis workflows that should stay separate from Whisper-style speech transcription. The initial scaffold is backend-agnostic and now ships with a ready-to-attach `chatllm.cpp` adapter for OuteTTS models, including speaker-profile paths and the sampler controls that matter for llama-backed TTS models.
 
-Use it when an app wants local speech generation without baking a specific TTS runtime into its UI layer. The bridge exposes `Synthesize`, `Clone Voice`, and `Continue Speech` task labels, ships with starter OuteTTS profile hints, and can attach a runtime callback through `createChatLlmTtsBridgeBackend(...)`, `createOuteTtsBridgeBackend(...)`, or `createTtsBridgeBackend(...)`.
+Use it when an app wants local speech generation without baking a specific TTS runtime into its UI layer. The bridge exposes `Synthesize`, `Clone Voice`, and `Continue Speech` task labels, ships with starter OuteTTS profile hints, and can attach a runtime callback through `createChatLlmTtsBridgeBackend(...)`, `createOuteTtsBridgeBackend(...)`, or `createTtsBridgeBackend(...)`. The GUI example now seeds the `Executable` field to the addon-local `libs/chatllm/bin/chatllm(.exe)` path by default and falls back to normal executable search if you change it.
 
 ## Vision Helpers
 

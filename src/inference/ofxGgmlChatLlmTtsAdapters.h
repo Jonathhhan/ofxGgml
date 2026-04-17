@@ -124,6 +124,18 @@ inline std::vector<std::filesystem::path> executableSearchRoots() {
 	return roots;
 }
 
+inline std::string preferredLocalExecutablePath() {
+#ifdef _WIN32
+	const std::string executableName = "chatllm.exe";
+#else
+	const std::string executableName = "chatllm";
+#endif
+	const std::filesystem::path exeDir(ofFilePath::getCurrentExeDir());
+	return (exeDir / ".." / ".." / "libs" / "chatllm" / "bin" / executableName)
+		.lexically_normal()
+		.string();
+}
+
 inline std::string findFirstExistingExecutable(
 	const std::vector<std::filesystem::path> & candidates) {
 	for (const auto & candidate : candidates) {
@@ -454,6 +466,15 @@ inline std::string resolveChatLlmExecutable(const std::string & executableHint) 
 	return resolved.empty() ? fallback : resolved;
 }
 
+inline bool isExplicitExecutablePath(const std::string & executableHint) {
+	const std::string trimmed = trimCopy(executableHint);
+	if (trimmed.empty()) {
+		return false;
+	}
+	const std::filesystem::path path(trimmed);
+	return path.is_absolute() || path.has_parent_path() || hasPathSeparator(trimmed);
+}
+
 inline std::shared_ptr<ofxGgmlTtsBackend> createBackend(
 	const RuntimeOptions & options = {},
 	const std::string & displayName = "ChatLLM TTS") {
@@ -501,6 +522,14 @@ inline std::shared_ptr<ofxGgmlTtsBackend> createBackend(
 
 			const std::string executable = resolveChatLlmExecutable(
 				options.executablePath);
+			if (isExplicitExecutablePath(options.executablePath)) {
+				std::error_code execEc;
+				if (!std::filesystem::exists(std::filesystem::path(executable), execEc) || execEc) {
+					result.error =
+						"chatllm.cpp executable not found: " + trimCopy(options.executablePath);
+					return result;
+				}
+			}
 			const auto started = std::chrono::steady_clock::now();
 
 			std::vector<std::string> args;
