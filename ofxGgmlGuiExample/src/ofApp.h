@@ -3,6 +3,7 @@
 #include "ofMain.h"
 #include "ofxGgml.h"
 #include "ofxImGui.h"
+#include "config/ModelPresets.h"
 
 #include <atomic>
 #include <array>
@@ -20,24 +21,6 @@
 #else
 #include <sys/types.h>
 #endif
-
-// ---------------------------------------------------------------------------
-// Mode — the active AI task tab.
-// ---------------------------------------------------------------------------
-
-enum class AiMode {
-	Chat,
-	Script,
-	Summarize,
-	Write,
-	Translate,
-	Custom,
-	Vision,
-	Speech,
-	Tts,
-	Diffusion,
-	Clip
-};
 
 enum class LiveContextMode {
 	Offline = 0,
@@ -65,28 +48,6 @@ struct Message {
 	std::string role;   // "user", "assistant", "system"
 	std::string text;
 	float timestamp = 0.0f;
-};
-
-// ---------------------------------------------------------------------------
-// ModelPreset — a recommended model with download metadata.
-// ---------------------------------------------------------------------------
-
-struct ModelPreset {
-	std::string name;         // e.g. "TinyLlama 1.1B Chat"
-	std::string filename;     // e.g. "tinyllama-1.1b-chat-v1.0.Q4_0.gguf"
-	std::string url;
-	std::string description;
-	std::string sizeMB;       // human-readable, e.g. "~600 MB"
-	std::string bestFor;      // e.g. "chat, general"
-};
-
-// ---------------------------------------------------------------------------
-// PromptTemplate — predefined system prompt for the Custom panel.
-// ---------------------------------------------------------------------------
-
-struct PromptTemplate {
-	std::string name;           // e.g. "Code Reviewer"
-	std::string systemPrompt;   // the system prompt text
 };
 
 // ---------------------------------------------------------------------------
@@ -381,12 +342,10 @@ private:
 	std::array<int, kModeCount> taskDefaultModelIndices = {};
 	mutable int cachedModelPathIndex = -1;
 	mutable std::string cachedModelPath;
-	void initModelPresets();
 
 	// -- script language presets --
 	std::vector<ofxGgmlCodeLanguagePreset> scriptLanguages;
 	int selectedLanguageIndex = 0;
-	void initScriptLanguages();
 
 	// -- prompt templates (Custom panel) --
 	std::vector<ofxGgmlChatLanguageOption> chatLanguages;
@@ -401,7 +360,6 @@ private:
 	int selectedTtsProfileIndex = 0;
 	std::vector<ofxGgmlImageGenerationModelProfile> diffusionProfiles;
 	int selectedDiffusionProfileIndex = 0;
-	void initPromptTemplates();
 
 	// -- script source (local folder / GitHub) --
 	ofxGgmlScriptSource scriptSource;

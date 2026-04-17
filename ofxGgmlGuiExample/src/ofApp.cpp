@@ -1,6 +1,8 @@
 #include "ofApp.h"
 
 #include "ImHelpers.h"
+#include "utils/ImGuiHelpers.h"
+#include "config/ModelPresets.h"
 #include "ofJson.h"
 #include "core/ofxGgmlWindowsUtf8.h"
 #include "gguf.h"
@@ -62,11 +64,6 @@ struct TokenLiteral {
 };
 
 bool gConsoleAnsiEnabled = false;
-
-struct LogLevelOption {
-	const char * label;
-	ofLogLevel level;
-};
 
 int detectGgufLayerCountMetadata(const std::string & modelPath) {
 	if (modelPath.empty()) {
@@ -131,214 +128,6 @@ int detectGgufLayerCountMetadata(const std::string & modelPath) {
 		ggml_free(dataCtx);
 	}
 	return detectedLayers;
-}
-
-void drawPanelHeader(const char * title, const char * subtitle) {
-	ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "%s", title);
-	ImGui::SameLine();
-	ImGui::TextDisabled("(%s)", subtitle);
-	ImGui::Separator();
-}
-
-void drawWrappedDisabledText(const std::string & text) {
-	if (text.empty()) {
-		return;
-	}
-	ImGui::PushTextWrapPos(0.0f);
-	ImGui::TextDisabled("%s", text.c_str());
-	ImGui::PopTextWrapPos();
-}
-
-void drawHelpMarker(const char * helpText) {
-	if (!helpText || *helpText == '\0') {
-		return;
-	}
-	ImGui::SameLine();
-	ImGui::TextDisabled("(?)");
-	if (ImGui::IsItemHovered()) {
-		ImGui::BeginTooltip();
-		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
-		ImGui::TextUnformatted(helpText);
-		ImGui::PopTextWrapPos();
-		ImGui::EndTooltip();
-	}
-}
-
-void showWrappedTooltip(const std::string & tooltipText) {
-	if (tooltipText.empty()) {
-		return;
-	}
-	ImGui::BeginTooltip();
-	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
-	ImGui::TextUnformatted(tooltipText.c_str());
-	ImGui::PopTextWrapPos();
-	ImGui::EndTooltip();
-}
-
-void showWrappedTooltipf(const char * fmt, ...) {
-	if (!fmt || *fmt == '\0') {
-		return;
-	}
-	va_list args;
-	va_start(args, fmt);
-	va_list argsCopy;
-	va_copy(argsCopy, args);
-	const int required = std::vsnprintf(nullptr, 0, fmt, args);
-	va_end(args);
-	if (required <= 0) {
-		va_end(argsCopy);
-		return;
-	}
-	std::string buffer(static_cast<size_t>(required), '\0');
-	std::vsnprintf(buffer.data(), static_cast<size_t>(required) + 1, fmt, argsCopy);
-	va_end(argsCopy);
-	showWrappedTooltip(buffer);
-}
-
-static const std::array<LogLevelOption, 5> kLogLevelOptions = {{
-	{"Silent",   OF_LOG_SILENT},
-	{"Errors",   OF_LOG_ERROR},
-	{"Warnings", OF_LOG_WARNING},
-	{"Notices",  OF_LOG_NOTICE},
-	{"Verbose",  OF_LOG_VERBOSE}
-}};
-
-std::string getEnvVarString(const char * name) {
-	if (!name || *name == '\0') return {};
-#ifdef _WIN32
-	char * value = nullptr;
-	size_t len = 0;
-	const errno_t err = _dupenv_s(&value, &len, name);
-	if (err != 0 || value == nullptr || len == 0) {
-		free(value);
-		return {};
-	}
-	std::string result(value);
-	free(value);
-	return result;
-#else
-	const char * value = std::getenv(name);
-	return value ? std::string(value) : std::string();
-#endif
-}
-
-void copyStringToBuffer(char * buffer, size_t bufferSize, const std::string & value) {
-	if (!buffer || bufferSize == 0) return;
-	const size_t copyLen = std::min(bufferSize - 1, value.size());
-	std::memcpy(buffer, value.data(), copyLen);
-	buffer[copyLen] = '\0';
-}
-
-void setVulkanRuntimeDisabled(bool disabled) {
-#ifdef _WIN32
-	_putenv_s("GGML_DISABLE_VULKAN", disabled ? "1" : "");
-#else
-	if (disabled) {
-		setenv("GGML_DISABLE_VULKAN", "1", 1);
-	} else {
-		unsetenv("GGML_DISABLE_VULKAN");
-	}
-#endif
-}
-
-bool shouldDisableVulkanForCurrentSelection(
-	const std::vector<std::string> & names,
-	int selectedIndex) {
-	if (getEnvVarString("OFXGGML_DISABLE_VULKAN") == "1") {
-		return true;
-	}
-	if (selectedIndex >= 0 && selectedIndex < static_cast<int>(names.size())) {
-		const std::string & sel = names[static_cast<size_t>(selectedIndex)];
-	if (sel.rfind("CUDA", 0) == 0) {
-			return true;
-		}
-	}
-	return false;
-}
-
-const char * logLevelLabel(ofLogLevel level) noexcept {
-	switch (level) {
-	case OF_LOG_VERBOSE:      return "verbose";
-	case OF_LOG_NOTICE:       return "notice";
-	case OF_LOG_WARNING:      return "warn";
-	case OF_LOG_ERROR:        return "error";
-	case OF_LOG_FATAL_ERROR:  return "fatal";
-	case OF_LOG_SILENT:       return "silent";
-	default:                  return "log";
-	}
-}
-
-int logLevelIndex(ofLogLevel level) noexcept {
-	if (level == OF_LOG_FATAL_ERROR) {
-		return 1; // treat fatal as errors for UI selection
-	}
-	for (size_t i = 0; i < kLogLevelOptions.size(); i++) {
-		if (kLogLevelOptions[i].level == level) {
-			return static_cast<int>(i);
-		}
-	}
-	// Default to "Notices" when the level isn't found.
-	return 3;
-}
-
-std::string stripAnsi(const std::string & text) {
-	std::string out;
-	out.reserve(text.size());
-	size_t i = 0;
-	while (i < text.size()) {
-		if (text[i] == '\x1b') {
-			i++; // skip ESC
-			if (i < text.size() && text[i] == '[') {
-				// CSI sequence: ESC [ <params> <final_byte>
-				// Skip parameter bytes (0x30-0x3F) and intermediate
-				// bytes (0x20-0x2F), then the final byte (0x40-0x7E).
-				i++; // skip '['
-				while (i < text.size()
-					&& static_cast<unsigned char>(text[i]) < 0x40) {
-					i++;
-				}
-				if (i < text.size()) i++; // skip the final byte (e.g. 'm')
-			} else if (i < text.size()) {
-				i++; // two-byte escape sequence (e.g. ESC =), skip second byte
-			}
-		} else {
-			out += text[i];
-			i++;
-		}
-	}
-	return out;
-}
-
-std::string stripLiteralAnsiMarkers(const std::string & text) {
-	static const std::regex markerRegex(R"(\[(?:\d{1,3})(?:;\d{1,3})*m)");
-	return std::regex_replace(text, markerRegex, "");
-}
-
-std::string trim(const std::string & s) {
-	size_t start = 0;
-	while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start]))) {
-		start++;
-	}
-	size_t end = s.size();
-	while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) {
-		end--;
-	}
-	return s.substr(start, end - start);
-}
-
-std::string trimLogMessage(const std::string & s) {
-	if (s.empty()) {
-		return {};
-	}
-	size_t start = 0;
-	while (start < s.size() && (s[start] == '\r' || s[start] == '\n')) {
-		start++;
-	}
-	size_t end = s.size();
-	while (end > start && (s[end - 1] == '\r' || s[end - 1] == '\n')) {
-		end--;
-	}
-	return s.substr(start, end - start);
 }
 
 std::string effectiveTextServerUrl(const char * buffer) {
@@ -2771,173 +2560,6 @@ void ofApp::probeCliCapabilities() {
 }
 
 // ---------------------------------------------------------------------------
-// Presets — models
-// ---------------------------------------------------------------------------
-
-void ofApp::initModelPresets() {
-	modelPresets.clear();
-	taskDefaultModelIndices.fill(0);
-
-	auto setFallbackPresets = [this]() {
-		modelPresets = {
-			{
-				"Qwen2.5-1.5B Instruct Q4_K_M",
-				"qwen2.5-1.5b-instruct-q4_k_m.gguf",
-				"https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
-				"Alibaba Qwen2.5 — balanced chat model",
-				"~1.0 GB", "chat, general"
-			},
-			{
-				"Qwen2.5-Coder-1.5B Instruct Q4_K_M",
-				"qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-				"https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-				"Alibaba Qwen2.5-Coder — optimized for code generation",
-				"~1.0 GB", "scripting, code generation"
-			},
-			{
-				"Qwen2.5-Coder-7B Instruct Q4_K_M",
-				"qwen2.5-coder-7b-instruct-q4_k_m.gguf",
-				"https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
-				"Alibaba Qwen2.5-Coder — stronger local repo review and patch planning",
-				"~4.7 GB", "repo review, larger code edits, architecture analysis"
-			}
-		};
-		// Match the CLI defaults for most modes, but prefer a stronger coder model for Script.
-		taskDefaultModelIndices = {0, 2, 0, 0, 0, 0, 0, 0, 0};
-	};
-
-	// Try to load presets from scripts/model-catalog.json first.
-	std::error_code ec;
-	std::filesystem::path catalogPath = ofToDataPath("model-catalog.json", true);
-	bool loaded = false;
-
-	if (!std::filesystem::exists(catalogPath, ec) || ec) {
-		// Fallback: resolve relative to addon root (…/ofxGgmlGuiExample/src -> addon root).
-		auto srcPath = std::filesystem::path(__FILE__).parent_path();
-		auto addonRoot = std::filesystem::weakly_canonical(srcPath / ".." / "..", ec);
-		if (!ec) {
-			catalogPath = addonRoot / "scripts" / "model-catalog.json";
-		}
-	}
-
-	if (std::filesystem::exists(catalogPath, ec) && !ec) {
-		try {
-			std::ifstream in(catalogPath);
-			ofJson json;
-			in >> json;
-			if (json.contains("models") && json["models"].is_array()) {
-				for (const auto & model : json["models"]) {
-					ModelPreset preset;
-					preset.name = model.value("name", "");
-					preset.filename = model.value("filename", "");
-					preset.url = model.value("url", "");
-					preset.sizeMB = model.value("size", "");
-					preset.bestFor = model.value("best_for", "");
-					preset.description = model.value("description", preset.bestFor);
-					if (preset.description.empty()) {
-						preset.description = "Recommended model";
-					}
-					if (preset.name.empty() || preset.filename.empty() || preset.url.empty()) {
-						continue;
-					}
-					modelPresets.push_back(std::move(preset));
-				}
-			}
-			if (!modelPresets.empty() &&
-				json.contains("task_defaults") && json["task_defaults"].is_object()) {
-				auto defaults = json["task_defaults"];
-				auto setDefault = [&](const char * key, AiMode mode) {
-					const int idxOneBased = defaults.value(key, 0);
-					if (idxOneBased > 0) {
-						const int idx = std::clamp(idxOneBased - 1, 0,
-							static_cast<int>(modelPresets.size()) - 1);
-						taskDefaultModelIndices[static_cast<int>(mode)] = idx;
-					}
-				};
-				setDefault("chat", AiMode::Chat);
-				setDefault("script", AiMode::Script);
-				setDefault("summarize", AiMode::Summarize);
-				setDefault("write", AiMode::Write);
-				setDefault("translate", AiMode::Translate);
-				setDefault("custom", AiMode::Custom);
-				setDefault("vision", AiMode::Vision);
-				setDefault("speech", AiMode::Speech);
-				setDefault("diffusion", AiMode::Diffusion);
-			}
-			loaded = !modelPresets.empty();
-		} catch (const std::exception & e) {
-			logWithLevel(OF_LOG_WARNING,
-				std::string("Failed to load model-catalog.json: ") + e.what());
-		} catch (...) {
-			logWithLevel(OF_LOG_WARNING,
-				"Failed to load model-catalog.json: unknown parse error");
-		}
-	}
-
-	if (!loaded) {
-		setFallbackPresets();
-	}
-
-	selectedModelIndex = std::clamp(selectedModelIndex, 0,
-		std::max(0, static_cast<int>(modelPresets.size()) - 1));
-}
-
-// ---------------------------------------------------------------------------
-// Presets — script languages
-// ---------------------------------------------------------------------------
-
-void ofApp::initScriptLanguages() {
-scriptLanguages = ofxGgmlCodeAssistant::defaultLanguagePresets();
-}
-
-// ---------------------------------------------------------------------------
-// Presets — prompt templates for Custom panel
-// ---------------------------------------------------------------------------
-
-void ofApp::initPromptTemplates() {
-chatLanguages = ofxGgmlChatAssistant::defaultResponseLanguages();
-translateLanguages = ofxGgmlTextAssistant::defaultTranslateLanguages();
-promptTemplates.clear();
-for (const auto & preset : ofxGgmlTextAssistant::defaultPromptTemplates()) {
-	promptTemplates.push_back({preset.name, preset.systemPrompt});
-}
-promptTemplates.push_back({
-	"Data Analyst",
-	"You are a data analysis expert. Help interpret data, suggest statistical "
-	"methods, write queries, and explain results in plain language."
-});
-promptTemplates.push_back({
-	"System Architect",
-	"You are a software architect. Design systems with clear component "
-	"boundaries, data flows, and technology choices. Consider scalability, "
-	"reliability, and maintainability."
-});
-promptTemplates.push_back({
-	"Debugger",
-	"You are an expert debugger. Analyze error messages, stack traces, and "
-	"code to identify root causes. Suggest specific fixes and explain why "
-	"the bug occurs."
-});
-promptTemplates.push_back({
-	"Test Engineer",
-	"You are a test engineering expert. Generate comprehensive test cases "
-	"including unit tests, edge cases, error paths, and integration scenarios. "
-	"Use the appropriate testing framework for the language."
-});
-promptTemplates.push_back({
-	"Translator",
-	"You are a code translator. Convert code between programming languages "
-	"while preserving logic, idioms, and best practices of the target language."
-});
-promptTemplates.push_back({
-	"Optimizer",
-	"You are a performance optimization expert. Analyze code for bottlenecks, "
-	"memory issues, and algorithmic improvements. Suggest concrete optimizations "
-	"with expected impact."
-});
-}
-
-// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
@@ -2953,9 +2575,13 @@ ImGui::GetIO().IniFilename = "imgui_ggml_studio.ini";
 applyLogLevel(logLevel);
 
 // Initialize presets.
-initModelPresets();
-initScriptLanguages();
-initPromptTemplates();
+loadModelPresets(modelPresets, taskDefaultModelIndices);
+selectedModelIndex = std::clamp(selectedModelIndex, 0,
+	std::max(0, static_cast<int>(modelPresets.size()) - 1));
+scriptLanguages = ofxGgmlCodeAssistant::defaultLanguagePresets();
+chatLanguages = ofxGgmlChatAssistant::defaultResponseLanguages();
+translateLanguages = ofxGgmlTextAssistant::defaultTranslateLanguages();
+loadPromptTemplates(promptTemplates);
 if (!scriptLanguages.empty()) {
 	scriptSource.setPreferredExtension(
 		scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
