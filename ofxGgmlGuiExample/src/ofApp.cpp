@@ -7240,31 +7240,7 @@ ImGui::End();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawDeviceInfoWindow() {
-ImGui::SetNextWindowSize(ImVec2(420, 300), ImGuiCond_FirstUseEver);
-if (ImGui::Begin("Device Info", &showDeviceInfo)) {
-ImGui::Text("Backend: %s", ggml.getBackendName().c_str());
-ImGui::Text("State: %s", ofxGgmlHelpers::stateName(ggml.getState()).c_str());
-ImGui::Separator();
-
-if (devices.empty()) {
-ImGui::TextDisabled("No devices discovered.");
-} else {
-for (size_t i = 0; i < devices.size(); i++) {
-const auto & d = devices[i];
-ImGui::PushID(static_cast<int>(i));
-ImGui::Text("%s", d.name.c_str());
-ImGui::SameLine();
-ImGui::TextDisabled("(%s)", d.description.c_str());
-ImGui::Text("  Type: %s  Memory: %s / %s",
-ofxGgmlHelpers::backendTypeName(d.type).c_str(),
-ofxGgmlHelpers::formatBytes(d.memoryFree).c_str(),
-ofxGgmlHelpers::formatBytes(d.memoryTotal).c_str());
-ImGui::Separator();
-ImGui::PopID();
-}
-}
-}
-ImGui::End();
+	deviceInfoPanel.draw(showDeviceInfo, ggml, devices);
 }
 
 // ---------------------------------------------------------------------------
@@ -7272,24 +7248,7 @@ ImGui::End();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawLogWindow() {
-ImGui::SetNextWindowSize(ImVec2(500, 300), ImGuiCond_FirstUseEver);
-if (ImGui::Begin("Engine Log", &showLog)) {
-if (ImGui::Button("Clear")) {
-std::lock_guard<std::mutex> lock(logMutex);
-logMessages.clear();
-}
-ImGui::Separator();
-ImGui::BeginChild("##LogScroll", ImVec2(0, 0), false);
-std::lock_guard<std::mutex> lock(logMutex);
-for (const auto & line : logMessages) {
-ImGui::TextWrapped("%s", line.c_str());
-}
-if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 10.0f) {
-ImGui::SetScrollHereY(1.0f);
-}
-ImGui::EndChild();
-}
-ImGui::End();
+	logPanel.draw(showLog, logMessages, logMutex);
 }
 
 // ---------------------------------------------------------------------------
@@ -10432,72 +10391,29 @@ break;
 // ---------------------------------------------------------------------------
 
 void ofApp::drawPerformanceWindow() {
-ImGui::SetNextWindowSize(ImVec2(380, 220), ImGuiCond_FirstUseEver);
-if (ImGui::Begin("Performance Metrics", &showPerformance)) {
-ImGui::Text("Last Computation:");
-ImGui::Separator();
-ImGui::Text("  Elapsed:    %.2f ms", lastComputeMs);
-ImGui::Text("  Nodes:      %d", lastNodeCount);
-ImGui::Text("  Backend:    %s", lastBackendUsed.empty() ? "(none)" : lastBackendUsed.c_str());
-ImGui::Spacing();
-
-ImGui::Text("Configuration:");
-ImGui::Separator();
-{
-std::string prefLabel = "(none)";
-if (selectedBackendIndex >= 0 &&
-	selectedBackendIndex < static_cast<int>(backendNames.size())) {
-	prefLabel = backendNames[selectedBackendIndex];
-}
-ImGui::Text("  Preference: %s", prefLabel.c_str());
-}
-ImGui::Text("  Threads:    %d", numThreads);
-ImGui::Text("  Context:    %d", contextSize);
-ImGui::Text("  Batch:      %d", batchSize);
-ImGui::Text("  Text path:  %s",
-	textInferenceBackend == TextInferenceBackend::LlamaServer
-		? "llama-server"
-		: "CLI");
-if (detectedModelLayers > 0) {
-ImGui::Text("  GPU Layers: %d / %d", gpuLayers, detectedModelLayers);
-} else {
-ImGui::Text("  GPU Layers: %d", gpuLayers);
-}
-ImGui::Text("  Seed:       %s", seed < 0 ? "random" : ofToString(seed).c_str());
-ImGui::Spacing();
-
-ImGui::Text("Sampling:");
-ImGui::Separator();
-ImGui::Text("  Tokens:     %d", maxTokens);
-ImGui::Text("  Temp:       %.2f", temperature);
-ImGui::Text("  Top-P:      %.2f", topP);
-ImGui::Text("  Top-K:      %d", topK);
-ImGui::Text("  Min-P:      %.2f", minP);
-ImGui::Text("  Repeat Pen: %.2f", repeatPenalty);
-ImGui::Spacing();
-
-// Device memory summary.
-if (!devices.empty()) {
-ImGui::Text("Devices:");
-ImGui::Separator();
-for (const auto & d : devices) {
-ImGui::Text("  %s (%s)", d.name.c_str(),
-ofxGgmlHelpers::backendTypeName(d.type).c_str());
-if (d.memoryTotal > 0) {
-float usedPct = 1.0f - static_cast<float>(d.memoryFree) /
-static_cast<float>(d.memoryTotal);
-ImGui::SameLine();
-ImGui::ProgressBar(usedPct, ImVec2(100, 14),
-ofxGgmlHelpers::formatBytes(d.memoryTotal).c_str());
-}
-}
-}
-
-if (ImGui::Button("Refresh Devices")) {
-devices = ggml.listDevices();
-}
-}
-ImGui::End();
+	performancePanel.draw(
+		showPerformance,
+		ggml,
+		devices,
+		lastComputeMs,
+		lastNodeCount,
+		lastBackendUsed,
+		selectedBackendIndex,
+		backendNames,
+		numThreads,
+		contextSize,
+		batchSize,
+		textInferenceBackend,
+		detectedModelLayers,
+		gpuLayers,
+		seed,
+		maxTokens,
+		temperature,
+		topP,
+		topK,
+		minP,
+		repeatPenalty,
+		devices);  // Pass devices as out parameter for refresh
 }
 
 // ---------------------------------------------------------------------------

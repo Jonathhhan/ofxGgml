@@ -4,6 +4,9 @@
 #include "ofxGgml.h"
 #include "ofxImGui.h"
 #include "config/ModelPresets.h"
+#include "panels/DeviceInfoPanel.h"
+#include "panels/LogPanel.h"
+#include "panels/PerformancePanel.h"
 
 #include <atomic>
 #include <array>
@@ -76,6 +79,11 @@ private:
 
 	// -- ImGui --
 	ofxImGui::Gui gui;
+
+	// -- UI Panels --
+	DeviceInfoPanel deviceInfoPanel;
+	LogPanel logPanel;
+	PerformancePanel performancePanel;
 
 	// -- mode --
 	AiMode activeMode = AiMode::Chat;
