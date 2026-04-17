@@ -89,99 +89,6 @@ struct TokenLiteral {
 
 #endif
 
-std::pair<std::string, int> parseServerHostPort(const std::string & configuredUrl) {
-	const std::string baseUrl = serverBaseUrlFromConfiguredUrl(configuredUrl);
-	static const std::regex hostPortRe(R"(^https?://([^/:]+)(?::(\d+))?.*$)", std::regex::icase);
-	std::smatch match;
-	if (std::regex_match(baseUrl, match, hostPortRe)) {
-		const std::string host = match[1].str();
-		const int port = (match.size() >= 3 && match[2].matched)
-			? std::max(1, std::stoi(match[2].str()))
-			: 8080;
-		return {host, port};
-	}
-	return {"127.0.0.1", 8080};
-}
-
-std::pair<std::string, int> parseSpeechServerHostPort(const std::string & configuredUrl) {
-	const std::string baseUrl = speechServerBaseUrlFromConfiguredUrl(configuredUrl);
-	static const std::regex hostPortRe(R"(^https?://([^/:]+)(?::(\d+))?.*$)", std::regex::icase);
-	std::smatch match;
-	if (std::regex_match(baseUrl, match, hostPortRe)) {
-		const std::string host = match[1].str();
-		const int port = (match.size() >= 3 && match[2].matched)
-			? std::max(1, std::stoi(match[2].str()))
-			: 8081;
-		return {host, port};
-	}
-	return {"127.0.0.1", 8081};
-}
-
-
-
-
-
-
-
-
-
-TextInferenceBackend clampTextInferenceBackend(int value) {
-	return value == static_cast<int>(TextInferenceBackend::LlamaServer)
-		? TextInferenceBackend::LlamaServer
-		: TextInferenceBackend::Cli;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-std::vector<std::string> extractHttpUrls(const std::string & text) {
-	static const std::regex urlRegex(R"(https?://[^\s<>\"]+)", std::regex::icase);
-	std::vector<std::string> urls;
-	std::unordered_set<std::string> seen;
-	for (std::sregex_iterator it(text.begin(), text.end(), urlRegex), end; it != end; ++it) {
-		const std::string url = it->str();
-		if (seen.insert(url).second) {
-			urls.push_back(url);
-		}
-	}
-	return urls;
-}
-
-std::vector<std::string> extractPathList(const std::string & text) {
-	std::vector<std::string> paths;
-	std::unordered_set<std::string> seen;
-	std::string current;
-	auto flush = [&]() {
-		const std::string value = trim(current);
-		current.clear();
-		if (!value.empty() && seen.insert(value).second) {
-			paths.push_back(value);
-		}
-	};
-	for (const char c : text) {
-		if (c == '\r' || c == '\n' || c == ';') {
-			flush();
-		} else {
-			current.push_back(c);
-		}
-	}
-	flush();
-	return paths;
-}
-
-// Strip common chat-template role markers and prompt artefacts that
-// llama-completion may emit around the actual generated text.
-// Examples of markers removed: "user", "assistant", "system",
-// "<|...|>" ChatML tokens, and leading/trailing ">" prompt chars.
 
 
 
@@ -196,16 +103,17 @@ std::vector<std::string> extractPathList(const std::string & text) {
 
 
 
-std::vector<std::string> splitStoredScriptSourceUrls(const std::string & packedUrls) {
-	if (packedUrls.empty()) {
-		return {};
-	}
-	return ofSplitString(packedUrls, "\n", true, true);
-}
 
-// Translate well-known process crash/error exit codes into a short
-// human-readable description.  Returns an empty string for codes that
-// are not recognised so the caller can fall back to the numeric value.
+
+
+
+
+
+
+
+
+
+
 
 
 
