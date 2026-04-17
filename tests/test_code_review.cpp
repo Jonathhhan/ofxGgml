@@ -39,7 +39,7 @@ std::string createCodeReviewExecutable(const std::string & body) {
 	std::ofstream out(exe);
 	out << "#!/usr/bin/env bash\nset -euo pipefail\n" << body << "\n";
 	out.close();
-	::chmod(exe.c_str(), 0755);
+	chmod(exe.c_str(), 0755);
 #endif
 	return exe.string();
 }

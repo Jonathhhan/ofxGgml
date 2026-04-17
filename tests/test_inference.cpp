@@ -136,7 +136,7 @@ std::string createExecutableScript(const std::string & body) {
 	std::ofstream out(exe);
 	out << "#!/usr/bin/env bash\nset -euo pipefail\n" << body << "\n";
 	out.close();
-	::chmod(exe.c_str(), 0755);
+	chmod(exe.c_str(), 0755);
 #endif
 	return exe.string();
 }
@@ -162,7 +162,7 @@ std::string createCompletionFlagSensitiveExecutable(const std::string & flag, co
 	out << "esac\n";
 	out << "echo \"" << output << "\"\n";
 	out.close();
-	::chmod(exe.c_str(), 0755);
+	chmod(exe.c_str(), 0755);
 #endif
 	return exe.string();
 }
@@ -276,7 +276,7 @@ TEST_CASE("Executable resolution accepts absolute path and PATH command", "[infe
 		std::ofstream out(cmdPath);
 		out << "#!/usr/bin/env bash\nset -euo pipefail\necho path-ok\n";
 		out.close();
-		::chmod(cmdPath.c_str(), 0755);
+		chmod(cmdPath.c_str(), 0755);
 #endif
 		std::string pathValue = cmdDir.string();
 		if (const char * existingPath = std::getenv("PATH")) {
