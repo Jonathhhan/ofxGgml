@@ -3,6 +3,7 @@
 #include "compute/ofxGgmlGraph.h"
 #include "compute/ofxGgmlTensor.h"
 #include "core/ofxGgmlTypes.h"
+#include "core/ofxGgmlResult.h"
 #include "model/ofxGgmlModel.h"
 
 #include <cstddef>
@@ -38,6 +39,10 @@ public:
 	/// Initialize backends according to the provided settings.
 	bool setup(const ofxGgmlSettings & settings = {});
 
+	/// Initialize backends with detailed error reporting.
+	/// This is the Result<T> variant of setup() that provides rich error context.
+	Result<void> setupEx(const ofxGgmlSettings & settings = {});
+
 	/// Shut down backends and release owned resources.
 	void close();
 
@@ -72,6 +77,10 @@ public:
 	/// Allocate backend buffers for all tensors in the graph.
 	bool allocGraph(ofxGgmlGraph & graph);
 
+	/// Allocate backend buffers with detailed error reporting.
+	/// This is the Result<T> variant of allocGraph() that provides rich error context.
+	Result<void> allocGraphEx(ofxGgmlGraph & graph);
+
 	/// Execute an already allocated graph synchronously.
 	ofxGgmlComputeResult computeGraph(ofxGgmlGraph & graph);
 
@@ -93,6 +102,10 @@ public:
 
 	/// Upload a loaded model's tensors into backend memory.
 	bool loadModelWeights(ofxGgmlModel & model);
+
+	/// Upload model weights with detailed error reporting.
+	/// This is the Result<T> variant of loadModelWeights() that provides rich error context.
+	Result<void> loadModelWeightsEx(ofxGgmlModel & model);
 
 	// ---------------------------------------------------------------------------
 	// Logging

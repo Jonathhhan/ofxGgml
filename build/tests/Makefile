@@ -139,125 +139,557 @@ ofxGgml-tests/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/build
 .PHONY : ofxGgml-tests/fast
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.o: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.o
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.o: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.o
 
 # target to build an object file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.o
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.o
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.i: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.i
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.i
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.i: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.i
 
 # target to preprocess a source file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.i
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.i
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.i
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.s: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.s
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.s
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.s: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.s
 
 # target to generate assembly for a file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.s
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.cpp.s
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.cpp.s
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.o: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.o
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.o: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.o
 
 # target to build an object file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.o
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.o
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.i: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.i
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.i
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.i: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.i
 
 # target to preprocess a source file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.i
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.i
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.i
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.s: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.s
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.s
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.s: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.s
 
 # target to generate assembly for a file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.s
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.cpp.s
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.cpp.s
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.o: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.o
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.o: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.o
 
 # target to build an object file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.o
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.o
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.i: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.i
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.i
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.i: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.i
 
 # target to preprocess a source file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.i
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.i
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.i
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.s: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.s
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.s
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.s: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.s
 
 # target to generate assembly for a file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.s
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.cpp.s
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.cpp.s
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.o: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.o
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.o: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.o
 
 # target to build an object file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.o
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.o
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.i: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.i
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.i
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.i: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.i
 
 # target to preprocess a source file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.i
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.i
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.i
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.s: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.s
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.s
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.s: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.s
 
 # target to generate assembly for a file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.s
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.cpp.s
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.cpp.s
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.o: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.o
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.o: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.o
 
 # target to build an object file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.o
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.o
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.i: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.i
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.i
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.i: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.i
 
 # target to preprocess a source file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.i
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.i
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.i
 
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.s: home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.s
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.s
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.s: home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.s
 
 # target to generate assembly for a file
-home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.s
-.PHONY : home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.cpp.s
+home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.o: home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.i: home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.s: home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.o: home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.i: home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.s: home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.o: home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.i: home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.s: home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.o: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.i: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.s: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.o: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.i: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.s: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.o: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.i: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.s: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.o: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.i: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.s: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.o: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.i: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.s: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.o: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.i: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.s: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.o: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.i: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.s: home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.o: home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.i: home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.s: home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.o: home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.i: home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.s: home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.cpp.s
+
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.o: home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.o
+
+# target to build an object file
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.o
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.o
+
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.i: home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.i
+
+# target to preprocess a source file
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.i
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.i
+
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.s: home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.s
+
+# target to generate assembly for a file
+home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.s
+.PHONY : home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.cpp.s
+
+test_assistant_eval.o: test_assistant_eval.cpp.o
+.PHONY : test_assistant_eval.o
+
+# target to build an object file
+test_assistant_eval.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_assistant_eval.cpp.o
+.PHONY : test_assistant_eval.cpp.o
+
+test_assistant_eval.i: test_assistant_eval.cpp.i
+.PHONY : test_assistant_eval.i
+
+# target to preprocess a source file
+test_assistant_eval.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_assistant_eval.cpp.i
+.PHONY : test_assistant_eval.cpp.i
+
+test_assistant_eval.s: test_assistant_eval.cpp.s
+.PHONY : test_assistant_eval.s
+
+# target to generate assembly for a file
+test_assistant_eval.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_assistant_eval.cpp.s
+.PHONY : test_assistant_eval.cpp.s
+
+test_chat_assistant.o: test_chat_assistant.cpp.o
+.PHONY : test_chat_assistant.o
+
+# target to build an object file
+test_chat_assistant.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_chat_assistant.cpp.o
+.PHONY : test_chat_assistant.cpp.o
+
+test_chat_assistant.i: test_chat_assistant.cpp.i
+.PHONY : test_chat_assistant.i
+
+# target to preprocess a source file
+test_chat_assistant.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_chat_assistant.cpp.i
+.PHONY : test_chat_assistant.cpp.i
+
+test_chat_assistant.s: test_chat_assistant.cpp.s
+.PHONY : test_chat_assistant.s
+
+# target to generate assembly for a file
+test_chat_assistant.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_chat_assistant.cpp.s
+.PHONY : test_chat_assistant.cpp.s
+
+test_clip_inference.o: test_clip_inference.cpp.o
+.PHONY : test_clip_inference.o
+
+# target to build an object file
+test_clip_inference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_clip_inference.cpp.o
+.PHONY : test_clip_inference.cpp.o
+
+test_clip_inference.i: test_clip_inference.cpp.i
+.PHONY : test_clip_inference.i
+
+# target to preprocess a source file
+test_clip_inference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_clip_inference.cpp.i
+.PHONY : test_clip_inference.cpp.i
+
+test_clip_inference.s: test_clip_inference.cpp.s
+.PHONY : test_clip_inference.s
+
+# target to generate assembly for a file
+test_clip_inference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_clip_inference.cpp.s
+.PHONY : test_clip_inference.cpp.s
+
+test_code_assistant.o: test_code_assistant.cpp.o
+.PHONY : test_code_assistant.o
+
+# target to build an object file
+test_code_assistant.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_code_assistant.cpp.o
+.PHONY : test_code_assistant.cpp.o
+
+test_code_assistant.i: test_code_assistant.cpp.i
+.PHONY : test_code_assistant.i
+
+# target to preprocess a source file
+test_code_assistant.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_code_assistant.cpp.i
+.PHONY : test_code_assistant.cpp.i
+
+test_code_assistant.s: test_code_assistant.cpp.s
+.PHONY : test_code_assistant.s
+
+# target to generate assembly for a file
+test_code_assistant.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_code_assistant.cpp.s
+.PHONY : test_code_assistant.cpp.s
+
+test_code_review.o: test_code_review.cpp.o
+.PHONY : test_code_review.o
+
+# target to build an object file
+test_code_review.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_code_review.cpp.o
+.PHONY : test_code_review.cpp.o
+
+test_code_review.i: test_code_review.cpp.i
+.PHONY : test_code_review.i
+
+# target to preprocess a source file
+test_code_review.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_code_review.cpp.i
+.PHONY : test_code_review.cpp.i
+
+test_code_review.s: test_code_review.cpp.s
+.PHONY : test_code_review.s
+
+# target to generate assembly for a file
+test_code_review.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_code_review.cpp.s
+.PHONY : test_code_review.cpp.s
 
 test_core.o: test_core.cpp.o
 .PHONY : test_core.o
@@ -283,6 +715,30 @@ test_core.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_core.cpp.s
 .PHONY : test_core.cpp.s
 
+test_diffusion_inference.o: test_diffusion_inference.cpp.o
+.PHONY : test_diffusion_inference.o
+
+# target to build an object file
+test_diffusion_inference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_diffusion_inference.cpp.o
+.PHONY : test_diffusion_inference.cpp.o
+
+test_diffusion_inference.i: test_diffusion_inference.cpp.i
+.PHONY : test_diffusion_inference.i
+
+# target to preprocess a source file
+test_diffusion_inference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_diffusion_inference.cpp.i
+.PHONY : test_diffusion_inference.cpp.i
+
+test_diffusion_inference.s: test_diffusion_inference.cpp.s
+.PHONY : test_diffusion_inference.s
+
+# target to generate assembly for a file
+test_diffusion_inference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_diffusion_inference.cpp.s
+.PHONY : test_diffusion_inference.cpp.s
+
 test_graph.o: test_graph.cpp.o
 .PHONY : test_graph.o
 
@@ -306,6 +762,54 @@ test_graph.s: test_graph.cpp.s
 test_graph.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_graph.cpp.s
 .PHONY : test_graph.cpp.s
+
+test_helpers.o: test_helpers.cpp.o
+.PHONY : test_helpers.o
+
+# target to build an object file
+test_helpers.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_helpers.cpp.o
+.PHONY : test_helpers.cpp.o
+
+test_helpers.i: test_helpers.cpp.i
+.PHONY : test_helpers.i
+
+# target to preprocess a source file
+test_helpers.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_helpers.cpp.i
+.PHONY : test_helpers.cpp.i
+
+test_helpers.s: test_helpers.cpp.s
+.PHONY : test_helpers.s
+
+# target to generate assembly for a file
+test_helpers.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_helpers.cpp.s
+.PHONY : test_helpers.cpp.s
+
+test_inference.o: test_inference.cpp.o
+.PHONY : test_inference.o
+
+# target to build an object file
+test_inference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.o
+.PHONY : test_inference.cpp.o
+
+test_inference.i: test_inference.cpp.i
+.PHONY : test_inference.i
+
+# target to preprocess a source file
+test_inference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.i
+.PHONY : test_inference.cpp.i
+
+test_inference.s: test_inference.cpp.s
+.PHONY : test_inference.s
+
+# target to generate assembly for a file
+test_inference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_inference.cpp.s
+.PHONY : test_inference.cpp.s
 
 test_integration.o: test_integration.cpp.o
 .PHONY : test_integration.o
@@ -403,6 +907,30 @@ test_project_memory.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_project_memory.cpp.s
 .PHONY : test_project_memory.cpp.s
 
+test_resource_guards.o: test_resource_guards.cpp.o
+.PHONY : test_resource_guards.o
+
+# target to build an object file
+test_resource_guards.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_resource_guards.cpp.o
+.PHONY : test_resource_guards.cpp.o
+
+test_resource_guards.i: test_resource_guards.cpp.i
+.PHONY : test_resource_guards.i
+
+# target to preprocess a source file
+test_resource_guards.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_resource_guards.cpp.i
+.PHONY : test_resource_guards.cpp.i
+
+test_resource_guards.s: test_resource_guards.cpp.s
+.PHONY : test_resource_guards.s
+
+# target to generate assembly for a file
+test_resource_guards.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_resource_guards.cpp.s
+.PHONY : test_resource_guards.cpp.s
+
 test_result.o: test_result.cpp.o
 .PHONY : test_result.o
 
@@ -426,6 +954,54 @@ test_result.s: test_result.cpp.s
 test_result.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_result.cpp.s
 .PHONY : test_result.cpp.s
+
+test_speech_inference.o: test_speech_inference.cpp.o
+.PHONY : test_speech_inference.o
+
+# target to build an object file
+test_speech_inference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_speech_inference.cpp.o
+.PHONY : test_speech_inference.cpp.o
+
+test_speech_inference.i: test_speech_inference.cpp.i
+.PHONY : test_speech_inference.i
+
+# target to preprocess a source file
+test_speech_inference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_speech_inference.cpp.i
+.PHONY : test_speech_inference.cpp.i
+
+test_speech_inference.s: test_speech_inference.cpp.s
+.PHONY : test_speech_inference.s
+
+# target to generate assembly for a file
+test_speech_inference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_speech_inference.cpp.s
+.PHONY : test_speech_inference.cpp.s
+
+test_srt_parser.o: test_srt_parser.cpp.o
+.PHONY : test_srt_parser.o
+
+# target to build an object file
+test_srt_parser.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_srt_parser.cpp.o
+.PHONY : test_srt_parser.cpp.o
+
+test_srt_parser.i: test_srt_parser.cpp.i
+.PHONY : test_srt_parser.i
+
+# target to preprocess a source file
+test_srt_parser.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_srt_parser.cpp.i
+.PHONY : test_srt_parser.cpp.i
+
+test_srt_parser.s: test_srt_parser.cpp.s
+.PHONY : test_srt_parser.s
+
+# target to generate assembly for a file
+test_srt_parser.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_srt_parser.cpp.s
+.PHONY : test_srt_parser.cpp.s
 
 test_tensor.o: test_tensor.cpp.o
 .PHONY : test_tensor.o
@@ -451,6 +1027,126 @@ test_tensor.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_tensor.cpp.s
 .PHONY : test_tensor.cpp.s
 
+test_text_assistant.o: test_text_assistant.cpp.o
+.PHONY : test_text_assistant.o
+
+# target to build an object file
+test_text_assistant.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_text_assistant.cpp.o
+.PHONY : test_text_assistant.cpp.o
+
+test_text_assistant.i: test_text_assistant.cpp.i
+.PHONY : test_text_assistant.i
+
+# target to preprocess a source file
+test_text_assistant.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_text_assistant.cpp.i
+.PHONY : test_text_assistant.cpp.i
+
+test_text_assistant.s: test_text_assistant.cpp.s
+.PHONY : test_text_assistant.s
+
+# target to generate assembly for a file
+test_text_assistant.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_text_assistant.cpp.s
+.PHONY : test_text_assistant.cpp.s
+
+test_tts_inference.o: test_tts_inference.cpp.o
+.PHONY : test_tts_inference.o
+
+# target to build an object file
+test_tts_inference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_tts_inference.cpp.o
+.PHONY : test_tts_inference.cpp.o
+
+test_tts_inference.i: test_tts_inference.cpp.i
+.PHONY : test_tts_inference.i
+
+# target to preprocess a source file
+test_tts_inference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_tts_inference.cpp.i
+.PHONY : test_tts_inference.cpp.i
+
+test_tts_inference.s: test_tts_inference.cpp.s
+.PHONY : test_tts_inference.s
+
+# target to generate assembly for a file
+test_tts_inference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_tts_inference.cpp.s
+.PHONY : test_tts_inference.cpp.s
+
+test_video_inference.o: test_video_inference.cpp.o
+.PHONY : test_video_inference.o
+
+# target to build an object file
+test_video_inference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_video_inference.cpp.o
+.PHONY : test_video_inference.cpp.o
+
+test_video_inference.i: test_video_inference.cpp.i
+.PHONY : test_video_inference.i
+
+# target to preprocess a source file
+test_video_inference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_video_inference.cpp.i
+.PHONY : test_video_inference.cpp.i
+
+test_video_inference.s: test_video_inference.cpp.s
+.PHONY : test_video_inference.s
+
+# target to generate assembly for a file
+test_video_inference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_video_inference.cpp.s
+.PHONY : test_video_inference.cpp.s
+
+test_vision_inference.o: test_vision_inference.cpp.o
+.PHONY : test_vision_inference.o
+
+# target to build an object file
+test_vision_inference.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_vision_inference.cpp.o
+.PHONY : test_vision_inference.cpp.o
+
+test_vision_inference.i: test_vision_inference.cpp.i
+.PHONY : test_vision_inference.i
+
+# target to preprocess a source file
+test_vision_inference.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_vision_inference.cpp.i
+.PHONY : test_vision_inference.cpp.i
+
+test_vision_inference.s: test_vision_inference.cpp.s
+.PHONY : test_vision_inference.s
+
+# target to generate assembly for a file
+test_vision_inference.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_vision_inference.cpp.s
+.PHONY : test_vision_inference.cpp.s
+
+test_workspace_assistant.o: test_workspace_assistant.cpp.o
+.PHONY : test_workspace_assistant.o
+
+# target to build an object file
+test_workspace_assistant.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_workspace_assistant.cpp.o
+.PHONY : test_workspace_assistant.cpp.o
+
+test_workspace_assistant.i: test_workspace_assistant.cpp.i
+.PHONY : test_workspace_assistant.i
+
+# target to preprocess a source file
+test_workspace_assistant.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_workspace_assistant.cpp.i
+.PHONY : test_workspace_assistant.cpp.i
+
+test_workspace_assistant.s: test_workspace_assistant.cpp.s
+.PHONY : test_workspace_assistant.s
+
+# target to generate assembly for a file
+test_workspace_assistant.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ofxGgml-tests.dir/build.make CMakeFiles/ofxGgml-tests.dir/test_workspace_assistant.cpp.s
+.PHONY : test_workspace_assistant.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -461,27 +1157,90 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... test"
 	@echo "... ofxGgml-tests"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.o"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.i"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlCore.s"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.o"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.i"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlGraph.s"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.o"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.i"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlModel.s"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.o"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.i"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlProjectMemory.s"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.o"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.i"
-	@echo "... home/runner/work/ofxGgml/ofxGgml/src/ofxGgmlTensor.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlChatAssistant.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeAssistant.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlCodeReview.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlTextAssistant.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/assistants/ofxGgmlWorkspaceAssistant.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlGraph.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/compute/ofxGgmlTensor.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/core/ofxGgmlCore.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlClipInference.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlDiffusionInference.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlInference.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlSpeechInference.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlTtsInference.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVideoInference.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/inference/ofxGgmlVisionInference.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/model/ofxGgmlModel.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlProjectMemory.s"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.o"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.i"
+	@echo "... home/runner/work/ofxGgml/ofxGgml/src/support/ofxGgmlScriptSource.s"
+	@echo "... test_assistant_eval.o"
+	@echo "... test_assistant_eval.i"
+	@echo "... test_assistant_eval.s"
+	@echo "... test_chat_assistant.o"
+	@echo "... test_chat_assistant.i"
+	@echo "... test_chat_assistant.s"
+	@echo "... test_clip_inference.o"
+	@echo "... test_clip_inference.i"
+	@echo "... test_clip_inference.s"
+	@echo "... test_code_assistant.o"
+	@echo "... test_code_assistant.i"
+	@echo "... test_code_assistant.s"
+	@echo "... test_code_review.o"
+	@echo "... test_code_review.i"
+	@echo "... test_code_review.s"
 	@echo "... test_core.o"
 	@echo "... test_core.i"
 	@echo "... test_core.s"
+	@echo "... test_diffusion_inference.o"
+	@echo "... test_diffusion_inference.i"
+	@echo "... test_diffusion_inference.s"
 	@echo "... test_graph.o"
 	@echo "... test_graph.i"
 	@echo "... test_graph.s"
+	@echo "... test_helpers.o"
+	@echo "... test_helpers.i"
+	@echo "... test_helpers.s"
+	@echo "... test_inference.o"
+	@echo "... test_inference.i"
+	@echo "... test_inference.s"
 	@echo "... test_integration.o"
 	@echo "... test_integration.i"
 	@echo "... test_integration.s"
@@ -494,12 +1253,36 @@ help:
 	@echo "... test_project_memory.o"
 	@echo "... test_project_memory.i"
 	@echo "... test_project_memory.s"
+	@echo "... test_resource_guards.o"
+	@echo "... test_resource_guards.i"
+	@echo "... test_resource_guards.s"
 	@echo "... test_result.o"
 	@echo "... test_result.i"
 	@echo "... test_result.s"
+	@echo "... test_speech_inference.o"
+	@echo "... test_speech_inference.i"
+	@echo "... test_speech_inference.s"
+	@echo "... test_srt_parser.o"
+	@echo "... test_srt_parser.i"
+	@echo "... test_srt_parser.s"
 	@echo "... test_tensor.o"
 	@echo "... test_tensor.i"
 	@echo "... test_tensor.s"
+	@echo "... test_text_assistant.o"
+	@echo "... test_text_assistant.i"
+	@echo "... test_text_assistant.s"
+	@echo "... test_tts_inference.o"
+	@echo "... test_tts_inference.i"
+	@echo "... test_tts_inference.s"
+	@echo "... test_video_inference.o"
+	@echo "... test_video_inference.i"
+	@echo "... test_video_inference.s"
+	@echo "... test_vision_inference.o"
+	@echo "... test_vision_inference.i"
+	@echo "... test_vision_inference.s"
+	@echo "... test_workspace_assistant.o"
+	@echo "... test_workspace_assistant.i"
+	@echo "... test_workspace_assistant.s"
 .PHONY : help
 
 

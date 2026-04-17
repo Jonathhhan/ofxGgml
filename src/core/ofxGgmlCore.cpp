@@ -1,5 +1,6 @@
 #include "ofxGgmlCore.h"
 #include "core/ofxGgmlVersion.h"
+#include "core/ofxGgmlResourceGuards.h"
 
 #include "ggml.h"
 #include "ggml-alloc.h"
@@ -54,12 +55,14 @@ struct ofxGgml::Impl {
 	ofxGgmlState state = ofxGgmlState::Uninitialized;
 	ofxGgmlSettings settings;
 
-	ggml_backend_t backend = nullptr;
-	ggml_backend_t cpuBackend = nullptr;
-	ggml_backend_sched_t sched = nullptr;
+	struct ggml_backend * backend = nullptr;
+	/// When the main backend is CPU, cpuBackend will be null (we reuse backend).
+	/// When the main backend is GPU, cpuBackend will hold a separate CPU backend.
+	struct ggml_backend * cpuBackend = nullptr;
+	struct ggml_backend_sched * sched = nullptr;
 
 	/// Backend buffer for uploaded model weights.
-	ggml_backend_buffer_t modelWeightBuf = nullptr;
+	struct ggml_backend_buffer * modelWeightBuf = nullptr;
 
 	/// Last graph reserved/allocated for scheduler reuse.
 	uint64_t reservedGraphToken = 0;
@@ -559,13 +562,28 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	return true;
 }
 
+Result<void> ofxGgml::setupEx(const ofxGgmlSettings & settings) {
+	if (!setup(settings)) {
+		// Determine the most appropriate error code based on state
+		if (m_impl->state == ofxGgmlState::Error) {
+			return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
+				"Failed to initialize backend. Check logs for details.");
+		}
+		return ofxGgmlError(ofxGgmlErrorCode::UnknownError,
+			"Setup failed for unknown reason");
+	}
+	return Result<void>();
+}
+
 void ofxGgml::close() {
 	synchronizePendingAsync(m_impl.get(), "shutdown");
 
+	// Free in proper order: scheduler first, then buffers, then backends.
 	if (m_impl->sched) {
 		ggml_backend_sched_free(m_impl->sched);
 		m_impl->sched = nullptr;
 	}
+
 	// Graph tracking is tied to scheduler lifetime; after close(), any
 	// previously tracked graph allocations/reservations are invalid.
 	m_impl->reservedGraphToken = 0;
@@ -573,22 +591,25 @@ void ofxGgml::close() {
 	m_impl->allocatedGraphToken = 0;
 	m_impl->allocatedGraph = nullptr;
 	m_impl->hasPendingAsync = false;
+
 	// Free model weight buffer before backends.
 	if (m_impl->modelWeightBuf) {
 		ggml_backend_buffer_free(m_impl->modelWeightBuf);
 		m_impl->modelWeightBuf = nullptr;
 	}
-	// Guard: if backend and cpuBackend point to the same allocation,
-	// only free once to avoid double-free.
-	const bool sameBackend = (m_impl->backend && m_impl->backend == m_impl->cpuBackend);
-	if (m_impl->backend) {
-		ggml_backend_free(m_impl->backend);
-		m_impl->backend = nullptr;
-	}
-	if (m_impl->cpuBackend && !sameBackend) {
+
+	// Free backends. When both point to the same allocation (CPU-only mode),
+	// cpuBackend will be the same as backend; only free backend in that case.
+	if (m_impl->cpuBackend && m_impl->cpuBackend != m_impl->backend) {
 		ggml_backend_free(m_impl->cpuBackend);
 	}
 	m_impl->cpuBackend = nullptr;
+
+	if (m_impl->backend) {
+		ggml_backend_free(m_impl->backend);
+	}
+	m_impl->backend = nullptr;
+
 	// ggml logging is process-global, so only unregister this instance and
 	// reactivate the previous live owner if one still exists.
 	unregisterLogCallbackOwner(m_impl.get());
@@ -726,6 +747,23 @@ static bool allocGraphInternal(
 
 bool ofxGgml::allocGraph(ofxGgmlGraph & graph) {
 	return allocGraphInternal(m_impl.get(), graph.cacheToken(), graph.raw(), true);
+}
+
+Result<void> ofxGgml::allocGraphEx(ofxGgmlGraph & graph) {
+	if (!allocGraph(graph)) {
+		// Provide more context based on the graph state
+		if (!graph.raw()) {
+			return ofxGgmlError(ofxGgmlErrorCode::GraphNotBuilt,
+				"Graph has not been built. Call graph.build() first.");
+		}
+		if (m_impl->state != ofxGgmlState::Ready) {
+			return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
+				"Backend not ready. Ensure setup() completed successfully.");
+		}
+		return ofxGgmlError(ofxGgmlErrorCode::GraphAllocFailed,
+			"Failed to allocate backend buffers for graph");
+	}
+	return Result<void>();
 }
 
 ofxGgmlComputeResult ofxGgml::computeGraph(ofxGgmlGraph & graph) {
@@ -915,6 +953,27 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	loadMsg += ")\n";
 	m_impl->log(GGML_LOG_LEVEL_INFO, loadMsg);
 	return true;
+}
+
+Result<void> ofxGgml::loadModelWeightsEx(ofxGgmlModel & model) {
+	if (!loadModelWeights(model)) {
+		// Provide detailed error based on failure point
+		if (m_impl->state != ofxGgmlState::Ready) {
+			return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
+				"Backend not ready. Ensure setup() completed successfully.");
+		}
+		if (!model.isLoaded()) {
+			return ofxGgmlError(ofxGgmlErrorCode::ModelLoadFailed,
+				"Model not loaded. Call model.load() first.");
+		}
+		if (!model.ggmlContext()) {
+			return ofxGgmlError(ofxGgmlErrorCode::ModelFormatInvalid,
+				"Model has no ggml context");
+		}
+		return ofxGgmlError(ofxGgmlErrorCode::ModelWeightUploadFailed,
+			"Failed to upload model weights to backend");
+	}
+	return Result<void>();
 }
 
 // --------------------------------------------------------------------------
