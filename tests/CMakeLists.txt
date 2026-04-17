@@ -118,6 +118,7 @@ set(ADDON_SOURCES
 if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND ADDON_SOURCES
         ../src/assistants/ofxGgmlChatAssistant.cpp
+        ../src/inference/ofxGgmlDiffusionInference.cpp
         ../src/inference/ofxGgmlInference.cpp
         ../src/inference/ofxGgmlSpeechInference.cpp
         ../src/inference/ofxGgmlVisionInference.cpp

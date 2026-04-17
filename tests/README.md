@@ -117,6 +117,7 @@ Current test coverage includes:
   - Executable configuration
   - Settings structures
   - Result structures
+  - Diffusion bridge task labels, selection-mode labels, and ranking-ready request/result metadata
   - Tokenization utilities
   - Sampling utilities
   - Embedding index and similarity search

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ofFileUtils.h"
+
 #include <atomic>
 #include <cctype>
 #include <condition_variable>

@@ -8,6 +8,8 @@ All notable changes to `ofxGgml` are documented in this file.
 - `ofxGgmlInference` live grounding now groups specialized sources under domain providers and keeps generic search as a separate fallback path.
 - `ofxGgmlClipInference` as a new bridge scaffold for optional CLIP-style text/image embedding and ranking backends, now with a generic bridge surface plus an optional `clip.cpp` adapter path and compatibility helpers for older `ofxStableDiffusion`-style naming.
 - `ofxGgmlDiffusionInference` as a new bridge scaffold for optional image-generation backends, including a callback-friendly `ofxStableDiffusion` adapter surface.
+- The diffusion bridge now carries structured image tasks for `InstructImage`, `Variation`, and `Restyle`, plus batch-selection modes for `KeepOrder`, `Rerank`, and `BestOnly`.
+- Generated-image metadata now keeps selection/ranking fields such as `sourceIndex`, selected-best state, score, scorer, and score-summary text so CLIP-aware callers can reason about best-of-N runs directly from addon result objects.
 - `ofxGgmlTtsInference` as a new bridge scaffold for optional text-to-speech backends, now with a `chatllm.cpp` adapter path for OuteTTS-style models, task-oriented request/result types, and speaker-profile handling.
 - The GUI example TTS mode now defaults its executable field to the addon-local `libs/chatllm/bin` runtime path and uses a cleaner one-backend-per-request flow.
 - Script mode now supports higher-level slash commands and quick actions such as `/review`, `/reviewfix`, `/nextedit`, `/summary`, and `Change Summary`.
@@ -23,6 +25,7 @@ All notable changes to `ofxGgml` are documented in this file.
 ### Changed
 - `ofxGgmlGuiExample` replaces the old online/offline toggle with four `Live context` policies: `Offline`, `LoadedSourcesOnly`, `LiveContext`, and `LiveContextStrictCitations`.
 - GUI live-source controls now use the more general `Live context` / `sources` wording instead of mixed `online` / `realtime` labels.
+- The AI Studio diffusion panel now exposes the newer bridge surface too, including instruct-image prompting, variation/restyle task selection, CLIP-oriented rerank modes, ranking prompts, and richer generated-image summaries.
 - Local workspaces now keep `.github` available during script-source scans so repository instruction files can shape assistant and review prompts.
 - `ofxGgmlCodeAssistant` and `ofxGgmlCodeReview` now read local `AGENTS.md` and `.github` instruction files directly from the workspace for server-first coding and review flows.
 - Setup scripts now follow the faster server-first path by default: `ggml` still builds automatically, while the local `llama.cpp` runtime remains opt-in via `--with-llama-cli` instead of being built on every `--auto` setup.

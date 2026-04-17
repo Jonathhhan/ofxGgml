@@ -24,6 +24,7 @@
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
+#include <system_error>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -73,6 +74,8 @@ struct RuntimeOptions {
 	std::string inputIdImagesPath;
 	std::string esrganPath;
 	int esrganMultiplier = 4;
+	std::shared_ptr<ofxGgmlClipInference> clipInference;
+	std::string clipScorerName = "ofxGgmlClip";
 	std::chrono::milliseconds pollInterval{15};
 	std::chrono::seconds timeout{300};
 };
@@ -134,6 +137,36 @@ inline std::string makeTimestampToken() {
 	const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
 		now.time_since_epoch()).count();
 	return std::to_string(ms);
+}
+
+inline ofxStableDiffusionImageMode mapImageMode(
+	ofxGgmlImageGenerationTask task) {
+	switch (task) {
+	case ofxGgmlImageGenerationTask::InstructImage:
+		return ofxStableDiffusionImageMode::InstructImage;
+	case ofxGgmlImageGenerationTask::Variation:
+		return ofxStableDiffusionImageMode::Variation;
+	case ofxGgmlImageGenerationTask::Restyle:
+		return ofxStableDiffusionImageMode::Restyle;
+	case ofxGgmlImageGenerationTask::ImageToImage:
+		return ofxStableDiffusionImageMode::ImageToImage;
+	case ofxGgmlImageGenerationTask::TextToImage:
+	default:
+		return ofxStableDiffusionImageMode::TextToImage;
+	}
+}
+
+inline ofxStableDiffusionImageSelectionMode mapSelectionMode(
+	ofxGgmlImageSelectionMode mode) {
+	switch (mode) {
+	case ofxGgmlImageSelectionMode::Rerank:
+		return ofxStableDiffusionImageSelectionMode::Rerank;
+	case ofxGgmlImageSelectionMode::BestOnly:
+		return ofxStableDiffusionImageSelectionMode::BestOnly;
+	case ofxGgmlImageSelectionMode::KeepOrder:
+	default:
+		return ofxStableDiffusionImageSelectionMode::KeepOrder;
+	}
 }
 
 inline bool loadSdImageFromPath(
@@ -198,6 +231,103 @@ inline bool saveSdImageToPath(
 	return true;
 }
 
+inline std::vector<ofxStableDiffusionImageScore> scoreImagesWithClip(
+	const ofxGgmlClipInference & clipInference,
+	const ofxGgmlImageGenerationRequest & request,
+	const std::vector<ofxStableDiffusionImageFrame> & frames,
+	const std::string & scorerName) {
+	std::vector<ofxStableDiffusionImageScore> scores(
+		frames.size(),
+		ofxStableDiffusionImageScore{});
+	if (frames.empty()) {
+		return scores;
+	}
+
+	const std::string rankingPrompt =
+		!request.rankingPrompt.empty()
+			? request.rankingPrompt
+			: (!request.instruction.empty() ? request.instruction : request.prompt);
+	if (rankingPrompt.empty()) {
+		return scores;
+	}
+
+	const auto query = clipInference.embedText(
+		rankingPrompt,
+		request.normalizeClipEmbeddings,
+		"prompt",
+		"Prompt");
+	if (!query.success || query.embedding.empty()) {
+		for (auto & score : scores) {
+			score.scorer = scorerName;
+			score.summary = query.error.empty()
+				? "CLIP text embedding failed"
+				: query.error;
+		}
+		return scores;
+	}
+
+	const std::filesystem::path tempDir =
+		std::filesystem::temp_directory_path() /
+		("ofxggml_sd_clip_rank_" + makeTimestampToken());
+	std::error_code dirEc;
+	std::filesystem::create_directories(tempDir, dirEc);
+	if (dirEc) {
+		for (auto & score : scores) {
+			score.scorer = scorerName;
+			score.summary = "failed to create temp rank directory";
+		}
+		return scores;
+	}
+
+	for (std::size_t i = 0; i < frames.size(); ++i) {
+		const auto & frame = frames[i];
+		ofxStableDiffusionImageScore score;
+		score.scorer = scorerName;
+		if (!frame.isAllocated()) {
+			score.summary = "frame is not allocated";
+			scores[i] = std::move(score);
+			continue;
+		}
+
+		const std::filesystem::path imagePath =
+			tempDir / ("rank_" + std::to_string(i) + ".png");
+		if (!ofSaveImage(frame.pixels, imagePath.string())) {
+			score.summary = "failed to write temp frame";
+			scores[i] = std::move(score);
+			continue;
+		}
+
+		const auto imageEmbedding = clipInference.embedImage(
+			imagePath.string(),
+			request.normalizeClipEmbeddings,
+			"image-" + std::to_string(i),
+			imagePath.filename().string());
+		std::error_code removeEc;
+		std::filesystem::remove(imagePath, removeEc);
+
+		if (!imageEmbedding.success || imageEmbedding.embedding.empty()) {
+			score.summary = imageEmbedding.error.empty()
+				? "CLIP image embedding failed"
+				: imageEmbedding.error;
+			scores[i] = std::move(score);
+			continue;
+		}
+
+		score.valid = true;
+		score.score = ofxGgmlClipInference::cosineSimilarity(
+			query.embedding,
+			imageEmbedding.embedding);
+		score.summary = "CLIP cosine similarity";
+		score.metadata.push_back({"prompt", rankingPrompt});
+		score.metadata.push_back({"imagePath", imageEmbedding.imagePath});
+		scores[i] = std::move(score);
+	}
+
+	std::error_code cleanupEc;
+	std::filesystem::remove(tempDir, cleanupEc);
+	return scores;
+}
+
 inline bool needsContextReload(
 	const ofxStableDiffusion & engine,
 	const ofxGgmlImageGenerationRequest & request,
@@ -234,7 +364,10 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 				result.error = "ofxStableDiffusion engine is null";
 				return result;
 			}
+			const bool isInstructionTask =
+				request.task == ofxGgmlImageGenerationTask::InstructImage;
 			if (request.prompt.empty() &&
+				request.instruction.empty() &&
 				request.task != ofxGgmlImageGenerationTask::Upscale) {
 				result.error = "prompt is empty";
 				return result;
@@ -368,30 +501,54 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 			}
 
 			engine->setDiffused(false);
+			engine->setImageSelectionMode(mapSelectionMode(request.selectionMode));
+			if (options.clipInference &&
+				request.selectionMode != ofxGgmlImageSelectionMode::KeepOrder) {
+				engine->setImageRankCallback(
+					[clipInference = options.clipInference,
+						request,
+						scorerName = options.clipScorerName](
+							const ofxStableDiffusionImageRequest &,
+							const std::vector<ofxStableDiffusionImageFrame> & frames) {
+						return scoreImagesWithClip(
+							*clipInference,
+							request,
+							frames,
+							scorerName);
+					});
+			} else {
+				engine->setImageRankCallback({});
+			}
 			const sample_method_t sampleMethod =
 				parseSampleMethod(request.sampler);
-			if (request.task == ofxGgmlImageGenerationTask::TextToImage) {
-				engine->txt2img(
-					request.prompt,
-					request.negativePrompt,
-					options.clipSkip,
-					request.cfgScale,
-					request.width,
-					request.height,
-					sampleMethod,
-					request.steps,
-					request.seed,
-					request.batchCount,
-					controlImagePtr,
-					request.controlImagePath.empty()
-						? options.defaultControlStrength
-						: request.controlStrength,
-					options.styleStrength,
-					options.normalizeInput,
-					options.inputIdImagesPath);
-			} else {
+			ofxStableDiffusionImageRequest sdRequest;
+			sdRequest.mode = mapImageMode(request.task);
+			sdRequest.selectionMode = mapSelectionMode(request.selectionMode);
+			sdRequest.prompt = request.prompt;
+			sdRequest.instruction = isInstructionTask
+				? (!request.instruction.empty() ? request.instruction : request.prompt)
+				: request.instruction;
+			sdRequest.negativePrompt = request.negativePrompt;
+			sdRequest.clipSkip = options.clipSkip;
+			sdRequest.cfgScale = request.cfgScale;
+			sdRequest.width = request.width;
+			sdRequest.height = request.height;
+			sdRequest.sampleMethod = sampleMethod;
+			sdRequest.sampleSteps = request.steps;
+			sdRequest.strength = request.strength;
+			sdRequest.seed = request.seed;
+			sdRequest.batchCount = request.batchCount;
+			sdRequest.controlCond = controlImagePtr;
+			sdRequest.controlStrength = request.controlImagePath.empty()
+				? options.defaultControlStrength
+				: request.controlStrength;
+			sdRequest.styleStrength = options.styleStrength;
+			sdRequest.normalizeInput = options.normalizeInput;
+			sdRequest.inputIdImagesPath = options.inputIdImagesPath;
+
+			if (sdRequest.mode != ofxStableDiffusionImageMode::TextToImage) {
 				if (request.initImagePath.empty()) {
-					result.error = "img2img requires initImagePath";
+					result.error = "selected task requires initImagePath";
 					return result;
 				}
 				if (!loadSdImageFromPath(
@@ -402,27 +559,9 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 					result.error = imageError;
 					return result;
 				}
-				engine->img2img(
-					initImage,
-					request.prompt,
-					request.negativePrompt,
-					options.clipSkip,
-					request.cfgScale,
-					request.width,
-					request.height,
-					sampleMethod,
-					request.steps,
-					request.strength,
-					request.seed,
-					request.batchCount,
-					controlImagePtr,
-					request.controlImagePath.empty()
-						? options.defaultControlStrength
-						: request.controlStrength,
-					options.styleStrength,
-					options.normalizeInput,
-					options.inputIdImagesPath);
+				sdRequest.initImage = initImage;
 			}
+			engine->generate(sdRequest);
 
 			if (!waitForIdle(*engine, options, &waitError)) {
 				result.error = "generation failed: " + waitError;
@@ -434,8 +573,8 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 				return result;
 			}
 
-			sd_image_t * images = engine->returnImages();
-			if (!images) {
+			const auto & rankedResult = engine->getLastResult();
+			if (rankedResult.images.empty()) {
 				result.error = "ofxStableDiffusion returned no images";
 				engine->setDiffused(false);
 				return result;
@@ -443,25 +582,58 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 
 			const std::string prefix = sanitizeOutputPrefix(request.outputPrefix);
 			const std::string timestamp = makeTimestampToken();
-			for (int i = 0; i < std::max(1, request.batchCount); ++i) {
-				const sd_image_t & image = images[i];
+			std::size_t savedImageCount = 0;
+			for (std::size_t i = 0; i < rankedResult.images.size(); ++i) {
+				const auto & frame = rankedResult.images[i];
+				if (!frame.isAllocated()) {
+					continue;
+				}
 				const std::string fileName =
 					prefix + "_" + timestamp + "_" + std::to_string(i) + ".png";
 				const std::string outputPath =
 					(std::filesystem::path(outputDir) / fileName).string();
-				std::string saveError;
-				if (!saveSdImageToPath(image, outputPath, &saveError)) {
-					result.error = saveError;
+				if (!ofSaveImage(frame.pixels, outputPath)) {
+					result.error = "failed to save image: " + outputPath;
 					engine->setDiffused(false);
 					return result;
 				}
 				result.images.push_back({
 					outputPath,
-					static_cast<int>(image.width),
-					static_cast<int>(image.height),
-					request.seed,
-					i
+					frame.width(),
+					frame.height(),
+					frame.seed,
+					static_cast<int>(i),
+					frame.sourceIndex,
+					frame.isSelected,
+					frame.score.score,
+					frame.score.scorer,
+					frame.score.summary
 				});
+				if (frame.score.valid) {
+					result.metadata.push_back({
+						"image[" + std::to_string(i) + "].score",
+						ofToString(frame.score.score, 6)
+					});
+				}
+				if (!frame.score.scorer.empty()) {
+					result.metadata.push_back({
+						"image[" + std::to_string(i) + "].scorer",
+						frame.score.scorer
+					});
+				}
+				if (frame.isSelected) {
+					result.metadata.push_back({
+						"selectedImageIndex",
+						std::to_string(i)
+					});
+				}
+				++savedImageCount;
+			}
+			if (savedImageCount == 0) {
+				result.error =
+					"ofxStableDiffusion produced frames, but none could be saved";
+				engine->setDiffused(false);
+				return result;
 			}
 
 			engine->setDiffused(false);
@@ -475,6 +647,10 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 			result.metadata.push_back({"sampler", request.sampler});
 			result.metadata.push_back({"steps", std::to_string(request.steps)});
 			result.metadata.push_back({"batchCount", std::to_string(request.batchCount)});
+			result.metadata.push_back({
+				"selectionMode",
+				ofxGgmlDiffusionInference::selectionModeLabel(request.selectionMode)
+			});
 			result.metadata.push_back({"modelPath", request.modelPath});
 			if (!request.vaePath.empty()) {
 				result.metadata.push_back({"vaePath", request.vaePath});

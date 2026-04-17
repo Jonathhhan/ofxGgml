@@ -64,6 +64,9 @@ ofxGgmlDiffusionInference::defaultProfiles() {
 			"",
 			true,
 			true,
+			true,
+			true,
+			true,
 			true
 		},
 		{
@@ -75,6 +78,9 @@ ofxGgmlDiffusionInference::defaultProfiles() {
 			"",
 			"",
 			"",
+			true,
+			true,
+			true,
 			true,
 			true,
 			true
@@ -89,6 +95,9 @@ ofxGgmlDiffusionInference::defaultProfiles() {
 			"",
 			"",
 			true,
+			true,
+			true,
+			true,
 			false,
 			false
 		}
@@ -100,10 +109,24 @@ const char * ofxGgmlDiffusionInference::taskLabel(
 	switch (task) {
 	case ofxGgmlImageGenerationTask::TextToImage: return "Text to Image";
 	case ofxGgmlImageGenerationTask::ImageToImage: return "Image to Image";
+	case ofxGgmlImageGenerationTask::InstructImage: return "Instruct Image";
+	case ofxGgmlImageGenerationTask::Variation: return "Variation";
+	case ofxGgmlImageGenerationTask::Restyle: return "Restyle";
 	case ofxGgmlImageGenerationTask::Inpaint: return "Inpaint";
 	case ofxGgmlImageGenerationTask::Upscale: return "Upscale";
 	}
 	return "Text to Image";
+}
+
+const char * ofxGgmlDiffusionInference::selectionModeLabel(
+	ofxGgmlImageSelectionMode mode) {
+	switch (mode) {
+	case ofxGgmlImageSelectionMode::Rerank: return "Rerank";
+	case ofxGgmlImageSelectionMode::BestOnly: return "Best Only";
+	case ofxGgmlImageSelectionMode::KeepOrder:
+	default:
+		return "Keep Order";
+	}
 }
 
 std::shared_ptr<ofxGgmlImageGenerationBackend>

@@ -397,6 +397,66 @@ TEST_CASE("Inference result structure", "[inference]") {
 	}
 }
 
+TEST_CASE("Diffusion bridge request and result structures", "[inference]") {
+	SECTION("Task labels cover modern image modes") {
+		REQUIRE(std::string(
+			ofxGgmlDiffusionInference::taskLabel(
+				ofxGgmlImageGenerationTask::TextToImage)) == "Text to Image");
+		REQUIRE(std::string(
+			ofxGgmlDiffusionInference::taskLabel(
+				ofxGgmlImageGenerationTask::InstructImage)) == "Instruct Image");
+		REQUIRE(std::string(
+			ofxGgmlDiffusionInference::taskLabel(
+				ofxGgmlImageGenerationTask::Variation)) == "Variation");
+		REQUIRE(std::string(
+			ofxGgmlDiffusionInference::taskLabel(
+				ofxGgmlImageGenerationTask::Restyle)) == "Restyle");
+	}
+
+	SECTION("Selection mode labels are stable") {
+		REQUIRE(std::string(
+			ofxGgmlDiffusionInference::selectionModeLabel(
+				ofxGgmlImageSelectionMode::KeepOrder)) == "Keep Order");
+		REQUIRE(std::string(
+			ofxGgmlDiffusionInference::selectionModeLabel(
+				ofxGgmlImageSelectionMode::Rerank)) == "Rerank");
+		REQUIRE(std::string(
+			ofxGgmlDiffusionInference::selectionModeLabel(
+				ofxGgmlImageSelectionMode::BestOnly)) == "Best Only");
+	}
+
+	SECTION("Default request exposes ranking and instruct fields") {
+		ofxGgmlImageGenerationRequest request;
+
+		REQUIRE(request.task == ofxGgmlImageGenerationTask::TextToImage);
+		REQUIRE(request.selectionMode == ofxGgmlImageSelectionMode::KeepOrder);
+		REQUIRE(request.instruction.empty());
+		REQUIRE(request.rankingPrompt.empty());
+		REQUIRE(request.normalizeClipEmbeddings);
+	}
+
+	SECTION("Generated image metadata supports selection and scores") {
+		ofxGgmlGeneratedImage image;
+
+		REQUIRE(image.sourceIndex == 0);
+		REQUIRE_FALSE(image.selected);
+		REQUIRE(image.score == 0.0f);
+		REQUIRE(image.scorer.empty());
+		REQUIRE(image.scoreSummary.empty());
+	}
+
+	SECTION("Default profiles advertise structured image-task support") {
+		const auto profiles = ofxGgmlDiffusionInference::defaultProfiles();
+
+		REQUIRE_FALSE(profiles.empty());
+		for (const auto & profile : profiles) {
+			REQUIRE(profile.supportsInstructImage);
+			REQUIRE(profile.supportsVariation);
+			REQUIRE(profile.supportsRestyle);
+		}
+	}
+}
+
 TEST_CASE("Source-aware prompt building", "[inference]") {
 	SECTION("Web sources are normalized into cleaner prompt context") {
 		ofxGgmlPromptSourceSettings sourceSettings;

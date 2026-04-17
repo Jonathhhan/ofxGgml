@@ -9,8 +9,17 @@
 enum class ofxGgmlImageGenerationTask {
 	TextToImage = 0,
 	ImageToImage,
+	InstructImage,
+	Variation,
+	Restyle,
 	Inpaint,
 	Upscale
+};
+
+enum class ofxGgmlImageSelectionMode {
+	KeepOrder = 0,
+	Rerank,
+	BestOnly
 };
 
 struct ofxGgmlImageGenerationModelProfile {
@@ -23,6 +32,9 @@ struct ofxGgmlImageGenerationModelProfile {
 	std::string clipLPath;
 	std::string clipGPath;
 	bool supportsImageToImage = true;
+	bool supportsInstructImage = true;
+	bool supportsVariation = true;
+	bool supportsRestyle = true;
 	bool supportsInpaint = false;
 	bool supportsUpscale = false;
 };
@@ -33,12 +45,20 @@ struct ofxGgmlGeneratedImage {
 	int height = 0;
 	int seed = -1;
 	int index = 0;
+	int sourceIndex = 0;
+	bool selected = false;
+	float score = 0.0f;
+	std::string scorer;
+	std::string scoreSummary;
 };
 
 struct ofxGgmlImageGenerationRequest {
 	ofxGgmlImageGenerationTask task = ofxGgmlImageGenerationTask::TextToImage;
+	ofxGgmlImageSelectionMode selectionMode = ofxGgmlImageSelectionMode::KeepOrder;
 	std::string prompt;
+	std::string instruction;
 	std::string negativePrompt;
+	std::string rankingPrompt;
 	std::string modelPath;
 	std::string vaePath;
 	std::string clipLPath;
@@ -58,6 +78,7 @@ struct ofxGgmlImageGenerationRequest {
 	float cfgScale = 7.0f;
 	float strength = 1.0f;
 	float controlStrength = 1.0f;
+	bool normalizeClipEmbeddings = true;
 	bool saveMetadata = true;
 };
 
@@ -106,6 +127,7 @@ public:
 
 	static std::vector<ofxGgmlImageGenerationModelProfile> defaultProfiles();
 	static const char * taskLabel(ofxGgmlImageGenerationTask task);
+	static const char * selectionModeLabel(ofxGgmlImageSelectionMode mode);
 	static std::shared_ptr<ofxGgmlImageGenerationBackend>
 		createStableDiffusionBridgeBackend(
 			ofxGgmlStableDiffusionBridgeBackend::GenerateFunction generateFunction = {},

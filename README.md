@@ -33,7 +33,7 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
 - `ofxGgmlTtsInference` as a lightweight text-to-speech bridge layer for optional `chatllm.cpp`-backed OuteTTS workflows and speaker-profile handling
 - `ofxGgmlClipInference` as a lightweight CLIP-style embedding and ranking bridge layer for text/image similarity workflows, with an optional `clip.cpp` adapter path
-- `ofxGgmlDiffusionInference` as a lightweight image-generation bridge layer that can host an `ofxStableDiffusion` adapter without coupling diffusion internals into the core addon
+- `ofxGgmlDiffusionInference` as a lightweight image-generation bridge layer that can host an `ofxStableDiffusion` adapter without coupling diffusion internals into the core addon, now with structured image modes, CLIP-friendly rerank selection, and richer per-image metadata
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
 - `ofxGgmlVideoInference` for backend-driven video understanding, starting with sampled-frame analysis and room for future specialized video backends
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
@@ -428,6 +428,19 @@ The Speech panel now supports a simple microphone workflow directly in the GUI:
 `ofxGgmlTtsInference` adds a parallel addon-level text-to-speech layer for synthesis workflows that should stay separate from Whisper-style speech transcription. The initial scaffold is backend-agnostic and now ships with a ready-to-attach `chatllm.cpp` adapter for OuteTTS models, including speaker-profile paths and the sampler controls that matter for llama-backed TTS models.
 
 Use it when an app wants local speech generation without baking a specific TTS runtime into its UI layer. The bridge exposes `Synthesize`, `Clone Voice`, and `Continue Speech` task labels, ships with starter OuteTTS profile hints, and can attach a runtime callback through `createChatLlmTtsBridgeBackend(...)`, `createOuteTtsBridgeBackend(...)`, or `createTtsBridgeBackend(...)`. The GUI example now seeds the `Executable` field to the addon-local `libs/chatllm/bin/chatllm(.exe)` path by default and falls back to normal executable search if you change it.
+
+## Diffusion Helpers
+
+`ofxGgmlDiffusionInference` stays intentionally thin at the native layer, but the public bridge now carries more of the creative workflow state that matters in apps.
+
+The current bridge surface supports:
+
+- image tasks such as `TextToImage`, `ImageToImage`, `InstructImage`, `Variation`, `Restyle`, `Inpaint`, and `Upscale`
+- selection policies such as `KeepOrder`, `Rerank`, and `BestOnly`
+- optional CLIP-oriented ranking inputs like `rankingPrompt` and normalized text/image embedding control
+- richer generated-image metadata including `sourceIndex`, selected-best flags, score values, scorer labels, and score summaries
+
+That design keeps `ofxStableDiffusion` standalone while giving `ofxGgmlClipInference` a clean seam for prompt-image reranking. When a runtime attaches both a diffusion backend and a CLIP backend, apps can generate batches, score them semantically, and keep either the original order or the best-scoring result without pulling low-level `ggml` or diffusion internals across addon boundaries.
 
 ## Vision Helpers
 
