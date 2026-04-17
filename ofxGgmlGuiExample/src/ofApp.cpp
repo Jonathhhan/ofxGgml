@@ -1,5 +1,6 @@
 #include "ofApp.h"
 
+#include "ImHelpers.h"
 #include "ofJson.h"
 #include "core/ofxGgmlWindowsUtf8.h"
 #include "gguf.h"
@@ -2844,6 +2845,7 @@ promptTemplates.push_back({
 
 void ofApp::setup() {
 	gConsoleAnsiEnabled = enableConsoleAnsiFormatting();
+	ofDisableArbTex();
 	ofSetWindowTitle("ofxGgml AI Studio");
 	ofSetFrameRate(60);
 	ofSetBackgroundColor(ofColor(30, 30, 34));
@@ -2921,11 +2923,14 @@ applyTheme(themeIndex);
 }
 
 void ofApp::update() {
-if (deferredEngineInitPending) {
-	deferredEngineInitPending = false;
-	initializeBackendEngine(false);
-	deferredPostInitPending = true;
-}
+  if (!visionPreviewVideoLoadedPath.empty()) {
+    visionPreviewVideo.update();
+  }
+  if (deferredEngineInitPending) {
+    deferredEngineInitPending = false;
+    initializeBackendEngine(false);
+    deferredPostInitPending = true;
+  }
 
 if (deferredPostInitPending) {
 	deferredPostInitPending = false;
@@ -3003,9 +3008,13 @@ gui.end();
 }
 
 void ofApp::exit() {
-autoSaveSession();
-stopLocalTextServer(false);
-stopLocalSpeechServer(false);
+  autoSaveSession();
+  if (!visionPreviewVideoLoadedPath.empty()) {
+    visionPreviewVideo.stop();
+    visionPreviewVideo.close();
+  }
+  stopLocalTextServer(false);
+  stopLocalSpeechServer(false);
 stopGeneration();
 stopSpeechRecording(false);
 ggml.close();
@@ -5388,9 +5397,104 @@ ImGui::EndChild();
 }
 }
 
+void ofApp::ensureVisionPreviewResources() {
+	const std::string imagePath = trim(visionImagePath);
+	if (imagePath != visionPreviewImageLoadedPath) {
+		visionPreviewImage.clear();
+		visionPreviewImageLoadedPath.clear();
+		visionPreviewImageError.clear();
+		if (!imagePath.empty()) {
+			if (visionPreviewImage.load(imagePath)) {
+				visionPreviewImageLoadedPath = imagePath;
+			} else {
+				visionPreviewImageError = "Unable to load image preview.";
+			}
+		}
+	}
+
+	const std::string videoPath = trim(visionVideoPath);
+	if (videoPath != visionPreviewVideoLoadedPath) {
+		if (!visionPreviewVideoLoadedPath.empty()) {
+			visionPreviewVideo.stop();
+			visionPreviewVideo.close();
+		}
+		visionPreviewVideoLoadedPath.clear();
+		visionPreviewVideoError.clear();
+		visionPreviewVideoReady = false;
+		if (!videoPath.empty()) {
+			if (visionPreviewVideo.load(videoPath)) {
+				visionPreviewVideo.setLoopState(OF_LOOP_NONE);
+				visionPreviewVideo.play();
+				visionPreviewVideo.setPaused(true);
+				visionPreviewVideo.setPosition(0.0f);
+				visionPreviewVideo.update();
+				visionPreviewVideoLoadedPath = videoPath;
+				visionPreviewVideoReady = visionPreviewVideo.isLoaded();
+			} else {
+				visionPreviewVideoError = "Unable to load video preview.";
+			}
+		}
+	}
+}
+
+void ofApp::drawVisionTexturePreview(const ofBaseHasTexture & previewTexture, const char * childId) {
+	const float availWidth = std::max(160.0f, ImGui::GetContentRegionAvail().x);
+	const float maxWidth = std::min(availWidth, 420.0f);
+	const float texWidth = std::max(1.0f, static_cast<float>(previewTexture.getTexture().getWidth()));
+	const float texHeight = std::max(1.0f, static_cast<float>(previewTexture.getTexture().getHeight()));
+	const float scale = std::min(maxWidth / texWidth, 240.0f / texHeight);
+	const ImVec2 drawSize(
+		std::max(1.0f, texWidth * scale),
+		std::max(1.0f, texHeight * scale));
+
+	ImGui::BeginChild(childId, ImVec2(0, drawSize.y + 12.0f), true);
+	ofxImGui::AddImage(previewTexture, glm::vec2(drawSize.x, drawSize.y));
+	ImGui::EndChild();
+}
+
+void ofApp::drawVisionImagePreview(const std::string & imagePath) {
+	if (imagePath.empty()) {
+		return;
+	}
+	if (!visionPreviewImageError.empty()) {
+		ImGui::TextDisabled("%s", visionPreviewImageError.c_str());
+		return;
+	}
+	if (!visionPreviewImage.isAllocated() || !visionPreviewImage.getTexture().isAllocated()) {
+		ImGui::TextDisabled("Image preview will appear here.");
+		return;
+	}
+	ImGui::TextDisabled(
+		"Image preview: %d x %d",
+		visionPreviewImage.getWidth(),
+		visionPreviewImage.getHeight());
+	drawVisionTexturePreview(visionPreviewImage, "##VisionImagePreview");
+}
+
+void ofApp::drawVisionVideoPreview(const std::string & videoPath) {
+	if (videoPath.empty()) {
+		return;
+	}
+	if (!visionPreviewVideoError.empty()) {
+		ImGui::TextDisabled("%s", visionPreviewVideoError.c_str());
+		return;
+	}
+	if (!visionPreviewVideoReady || !visionPreviewVideo.isLoaded() ||
+		!visionPreviewVideo.getTexture().isAllocated()) {
+		ImGui::TextDisabled("Video preview will appear here after the file loads.");
+		return;
+	}
+	ImGui::TextDisabled(
+		"Video preview: %d x %d",
+		visionPreviewVideo.getWidth(),
+		visionPreviewVideo.getHeight());
+	drawVisionTexturePreview(visionPreviewVideo, "##VisionVideoPreview");
+}
+
 void ofApp::drawVisionPanel() {
-drawPanelHeader("Vision", "image / video-to-text via llama-server multimodal models");
-const float compactModeFieldWidth = std::min(280.0f, ImGui::GetContentRegionAvail().x);
+  drawPanelHeader("Vision", "image / video-to-text via llama-server multimodal models");
+  const float compactModeFieldWidth = std::min(280.0f, ImGui::GetContentRegionAvail().x);
+  ensureVisionPreviewResources();
 
 	const auto applyVisionProfileDefaults =
 		[this](const ofxGgmlVisionModelProfile & profile, bool onlyWhenEmpty) {
@@ -5564,6 +5668,7 @@ if (ImGui::Button("Browse...", ImVec2(90, 0))) {
 		copyStringToBuffer(visionImagePath, sizeof(visionImagePath), result.getPath());
 	}
 }
+drawVisionImagePreview(trim(visionImagePath));
 
 static const char * visionTaskLabels[] = { "Describe", "OCR", "Ask" };
 ImGui::SetNextItemWidth(180);
@@ -5657,6 +5762,7 @@ ImGui::InputTextMultiline(
 			autoSaveSession();
 		}
 	}
+	drawVisionVideoPreview(trim(visionVideoPath));
 	ImGui::SetNextItemWidth(180);
 	ImGui::SliderInt("Sampled frames", &visionVideoMaxFrames, 1, 12);
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
@@ -6515,10 +6621,34 @@ void ofApp::drawDiffusionPanel() {
 		diffusionProfiles.empty()
 			? ofxGgmlImageGenerationModelProfile{}
 			: diffusionProfiles[static_cast<size_t>(selectedDiffusionProfileIndex)];
+	const auto profileSupportsTask =
+		[](const ofxGgmlImageGenerationModelProfile & profile,
+			ofxGgmlImageGenerationTask task) {
+			switch (task) {
+			case ofxGgmlImageGenerationTask::ImageToImage:
+				return profile.supportsImageToImage;
+			case ofxGgmlImageGenerationTask::InstructImage:
+				return profile.supportsInstructImage;
+			case ofxGgmlImageGenerationTask::Variation:
+				return profile.supportsVariation;
+			case ofxGgmlImageGenerationTask::Restyle:
+				return profile.supportsRestyle;
+			case ofxGgmlImageGenerationTask::Inpaint:
+				return profile.supportsInpaint;
+			case ofxGgmlImageGenerationTask::Upscale:
+				return profile.supportsUpscale;
+			case ofxGgmlImageGenerationTask::TextToImage:
+			default:
+				return true;
+			}
+		};
 	const auto activeTask =
-		static_cast<ofxGgmlImageGenerationTask>(std::clamp(diffusionTaskIndex, 0, 3));
+		static_cast<ofxGgmlImageGenerationTask>(std::clamp(diffusionTaskIndex, 0, 6));
 	const bool needsInitImage =
 		activeTask == ofxGgmlImageGenerationTask::ImageToImage ||
+		activeTask == ofxGgmlImageGenerationTask::InstructImage ||
+		activeTask == ofxGgmlImageGenerationTask::Variation ||
+		activeTask == ofxGgmlImageGenerationTask::Restyle ||
 		activeTask == ofxGgmlImageGenerationTask::Inpaint ||
 		activeTask == ofxGgmlImageGenerationTask::Upscale;
 	const bool needsMaskImage = activeTask == ofxGgmlImageGenerationTask::Inpaint;
@@ -6555,16 +6685,10 @@ void ofApp::drawDiffusionPanel() {
 			const auto & profile =
 				diffusionProfiles[static_cast<size_t>(selectedDiffusionProfileIndex)];
 			applyDiffusionProfileDefaults(profile, false);
-			if (!profile.supportsImageToImage &&
-				diffusionTaskIndex == static_cast<int>(ofxGgmlImageGenerationTask::ImageToImage)) {
-				diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::TextToImage);
-			}
-			if (!profile.supportsInpaint &&
-				diffusionTaskIndex == static_cast<int>(ofxGgmlImageGenerationTask::Inpaint)) {
-				diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::TextToImage);
-			}
-			if (!profile.supportsUpscale &&
-				diffusionTaskIndex == static_cast<int>(ofxGgmlImageGenerationTask::Upscale)) {
+			const auto selectedTask =
+				static_cast<ofxGgmlImageGenerationTask>(
+					std::clamp(diffusionTaskIndex, 0, 6));
+			if (!profileSupportsTask(profile, selectedTask)) {
 				diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::TextToImage);
 			}
 		}
@@ -6608,8 +6732,11 @@ void ofApp::drawDiffusionPanel() {
 			}
 		}
 		ImGui::TextDisabled(
-			"Img2Img: %s | Inpaint: %s | Upscale: %s",
+			"Img2Img: %s | Instruct: %s | Variation: %s | Restyle: %s | Inpaint: %s | Upscale: %s",
 			activeProfile.supportsImageToImage ? "supported" : "not supported",
+			activeProfile.supportsInstructImage ? "supported" : "not supported",
+			activeProfile.supportsVariation ? "supported" : "not supported",
+			activeProfile.supportsRestyle ? "supported" : "not supported",
 			activeProfile.supportsInpaint ? "supported" : "not supported",
 			activeProfile.supportsUpscale ? "supported" : "not supported");
 	}
@@ -6622,26 +6749,80 @@ void ofApp::drawDiffusionPanel() {
 		diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::ImageToImage);
 	}
 	ImGui::SameLine();
+	if (ImGui::Button("Instruct", ImVec2(100, 0))) {
+		diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::InstructImage);
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Variation", ImVec2(100, 0))) {
+		diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::Variation);
+	}
+	if (ImGui::Button("Restyle", ImVec2(100, 0))) {
+		diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::Restyle);
+	}
+	ImGui::SameLine();
 	if (ImGui::Button("Inpaint", ImVec2(100, 0))) {
 		diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::Inpaint);
 	}
+	ImGui::SameLine();
+	if (ImGui::Button("Upscale", ImVec2(100, 0))) {
+		diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::Upscale);
+	}
 
 	static const char * diffusionTaskLabels[] = {
-		"Text to Image", "Image to Image", "Inpaint", "Upscale"
+		"Text to Image",
+		"Image to Image",
+		"Instruct Image",
+		"Variation",
+		"Restyle",
+		"Inpaint",
+		"Upscale"
 	};
-	ImGui::SetNextItemWidth(180);
-	ImGui::Combo("Diffusion task", &diffusionTaskIndex, diffusionTaskLabels, 4);
+	ImGui::SetNextItemWidth(200);
+	ImGui::Combo("Diffusion task", &diffusionTaskIndex, diffusionTaskLabels, 7);
+
+	static const char * diffusionSelectionLabels[] = {
+		"Keep Order",
+		"Rerank",
+		"Best Only"
+	};
+	diffusionSelectionModeIndex = std::clamp(diffusionSelectionModeIndex, 0, 2);
+	ImGui::SetNextItemWidth(200);
+	ImGui::Combo(
+		"Selection mode",
+		&diffusionSelectionModeIndex,
+		diffusionSelectionLabels,
+		3);
+	const bool useClipSelection = diffusionSelectionModeIndex > 0;
 
 	ImGui::InputTextMultiline(
 		"Prompt",
 		diffusionPrompt,
 		sizeof(diffusionPrompt),
 		ImVec2(-1, 100));
+	if (activeTask == ofxGgmlImageGenerationTask::InstructImage) {
+		ImGui::InputTextMultiline(
+			"Instruction",
+			diffusionInstruction,
+			sizeof(diffusionInstruction),
+			ImVec2(-1, 80));
+	}
 	ImGui::InputTextMultiline(
 		"Negative prompt",
 		diffusionNegativePrompt,
 		sizeof(diffusionNegativePrompt),
 		ImVec2(-1, 70));
+	if (useClipSelection) {
+		ImGui::InputTextMultiline(
+			"Ranking prompt",
+			diffusionRankingPrompt,
+			sizeof(diffusionRankingPrompt),
+			ImVec2(-1, 70));
+		ImGui::Checkbox(
+			"Normalize CLIP embeddings",
+			&diffusionNormalizeClipEmbeddings);
+		ImGui::TextDisabled(
+			"Rerank and Best Only need a configured adapter runtime with CLIP attached.");
+	}
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Model path", diffusionModelPath, sizeof(diffusionModelPath));
@@ -6726,11 +6907,21 @@ void ofApp::drawDiffusionPanel() {
 	}
 	ImGui::Checkbox("Save metadata", &diffusionSaveMetadata);
 
+	const bool hasPromptText = std::strlen(diffusionPrompt) > 0;
+	const bool hasInstructionText = std::strlen(diffusionInstruction) > 0;
+	const bool taskNeedsText =
+		activeTask != ofxGgmlImageGenerationTask::Upscale &&
+		activeTask != ofxGgmlImageGenerationTask::Variation;
+	const bool hasRunnableText =
+		!taskNeedsText ||
+		hasPromptText ||
+		(activeTask == ofxGgmlImageGenerationTask::InstructImage && hasInstructionText);
 	const bool canRunDiffusion =
 		!generating.load() &&
-		std::strlen(diffusionPrompt) > 0 &&
+		hasRunnableText &&
 		(!needsInitImage || std::strlen(diffusionInitImagePath) > 0) &&
-		(!needsMaskImage || std::strlen(diffusionMaskImagePath) > 0);
+		(!needsMaskImage || std::strlen(diffusionMaskImagePath) > 0) &&
+		(!useClipSelection || bridgeConfigured);
 	ImGui::BeginDisabled(!canRunDiffusion);
 	if (ImGui::Button("Run Diffusion", ImVec2(160, 0))) {
 		runDiffusionInference();
@@ -6768,7 +6959,15 @@ void ofApp::drawDiffusionPanel() {
 	if (!diffusionGeneratedImages.empty()) {
 		ImGui::TextDisabled("Generated files:");
 		for (const auto & image : diffusionGeneratedImages) {
-			ImGui::BulletText("%s", image.path.c_str());
+			std::string label = image.path;
+			if (image.selected) {
+				label += " [selected]";
+			}
+			if (!image.scorer.empty()) {
+				label += " | " + image.scorer;
+				label += ": " + ofToString(image.score, 4);
+			}
+			ImGui::BulletText("%s", label.c_str());
 		}
 	}
 
@@ -7337,7 +7536,9 @@ out << "speechServerModel=" << escapeSessionText(speechServerModel) << "\n";
   out << "ttsStreamAudio=" << (ttsStreamAudio ? 1 : 0) << "\n";
   out << "ttsNormalizeText=" << (ttsNormalizeText ? 1 : 0) << "\n";
   out << "diffusionPrompt=" << escapeSessionText(diffusionPrompt) << "\n";
+  out << "diffusionInstruction=" << escapeSessionText(diffusionInstruction) << "\n";
   out << "diffusionNegativePrompt=" << escapeSessionText(diffusionNegativePrompt) << "\n";
+  out << "diffusionRankingPrompt=" << escapeSessionText(diffusionRankingPrompt) << "\n";
   out << "diffusionModelPath=" << escapeSessionText(diffusionModelPath) << "\n";
   out << "diffusionVaePath=" << escapeSessionText(diffusionVaePath) << "\n";
   out << "diffusionInitImagePath=" << escapeSessionText(diffusionInitImagePath) << "\n";
@@ -7346,6 +7547,7 @@ out << "speechServerModel=" << escapeSessionText(speechServerModel) << "\n";
   out << "diffusionOutputPrefix=" << escapeSessionText(diffusionOutputPrefix) << "\n";
   out << "diffusionSampler=" << escapeSessionText(diffusionSampler) << "\n";
   out << "diffusionTaskIndex=" << diffusionTaskIndex << "\n";
+  out << "diffusionSelectionModeIndex=" << diffusionSelectionModeIndex << "\n";
   out << "diffusionWidth=" << diffusionWidth << "\n";
   out << "diffusionHeight=" << diffusionHeight << "\n";
   out << "diffusionSteps=" << diffusionSteps << "\n";
@@ -7354,6 +7556,7 @@ out << "speechServerModel=" << escapeSessionText(speechServerModel) << "\n";
   out << "diffusionCfgScale=" << ofToString(diffusionCfgScale, 4) << "\n";
   out << "diffusionStrength=" << ofToString(diffusionStrength, 4) << "\n";
   out << "diffusionProfileIndex=" << selectedDiffusionProfileIndex << "\n";
+  out << "diffusionNormalizeClipEmbeddings=" << (diffusionNormalizeClipEmbeddings ? 1 : 0) << "\n";
   out << "diffusionSaveMetadata=" << (diffusionSaveMetadata ? 1 : 0) << "\n";
   out << "clipPrompt=" << escapeSessionText(clipPrompt) << "\n";
   out << "clipModelPath=" << escapeSessionText(clipModelPath) << "\n";
@@ -7638,7 +7841,9 @@ else if (key == "speechServerUrl") copyToBuf(speechServerUrl, sizeof(speechServe
     else if (key == "speechProfileIndex") selectedSpeechProfileIndex = std::max(0, safeStoi(value));
     else if (key == "speechReturnTimestamps") speechReturnTimestamps = (safeStoi(value, 0) != 0);
     else if (key == "diffusionPrompt") copyToBuf(diffusionPrompt, sizeof(diffusionPrompt), value);
+  else if (key == "diffusionInstruction") copyToBuf(diffusionInstruction, sizeof(diffusionInstruction), value);
   else if (key == "diffusionNegativePrompt") copyToBuf(diffusionNegativePrompt, sizeof(diffusionNegativePrompt), value);
+  else if (key == "diffusionRankingPrompt") copyToBuf(diffusionRankingPrompt, sizeof(diffusionRankingPrompt), value);
   else if (key == "diffusionModelPath") copyToBuf(diffusionModelPath, sizeof(diffusionModelPath), value);
   else if (key == "diffusionVaePath") copyToBuf(diffusionVaePath, sizeof(diffusionVaePath), value);
   else if (key == "diffusionInitImagePath") copyToBuf(diffusionInitImagePath, sizeof(diffusionInitImagePath), value);
@@ -7646,7 +7851,8 @@ else if (key == "speechServerUrl") copyToBuf(speechServerUrl, sizeof(speechServe
   else if (key == "diffusionOutputDir") copyToBuf(diffusionOutputDir, sizeof(diffusionOutputDir), value);
   else if (key == "diffusionOutputPrefix") copyToBuf(diffusionOutputPrefix, sizeof(diffusionOutputPrefix), value);
   else if (key == "diffusionSampler") copyToBuf(diffusionSampler, sizeof(diffusionSampler), value);
-  else if (key == "diffusionTaskIndex") diffusionTaskIndex = std::clamp(safeStoi(value), 0, 3);
+  else if (key == "diffusionTaskIndex") diffusionTaskIndex = std::clamp(safeStoi(value), 0, 6);
+  else if (key == "diffusionSelectionModeIndex") diffusionSelectionModeIndex = std::clamp(safeStoi(value), 0, 2);
   else if (key == "diffusionWidth") diffusionWidth = std::clamp(safeStoi(value, 1024), 64, 4096);
   else if (key == "diffusionHeight") diffusionHeight = std::clamp(safeStoi(value, 1024), 64, 4096);
   else if (key == "diffusionSteps") diffusionSteps = std::clamp(safeStoi(value, 20), 1, 200);
@@ -7655,6 +7861,7 @@ else if (key == "speechServerUrl") copyToBuf(speechServerUrl, sizeof(speechServe
   else if (key == "diffusionCfgScale") diffusionCfgScale = std::clamp(safeStof(value, 7.0f), 0.0f, 30.0f);
   else if (key == "diffusionStrength") diffusionStrength = std::clamp(safeStof(value, 0.75f), 0.0f, 1.0f);
   else if (key == "diffusionProfileIndex") selectedDiffusionProfileIndex = std::max(0, safeStoi(value));
+  else if (key == "diffusionNormalizeClipEmbeddings") diffusionNormalizeClipEmbeddings = (safeStoi(value, 1) != 0);
   else if (key == "diffusionSaveMetadata") diffusionSaveMetadata = (safeStoi(value, 1) != 0);
   else if (key == "clipPrompt") copyToBuf(clipPrompt, sizeof(clipPrompt), value);
   else if (key == "clipModelPath") copyToBuf(clipModelPath, sizeof(clipModelPath), value);
@@ -8869,7 +9076,9 @@ void ofApp::runDiffusionInference() {
 			? ofxGgmlImageGenerationModelProfile{}
 			: diffusionProfiles[static_cast<size_t>(selectedDiffusionProfileIndex)];
 	const std::string prompt = trim(diffusionPrompt);
+	const std::string instruction = trim(diffusionInstruction);
 	const std::string negativePrompt = trim(diffusionNegativePrompt);
+	const std::string rankingPrompt = trim(diffusionRankingPrompt);
 	const std::string modelPath = trim(diffusionModelPath);
 	const std::string vaePath = trim(diffusionVaePath);
 	const std::string initImagePath = trim(diffusionInitImagePath);
@@ -8877,7 +9086,8 @@ void ofApp::runDiffusionInference() {
 	const std::string outputDir = trim(diffusionOutputDir);
 	const std::string outputPrefix = trim(diffusionOutputPrefix);
 	const std::string sampler = trim(diffusionSampler);
-	const int taskIndex = std::clamp(diffusionTaskIndex, 0, 3);
+	const int taskIndex = std::clamp(diffusionTaskIndex, 0, 6);
+	const int selectionModeIndex = std::clamp(diffusionSelectionModeIndex, 0, 2);
 	const int width = std::clamp(diffusionWidth, 64, 4096);
 	const int height = std::clamp(diffusionHeight, 64, 4096);
 	const int steps = std::clamp(diffusionSteps, 1, 200);
@@ -8889,9 +9099,10 @@ void ofApp::runDiffusionInference() {
 	const float strength = std::isfinite(diffusionStrength)
 		? std::clamp(diffusionStrength, 0.0f, 1.0f)
 		: 0.75f;
+	const bool normalizeClipEmbeddings = diffusionNormalizeClipEmbeddings;
 	const bool saveMetadata = diffusionSaveMetadata;
 
-	workerThread = std::thread([this, profileBase, prompt, negativePrompt, modelPath, vaePath, initImagePath, maskImagePath, outputDir, outputPrefix, sampler, taskIndex, width, height, steps, batchCount, requestSeed, cfgScale, strength, saveMetadata]() {
+	workerThread = std::thread([this, profileBase, prompt, instruction, negativePrompt, rankingPrompt, modelPath, vaePath, initImagePath, maskImagePath, outputDir, outputPrefix, sampler, taskIndex, selectionModeIndex, width, height, steps, batchCount, requestSeed, cfgScale, strength, normalizeClipEmbeddings, saveMetadata]() {
 		auto setPending = [this](const std::string & text) {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingOutput = text;
@@ -8908,16 +9119,52 @@ void ofApp::runDiffusionInference() {
 		};
 
 		try {
-			if (prompt.empty()) {
+			const auto task = static_cast<ofxGgmlImageGenerationTask>(taskIndex);
+			const auto selectionMode =
+				static_cast<ofxGgmlImageSelectionMode>(selectionModeIndex);
+			const auto supportsTask =
+				[](const ofxGgmlImageGenerationModelProfile & profile,
+					ofxGgmlImageGenerationTask taskValue) {
+					switch (taskValue) {
+					case ofxGgmlImageGenerationTask::ImageToImage:
+						return profile.supportsImageToImage;
+					case ofxGgmlImageGenerationTask::InstructImage:
+						return profile.supportsInstructImage;
+					case ofxGgmlImageGenerationTask::Variation:
+						return profile.supportsVariation;
+					case ofxGgmlImageGenerationTask::Restyle:
+						return profile.supportsRestyle;
+					case ofxGgmlImageGenerationTask::Inpaint:
+						return profile.supportsInpaint;
+					case ofxGgmlImageGenerationTask::Upscale:
+						return profile.supportsUpscale;
+					case ofxGgmlImageGenerationTask::TextToImage:
+					default:
+						return true;
+					}
+				};
+			const bool needsPromptText =
+				task != ofxGgmlImageGenerationTask::Upscale &&
+				task != ofxGgmlImageGenerationTask::Variation;
+			const bool hasRunnableText =
+				!needsPromptText ||
+				!prompt.empty() ||
+				(task == ofxGgmlImageGenerationTask::InstructImage &&
+					!instruction.empty());
+			if (!hasRunnableText) {
 				clearPendingDiffusionArtifacts();
-				setPending("[Error] Enter a prompt first.");
+				setPending(
+					task == ofxGgmlImageGenerationTask::InstructImage
+						? "[Error] Enter a prompt or instruction first."
+						: "[Error] Enter a prompt first.");
 				generating.store(false);
 				return;
 			}
-
-			const auto task = static_cast<ofxGgmlImageGenerationTask>(taskIndex);
 			const bool needsInitImage =
 				task == ofxGgmlImageGenerationTask::ImageToImage ||
+				task == ofxGgmlImageGenerationTask::InstructImage ||
+				task == ofxGgmlImageGenerationTask::Variation ||
+				task == ofxGgmlImageGenerationTask::Restyle ||
 				task == ofxGgmlImageGenerationTask::Inpaint ||
 				task == ofxGgmlImageGenerationTask::Upscale;
 			const bool needsMaskImage =
@@ -8935,9 +9182,7 @@ void ofApp::runDiffusionInference() {
 				return;
 			}
 
-			if ((task == ofxGgmlImageGenerationTask::ImageToImage && !profileBase.supportsImageToImage) ||
-				(task == ofxGgmlImageGenerationTask::Inpaint && !profileBase.supportsInpaint) ||
-				(task == ofxGgmlImageGenerationTask::Upscale && !profileBase.supportsUpscale)) {
+			if (!supportsTask(profileBase, task)) {
 				clearPendingDiffusionArtifacts();
 				setPending("[Error] The selected diffusion profile does not support the chosen task.");
 				generating.store(false);
@@ -8962,8 +9207,11 @@ void ofApp::runDiffusionInference() {
 
 			ofxGgmlImageGenerationRequest request;
 			request.task = task;
+			request.selectionMode = selectionMode;
 			request.prompt = prompt;
+			request.instruction = instruction;
 			request.negativePrompt = negativePrompt;
+			request.rankingPrompt = rankingPrompt;
 			request.modelPath = effectiveModelPath;
 			request.vaePath = vaePath;
 			request.initImagePath = initImagePath;
@@ -8978,6 +9226,7 @@ void ofApp::runDiffusionInference() {
 			request.seed = requestSeed;
 			request.cfgScale = cfgScale;
 			request.strength = strength;
+			request.normalizeClipEmbeddings = normalizeClipEmbeddings;
 			request.saveMetadata = saveMetadata;
 
 			{
@@ -9010,6 +9259,18 @@ void ofApp::runDiffusionInference() {
 						summary << "\n- " << image.path;
 						if (image.width > 0 && image.height > 0) {
 							summary << " (" << image.width << "x" << image.height << ")";
+						}
+						if (image.selected) {
+							summary << " [selected]";
+						}
+						if (!image.scorer.empty()) {
+							summary << " | " << image.scorer;
+						}
+						if (!image.scorer.empty() || !image.scoreSummary.empty()) {
+							summary << " score=" << ofToString(image.score, 4);
+						}
+						if (!image.scoreSummary.empty()) {
+							summary << " | " << image.scoreSummary;
 						}
 					}
 				}

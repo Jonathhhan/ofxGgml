@@ -174,7 +174,9 @@ private:
 	bool ttsStreamAudio = false;
 	bool ttsNormalizeText = true;
 	char diffusionPrompt[4096] = {};
+	char diffusionInstruction[4096] = {};
 	char diffusionNegativePrompt[4096] = {};
+	char diffusionRankingPrompt[4096] = {};
 	char diffusionModelPath[1024] = {};
 	char diffusionVaePath[1024] = {};
 	char diffusionInitImagePath[1024] = {};
@@ -183,6 +185,7 @@ private:
 	char diffusionOutputPrefix[128] = "diffusion";
 	char diffusionSampler[64] = "euler_a";
 	int diffusionTaskIndex = 0;
+	int diffusionSelectionModeIndex = 0;
 	int diffusionWidth = 1024;
 	int diffusionHeight = 1024;
 	int diffusionSteps = 20;
@@ -190,6 +193,7 @@ private:
 	int diffusionSeed = -1;
 	float diffusionCfgScale = 7.0f;
 	float diffusionStrength = 0.75f;
+	bool diffusionNormalizeClipEmbeddings = true;
 	bool diffusionSaveMetadata = true;
 	char clipPrompt[4096] = {};
 	char clipModelPath[1024] = {};
@@ -224,6 +228,13 @@ private:
 	std::string ttsOutput;
 	std::string diffusionOutput;
 	std::string clipOutput;
+	ofImage visionPreviewImage;
+	std::string visionPreviewImageLoadedPath;
+	std::string visionPreviewImageError;
+	ofVideoPlayer visionPreviewVideo;
+	std::string visionPreviewVideoLoadedPath;
+	std::string visionPreviewVideoError;
+	bool visionPreviewVideoReady = false;
 	std::string speechDetectedLanguage;
 	std::string speechTranscriptPath;
 	std::string speechSrtPath;
@@ -498,6 +509,10 @@ private:
 	void drawTranslatePanel();
 	void drawCustomPanel();
 	void drawVisionPanel();
+	void ensureVisionPreviewResources();
+	void drawVisionImagePreview(const std::string & imagePath);
+	void drawVisionVideoPreview(const std::string & videoPath);
+	void drawVisionTexturePreview(const ofBaseHasTexture & previewTexture, const char * childId);
 	void drawSpeechPanel();
 	void drawTtsPanel();
 	void drawDiffusionPanel();
