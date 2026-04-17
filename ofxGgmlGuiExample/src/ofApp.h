@@ -175,16 +175,6 @@ private:
 	bool speechServerManagedByApp = false;
 	ServerStatusState speechServerStatus = ServerStatusState::Unknown;
 	std::string speechServerStatusMessage;
-	std::string cachedSpeechCliExecutable;
-	bool speechCliExecutableCached = false;
-	std::string cachedSpeechServerExecutable;
-	bool speechServerExecutableCached = false;
-#ifdef _WIN32
-	HANDLE speechServerProcessHandle = nullptr;
-	DWORD speechServerProcessId = 0;
-#else
-	pid_t speechServerProcessId = 0;
-#endif
 
 	// -- conversation / output --
 	std::deque<Message> chatMessages;
@@ -306,18 +296,6 @@ private:
 	std::string textServerStatusMessage;
 	std::string textServerCapabilityHint;
 	bool textServerManagedByApp = false;
-	std::string cachedTextServerExecutable;
-	bool textServerExecutableCached = false;
-	bool deferredTextServerWarmupPending = false;
-	float deferredTextServerWarmupDeadline = 0.0f;
-	float deferredTextServerWarmupNextProbeTime = 0.0f;
-	std::string deferredTextServerWarmupUrl;
-#ifdef _WIN32
-	HANDLE textServerProcessHandle = nullptr;
-	DWORD textServerProcessId = 0;
-#else
-	pid_t textServerProcessId = 0;
-#endif
 	bool useModeTokenBudgets = true;
 	bool autoContinueCutoff = false;
 	bool usePromptCache = true;

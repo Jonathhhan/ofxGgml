@@ -1108,7 +1108,6 @@ void ofApp::startLocalSpeechServer() {
 			? ofxGgmlSpeechModelProfile{}
 			: speechProfiles[static_cast<size_t>(selectedSpeechProfileIndex)];
 
-	const std::string serverExe = findLocalSpeechServerExecutable(true);
 	std::string modelPath = trim(speechModelPath);
 	if (modelPath.empty()) {
 		modelPath = trim(activeSpeechProfile.modelPath);
@@ -1120,6 +1119,8 @@ void ofApp::startLocalSpeechServer() {
 			modelPath = suggestedPath;
 		}
 	}
+
+	const std::string serverExe = findLocalSpeechServerExecutable(true);
 	if (serverExe.empty()) {
 		logWithLevel(OF_LOG_ERROR, "No local whisper-server executable was found. Build or copy whisper-server.exe into libs/whisper/bin first.");
 		speechServerStatus = ServerStatusState::Unreachable;
@@ -1133,112 +1134,36 @@ void ofApp::startLocalSpeechServer() {
 		return;
 	}
 
-	const auto [host, port] = parseSpeechServerHostPort(effectiveSpeechServerUrl(speechServerUrl));
+	// Delegate to manager
+	speechServerManager.startLocalServer(
+		effectiveSpeechServerUrl(speechServerUrl),
+		modelPath);
 
-#ifdef _WIN32
-	std::vector<std::string> args = {
-		serverExe,
-		"--host", host,
-		"--port", ofToString(port),
-		"-m", modelPath
-	};
-	std::string cmdLine;
-	for (size_t i = 0; i < args.size(); ++i) {
-		if (i > 0) cmdLine += " ";
-		const bool needsQuotes = args[i].find_first_of(" \t\"") != std::string::npos;
-		if (!needsQuotes) {
-			cmdLine += args[i];
-			continue;
-		}
-		cmdLine += "\"";
-		for (char c : args[i]) {
-			if (c == '"') cmdLine += "\\\"";
-			else cmdLine += c;
-		}
-		cmdLine += "\"";
-	}
+	// Update local UI state
+	speechServerManagedByApp = speechServerManager.isManagedByApp();
+	speechServerStatus = speechServerManager.getStatus();
+	speechServerStatusMessage = speechServerManager.getStatusMessage();
 
-	std::wstring wideCmd = ofxGgmlWideFromUtf8(cmdLine);
-	std::vector<wchar_t> mutableCmd(wideCmd.begin(), wideCmd.end());
-	mutableCmd.push_back(L'\0');
-	STARTUPINFOW si {};
-	si.cb = sizeof(si);
-	PROCESS_INFORMATION pi {};
-	const std::wstring workingDir = ofxGgmlWideFromUtf8(
-		std::filesystem::path(serverExe).parent_path().string());
-	const BOOL ok = CreateProcessW(
-		nullptr,
-		mutableCmd.data(),
-		nullptr,
-		nullptr,
-		FALSE,
-		CREATE_NO_WINDOW,
-		nullptr,
-		workingDir.c_str(),
-		&si,
-		&pi);
-	if (!ok) {
-		logWithLevel(OF_LOG_ERROR, "Failed to start local whisper-server. Windows error: " + ofToString(static_cast<int>(GetLastError())));
-		speechServerStatus = ServerStatusState::Unreachable;
-		speechServerStatusMessage = "Failed to launch local whisper-server.";
-		return;
+	// Log the result
+	if (speechServerManagedByApp) {
+		const auto [host, port] = parseSpeechServerHostPort(effectiveSpeechServerUrl(speechServerUrl));
+		logWithLevel(
+			OF_LOG_NOTICE,
+			"Started local whisper-server on " + host + ":" + ofToString(port) +
+			" using model " + ofFilePath::getFileName(modelPath) + ".");
+	} else if (!speechServerStatusMessage.empty()) {
+		logWithLevel(OF_LOG_ERROR, speechServerStatusMessage);
 	}
-	if (speechServerProcessHandle) {
-		CloseHandle(speechServerProcessHandle);
-	}
-	speechServerProcessHandle = pi.hProcess;
-	speechServerProcessId = pi.dwProcessId;
-	CloseHandle(pi.hThread);
-#else
-	pid_t pid = fork();
-	if (pid == 0) {
-		chdir(std::filesystem::path(serverExe).parent_path().string().c_str());
-		execl(
-			serverExe.c_str(),
-			serverExe.c_str(),
-			"--host", host.c_str(),
-			"--port", ofToString(port).c_str(),
-			"-m", modelPath.c_str(),
-			nullptr);
-		_exit(127);
-	}
-	if (pid <= 0) {
-		logWithLevel(OF_LOG_ERROR, "Failed to fork local whisper-server process.");
-		return;
-	}
-	speechServerProcessId = pid;
-#endif
-
-	speechServerManagedByApp = true;
-	speechServerStatus = ServerStatusState::Unknown;
-	speechServerStatusMessage = "Local whisper-server started.";
-	logWithLevel(
-		OF_LOG_NOTICE,
-		"Started local whisper-server on " + host + ":" + ofToString(port) +
-		" using model " + ofFilePath::getFileName(modelPath) + ".");
 }
 
 void ofApp::stopLocalSpeechServer(bool logResult) {
-	if (!isManagedSpeechServerRunning()) {
-		speechServerManagedByApp = false;
-		speechServerStatus = ServerStatusState::Unknown;
-		if (logResult) {
-			logWithLevel(OF_LOG_NOTICE, "No app-managed local whisper-server is currently running.");
-		}
-		return;
-	}
-#ifdef _WIN32
-	TerminateProcess(speechServerProcessHandle, 0);
-	CloseHandle(speechServerProcessHandle);
-	speechServerProcessHandle = nullptr;
-	speechServerProcessId = 0;
-#else
-	kill(speechServerProcessId, SIGTERM);
-	speechServerProcessId = 0;
-#endif
-	speechServerManagedByApp = false;
-	speechServerStatus = ServerStatusState::Unknown;
-	speechServerStatusMessage = "Local whisper-server stopped.";
+	speechServerManager.stopLocalServer(logResult);
+
+	// Update local UI state
+	speechServerManagedByApp = speechServerManager.isManagedByApp();
+	speechServerStatus = speechServerManager.getStatus();
+	speechServerStatusMessage = speechServerManager.getStatusMessage();
+
 	if (logResult) {
 		logWithLevel(OF_LOG_NOTICE, speechServerStatusMessage);
 	}
