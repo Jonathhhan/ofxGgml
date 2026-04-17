@@ -56,6 +56,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build bundled ggml (CPU-only)
+        run: ./scripts/build-ggml.sh --cpu-only
+
       - name: Install static analysis tools
         run: |
           sudo apt-get update

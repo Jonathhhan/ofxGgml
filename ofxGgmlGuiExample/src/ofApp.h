@@ -442,13 +442,10 @@ private:
 		bool logResult = false,
 		bool allowLaunch = true,
 		bool allowMmproj = false);
+	void updateTextServerStateFromResult(const TextServerEnsureResult & result);
 	std::string findLocalTextServerExecutable(bool refresh = false);
 	bool isManagedTextServerRunning();
 	void startLocalTextServer();
-	void startLocalLlamaServerForModel(
-		const std::string & configuredUrl,
-		const std::string & modelPath,
-		bool allowMmproj = false);
 	void stopLocalTextServer(bool logResult = true);
 	std::string findLocalSpeechCliExecutable(bool refresh = false);
 	std::string findLocalSpeechServerExecutable(bool refresh = false);
