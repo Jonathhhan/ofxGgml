@@ -8,6 +8,8 @@
 #include "panels/LogPanel.h"
 #include "panels/PerformancePanel.h"
 #include "panels/StatusBar.h"
+#include "managers/TextServerManager.h"
+#include "managers/SpeechServerManager.h"
 
 #include <atomic>
 #include <array>
@@ -36,12 +38,6 @@ enum class LiveContextMode {
 enum class TextInferenceBackend {
 	Cli = 0,
 	LlamaServer
-};
-
-enum class ServerStatusState {
-	Unknown = 0,
-	Reachable,
-	Unreachable
 };
 
 // ---------------------------------------------------------------------------
@@ -86,6 +82,10 @@ private:
 	LogPanel logPanel;
 	PerformancePanel performancePanel;
 	StatusBar statusBar;
+
+	// -- Server Managers --
+	TextServerManager textServerManager;
+	SpeechServerManager speechServerManager;
 
 	// -- mode --
 	AiMode activeMode = AiMode::Chat;
@@ -175,16 +175,6 @@ private:
 	bool speechServerManagedByApp = false;
 	ServerStatusState speechServerStatus = ServerStatusState::Unknown;
 	std::string speechServerStatusMessage;
-	std::string cachedSpeechCliExecutable;
-	bool speechCliExecutableCached = false;
-	std::string cachedSpeechServerExecutable;
-	bool speechServerExecutableCached = false;
-#ifdef _WIN32
-	HANDLE speechServerProcessHandle = nullptr;
-	DWORD speechServerProcessId = 0;
-#else
-	pid_t speechServerProcessId = 0;
-#endif
 
 	// -- conversation / output --
 	std::deque<Message> chatMessages;
@@ -306,18 +296,6 @@ private:
 	std::string textServerStatusMessage;
 	std::string textServerCapabilityHint;
 	bool textServerManagedByApp = false;
-	std::string cachedTextServerExecutable;
-	bool textServerExecutableCached = false;
-	bool deferredTextServerWarmupPending = false;
-	float deferredTextServerWarmupDeadline = 0.0f;
-	float deferredTextServerWarmupNextProbeTime = 0.0f;
-	std::string deferredTextServerWarmupUrl;
-#ifdef _WIN32
-	HANDLE textServerProcessHandle = nullptr;
-	DWORD textServerProcessId = 0;
-#else
-	pid_t textServerProcessId = 0;
-#endif
 	bool useModeTokenBudgets = true;
 	bool autoContinueCutoff = false;
 	bool usePromptCache = true;
