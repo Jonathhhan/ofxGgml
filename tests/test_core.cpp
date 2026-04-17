@@ -341,3 +341,145 @@ TEST_CASE("Log callback", "[core]") {
 		REQUIRE(ok);
 	}
 }
+
+TEST_CASE("Result<T> Ex variants - setupEx", "[core][result]") {
+	ofxGgml ggml;
+
+	SECTION("setupEx succeeds with default settings") {
+		auto result = ggml.setupEx();
+		REQUIRE(result.isOk());
+		REQUIRE_FALSE(result.isError());
+		REQUIRE(ggml.isReady());
+	}
+
+	SECTION("setupEx succeeds with custom settings") {
+		ofxGgmlSettings settings;
+		settings.threads = 2;
+		auto result = ggml.setupEx(settings);
+		REQUIRE(result.isOk());
+		REQUIRE(ggml.isReady());
+	}
+
+	SECTION("setupEx allows multiple calls") {
+		auto result1 = ggml.setupEx();
+		REQUIRE(result1.isOk());
+
+		auto result2 = ggml.setupEx();
+		REQUIRE(result2.isOk());
+		REQUIRE(ggml.isReady());
+	}
+
+	SECTION("setupEx explicit bool conversion") {
+		auto result = ggml.setupEx();
+		REQUIRE(static_cast<bool>(result));
+	}
+}
+
+TEST_CASE("Result<T> Ex variants - allocGraphEx", "[core][result]") {
+	ofxGgml ggml;
+	ggml.setup();
+
+	SECTION("allocGraphEx succeeds with valid graph") {
+		ofxGgmlGraph graph;
+		auto a = graph.newTensor2d(ofxGgmlType::F32, 10, 10);
+		graph.setInput(a);
+		auto b = graph.sqr(a);
+		graph.setOutput(b);
+		graph.build(b);
+
+		auto result = ggml.allocGraphEx(graph);
+		REQUIRE(result.isOk());
+		REQUIRE_FALSE(result.isError());
+	}
+
+	SECTION("allocGraphEx fails with unbuilt graph") {
+		ofxGgmlGraph graph;
+		// Don't build the graph
+
+		auto result = ggml.allocGraphEx(graph);
+		REQUIRE(result.isError());
+		REQUIRE(result.error().code == ofxGgmlErrorCode::GraphNotBuilt);
+		REQUIRE_FALSE(result.error().message.empty());
+	}
+
+	SECTION("allocGraphEx error message is descriptive") {
+		ofxGgmlGraph graph;
+
+		auto result = ggml.allocGraphEx(graph);
+		REQUIRE(result.isError());
+
+		std::string errMsg = result.error().toString();
+		REQUIRE_FALSE(errMsg.empty());
+		REQUIRE(errMsg.find("GraphNotBuilt") != std::string::npos);
+	}
+}
+
+TEST_CASE("Result<T> Ex variants - error handling", "[core][result]") {
+	SECTION("Error details are accessible") {
+		ofxGgml ggml;
+		ofxGgmlGraph graph;
+
+		// Try to allocate without setup
+		auto result = ggml.allocGraphEx(graph);
+		REQUIRE(result.isError());
+
+		const auto & err = result.error();
+		REQUIRE(err.hasError());
+		REQUIRE(err.code != ofxGgmlErrorCode::None);
+		REQUIRE_FALSE(err.message.empty());
+
+		std::string codeStr = err.codeString();
+		REQUIRE_FALSE(codeStr.empty());
+	}
+
+	SECTION("Success and error are mutually exclusive") {
+		ofxGgml ggml;
+		auto result = ggml.setupEx();
+
+		REQUIRE(result.isOk() != result.isError());
+	}
+}
+
+TEST_CASE("Result<T> Ex variants - backward compatibility", "[core][result]") {
+	SECTION("bool and Result<void> variants work together") {
+		ofxGgml ggml;
+
+		// Use bool variant
+		bool boolResult = ggml.setup();
+		REQUIRE(boolResult);
+
+		// Close and try Ex variant
+		ggml.close();
+		auto resultVariant = ggml.setupEx();
+		REQUIRE(resultVariant.isOk());
+
+		// Both should reach the same state
+		REQUIRE(ggml.isReady());
+	}
+
+	SECTION("allocGraph and allocGraphEx are consistent") {
+		ofxGgml ggml;
+		ggml.setup();
+
+		ofxGgmlGraph graph1;
+		auto a1 = graph1.newTensor2d(ofxGgmlType::F32, 10, 10);
+		graph1.setInput(a1);
+		auto b1 = graph1.sqr(a1);
+		graph1.setOutput(b1);
+		graph1.build(b1);
+
+		ofxGgmlGraph graph2;
+		auto a2 = graph2.newTensor2d(ofxGgmlType::F32, 10, 10);
+		graph2.setInput(a2);
+		auto b2 = graph2.sqr(a2);
+		graph2.setOutput(b2);
+		graph2.build(b2);
+
+		// Use both variants
+		bool boolResult = ggml.allocGraph(graph1);
+		auto resultResult = ggml.allocGraphEx(graph2);
+
+		REQUIRE(boolResult);
+		REQUIRE(resultResult.isOk());
+	}
+}
