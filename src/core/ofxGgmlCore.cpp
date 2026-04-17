@@ -354,7 +354,7 @@ ofxGgml::~ofxGgml() {
 	close();
 }
 
-bool ofxGgml::setup(const ofxGgmlSettings & settings) {
+Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 	auto tSetup0 = std::chrono::steady_clock::now();
 
 	if (m_impl->state != ofxGgmlState::Uninitialized) {
@@ -504,7 +504,8 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	if (!m_impl->backend) {
 		m_impl->state = ofxGgmlState::Error;
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to initialize any backend\n");
-		return false;
+		return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
+			"Failed to initialize any backend. Check logs for details.");
 	}
 
 	// Ensure we always have a CPU backend for scheduling. When the main backend
@@ -522,7 +523,8 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to initialize CPU backend\n");
 		ggml_backend_free(m_impl->backend);
 		m_impl->backend = nullptr;
-		return false;
+		return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
+			"Failed to initialize CPU backend for scheduling.");
 	}
 
 	// Set thread count.
@@ -549,7 +551,8 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		}
 		m_impl->backend = nullptr;
 		m_impl->cpuBackend = nullptr;
-		return false;
+		return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
+			"Failed to create backend scheduler.");
 	}
 
 	m_impl->state = ofxGgmlState::Ready;
@@ -559,19 +562,6 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	readyMsg += ggml_backend_name(m_impl->backend);
 	readyMsg += ")\n";
 	m_impl->log(GGML_LOG_LEVEL_INFO, readyMsg);
-	return true;
-}
-
-Result<void> ofxGgml::setupEx(const ofxGgmlSettings & settings) {
-	if (!setup(settings)) {
-		// Determine the most appropriate error code based on state
-		if (m_impl->state == ofxGgmlState::Error) {
-			return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
-				"Failed to initialize backend. Check logs for details.");
-		}
-		return ofxGgmlError(ofxGgmlErrorCode::UnknownError,
-			"Setup failed for unknown reason");
-	}
 	return Result<void>();
 }
 
@@ -745,12 +735,8 @@ static bool allocGraphInternal(
 	return true;
 }
 
-bool ofxGgml::allocGraph(ofxGgmlGraph & graph) {
-	return allocGraphInternal(m_impl.get(), graph.cacheToken(), graph.raw(), true);
-}
-
-Result<void> ofxGgml::allocGraphEx(ofxGgmlGraph & graph) {
-	if (!allocGraph(graph)) {
+Result<void> ofxGgml::allocGraph(ofxGgmlGraph & graph) {
+	if (!allocGraphInternal(m_impl.get(), graph.cacheToken(), graph.raw(), true)) {
 		// Provide more context based on the graph state
 		if (!graph.raw()) {
 			return ofxGgmlError(ofxGgmlErrorCode::GraphNotBuilt,
@@ -860,20 +846,23 @@ ofxGgmlComputeResult ofxGgml::compute(ofxGgmlGraph & graph) {
 //  Model weight loading
 // --------------------------------------------------------------------------
 
-bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
+Result<void> ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	if (m_impl->state != ofxGgmlState::Ready) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: not ready\n");
-		return false;
+		return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
+			"Backend not ready. Ensure setup() completed successfully.");
 	}
 	if (!model.isLoaded()) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: model not loaded\n");
-		return false;
+		return ofxGgmlError(ofxGgmlErrorCode::ModelLoadFailed,
+			"Model not loaded. Call model.load() first.");
 	}
 
 	struct ggml_context * modelCtx = model.ggmlContext();
 	if (!modelCtx) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: model has no ggml context\n");
-		return false;
+		return ofxGgmlError(ofxGgmlErrorCode::ModelFormatInvalid,
+			"Model has no ggml context");
 	}
 
 	auto t0 = std::chrono::steady_clock::now();
@@ -909,7 +898,8 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	if (snapshots.empty()) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR,
 			"ofxGgml: model has no host tensor payload to upload\n");
-		return false;
+		return ofxGgmlError(ofxGgmlErrorCode::ModelWeightUploadFailed,
+			"Model has no host tensor payload to upload");
 	}
 
 	// Step 2 - allocate a backend buffer for all context tensors.
@@ -927,7 +917,8 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	}
 	if (!buf) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to allocate backend buffer for model weights\n");
-		return false;
+		return ofxGgmlError(ofxGgmlErrorCode::ModelWeightUploadFailed,
+			"Failed to allocate backend buffer for model weights");
 	}
 	ggml_backend_buffer_set_usage(buf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
 	m_impl->modelWeightBuf = buf;
@@ -936,7 +927,8 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	ggml_backend_t uploadBackend = m_impl->backend ? m_impl->backend : m_impl->cpuBackend;
 	if (!uploadBackend) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: no backend available for model weight upload\n");
-		return false;
+		return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
+			"No backend available for model weight upload");
 	}
 	for (const auto & snap : snapshots) {
 		ggml_backend_tensor_set_async(uploadBackend, snap.tensor, snap.hostData, 0, snap.bytes);
@@ -952,27 +944,6 @@ bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	loadMsg += ggml_backend_name(m_impl->backend);
 	loadMsg += ")\n";
 	m_impl->log(GGML_LOG_LEVEL_INFO, loadMsg);
-	return true;
-}
-
-Result<void> ofxGgml::loadModelWeightsEx(ofxGgmlModel & model) {
-	if (!loadModelWeights(model)) {
-		// Provide detailed error based on failure point
-		if (m_impl->state != ofxGgmlState::Ready) {
-			return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
-				"Backend not ready. Ensure setup() completed successfully.");
-		}
-		if (!model.isLoaded()) {
-			return ofxGgmlError(ofxGgmlErrorCode::ModelLoadFailed,
-				"Model not loaded. Call model.load() first.");
-		}
-		if (!model.ggmlContext()) {
-			return ofxGgmlError(ofxGgmlErrorCode::ModelFormatInvalid,
-				"Model has no ggml context");
-		}
-		return ofxGgmlError(ofxGgmlErrorCode::ModelWeightUploadFailed,
-			"Failed to upload model weights to backend");
-	}
 	return Result<void>();
 }
 
