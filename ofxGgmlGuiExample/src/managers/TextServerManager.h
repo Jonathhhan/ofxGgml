@@ -19,6 +19,22 @@ enum class ServerStatusState {
 	Unreachable
 };
 
+struct TextServerEnsureResult {
+	bool reachable = false;
+	bool started = false;
+	bool restartedForModelChange = false;
+	bool terminatedExternalProcess = false;
+	bool missingExecutable = false;
+	bool missingModel = false;
+	ServerStatusState status = ServerStatusState::Unknown;
+	std::string statusMessage;
+	std::string capabilityHint;
+	bool managedByApp = false;
+	std::string requestedModel;
+	std::string previousModel;
+	std::string mmprojPath;
+};
+
 class TextServerManager {
 public:
 	TextServerManager();
@@ -45,6 +61,15 @@ public:
 		bool allowLaunch = true,
 		bool allowMmproj = false);
 
+	TextServerEnsureResult ensureReadyForModel(
+		const std::string & configuredUrl,
+		const std::string & modelPath,
+		int gpuLayers,
+		int contextSize,
+		bool allowLaunch = true,
+		bool allowMmproj = false,
+		bool allowExternalTermination = true);
+
 	// Deferred warmup
 	void scheduleDeferredWarmup(const std::string & url, float timeoutSeconds = 10.0f);
 	void updateDeferredWarmup(const std::string & currentUrl);
@@ -55,6 +80,7 @@ public:
 	ServerStatusState getStatus() const { return status_; }
 	std::string getStatusMessage() const { return statusMessage_; }
 	std::string getCapabilityHint() const { return capabilityHint_; }
+	std::string getLastMmprojPath() const { return lastMmprojPath_; }
 
 	// Executable discovery
 	std::string findLocalExecutable(bool refresh = false);
@@ -77,6 +103,9 @@ private:
 	// Executable caching
 	std::string cachedExecutable_;
 	bool executableCached_ = false;
+
+	// Last launcher state
+	std::string lastMmprojPath_;
 
 	// Deferred warmup state
 	bool deferredWarmupPending_ = false;

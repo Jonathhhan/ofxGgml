@@ -848,10 +848,12 @@ void ofApp::checkTextServerStatus(bool logResult) {
 	const std::string configuredUrl = effectiveTextServerUrl(textServerUrl);
 	textServerManager.checkStatus(configuredUrl, false);
 
-	// Update local cached state for UI display
-	textServerStatus = textServerManager.getStatus();
-	textServerStatusMessage = textServerManager.getStatusMessage();
-	textServerCapabilityHint = textServerManager.getCapabilityHint();
+	TextServerEnsureResult state;
+	state.status = textServerManager.getStatus();
+	state.statusMessage = textServerManager.getStatusMessage();
+	state.capabilityHint = textServerManager.getCapabilityHint();
+	state.managedByApp = textServerManager.isManagedByApp();
+	updateTextServerStateFromResult(state);
 
 	if (logResult) {
 		if (textServerStatus == ServerStatusState::Reachable) {
@@ -866,16 +868,6 @@ bool ofApp::ensureTextServerReady(bool logResult, bool allowLaunch) {
 	if (textInferenceBackend != TextInferenceBackend::LlamaServer) {
 		return true;
 	}
-
-	checkTextServerStatus(logResult);
-	if (textServerStatus == ServerStatusState::Reachable) {
-		return true;
-	}
-
-	if (!allowLaunch) {
-		return false;
-	}
-
 	return ensureLlamaServerReadyForModel(
 		effectiveTextServerUrl(textServerUrl),
 		getSelectedModelPath(),
@@ -890,108 +882,58 @@ bool ofApp::ensureLlamaServerReadyForModel(
 	bool logResult,
 	bool allowLaunch,
 	bool allowMmproj) {
-	const std::string effectiveUrl = trim(configuredUrl).empty()
-		? std::string(kDefaultTextServerUrl)
-		: trim(configuredUrl);
+	const TextServerEnsureResult result = textServerManager.ensureReadyForModel(
+		configuredUrl,
+		modelPath,
+		gpuLayers,
+		contextSize,
+		allowLaunch,
+		allowMmproj);
+	updateTextServerStateFromResult(result);
 
-	const std::string savedTextServerUrl = textServerUrl;
-	copyStringToBuffer(textServerUrl, sizeof(textServerUrl), effectiveUrl);
-	checkTextServerStatus(logResult);
-	const bool reachable = (textServerStatus == ServerStatusState::Reachable);
-	copyStringToBuffer(textServerUrl, sizeof(textServerUrl), savedTextServerUrl);
-
-	bool needsManagedRestartForModelChange = false;
-	if (reachable && allowLaunch && shouldManageLocalTextServer(effectiveUrl) && !trim(modelPath).empty()) {
-		const ofxGgmlServerProbeResult probe = ofxGgmlInference::probeServer(effectiveUrl, true);
-		const std::string requestedModel = ofFilePath::getFileName(modelPath);
-		if (probe.reachable &&
-			!requestedModel.empty() &&
-			!probe.activeModel.empty() &&
-			probe.activeModel != requestedModel) {
-			needsManagedRestartForModelChange = true;
-			if (logResult) {
-				logWithLevel(
-					OF_LOG_NOTICE,
-					"Restarting local llama-server to switch models from " +
-						probe.activeModel + " to " + requestedModel + ".");
-			}
-			if (textServerManagedByApp) {
-				stopLocalTextServer(false);
-			} else {
-				const std::string serverExe = findLocalTextServerExecutable();
-				const bool terminatedStaleProcess = terminateAddonLlamaServerProcesses(serverExe);
-				if (!terminatedStaleProcess) {
-					textServerStatus = ServerStatusState::Unreachable;
-					textServerStatusMessage =
-						"A local llama-server is already running with model " +
-						probe.activeModel +
-						". Stop it manually or point Vision at a different server URL.";
-					textServerCapabilityHint.clear();
-					return false;
-				}
-			}
-			textServerStatus = ServerStatusState::Unknown;
-			textServerStatusMessage =
-				"Requested model differs from the running local server; restarting.";
-			textServerCapabilityHint.clear();
+	if (result.restartedForModelChange && logResult) {
+		if (!result.previousModel.empty() && !result.requestedModel.empty()) {
+			logWithLevel(
+				OF_LOG_NOTICE,
+				"Restarting local llama-server to switch models from " +
+					result.previousModel + " to " + result.requestedModel + ".");
+		} else {
+			logWithLevel(OF_LOG_NOTICE, "Restarting local llama-server to switch models.");
 		}
 	}
 
-	if (reachable && !needsManagedRestartForModelChange) {
-		return true;
-	}
-
-	if (!allowLaunch) {
-		return false;
-	}
-
-	const std::string serverExe = findLocalTextServerExecutable();
-	if (serverExe.empty()) {
-		textServerStatus = ServerStatusState::Unreachable;
-		textServerStatusMessage = "Local llama-server executable not found.";
-		textServerCapabilityHint.clear();
-		if (logResult) {
-			logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
-		}
-		return false;
-	}
-
-	std::error_code modelEc;
-	if (modelPath.empty() ||
-		!std::filesystem::exists(modelPath, modelEc) ||
-		modelEc) {
-		textServerStatus = ServerStatusState::Unreachable;
-		textServerStatusMessage = "Selected GGUF model is missing; local server was not started.";
-		textServerCapabilityHint.clear();
-		if (logResult) {
-			logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
-		}
-		return false;
-	}
-
-	if (!isManagedTextServerRunning()) {
-		startLocalLlamaServerForModel(effectiveUrl, modelPath, allowMmproj);
-	}
-
-	for (int attempt = 0; attempt < 20; ++attempt) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(150));
-		const std::string probeSavedTextServerUrl = textServerUrl;
-		copyStringToBuffer(textServerUrl, sizeof(textServerUrl), effectiveUrl);
-		checkTextServerStatus(false);
-		const bool probeReachable = (textServerStatus == ServerStatusState::Reachable);
-		copyStringToBuffer(textServerUrl, sizeof(textServerUrl), probeSavedTextServerUrl);
-		if (probeReachable) {
-			if (logResult) {
-				logWithLevel(OF_LOG_NOTICE, textServerStatusMessage);
-			}
-			return true;
+	if (result.started && result.managedByApp) {
+		const auto [host, port] = parseServerHostPort(configuredUrl);
+		const std::string modelName = result.requestedModel.empty()
+			? ofFilePath::getFileName(modelPath)
+			: result.requestedModel;
+		logWithLevel(
+			OF_LOG_NOTICE,
+			"Started local llama-server on " + host + ":" + ofToString(port) +
+			" using model " + modelName + ".");
+		if (!result.mmprojPath.empty()) {
+			logWithLevel(
+				OF_LOG_NOTICE,
+				"Using multimodal projector " + ofFilePath::getFileName(result.mmprojPath) + ".");
 		}
 	}
 
 	if (logResult && !textServerStatusMessage.empty()) {
-		logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
+		const ofLogLevel level =
+			textServerStatus == ServerStatusState::Reachable
+				? OF_LOG_NOTICE
+				: OF_LOG_WARNING;
+		logWithLevel(level, textServerStatusMessage);
 	}
-	return false;
+
+	return result.reachable;
+}
+
+void ofApp::updateTextServerStateFromResult(const TextServerEnsureResult & result) {
+	textServerStatus = result.status;
+	textServerStatusMessage = result.statusMessage;
+	textServerCapabilityHint = result.capabilityHint;
+	textServerManagedByApp = result.managedByApp;
 }
 
 std::string ofApp::findLocalTextServerExecutable(bool refresh) {
@@ -1005,71 +947,23 @@ bool ofApp::isManagedTextServerRunning() {
 }
 
 void ofApp::startLocalTextServer() {
-	if (isManagedTextServerRunning()) {
-		logWithLevel(OF_LOG_NOTICE, "Local llama-server is already running.");
-		checkTextServerStatus(false);
-		return;
-	}
-
-	startLocalLlamaServerForModel(
+	ensureLlamaServerReadyForModel(
 		effectiveTextServerUrl(textServerUrl),
 		getSelectedModelPath(),
+		true,
+		true,
 		false);
-}
-
-void ofApp::startLocalLlamaServerForModel(
-	const std::string & configuredUrl,
-	const std::string & modelPath,
-	bool allowMmproj) {
-	if (isManagedTextServerRunning()) {
-		logWithLevel(OF_LOG_NOTICE, "Local llama-server is already running.");
-		const std::string savedTextServerUrl = textServerUrl;
-		copyStringToBuffer(textServerUrl, sizeof(textServerUrl), configuredUrl);
-		checkTextServerStatus(false);
-		copyStringToBuffer(textServerUrl, sizeof(textServerUrl), savedTextServerUrl);
-		return;
-	}
-
-	// Delegate to manager
-	textServerManager.startLocalServer(
-		configuredUrl,
-		modelPath,
-		gpuLayers,
-		contextSize,
-		allowMmproj);
-
-	// Update local UI state
-	textServerStatus = textServerManager.getStatus();
-	textServerStatusMessage = textServerManager.getStatusMessage();
-	textServerCapabilityHint = textServerManager.getCapabilityHint();
-	textServerManagedByApp = textServerManager.isManagedByApp();
-
-	// Log the result
-	if (textServerManagedByApp) {
-		const auto [host, port] = parseServerHostPort(configuredUrl);
-		logWithLevel(
-			OF_LOG_NOTICE,
-			"Started local llama-server on " + host + ":" + ofToString(port) +
-			" using model " + ofFilePath::getFileName(modelPath) + ".");
-		const std::string mmprojPath = allowMmproj ? findMatchingMmprojPath(modelPath) : std::string{};
-		if (!mmprojPath.empty()) {
-			logWithLevel(
-				OF_LOG_NOTICE,
-				"Using multimodal projector " + ofFilePath::getFileName(mmprojPath) + ".");
-		}
-	} else if (!textServerStatusMessage.empty()) {
-		logWithLevel(OF_LOG_ERROR, textServerStatusMessage);
-	}
 }
 
 void ofApp::stopLocalTextServer(bool logResult) {
 	textServerManager.stopLocalServer(logResult);
 
-	// Update local UI state
-	textServerManagedByApp = textServerManager.isManagedByApp();
-	textServerStatus = textServerManager.getStatus();
-	textServerStatusMessage = textServerManager.getStatusMessage();
-	textServerCapabilityHint = textServerManager.getCapabilityHint();
+	TextServerEnsureResult state;
+	state.status = textServerManager.getStatus();
+	state.statusMessage = textServerManager.getStatusMessage();
+	state.capabilityHint = textServerManager.getCapabilityHint();
+	state.managedByApp = textServerManager.isManagedByApp();
+	updateTextServerStateFromResult(state);
 
 	if (logResult) {
 		logWithLevel(OF_LOG_NOTICE, textServerStatusMessage);

@@ -2,6 +2,7 @@
 #include "utils/BackendHelpers.h"
 #include "utils/VisionHelpers.h"
 #include "utils/ProcessHelpers.h"
+#include "utils/ImGuiHelpers.h"
 #include "core/ofxGgmlWindowsUtf8.h"
 
 #include <filesystem>
@@ -30,6 +31,7 @@ void TextServerManager::startLocalServer(
 	if (isRunning()) {
 		return;
 	}
+	lastMmprojPath_.clear();
 
 	const std::string serverExe = findLocalExecutable(true);
 	if (serverExe.empty()) {
@@ -51,6 +53,7 @@ void TextServerManager::startLocalServer(
 	const std::string mmprojPath = allowMmproj
 		? findMatchingMmprojPath(modelPath)
 		: std::string{};
+	lastMmprojPath_ = mmprojPath;
 
 #ifdef _WIN32
 	std::vector<std::string> args = {
@@ -167,6 +170,7 @@ void TextServerManager::stopLocalServer(bool logResult) {
 	if (!isRunning()) {
 		managedByApp_ = false;
 		status_ = ServerStatusState::Unknown;
+		lastMmprojPath_.clear();
 		capabilityHint_.clear();
 		return;
 	}
@@ -183,6 +187,7 @@ void TextServerManager::stopLocalServer(bool logResult) {
 	managedByApp_ = false;
 	status_ = ServerStatusState::Unknown;
 	statusMessage_ = "Local llama-server stopped.";
+	lastMmprojPath_.clear();
 	capabilityHint_.clear();
 }
 
@@ -241,6 +246,155 @@ bool TextServerManager::ensureReady(
 	}
 
 	return false;
+}
+
+TextServerEnsureResult TextServerManager::ensureReadyForModel(
+	const std::string & configuredUrl,
+	const std::string & modelPath,
+	int gpuLayers,
+	int contextSize,
+	bool allowLaunch,
+	bool allowMmproj,
+	bool allowExternalTermination) {
+
+	TextServerEnsureResult result;
+	const std::string effectiveUrl = serverBaseUrlFromConfiguredUrl(configuredUrl);
+	result.requestedModel = ofFilePath::getFileName(modelPath);
+
+	// Probe current state.
+	checkStatus(effectiveUrl, false);
+	result.status = status_;
+	result.statusMessage = statusMessage_;
+	result.capabilityHint = capabilityHint_;
+	result.managedByApp = managedByApp_;
+	result.reachable = (status_ == ServerStatusState::Reachable);
+
+	// If reachable, ensure the active model matches when we manage the server.
+	bool needsRestartForModelChange = false;
+	if (result.reachable &&
+		allowLaunch &&
+		shouldManageLocalTextServer(effectiveUrl) &&
+		!trim(modelPath).empty()) {
+
+		const ofxGgmlServerProbeResult probe = ofxGgmlInference::probeServer(effectiveUrl, true);
+		result.previousModel = probe.activeModel;
+		if (probe.reachable &&
+			!probe.activeModel.empty() &&
+			!result.requestedModel.empty() &&
+			probe.activeModel != result.requestedModel) {
+
+			needsRestartForModelChange = true;
+			result.restartedForModelChange = true;
+			result.reachable = false;
+
+			if (managedByApp_) {
+				stopLocalServer(false);
+			} else if (allowExternalTermination) {
+				const std::string serverExe = findLocalExecutable(true);
+				const bool terminated = terminateAddonLlamaServerProcesses(serverExe);
+				result.terminatedExternalProcess = terminated;
+				if (!terminated) {
+					status_ = ServerStatusState::Unreachable;
+					statusMessage_ =
+						"A local llama-server is already running with model " +
+						probe.activeModel +
+						". Stop it manually or point Vision at a different server URL.";
+					capabilityHint_.clear();
+					result.status = status_;
+					result.statusMessage = statusMessage_;
+					result.capabilityHint = capabilityHint_;
+					result.managedByApp = managedByApp_;
+					return result;
+				}
+			} else {
+				status_ = ServerStatusState::Unreachable;
+				statusMessage_ =
+					"A local llama-server is already running with model " +
+					probe.activeModel +
+					". Stop it manually or point Vision at a different server URL.";
+				capabilityHint_.clear();
+				result.status = status_;
+				result.statusMessage = statusMessage_;
+				result.capabilityHint = capabilityHint_;
+				result.managedByApp = managedByApp_;
+				return result;
+			}
+
+			status_ = ServerStatusState::Unknown;
+			statusMessage_ =
+				"Requested model differs from the running local server; restarting.";
+			capabilityHint_.clear();
+			result.status = status_;
+			result.statusMessage = statusMessage_;
+			result.capabilityHint = capabilityHint_;
+			result.managedByApp = managedByApp_;
+		}
+	}
+
+	if (result.reachable && !needsRestartForModelChange) {
+		return result;
+	}
+
+	if (!allowLaunch) {
+		return result;
+	}
+
+	const std::string serverExe = findLocalExecutable(true);
+	if (serverExe.empty()) {
+		status_ = ServerStatusState::Unreachable;
+		statusMessage_ = "Local llama-server executable not found.";
+		capabilityHint_.clear();
+		result.status = status_;
+		result.statusMessage = statusMessage_;
+		result.capabilityHint = capabilityHint_;
+		result.managedByApp = managedByApp_;
+		result.missingExecutable = true;
+		return result;
+	}
+
+	std::error_code modelEc;
+	if (modelPath.empty() ||
+		!std::filesystem::exists(modelPath, modelEc) ||
+		modelEc) {
+		status_ = ServerStatusState::Unreachable;
+		statusMessage_ = "Selected GGUF model is missing; local server was not started.";
+		capabilityHint_.clear();
+		result.status = status_;
+		result.statusMessage = statusMessage_;
+		result.capabilityHint = capabilityHint_;
+		result.managedByApp = managedByApp_;
+		result.missingModel = true;
+		return result;
+	}
+
+	if (!isRunning()) {
+		startLocalServer(
+			effectiveUrl,
+			modelPath,
+			gpuLayers,
+			contextSize,
+			allowMmproj);
+		result.started = isRunning();
+		result.managedByApp = managedByApp_;
+		result.mmprojPath = lastMmprojPath_;
+	} else {
+		result.mmprojPath = lastMmprojPath_;
+	}
+
+	for (int attempt = 0; attempt < 20; ++attempt) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(150));
+		checkStatus(effectiveUrl, false);
+		result.status = status_;
+		result.statusMessage = statusMessage_;
+		result.capabilityHint = capabilityHint_;
+		result.managedByApp = managedByApp_;
+		if (status_ == ServerStatusState::Reachable) {
+			result.reachable = true;
+			return result;
+		}
+	}
+
+	return result;
 }
 
 void TextServerManager::scheduleDeferredWarmup(const std::string & url, float timeoutSeconds) {
