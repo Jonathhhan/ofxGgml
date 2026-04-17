@@ -23,7 +23,7 @@ jobs:
         run: python3 -m json.tool scripts/model-catalog.json > /dev/null
 
       - name: Validate model catalog checksums and schema
-        run: python3 scripts/dev/validate-model-catalog.py scripts/model-catalog.json
+        run: python3 scripts/dev/validate-model-catalog.py --require-official-checksums scripts/model-catalog.json
 
       - name: Smoke test model tooling
         run: |
@@ -69,10 +69,19 @@ jobs:
           cppcheck --enable=warning,style,performance,portability \
                    --suppressions-list=.cppcheck-suppressions \
                    --inline-suppr \
-                   --error-exitcode=0 \
+                   --template='{file}:{line}:{column}: {severity}: {message} [{id}]' \
                    --quiet \
-                   src/ 2>&1 | tee cppcheck-report.txt
-          echo "==> cppcheck completed (warnings allowed for now)"
+                   src/ 2> cppcheck-report.txt
+          cat cppcheck-report.txt
+          grep -E ':[0-9]+:[0-9]+: ' cppcheck-report.txt | sort -u > cppcheck-findings.txt || true
+          sort -u .ci/static-analysis-baselines/cppcheck-findings.txt > cppcheck-baseline.txt
+          comm -23 cppcheck-findings.txt cppcheck-baseline.txt > cppcheck-new-findings.txt || true
+          if [[ -s cppcheck-new-findings.txt ]]; then
+            echo "New cppcheck findings detected:"
+            cat cppcheck-new-findings.txt
+            exit 1
+          fi
+          echo "==> cppcheck passed with baseline enforcement"
 
       - name: Run clang-tidy on source files
         run: |
@@ -82,16 +91,26 @@ jobs:
           cd ..
 
           # Run clang-tidy on addon source files (not examples)
+          : > clang-tidy-report.txt
           find src -name "*.cpp" -type f | while read -r file; do
             echo "Analyzing: $file"
             clang-tidy "$file" -- \
               -Ilibs/ggml/include \
               -Isrc \
               -std=c++17 \
-              -DGLM_FORCE_CTOR_INIT || echo "  (warnings ignored)"
+              -DGLM_FORCE_CTOR_INIT 2>&1 | tee -a clang-tidy-report.txt || true
           done
 
-          echo "==> clang-tidy completed (warnings allowed for now)"
+          grep -E ':[0-9]+:[0-9]+: (warning|error): .*\\[[^]]+\\]' clang-tidy-report.txt \
+            | sort -u > clang-tidy-findings.txt || true
+          sort -u .ci/static-analysis-baselines/clang-tidy-findings.txt > clang-tidy-baseline.txt
+          comm -23 clang-tidy-findings.txt clang-tidy-baseline.txt > clang-tidy-new-findings.txt || true
+          if [[ -s clang-tidy-new-findings.txt ]]; then
+            echo "New clang-tidy findings detected:"
+            cat clang-tidy-new-findings.txt
+            exit 1
+          fi
+          echo "==> clang-tidy passed with baseline enforcement"
 
       - name: Upload static analysis reports
         if: always()
@@ -100,6 +119,11 @@ jobs:
           name: static-analysis-reports
           path: |
             cppcheck-report.txt
+            cppcheck-findings.txt
+            cppcheck-new-findings.txt
+            clang-tidy-report.txt
+            clang-tidy-findings.txt
+            clang-tidy-new-findings.txt
 
   code-coverage:
     runs-on: ubuntu-latest

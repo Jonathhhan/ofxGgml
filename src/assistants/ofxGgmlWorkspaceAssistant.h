@@ -1,6 +1,7 @@
 #pragma once
 
 #include "assistants/ofxGgmlCodeAssistant.h"
+#include "core/ofxGgmlResult.h"
 
 #include <functional>
 #include <string>
@@ -163,6 +164,10 @@ public:
 		const std::vector<ofxGgmlCodeAssistantCommandSuggestion> & commands,
 		const ofxGgmlWorkspaceSettings & settings = {},
 		ofxGgmlWorkspaceCommandRunner commandRunner = nullptr) const;
+	Result<ofxGgmlWorkspaceVerificationResult> runVerificationEx(
+		const std::vector<ofxGgmlCodeAssistantCommandSuggestion> & commands,
+		const ofxGgmlWorkspaceSettings & settings = {},
+		ofxGgmlWorkspaceCommandRunner commandRunner = nullptr) const;
 	std::vector<ofxGgmlCodeAssistantCommandSuggestion> suggestVerificationCommands(
 		const std::vector<std::string> & changedFiles,
 		const std::string & workspaceRoot,
@@ -177,6 +182,15 @@ public:
 		std::vector<std::string> * messages = nullptr) const;
 
 	ofxGgmlWorkspaceResult runTask(
+		const std::string & modelPath,
+		const ofxGgmlCodeAssistantRequest & request,
+		const ofxGgmlCodeAssistantContext & context = {},
+		const ofxGgmlWorkspaceSettings & workspaceSettings = {},
+		const ofxGgmlInferenceSettings & inferenceSettings = {},
+		const ofxGgmlPromptSourceSettings & sourceSettings = {},
+		ofxGgmlWorkspaceCommandRunner commandRunner = nullptr,
+		ofxGgmlWorkspaceRetryProvider retryProvider = nullptr) const;
+	Result<ofxGgmlWorkspaceResult> runTaskEx(
 		const std::string & modelPath,
 		const ofxGgmlCodeAssistantRequest & request,
 		const ofxGgmlCodeAssistantContext & context = {},

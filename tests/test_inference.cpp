@@ -262,6 +262,16 @@ TEST_CASE("Executable resolution accepts absolute path and PATH command", "[infe
 		auto emb = inf.embed(modelPath, "hello");
 		REQUIRE(emb.success);
 		REQUIRE(emb.embedding.size() == 3);
+
+		auto genEx = inf.generateEx(modelPath, "hello");
+		REQUIRE(genEx.isOk());
+		REQUIRE(genEx.value().success);
+		REQUIRE(genEx.value().text.find("absolute-ok") != std::string::npos);
+
+		auto embEx = inf.embedEx(modelPath, "hello");
+		REQUIRE(embEx.isOk());
+		REQUIRE(embEx.value().success);
+		REQUIRE(embEx.value().embedding.size() == 3);
 	}
 
 	SECTION("PATH-resolvable command works") {
@@ -302,6 +312,10 @@ TEST_CASE("Executable resolution accepts absolute path and PATH command", "[infe
 		auto missing = inf.generate(modelPath, "hello");
 		REQUIRE_FALSE(missing.success);
 		REQUIRE(missing.error.find("invalid or inaccessible completion executable") != std::string::npos);
+		auto missingEx = inf.generateEx(modelPath, "hello");
+		REQUIRE(missingEx.isError());
+		REQUIRE(missingEx.error().code == ofxGgmlErrorCode::InferenceExecutableMissing);
+		REQUIRE(missingEx.error().message.find("invalid or inaccessible completion executable") != std::string::npos);
 
 		const auto dirPath = makeUniqueTestDir("nonfile");
 		inf.setCompletionExecutable(dirPath.string());

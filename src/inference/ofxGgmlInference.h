@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ofMain.h"
+#include "core/ofxGgmlResult.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -162,6 +163,11 @@ public:
 		const std::string & prompt,
 		const ofxGgmlInferenceSettings & settings = {},
 		std::function<bool(const std::string &)> onChunk = nullptr) const;
+	Result<ofxGgmlInferenceResult> generateEx(
+		const std::string & modelPath,
+		const std::string & prompt,
+		const ofxGgmlInferenceSettings & settings = {},
+		std::function<bool(const std::string &)> onChunk = nullptr) const;
 
 	ofxGgmlInferenceResult generateWithSources(
 		const std::string & modelPath,
@@ -196,6 +202,10 @@ public:
 		std::function<bool(const std::string &)> onChunk = nullptr) const;
 
 	ofxGgmlEmbeddingResult embed(
+		const std::string & modelPath,
+		const std::string & text,
+		const ofxGgmlEmbeddingSettings & settings = {}) const;
+	Result<ofxGgmlEmbeddingResult> embedEx(
 		const std::string & modelPath,
 		const std::string & text,
 		const ofxGgmlEmbeddingSettings & settings = {}) const;

@@ -4,23 +4,23 @@ This document describes security improvements implemented in ofxGgml.
 
 ## Model Checksums
 
-The `scripts/model-catalog.json` file contains SHA256 checksums for model verification. These are placeholder values that should be replaced with actual checksums:
+The `scripts/model-catalog.json` file contains SHA256 checksums for model verification.
 
-### To Update Checksums
+### To Update Checksums (maintainer workflow)
 
-1. Download a model using the download script
+1. Download or locate the exact model file referenced in the catalog entry.
 2. Compute the SHA256 checksum:
    ```bash
    sha256sum path/to/model.gguf
    # or on macOS:
    shasum -a 256 path/to/model.gguf
    ```
-3. Update the corresponding entry in `scripts/model-catalog.json`
-4. The download script will automatically verify the checksum on future downloads
-
-### Current Status
-
-Model presets currently require maintainer-supplied SHA256 values from model publishers. Use `./scripts/dev/update-model-checksums.sh` to populate them and `python3 scripts/dev/validate-model-catalog.py` to validate catalog checksum formatting and completeness.
+3. Update the corresponding `sha256` field in `scripts/model-catalog.json`.
+4. Validate with:
+   ```bash
+   python3 scripts/dev/validate-model-catalog.py --require-official-checksums scripts/model-catalog.json
+   ```
+5. Commit the updated catalog.
 
 ## Security Features Implemented
 
@@ -40,11 +40,10 @@ Model presets currently require maintainer-supplied SHA256 values from model pub
 - Cryptographically random filenames
 - Automatic cleanup via RAII
 
-### 4. Model Integrity (Critical - Framework Complete)
+### 4. Model Integrity (Critical - Enforced)
 - SHA256 checksum support in model catalog
 - Automatic verification in download script
-- Warning messages when checksums are missing
-- **Action Required**: Replace placeholder checksums with actual values
+- CI validation requires official checksums for all catalog entries
 
 ## Recommendations for Future Work
 

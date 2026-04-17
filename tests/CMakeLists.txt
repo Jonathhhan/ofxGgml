@@ -126,6 +126,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/inference/ofxGgmlTtsInference.cpp
         ../src/inference/ofxGgmlClipInference.cpp
         ../src/support/ofxGgmlScriptSource.cpp
+        ../src/support/ofxGgmlProcessSecurity.cpp
         ../src/assistants/ofxGgmlCodeAssistant.cpp
         ../src/assistants/ofxGgmlWorkspaceAssistant.cpp
         ../src/assistants/ofxGgmlTextAssistant.cpp
