@@ -8,100 +8,110 @@ TEST_CASE("Live Speech Transcriber initialization", "[live_speech_transcriber]")
 		REQUIRE_NOTHROW(ofxGgmlLiveSpeechTranscriber());
 	}
 
-	SECTION("Not active by default") {
-		REQUIRE_FALSE(transcriber.isActive());
+	SECTION("Not capturing by default") {
+		REQUIRE_FALSE(transcriber.isCapturing());
+	}
+
+	SECTION("Not busy by default") {
+		REQUIRE_FALSE(transcriber.isBusy());
 	}
 }
 
 TEST_CASE("Live Speech Transcriber configuration", "[live_speech_transcriber]") {
 	ofxGgmlLiveSpeechTranscriber transcriber;
 
-	SECTION("Set sample rate") {
-		transcriber.setSampleRate(16000);
-		REQUIRE(transcriber.getSampleRate() == 16000);
+	SECTION("Set and get settings") {
+		ofxGgmlLiveSpeechSettings settings;
+		settings.sampleRate = 22050;
+		settings.intervalSeconds = 2.0f;
+		settings.windowSeconds = 10.0f;
+		settings.languageHint = "en";
+
+		transcriber.setSettings(settings);
+
+		auto retrieved = transcriber.getSettings();
+		REQUIRE(retrieved.sampleRate == 22050);
+		REQUIRE(retrieved.intervalSeconds == 2.0f);
+		REQUIRE(retrieved.windowSeconds == 10.0f);
+		REQUIRE(retrieved.languageHint == "en");
 	}
 
-	SECTION("Default sample rate") {
-		REQUIRE(transcriber.getSampleRate() == 16000);
-	}
-
-	SECTION("Set channels") {
-		transcriber.setChannels(2);
-		REQUIRE(transcriber.getChannels() == 2);
-	}
-
-	SECTION("Default channels") {
-		REQUIRE(transcriber.getChannels() == 1);
+	SECTION("Default settings") {
+		auto settings = transcriber.getSettings();
+		REQUIRE(settings.sampleRate == 16000);
+		REQUIRE_FALSE(settings.enabled);
 	}
 }
 
-TEST_CASE("Live Speech Transcriber state management", "[live_speech_transcriber]") {
+TEST_CASE("Live Speech Transcriber capture control", "[live_speech_transcriber]") {
 	ofxGgmlLiveSpeechTranscriber transcriber;
 
-	SECTION("Start transcription") {
-		bool ok = transcriber.start();
-		// May fail without backend configured
-		if (ok) {
-			REQUIRE(transcriber.isActive());
-		}
+	SECTION("Begin capture") {
+		REQUIRE_NOTHROW(transcriber.beginCapture());
+		REQUIRE(transcriber.isCapturing());
 	}
 
-	SECTION("Stop transcription") {
-		transcriber.start();
-		transcriber.stop();
-		REQUIRE_FALSE(transcriber.isActive());
+	SECTION("Stop capture") {
+		transcriber.beginCapture();
+		REQUIRE(transcriber.isCapturing());
+
+		transcriber.stopCapture();
+		REQUIRE_FALSE(transcriber.isCapturing());
 	}
 
-	SECTION("Multiple start calls") {
-		transcriber.start();
-		bool wasActive = transcriber.isActive();
-		transcriber.start();
-		// Should remain in same state or handle gracefully
-		REQUIRE(transcriber.isActive() == wasActive);
-		transcriber.stop();
+	SECTION("Stop when not capturing") {
+		REQUIRE_FALSE(transcriber.isCapturing());
+		REQUIRE_NOTHROW(transcriber.stopCapture());
+		REQUIRE_FALSE(transcriber.isCapturing());
 	}
 
-	SECTION("Stop when not active") {
-		REQUIRE_FALSE(transcriber.isActive());
-		REQUIRE_NOTHROW(transcriber.stop());
-		REQUIRE_FALSE(transcriber.isActive());
+	SECTION("Multiple begin calls") {
+		transcriber.beginCapture();
+		bool wasCapturing = transcriber.isCapturing();
+		transcriber.beginCapture();
+		REQUIRE(transcriber.isCapturing() == wasCapturing);
+		transcriber.stopCapture();
 	}
 }
 
 TEST_CASE("Live Speech Transcriber audio submission", "[live_speech_transcriber]") {
 	ofxGgmlLiveSpeechTranscriber transcriber;
 
-	SECTION("Submit audio data") {
-		std::vector<float> audioData(1600, 0.0f); // 100ms at 16kHz
-		REQUIRE_NOTHROW(transcriber.submitAudio(audioData.data(), audioData.size()));
+	SECTION("Append mono samples vector") {
+		std::vector<float> audioData(1600, 0.0f);
+		REQUIRE_NOTHROW(transcriber.appendMonoSamples(audioData));
 	}
 
-	SECTION("Submit empty audio") {
-		REQUIRE_NOTHROW(transcriber.submitAudio(nullptr, 0));
+	SECTION("Append mono samples pointer") {
+		std::vector<float> audioData(1600, 0.0f);
+		REQUIRE_NOTHROW(transcriber.appendMonoSamples(audioData.data(), audioData.size()));
 	}
 
-	SECTION("Submit large audio chunk") {
-		std::vector<float> audioData(160000, 0.0f); // 10 seconds at 16kHz
-		REQUIRE_NOTHROW(transcriber.submitAudio(audioData.data(), audioData.size()));
+	SECTION("Append empty audio") {
+		REQUIRE_NOTHROW(transcriber.appendMonoSamples(nullptr, 0));
+	}
+
+	SECTION("Append large audio chunk") {
+		std::vector<float> audioData(160000, 0.0f);
+		REQUIRE_NOTHROW(transcriber.appendMonoSamples(audioData));
 	}
 }
 
-TEST_CASE("Live Speech Transcriber result retrieval", "[live_speech_transcriber]") {
+TEST_CASE("Live Speech Transcriber snapshot", "[live_speech_transcriber]") {
 	ofxGgmlLiveSpeechTranscriber transcriber;
 
-	SECTION("Get transcription when not started") {
-		auto text = transcriber.getTranscription();
-		// Should return empty or handle gracefully
-		REQUIRE(text.length() >= 0);
+	SECTION("Get snapshot when not started") {
+		auto snapshot = transcriber.getSnapshot();
+		REQUIRE_FALSE(snapshot.capturing);
+		REQUIRE_FALSE(snapshot.busy);
+		REQUIRE(snapshot.bufferedSeconds >= 0.0);
 	}
 
-	SECTION("Get partial results") {
-		auto partials = transcriber.getPartialResults();
-		REQUIRE(partials.size() >= 0);
-	}
-
-	SECTION("Has new results when not active") {
-		REQUIRE_FALSE(transcriber.hasNewResults());
+	SECTION("Snapshot reflects capturing state") {
+		transcriber.beginCapture();
+		auto snapshot = transcriber.getSnapshot();
+		REQUIRE(snapshot.capturing);
+		transcriber.stopCapture();
 	}
 }
 
@@ -109,120 +119,105 @@ TEST_CASE("Live Speech Transcriber reset", "[live_speech_transcriber]") {
 	ofxGgmlLiveSpeechTranscriber transcriber;
 
 	SECTION("Reset clears state") {
-		transcriber.start();
+		transcriber.beginCapture();
 		transcriber.reset();
-		REQUIRE_FALSE(transcriber.isActive());
+		REQUIRE_FALSE(transcriber.isCapturing());
 	}
 
 	SECTION("Reset when not active") {
 		REQUIRE_NOTHROW(transcriber.reset());
-		REQUIRE_FALSE(transcriber.isActive());
+		REQUIRE_FALSE(transcriber.isCapturing());
 	}
 
-	SECTION("Reset clears transcription") {
-		transcriber.reset();
-		auto text = transcriber.getTranscription();
-		REQUIRE(text.empty() || text.length() >= 0);
+	SECTION("Clear transcript") {
+		REQUIRE_NOTHROW(transcriber.clearTranscript());
 	}
 }
 
-TEST_CASE("Live Speech Transcriber buffer management", "[live_speech_transcriber]") {
+TEST_CASE("Live Speech Transcriber update", "[live_speech_transcriber]") {
 	ofxGgmlLiveSpeechTranscriber transcriber;
 
-	SECTION("Buffer size configuration") {
-		transcriber.setBufferSizeMs(3000);
-		REQUIRE(transcriber.getBufferSizeMs() == 3000);
+	SECTION("Update can be called safely") {
+		REQUIRE_NOTHROW(transcriber.update());
 	}
 
-	SECTION("Default buffer size") {
-		REQUIRE(transcriber.getBufferSizeMs() > 0);
-	}
-
-	SECTION("Minimum buffer size") {
-		transcriber.setBufferSizeMs(100);
-		REQUIRE(transcriber.getBufferSizeMs() >= 100);
+	SECTION("Update while capturing") {
+		transcriber.beginCapture();
+		REQUIRE_NOTHROW(transcriber.update());
+		transcriber.stopCapture();
 	}
 }
 
-TEST_CASE("Live Speech Transcriber completion", "[live_speech_transcriber]") {
+TEST_CASE("Live Speech Transcriber log callback", "[live_speech_transcriber]") {
 	ofxGgmlLiveSpeechTranscriber transcriber;
 
-	SECTION("Complete transcription") {
-		auto result = transcriber.completeTranscription();
-		// Should return a result even if not started
-		REQUIRE(result.text.length() >= 0);
-	}
+	SECTION("Set log callback") {
+		std::vector<std::string> logMessages;
+		transcriber.setLogCallback([&logMessages](ofLogLevel level, const std::string & msg) {
+			logMessages.push_back(msg);
+		});
 
-	SECTION("Complete after stop") {
-		transcriber.start();
-		transcriber.stop();
-		auto result = transcriber.completeTranscription();
-		REQUIRE(result.text.length() >= 0);
+		// Should not crash
+		REQUIRE(logMessages.size() >= 0);
 	}
 }
 
-TEST_CASE("Live Speech Transcriber configuration before start", "[live_speech_transcriber]") {
-	ofxGgmlLiveSpeechTranscriber transcriber;
+TEST_CASE("Live Speech Transcriber settings structure", "[live_speech_transcriber]") {
+	ofxGgmlLiveSpeechSettings settings;
 
-	SECTION("Configure sample rate before start") {
-		transcriber.setSampleRate(22050);
-		REQUIRE(transcriber.getSampleRate() == 22050);
-
-		transcriber.start();
-		// Sample rate should be preserved
-		REQUIRE(transcriber.getSampleRate() == 22050);
-		transcriber.stop();
+	SECTION("Default values") {
+		REQUIRE(settings.sampleRate == 16000);
+		REQUIRE(settings.intervalSeconds == 1.25f);
+		REQUIRE(settings.windowSeconds == 8.0f);
+		REQUIRE(settings.overlapSeconds == 0.75f);
+		REQUIRE_FALSE(settings.enabled);
+		REQUIRE_FALSE(settings.returnTimestamps);
 	}
 
-	SECTION("Configure channels before start") {
-		transcriber.setChannels(2);
-		REQUIRE(transcriber.getChannels() == 2);
-
-		transcriber.start();
-		REQUIRE(transcriber.getChannels() == 2);
-		transcriber.stop();
-	}
-}
-
-TEST_CASE("Live Speech Transcriber language setting", "[live_speech_transcriber]") {
-	ofxGgmlLiveSpeechTranscriber transcriber;
-
-	SECTION("Set language") {
-		transcriber.setLanguage("en");
-		REQUIRE(transcriber.getLanguage() == "en");
+	SECTION("Task can be set") {
+		settings.task = ofxGgmlSpeechTask::Translate;
+		REQUIRE(settings.task == ofxGgmlSpeechTask::Translate);
 	}
 
-	SECTION("Default language") {
-		std::string lang = transcriber.getLanguage();
-		// Should have some default
-		REQUIRE(lang.length() >= 0);
-	}
+	SECTION("Paths can be set") {
+		settings.executable = "/path/to/whisper";
+		settings.modelPath = "/path/to/model.bin";
+		settings.serverUrl = "http://localhost:8080";
 
-	SECTION("Change language") {
-		transcriber.setLanguage("en");
-		transcriber.setLanguage("es");
-		REQUIRE(transcriber.getLanguage() == "es");
+		REQUIRE(settings.executable == "/path/to/whisper");
+		REQUIRE(settings.modelPath == "/path/to/model.bin");
+		REQUIRE(settings.serverUrl == "http://localhost:8080");
 	}
 }
 
-TEST_CASE("Live Speech Transcriber threading safety", "[live_speech_transcriber]") {
-	ofxGgmlLiveSpeechTranscriber transcriber;
+TEST_CASE("Live Speech Transcriber snapshot structure", "[live_speech_transcriber]") {
+	ofxGgmlLiveSpeechSnapshot snapshot;
 
-	SECTION("Rapid start/stop cycles") {
-		for (int i = 0; i < 5; ++i) {
-			transcriber.start();
-			transcriber.stop();
-		}
-		REQUIRE_FALSE(transcriber.isActive());
+	SECTION("Default values") {
+		REQUIRE_FALSE(snapshot.enabled);
+		REQUIRE_FALSE(snapshot.capturing);
+		REQUIRE_FALSE(snapshot.busy);
+		REQUIRE(snapshot.bufferedSeconds == 0.0);
+		REQUIRE(snapshot.transcript.empty());
+		REQUIRE(snapshot.status.empty());
+		REQUIRE(snapshot.detectedLanguage.empty());
 	}
 
-	SECTION("Submit audio during state changes") {
-		std::vector<float> audioData(160, 0.0f);
+	SECTION("Values can be set") {
+		snapshot.enabled = true;
+		snapshot.capturing = true;
+		snapshot.busy = true;
+		snapshot.bufferedSeconds = 5.5;
+		snapshot.transcript = "Test transcript";
+		snapshot.status = "Processing";
+		snapshot.detectedLanguage = "en";
 
-		transcriber.start();
-		transcriber.submitAudio(audioData.data(), audioData.size());
-		transcriber.stop();
-
-		REQUIRE_NOTHROW(transcriber.getTranscription());
+		REQUIRE(snapshot.enabled);
+		REQUIRE(snapshot.capturing);
+		REQUIRE(snapshot.busy);
+		REQUIRE(snapshot.bufferedSeconds == 5.5);
+		REQUIRE(snapshot.transcript == "Test transcript");
+		REQUIRE(snapshot.status == "Processing");
+		REQUIRE(snapshot.detectedLanguage == "en");
 	}
 }

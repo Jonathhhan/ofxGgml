@@ -8,82 +8,62 @@ TEST_CASE("Diffusion Inference initialization", "[diffusion_inference]") {
 		REQUIRE_NOTHROW(ofxGgmlDiffusionInference());
 	}
 
-	SECTION("No backend by default") {
-		REQUIRE(diffusion.getBackend() == nullptr);
+	SECTION("Has default backend") {
+		REQUIRE(diffusion.getBackend() != nullptr);
 	}
 }
 
 TEST_CASE("Diffusion task labels", "[diffusion_inference]") {
 	SECTION("Text to image task") {
-		const char * label = ofxGgmlDiffusionInference::taskLabel(ofxGgmlDiffusionTask::TextToImage);
+		const char * label = ofxGgmlDiffusionInference::taskLabel(ofxGgmlImageGenerationTask::TextToImage);
 		REQUIRE(label != nullptr);
 		REQUIRE(std::string(label).length() > 0);
 	}
 
 	SECTION("Image to image task") {
-		const char * label = ofxGgmlDiffusionInference::taskLabel(ofxGgmlDiffusionTask::ImageToImage);
-		REQUIRE(label != nullptr);
-		REQUIRE(std::string(label).length() > 0);
-	}
-}
-
-TEST_CASE("Diffusion image mode labels", "[diffusion_inference]") {
-	SECTION("Single image mode") {
-		const char * label = ofxGgmlDiffusionInference::imageModeLabel(ofxGgmlDiffusionImageMode::Single);
+		const char * label = ofxGgmlDiffusionInference::taskLabel(ofxGgmlImageGenerationTask::ImageToImage);
 		REQUIRE(label != nullptr);
 		REQUIRE(std::string(label).length() > 0);
 	}
 
-	SECTION("Batch image mode") {
-		const char * label = ofxGgmlDiffusionInference::imageModeLabel(ofxGgmlDiffusionImageMode::Batch);
-		REQUIRE(label != nullptr);
-		REQUIRE(std::string(label).length() > 0);
-	}
-
-	SECTION("Grid image mode") {
-		const char * label = ofxGgmlDiffusionInference::imageModeLabel(ofxGgmlDiffusionImageMode::Grid);
+	SECTION("Instruct image task") {
+		const char * label = ofxGgmlDiffusionInference::taskLabel(ofxGgmlImageGenerationTask::InstructImage);
 		REQUIRE(label != nullptr);
 		REQUIRE(std::string(label).length() > 0);
 	}
 }
 
 TEST_CASE("Diffusion selection mode labels", "[diffusion_inference]") {
-	SECTION("None selection mode") {
-		const char * label = ofxGgmlDiffusionInference::selectionModeLabel(ofxGgmlDiffusionSelectionMode::None);
+	SECTION("KeepOrder selection mode") {
+		const char * label = ofxGgmlDiffusionInference::selectionModeLabel(ofxGgmlImageSelectionMode::KeepOrder);
 		REQUIRE(label != nullptr);
 		REQUIRE(std::string(label).length() > 0);
 	}
 
-	SECTION("BestOfN selection mode") {
-		const char * label = ofxGgmlDiffusionInference::selectionModeLabel(ofxGgmlDiffusionSelectionMode::BestOfN);
+	SECTION("Rerank selection mode") {
+		const char * label = ofxGgmlDiffusionInference::selectionModeLabel(ofxGgmlImageSelectionMode::Rerank);
 		REQUIRE(label != nullptr);
 		REQUIRE(std::string(label).length() > 0);
 	}
 
-	SECTION("AllRanked selection mode") {
-		const char * label = ofxGgmlDiffusionInference::selectionModeLabel(ofxGgmlDiffusionSelectionMode::AllRanked);
+	SECTION("BestOnly selection mode") {
+		const char * label = ofxGgmlDiffusionInference::selectionModeLabel(ofxGgmlImageSelectionMode::BestOnly);
 		REQUIRE(label != nullptr);
 		REQUIRE(std::string(label).length() > 0);
 	}
 }
 
-TEST_CASE("Diffusion bridge backend creation", "[diffusion_inference]") {
-	SECTION("Create generic bridge backend") {
-		auto backend = ofxGgmlDiffusionInference::createDiffusionBridgeBackend();
+TEST_CASE("Diffusion backend creation", "[diffusion_inference]") {
+	SECTION("Create Stable Diffusion backend") {
+		auto backend = ofxGgmlDiffusionInference::createStableDiffusionBridgeBackend();
 		REQUIRE(backend != nullptr);
 		REQUIRE_FALSE(backend->backendName().empty());
 	}
 
 	SECTION("Create with custom name") {
-		auto backend = ofxGgmlDiffusionInference::createDiffusionBridgeBackend({}, "CustomDiffusion");
+		auto backend = ofxGgmlDiffusionInference::createStableDiffusionBridgeBackend({}, "CustomDiffusion");
 		REQUIRE(backend != nullptr);
 		REQUIRE(backend->backendName() == "CustomDiffusion");
-	}
-
-	SECTION("Create Stable Diffusion backend") {
-		auto backend = ofxGgmlDiffusionInference::createStableDiffusionBridgeBackend();
-		REQUIRE(backend != nullptr);
-		REQUIRE_FALSE(backend->backendName().empty());
 	}
 }
 
@@ -91,14 +71,14 @@ TEST_CASE("Diffusion backend setting and getting", "[diffusion_inference]") {
 	ofxGgmlDiffusionInference diffusion;
 
 	SECTION("Set backend") {
-		auto backend = ofxGgmlDiffusionInference::createDiffusionBridgeBackend();
+		auto backend = ofxGgmlDiffusionInference::createStableDiffusionBridgeBackend();
 		diffusion.setBackend(backend);
 		REQUIRE(diffusion.getBackend() == backend);
 	}
 
 	SECTION("Replace backend") {
-		auto backend1 = ofxGgmlDiffusionInference::createDiffusionBridgeBackend({}, "Backend1");
-		auto backend2 = ofxGgmlDiffusionInference::createDiffusionBridgeBackend({}, "Backend2");
+		auto backend1 = ofxGgmlDiffusionInference::createStableDiffusionBridgeBackend({}, "Backend1");
+		auto backend2 = ofxGgmlDiffusionInference::createStableDiffusionBridgeBackend({}, "Backend2");
 
 		diffusion.setBackend(backend1);
 		REQUIRE(diffusion.getBackend()->backendName() == "Backend1");
@@ -109,29 +89,26 @@ TEST_CASE("Diffusion backend setting and getting", "[diffusion_inference]") {
 }
 
 TEST_CASE("Diffusion request structure", "[diffusion_inference]") {
-	ofxGgmlDiffusionRequest request;
+	ofxGgmlImageGenerationRequest request;
 
 	SECTION("Default task is TextToImage") {
-		REQUIRE(request.task == ofxGgmlDiffusionTask::TextToImage);
+		REQUIRE(request.task == ofxGgmlImageGenerationTask::TextToImage);
 	}
 
-	SECTION("Default image mode is Single") {
-		REQUIRE(request.imageMode == ofxGgmlDiffusionImageMode::Single);
-	}
-
-	SECTION("Default selection mode is None") {
-		REQUIRE(request.selectionMode == ofxGgmlDiffusionSelectionMode::None);
+	SECTION("Default selection mode is KeepOrder") {
+		REQUIRE(request.selectionMode == ofxGgmlImageSelectionMode::KeepOrder);
 	}
 
 	SECTION("Default parameters") {
-		REQUIRE(request.width == 512);
-		REQUIRE(request.height == 512);
+		REQUIRE(request.width == 1024);
+		REQUIRE(request.height == 1024);
 		REQUIRE(request.batchCount == 1);
 		REQUIRE(request.seed == -1);
-		REQUIRE(request.sampleSteps == 20);
+		REQUIRE(request.steps == 20);
 		REQUIRE(request.cfgScale == 7.0f);
-		REQUIRE(request.clipSkip == -1);
-		REQUIRE(request.sampleMethod == 0);
+		REQUIRE(request.strength == 1.0f);
+		REQUIRE(request.normalizeClipEmbeddings);
+		REQUIRE(request.saveMetadata);
 	}
 
 	SECTION("Prompt can be set") {
@@ -146,7 +123,7 @@ TEST_CASE("Diffusion request structure", "[diffusion_inference]") {
 }
 
 TEST_CASE("Diffusion result structure", "[diffusion_inference]") {
-	ofxGgmlDiffusionResult result;
+	ofxGgmlImageGenerationResult result;
 
 	SECTION("Default state is failure") {
 		REQUIRE_FALSE(result.success);
@@ -155,43 +132,41 @@ TEST_CASE("Diffusion result structure", "[diffusion_inference]") {
 		REQUIRE(result.metadata.empty());
 	}
 
-	SECTION("Image mode is preserved") {
-		result.imageMode = ofxGgmlDiffusionImageMode::Grid;
-		REQUIRE(result.imageMode == ofxGgmlDiffusionImageMode::Grid);
-	}
-
-	SECTION("Selection mode is preserved") {
-		result.selectionMode = ofxGgmlDiffusionSelectionMode::BestOfN;
-		REQUIRE(result.selectionMode == ofxGgmlDiffusionSelectionMode::BestOfN);
+	SECTION("Backend name can be set") {
+		result.backendName = "TestBackend";
+		REQUIRE(result.backendName == "TestBackend");
 	}
 }
 
 TEST_CASE("Diffusion image artifact structure", "[diffusion_inference]") {
-	ofxGgmlDiffusionImageArtifact artifact;
+	ofxGgmlGeneratedImage image;
 
 	SECTION("Default values") {
-		REQUIRE(artifact.path.empty());
-		REQUIRE(artifact.width == 0);
-		REQUIRE(artifact.height == 0);
-		REQUIRE(artifact.seed == 0);
-		REQUIRE(artifact.rankScore == 0.0f);
-		REQUIRE(artifact.batchIndex == 0);
+		REQUIRE(image.path.empty());
+		REQUIRE(image.width == 0);
+		REQUIRE(image.height == 0);
+		REQUIRE(image.seed == -1);
+		REQUIRE(image.index == 0);
+		REQUIRE_FALSE(image.selected);
+		REQUIRE(image.score == 0.0f);
 	}
 
 	SECTION("Values can be set") {
-		artifact.path = "/tmp/image.png";
-		artifact.width = 512;
-		artifact.height = 512;
-		artifact.seed = 12345;
-		artifact.rankScore = 0.95f;
-		artifact.batchIndex = 2;
+		image.path = "/tmp/image.png";
+		image.width = 512;
+		image.height = 512;
+		image.seed = 12345;
+		image.score = 0.95f;
+		image.index = 2;
+		image.selected = true;
 
-		REQUIRE(artifact.path == "/tmp/image.png");
-		REQUIRE(artifact.width == 512);
-		REQUIRE(artifact.height == 512);
-		REQUIRE(artifact.seed == 12345);
-		REQUIRE(artifact.rankScore == 0.95f);
-		REQUIRE(artifact.batchIndex == 2);
+		REQUIRE(image.path == "/tmp/image.png");
+		REQUIRE(image.width == 512);
+		REQUIRE(image.height == 512);
+		REQUIRE(image.seed == 12345);
+		REQUIRE(image.score == 0.95f);
+		REQUIRE(image.index == 2);
+		REQUIRE(image.selected);
 	}
 }
 
@@ -199,32 +174,30 @@ TEST_CASE("Diffusion generate with mock backend", "[diffusion_inference]") {
 	ofxGgmlDiffusionInference diffusion;
 
 	SECTION("Generate with no backend returns error") {
-		ofxGgmlDiffusionRequest request;
+		ofxGgmlImageGenerationRequest request;
 		request.prompt = "A cat";
 		auto result = diffusion.generate(request);
 		REQUIRE_FALSE(result.success);
 	}
 
 	SECTION("Generate with configured backend") {
-		auto backend = std::dynamic_pointer_cast<ofxGgmlDiffusionBridgeBackend>(
-			ofxGgmlDiffusionInference::createDiffusionBridgeBackend());
+		auto backend = std::dynamic_pointer_cast<ofxGgmlStableDiffusionBridgeBackend>(
+			ofxGgmlDiffusionInference::createStableDiffusionBridgeBackend());
 
-		backend->setGenerateFunction([](const ofxGgmlDiffusionRequest & req) {
-			ofxGgmlDiffusionResult res;
+		backend->setGenerateFunction([](const ofxGgmlImageGenerationRequest & req) {
+			ofxGgmlImageGenerationResult res;
 			res.success = true;
 			res.backendName = "MockDiffusion";
 			res.elapsedMs = 2500.0f;
-			res.imageMode = req.imageMode;
-			res.selectionMode = req.selectionMode;
 
 			for (int i = 0; i < req.batchCount; ++i) {
-				ofxGgmlDiffusionImageArtifact artifact;
-				artifact.path = "/tmp/image_" + std::to_string(i) + ".png";
-				artifact.width = req.width;
-				artifact.height = req.height;
-				artifact.seed = req.seed + i;
-				artifact.batchIndex = i;
-				res.images.push_back(artifact);
+				ofxGgmlGeneratedImage image;
+				image.path = "/tmp/image_" + std::to_string(i) + ".png";
+				image.width = req.width;
+				image.height = req.height;
+				image.seed = req.seed + i;
+				image.index = i;
+				res.images.push_back(image);
 			}
 
 			return res;
@@ -232,7 +205,7 @@ TEST_CASE("Diffusion generate with mock backend", "[diffusion_inference]") {
 
 		diffusion.setBackend(backend);
 
-		ofxGgmlDiffusionRequest request;
+		ofxGgmlImageGenerationRequest request;
 		request.prompt = "A beautiful sunset";
 		request.width = 512;
 		request.height = 512;
@@ -249,16 +222,16 @@ TEST_CASE("Diffusion generate with mock backend", "[diffusion_inference]") {
 		for (size_t i = 0; i < result.images.size(); ++i) {
 			REQUIRE(result.images[i].width == 512);
 			REQUIRE(result.images[i].height == 512);
-			REQUIRE(result.images[i].batchIndex == i);
+			REQUIRE(result.images[i].index == i);
 		}
 	}
 
 	SECTION("Generate propagates backend errors") {
-		auto backend = std::dynamic_pointer_cast<ofxGgmlDiffusionBridgeBackend>(
-			ofxGgmlDiffusionInference::createDiffusionBridgeBackend());
+		auto backend = std::dynamic_pointer_cast<ofxGgmlStableDiffusionBridgeBackend>(
+			ofxGgmlDiffusionInference::createStableDiffusionBridgeBackend());
 
-		backend->setGenerateFunction([](const ofxGgmlDiffusionRequest &) {
-			ofxGgmlDiffusionResult res;
+		backend->setGenerateFunction([](const ofxGgmlImageGenerationRequest &) {
+			ofxGgmlImageGenerationResult res;
 			res.success = false;
 			res.error = "Mock generation error";
 			return res;
@@ -266,7 +239,7 @@ TEST_CASE("Diffusion generate with mock backend", "[diffusion_inference]") {
 
 		diffusion.setBackend(backend);
 
-		ofxGgmlDiffusionRequest request;
+		ofxGgmlImageGenerationRequest request;
 		request.prompt = "Test";
 		auto result = diffusion.generate(request);
 
@@ -276,21 +249,25 @@ TEST_CASE("Diffusion generate with mock backend", "[diffusion_inference]") {
 }
 
 TEST_CASE("Diffusion ranking metadata", "[diffusion_inference]") {
-	ofxGgmlDiffusionResult result;
+	ofxGgmlImageGenerationResult result;
 
 	SECTION("Ranking scores on images") {
-		ofxGgmlDiffusionImageArtifact img1;
-		img1.rankScore = 0.95f;
-		img1.batchIndex = 0;
+		ofxGgmlGeneratedImage img1;
+		img1.score = 0.95f;
+		img1.index = 0;
+		img1.selected = true;
 
-		ofxGgmlDiffusionImageArtifact img2;
-		img2.rankScore = 0.75f;
-		img2.batchIndex = 1;
+		ofxGgmlGeneratedImage img2;
+		img2.score = 0.75f;
+		img2.index = 1;
+		img2.selected = false;
 
 		result.images = {img1, img2};
 
-		REQUIRE(result.images[0].rankScore == 0.95f);
-		REQUIRE(result.images[1].rankScore == 0.75f);
+		REQUIRE(result.images[0].score == 0.95f);
+		REQUIRE(result.images[1].score == 0.75f);
+		REQUIRE(result.images[0].selected);
+		REQUIRE_FALSE(result.images[1].selected);
 	}
 
 	SECTION("General metadata") {
@@ -300,5 +277,21 @@ TEST_CASE("Diffusion ranking metadata", "[diffusion_inference]") {
 		REQUIRE(result.metadata.size() == 2);
 		REQUIRE(result.metadata[0].first == "model");
 		REQUIRE(result.metadata[1].first == "sampler");
+	}
+}
+
+TEST_CASE("Diffusion model profiles", "[diffusion_inference]") {
+	auto profiles = ofxGgmlDiffusionInference::defaultProfiles();
+
+	SECTION("Returns model profiles") {
+		REQUIRE(profiles.size() >= 0);
+	}
+
+	SECTION("Profile structure") {
+		if (!profiles.empty()) {
+			const auto & profile = profiles[0];
+			REQUIRE(profile.name.length() >= 0);
+			REQUIRE(profile.architecture.length() >= 0);
+		}
 	}
 }

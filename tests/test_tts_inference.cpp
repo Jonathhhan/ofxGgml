@@ -8,8 +8,8 @@ TEST_CASE("TTS Inference initialization", "[tts_inference]") {
 		REQUIRE_NOTHROW(ofxGgmlTtsInference());
 	}
 
-	SECTION("No backend by default") {
-		REQUIRE(tts.getBackend() == nullptr);
+	SECTION("Has default backend") {
+		REQUIRE(tts.getBackend() != nullptr);
 	}
 }
 
@@ -117,11 +117,11 @@ TEST_CASE("TTS backend setting and getting", "[tts_inference]") {
 		REQUIRE(tts.getBackend()->backendName() == "Backend2");
 	}
 
-	SECTION("Set null backend") {
+	SECTION("Set null backend creates default") {
 		auto backend = ofxGgmlTtsInference::createTtsBridgeBackend();
 		tts.setBackend(backend);
 		tts.setBackend(nullptr);
-		REQUIRE(tts.getBackend() == nullptr);
+		REQUIRE(tts.getBackend() != nullptr);
 	}
 }
 

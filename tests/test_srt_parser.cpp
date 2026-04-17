@@ -211,23 +211,18 @@ TEST_CASE("SRT parser - UTF-16 LE encoding", "[srt_parser]") {
 	std::string utf16le;
 	utf16le += "\xFF\xFE"; // BOM
 
-	// "1\n"
-	utf16le += "1\0\n\0";
-
-	// "00:00:00,000 --> 00:00:01,000\n"
-	const char * timecode = "00:00:00,000 --> 00:00:01,000\n";
-	for (const char * p = timecode; *p; ++p) {
+	// "1\n00:00:00,000 --> 00:00:01,000\nTest\n\n"
+	const char * srtData = "1\n00:00:00,000 --> 00:00:01,000\nTest\n\n";
+	for (const char * p = srtData; *p; ++p) {
 		utf16le += *p;
 		utf16le += '\0';
 	}
-
-	// "Test\n"
-	utf16le += "T\0e\0s\0t\0\n\0";
 
 	std::vector<ofxGgmlSimpleSrtCue> cues;
 	std::string error;
 
 	bool ok = ofxGgmlSimpleSrtSubtitleParser::parseText(utf16le, cues, error);
+	WARN("UTF-16 LE error: " << error);
 	REQUIRE(ok);
 	REQUIRE(cues.size() == 1);
 	REQUIRE(cues[0].text == "Test");
@@ -238,23 +233,20 @@ TEST_CASE("SRT parser - UTF-16 BE encoding", "[srt_parser]") {
 	std::string utf16be;
 	utf16be += "\xFE\xFF"; // BOM
 
-	// "1\n"
-	utf16be += "\0001\0\n";
-
-	// "00:00:00,000 --> 00:00:01,000\n"
-	const char * timecode = "00:00:00,000 --> 00:00:01,000\n";
-	for (const char * p = timecode; *p; ++p) {
+	// "1\n00:00:00,000 --> 00:00:01,000\nTest\n\n"
+	const char * srtData = "1\n00:00:00,000 --> 00:00:01,000\nTest\n\n";
+	for (const char * p = srtData; *p; ++p) {
 		utf16be += '\0';
 		utf16be += *p;
 	}
-
-	// "Test\n"
-	utf16be += "\0T\0e\0s\0t\0\n";
 
 	std::vector<ofxGgmlSimpleSrtCue> cues;
 	std::string error;
 
 	bool ok = ofxGgmlSimpleSrtSubtitleParser::parseText(utf16be, cues, error);
+	if (!ok) {
+		INFO("Parse error: " << error);
+	}
 	REQUIRE(ok);
 	REQUIRE(cues.size() == 1);
 	REQUIRE(cues[0].text == "Test");

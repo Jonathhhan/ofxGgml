@@ -5,6 +5,10 @@
 #include <filesystem>
 #include <fstream>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 namespace {
 
 std::filesystem::path makeChatAssistantTestDir(const std::string & name) {
@@ -33,7 +37,8 @@ std::string createChatAssistantExecutable(const std::string & outputLine) {
 	const auto exe = dir / "fake_chat_assistant.sh";
 	std::ofstream out(exe);
 	out << "#!/usr/bin/env bash\nset -euo pipefail\necho " << outputLine << "\n";
-	::chmod(exe.c_str(), 0755);
+	out.close();
+	chmod(exe.c_str(), 0755);
 #endif
 	return exe.string();
 }

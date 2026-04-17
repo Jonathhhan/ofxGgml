@@ -10,8 +10,8 @@ TEST_CASE("CLIP Inference initialization", "[clip_inference]") {
 		REQUIRE_NOTHROW(ofxGgmlClipInference());
 	}
 
-	SECTION("No backend by default") {
-		REQUIRE(clip.getBackend() == nullptr);
+	SECTION("Has default backend") {
+		REQUIRE(clip.getBackend() != nullptr);
 	}
 }
 
@@ -73,11 +73,11 @@ TEST_CASE("CLIP backend setting and getting", "[clip_inference]") {
 		REQUIRE(clip.getBackend()->backendName() == "Backend2");
 	}
 
-	SECTION("Set null backend") {
+	SECTION("Set null backend creates default") {
 		auto backend = ofxGgmlClipInference::createClipBridgeBackend();
 		clip.setBackend(backend);
 		clip.setBackend(nullptr);
-		REQUIRE(clip.getBackend() == nullptr);
+		REQUIRE(clip.getBackend() != nullptr);
 	}
 }
 

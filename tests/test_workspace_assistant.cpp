@@ -69,7 +69,7 @@ std::string createWorkspaceExecutable(const std::vector<std::string> & lines) {
 	for (const auto & line : lines) {
 		out << "printf '%s\\n' " << std::quoted(line) << "\n";
 	}
-	::chmod(exe.c_str(), 0755);
+	chmod(exe.c_str(), 0755);
 #endif
 	return exe.string();
 }
