@@ -41,8 +41,9 @@ void ofApp::setup() {
 
 	ofxGgmlSettings settings;
 	settings.threads = 4;
-	if (!ggml.setup(settings)) {
-		logLines.push_back("ERROR: failed to initialize ggml");
+	auto result = ggml.setup(settings);
+	if (!result.isOk()) {
+		logLines.push_back("ERROR: failed to initialize ggml - " + result.error().message);
 		return;
 	}
 
@@ -85,7 +86,7 @@ void ofApp::buildGraph() {
 	outputTensor.setName("output");
 	graph.setOutput(outputTensor);
 	graph.build(outputTensor);
-	graphReady = ggml.allocGraph(graph);
+	graphReady = ggml.allocGraph(graph).isOk();
 }
 
 void ofApp::runInference() {
