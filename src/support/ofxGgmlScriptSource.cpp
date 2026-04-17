@@ -368,13 +368,15 @@ VisualStudioParseResult parseVisualStudioSolution(
 		std::smatch projectMatch;
 		if (std::regex_match(line, projectMatch, projectPattern) &&
 			projectMatch.size() >= 4) {
-			const std::string projectPath =
-				std::filesystem::path(projectMatch[2].str()).generic_string();
-			if (normalizeLower(std::filesystem::path(projectPath).extension().string()) ==
+			std::string projectPath = projectMatch[2].str();
+			std::replace(projectPath.begin(), projectPath.end(), '\\', '/');
+			const std::string projectPathGeneric =
+				std::filesystem::path(projectPath).generic_string();
+			if (normalizeLower(std::filesystem::path(projectPathGeneric).extension().string()) ==
 				".vcxproj") {
 				ofxGgmlScriptSourceVisualStudioProjectInfo projectInfo;
 				projectInfo.name = projectMatch[1].str();
-				projectInfo.relativePath = projectPath;
+				projectInfo.relativePath = projectPathGeneric;
 				projectInfo.projectGuid = projectMatch[3].str();
 				result.projects.push_back(std::move(projectInfo));
 			}

@@ -1530,6 +1530,27 @@ std::function<bool(const std::string&)> onChunk = nullptr) {
 output.clear();
 exitCode = -1;
 if (args.empty() || args.front().empty()) return false;
+	std::string pendingChunk;
+	auto dispatchChunk = [&](const std::string & chunk) -> bool {
+		if (!onChunk || chunk.empty()) {
+			return true;
+		}
+		pendingChunk.append(chunk);
+		size_t newlinePos = std::string::npos;
+		while ((newlinePos = pendingChunk.find('\n')) != std::string::npos) {
+			const std::string segment = pendingChunk.substr(0, newlinePos);
+			pendingChunk.erase(0, newlinePos + 1);
+			if (!onChunk(segment)) {
+				return false;
+			}
+		}
+		if (!pendingChunk.empty()) {
+			const std::string segment = pendingChunk;
+			pendingChunk.clear();
+			return onChunk(segment);
+		}
+		return true;
+	};
 #ifdef _WIN32
 	SECURITY_ATTRIBUTES sa {};
 	sa.nLength = sizeof(sa);
@@ -1630,7 +1651,7 @@ if (args.empty() || args.front().empty()) return false;
 	while (ReadFile(readPipe, buf.data(), static_cast<DWORD>(buf.size()), &bytesRead, nullptr) && bytesRead > 0) {
 		std::string chunk(buf.data(), bytesRead);
 		output.append(chunk);
-		if (onChunk && !onChunk(chunk)) {
+		if (!dispatchChunk(chunk)) {
 			// Terminate process if callback requested early exit
 			TerminateProcess(pi.hProcess, 1);
 			break;
@@ -1690,7 +1711,7 @@ if (args.empty() || args.front().empty()) return false;
 	while ((bytesRead = read(pipeFds[0], buf.data(), buf.size())) > 0) {
 		std::string chunk(buf.data(), static_cast<size_t>(bytesRead));
 		output.append(chunk);
-		if (onChunk && !onChunk(chunk)) {
+		if (!dispatchChunk(chunk)) {
 			// Terminate process if callback requested early exit
 			kill(pid, SIGTERM);
 			break;

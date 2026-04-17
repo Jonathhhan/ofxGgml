@@ -27,6 +27,23 @@ std::string createCodeReviewDummyModel() {
 	return model.string();
 }
 
+#ifndef _WIN32
+std::string shellQuote(const std::string & line) {
+	std::string quoted;
+	quoted.reserve(line.size() + 2);
+	quoted.push_back('\'');
+	for (char c : line) {
+		if (c == '\'') {
+			quoted += "'\"'\"'";
+		} else {
+			quoted.push_back(c);
+		}
+	}
+	quoted.push_back('\'');
+	return quoted;
+}
+#endif
+
 std::string createCodeReviewExecutable(const std::string & body) {
 	const auto dir = makeUniqueCodeReviewDir("exec");
 #ifdef _WIN32
@@ -36,8 +53,26 @@ std::string createCodeReviewExecutable(const std::string & body) {
 	out.close();
 #else
 	const auto exe = dir / "fake_llama.sh";
+	std::string escapedBody = body;
+	escapedBody.erase(
+		std::remove(escapedBody.begin(), escapedBody.end(), '\r'),
+		escapedBody.end());
+	std::vector<std::string> safeLines;
+	std::istringstream bodyStream(escapedBody);
+	std::string line;
+	while (std::getline(bodyStream, line)) {
+		if (line.empty()) continue;
+		if (line.rfind("echo ", 0) == 0) {
+			safeLines.push_back("printf '%s\\n' " + shellQuote(line.substr(5)));
+		} else {
+			safeLines.push_back(line);
+		}
+	}
 	std::ofstream out(exe);
-	out << "#!/usr/bin/env bash\nset -euo pipefail\n" << body << "\n";
+	out << "#!/usr/bin/env bash\nset -euo pipefail\nset -f\n";
+	for (const auto & safeLine : safeLines) {
+		out << safeLine << "\n";
+	}
 	out.close();
 	chmod(exe.c_str(), 0755);
 #endif

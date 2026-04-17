@@ -52,6 +52,23 @@ std::string escapeBatchEcho(const std::string & line) {
 	return escaped;
 }
 
+#ifndef _WIN32
+std::string shellQuote(const std::string & line) {
+	std::string quoted;
+	quoted.reserve(line.size() + 2);
+	quoted.push_back('\'');
+	for (char c : line) {
+		if (c == '\'') {
+			quoted += "'\"'\"'";
+		} else {
+			quoted.push_back(c);
+		}
+	}
+	quoted.push_back('\'');
+	return quoted;
+}
+#endif
+
 std::string createAssistantExecutable(const std::vector<std::string> & lines) {
 	const auto dir = makeAssistantTestDir("exec");
 #ifdef _WIN32
@@ -66,7 +83,7 @@ std::string createAssistantExecutable(const std::vector<std::string> & lines) {
 	std::ofstream out(exe);
 	out << "#!/usr/bin/env bash\nset -euo pipefail\n";
 	for (const auto & line : lines) {
-		out << "printf '%s\\n' " << std::quoted(line) << "\n";
+		out << "printf '%s\\n' " << shellQuote(line) << "\n";
 	}
 	chmod(exe.c_str(), 0755);
 #endif

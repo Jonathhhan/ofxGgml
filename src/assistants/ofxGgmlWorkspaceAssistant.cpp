@@ -1853,16 +1853,15 @@ ofxGgmlWorkspaceAssistant::suggestVerificationCommands(
 
 	const bool testsBuildExists =
 		fileExistsWithinWorkspace(workspaceRoot, testsBuildDir);
-	const bool testExeExists =
-#ifdef _WIN32
-		fileExistsWithinWorkspace(
-			workspaceRoot,
-			(std::filesystem::path(testsBuildDir) / "Release" / "ofxGgml-tests.exe").generic_string());
-#else
-		fileExistsWithinWorkspace(
-			workspaceRoot,
-			(std::filesystem::path(testsBuildDir) / "ofxGgml-tests").generic_string());
-#endif
+	const std::string windowsTestExe =
+		(std::filesystem::path(testsBuildDir) / "Release" / "ofxGgml-tests.exe")
+		.generic_string();
+	const std::string posixTestExe =
+		(std::filesystem::path(testsBuildDir) / "ofxGgml-tests")
+		.generic_string();
+	const bool hasWindowsTestExe = fileExistsWithinWorkspace(workspaceRoot, windowsTestExe);
+	const bool hasPosixTestExe = fileExistsWithinWorkspace(workspaceRoot, posixTestExe);
+	const bool testExeExists = hasWindowsTestExe || hasPosixTestExe;
 
 	const bool touchesCode = std::any_of(
 		normalized.begin(), normalized.end(),
@@ -1899,13 +1898,13 @@ ofxGgmlWorkspaceAssistant::suggestVerificationCommands(
 		test.label = "run-targeted-tests";
 		test.workingDirectory = workspaceRoot;
 #ifdef _WIN32
-		test.executable = (
-			std::filesystem::path(testsBuildDir) / "Release" / "ofxGgml-tests.exe")
-			.generic_string();
+		test.executable = hasWindowsTestExe
+			? windowsTestExe
+			: (std::filesystem::path(".") / posixTestExe).generic_string();
 #else
-		test.executable = (
-			std::filesystem::path(".") / testsBuildDir / "ofxGgml-tests")
-			.generic_string();
+		test.executable = hasPosixTestExe
+			? (std::filesystem::path(".") / posixTestExe).generic_string()
+			: windowsTestExe;
 #endif
 		if (!tags.empty()) {
 			for (const auto & tag : tags) {
