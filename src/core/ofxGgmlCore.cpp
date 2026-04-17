@@ -10,6 +10,7 @@
 #include "ggml-vulkan.h"
 #endif
 
+#include <atomic>
 #include <chrono>
 #include <csetjmp>
 #include <cstdio>
@@ -51,7 +52,7 @@ static void defaultLogCallback(int level, const std::string & message) {
 // --------------------------------------------------------------------------
 
 struct ofxGgml::Impl {
-	ofxGgmlState state = ofxGgmlState::Uninitialized;
+	std::atomic<ofxGgmlState> state { ofxGgmlState::Uninitialized };
 	ofxGgmlSettings settings;
 
 	ggml_backend_t backend = nullptr;
@@ -67,6 +68,8 @@ struct ofxGgml::Impl {
 	uint64_t allocatedGraphToken = 0;
 	struct ggml_cgraph * allocatedGraph = nullptr;
 
+	/// Mutex protecting async state changes.
+	std::mutex asyncMutex;
 	/// Async compute tracking.
 	bool hasPendingAsync = false;
 	std::chrono::steady_clock::time_point asyncStart;
@@ -103,12 +106,17 @@ static ofxGgmlSettings sanitizeSettings(const ofxGgmlSettings & settings, ofxGgm
 }
 
 static bool synchronizePendingAsync(ofxGgml::Impl * impl, const char * context) {
-	if (!impl || !impl->hasPendingAsync) {
+	if (!impl) {
+		return true;
+	}
+
+	std::lock_guard<std::mutex> lock(impl->asyncMutex);
+	if (!impl->hasPendingAsync) {
 		return true;
 	}
 	if (!impl->sched) {
 		impl->hasPendingAsync = false;
-		impl->state = ofxGgmlState::Ready;
+		impl->state.store(ofxGgmlState::Ready, std::memory_order_release);
 		return true;
 	}
 	if (context) {
@@ -120,7 +128,7 @@ static bool synchronizePendingAsync(ofxGgml::Impl * impl, const char * context) 
 	impl->timings.computeTotalMs =
 		std::chrono::duration<float, std::milli>(t1 - impl->asyncStart).count();
 	impl->hasPendingAsync = false;
-	impl->state = ofxGgmlState::Ready;
+	impl->state.store(ofxGgmlState::Ready, std::memory_order_release);
 	return true;
 }
 
@@ -354,7 +362,7 @@ ofxGgml::~ofxGgml() {
 bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	auto tSetup0 = std::chrono::steady_clock::now();
 
-	if (m_impl->state != ofxGgmlState::Uninitialized) {
+	if (m_impl->state.load(std::memory_order_acquire) != ofxGgmlState::Uninitialized) {
 		close();
 	}
 
@@ -499,7 +507,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	}
 
 	if (!m_impl->backend) {
-		m_impl->state = ofxGgmlState::Error;
+		m_impl->state.store(ofxGgmlState::Error, std::memory_order_release);
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to initialize any backend\n");
 		return false;
 	}
@@ -515,7 +523,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		}, "CPU scheduling backend init");
 	}
 	if (!m_impl->cpuBackend) {
-		m_impl->state = ofxGgmlState::Error;
+		m_impl->state.store(ofxGgmlState::Error, std::memory_order_release);
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to initialize CPU backend\n");
 		ggml_backend_free(m_impl->backend);
 		m_impl->backend = nullptr;
@@ -537,7 +545,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 	}, "scheduler creation");
 
 	if (!m_impl->sched) {
-		m_impl->state = ofxGgmlState::Error;
+		m_impl->state.store(ofxGgmlState::Error, std::memory_order_release);
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to create backend scheduler\n");
 		const bool sameBackend = (m_impl->backend == m_impl->cpuBackend);
 		ggml_backend_free(m_impl->backend);
@@ -549,7 +557,7 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 		return false;
 	}
 
-	m_impl->state = ofxGgmlState::Ready;
+	m_impl->state.store(ofxGgmlState::Ready, std::memory_order_release);
 	auto tSetup1 = std::chrono::steady_clock::now();
 	m_impl->timings.setupMs = std::chrono::duration<float, std::milli>(tSetup1 - tSetup0).count();
 	std::string readyMsg = "ofxGgml: ready (backend: ";
@@ -592,15 +600,15 @@ void ofxGgml::close() {
 	// ggml logging is process-global, so only unregister this instance and
 	// reactivate the previous live owner if one still exists.
 	unregisterLogCallbackOwner(m_impl.get());
-	m_impl->state = ofxGgmlState::Uninitialized;
+	m_impl->state.store(ofxGgmlState::Uninitialized, std::memory_order_release);
 }
 
 ofxGgmlState ofxGgml::getState() const {
-	return m_impl->state;
+	return m_impl->state.load(std::memory_order_acquire);
 }
 
 bool ofxGgml::isReady() const {
-	return m_impl->state == ofxGgmlState::Ready;
+	return m_impl->state.load(std::memory_order_acquire) == ofxGgmlState::Ready;
 }
 
 // --------------------------------------------------------------------------
@@ -679,7 +687,7 @@ static bool allocGraphInternal(
 	struct ggml_cgraph * graph,
 	bool validateGraph) {
 	if (!impl) return false;
-	if (impl->state != ofxGgmlState::Ready) {
+	if (impl->state.load(std::memory_order_acquire) != ofxGgmlState::Ready) {
 		impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: not ready\n");
 		return false;
 	}
@@ -740,8 +748,12 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 	ofxGgmlComputeResult result;
 	struct ggml_cgraph * rawGraph = graph.raw();
 
-	if (m_impl->state != ofxGgmlState::Ready) {
-		if (m_impl->state == ofxGgmlState::Computing && m_impl->hasPendingAsync) {
+	// Check state with atomic load
+	ofxGgmlState currentState = m_impl->state.load(std::memory_order_acquire);
+	if (currentState != ofxGgmlState::Ready) {
+		// Check if async already in flight
+		std::lock_guard<std::mutex> lock(m_impl->asyncMutex);
+		if (currentState == ofxGgmlState::Computing && m_impl->hasPendingAsync) {
 			result.error = "ofxGgml: async compute already in flight (call synchronize() first)";
 			return result;
 		}
@@ -765,7 +777,7 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 		}
 	}
 
-	m_impl->state = ofxGgmlState::Computing;
+	m_impl->state.store(ofxGgmlState::Computing, std::memory_order_release);
 
 	auto t0 = std::chrono::steady_clock::now();
 
@@ -777,12 +789,14 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 
 	if (status == GGML_STATUS_SUCCESS) {
 		result.success = true;
+		// Protect async state changes with mutex
+		std::lock_guard<std::mutex> lock(m_impl->asyncMutex);
 		m_impl->hasPendingAsync = true;
 		m_impl->asyncStart = t0;
 	} else {
 		result.error = std::string("ofxGgml: compute failed (status ") +
 			ggml_status_to_string(status) + ")";
-		m_impl->state = ofxGgmlState::Ready;
+		m_impl->state.store(ofxGgmlState::Ready, std::memory_order_release);
 	}
 
 	return result;
@@ -790,20 +804,30 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 
 ofxGgmlComputeResult ofxGgml::synchronize() {
 	ofxGgmlComputeResult result;
-	if (m_impl->state != ofxGgmlState::Computing || !m_impl->hasPendingAsync) {
-		result.success = true;
-		return result;
+
+	// Check state and async flag under lock
+	{
+		std::lock_guard<std::mutex> lock(m_impl->asyncMutex);
+		if (m_impl->state.load(std::memory_order_acquire) != ofxGgmlState::Computing || !m_impl->hasPendingAsync) {
+			result.success = true;
+			return result;
+		}
 	}
 
 	ggml_backend_sched_synchronize(m_impl->sched);
 	auto t1 = std::chrono::steady_clock::now();
-	m_impl->timings.computeTotalMs =
-		std::chrono::duration<float, std::milli>(t1 - m_impl->asyncStart).count();
+
+	// Update timing and state atomically
+	{
+		std::lock_guard<std::mutex> lock(m_impl->asyncMutex);
+		m_impl->timings.computeTotalMs =
+			std::chrono::duration<float, std::milli>(t1 - m_impl->asyncStart).count();
+		m_impl->hasPendingAsync = false;
+	}
 
 	result.success = true;
 	result.elapsedMs = m_impl->timings.computeTotalMs;
-	m_impl->hasPendingAsync = false;
-	m_impl->state = ofxGgmlState::Ready;
+	m_impl->state.store(ofxGgmlState::Ready, std::memory_order_release);
 	return result;
 }
 
@@ -823,7 +847,7 @@ ofxGgmlComputeResult ofxGgml::compute(ofxGgmlGraph & graph) {
 // --------------------------------------------------------------------------
 
 bool ofxGgml::loadModelWeights(ofxGgmlModel & model) {
-	if (m_impl->state != ofxGgmlState::Ready) {
+	if (m_impl->state.load(std::memory_order_acquire) != ofxGgmlState::Ready) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: not ready\n");
 		return false;
 	}
