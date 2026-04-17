@@ -8,6 +8,8 @@
 #include "panels/LogPanel.h"
 #include "panels/PerformancePanel.h"
 #include "panels/StatusBar.h"
+#include "managers/TextServerManager.h"
+#include "managers/SpeechServerManager.h"
 
 #include <atomic>
 #include <array>
@@ -36,12 +38,6 @@ enum class LiveContextMode {
 enum class TextInferenceBackend {
 	Cli = 0,
 	LlamaServer
-};
-
-enum class ServerStatusState {
-	Unknown = 0,
-	Reachable,
-	Unreachable
 };
 
 // ---------------------------------------------------------------------------
@@ -86,6 +82,10 @@ private:
 	LogPanel logPanel;
 	PerformancePanel performancePanel;
 	StatusBar statusBar;
+
+	// -- Server Managers --
+	TextServerManager textServerManager;
+	SpeechServerManager speechServerManager;
 
 	// -- mode --
 	AiMode activeMode = AiMode::Chat;
