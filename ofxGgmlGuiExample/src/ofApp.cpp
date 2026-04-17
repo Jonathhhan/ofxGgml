@@ -2,6 +2,7 @@
 
 #include "ImHelpers.h"
 #include "utils/ImGuiHelpers.h"
+#include "utils/TextPromptHelpers.h"
 #include "config/ModelPresets.h"
 #include "ofJson.h"
 #include "core/ofxGgmlWindowsUtf8.h"
@@ -137,28 +138,6 @@ std::string effectiveTextServerUrl(const char * buffer) {
 
 std::string effectiveSpeechServerUrl(const char * buffer) {
 	return trim(buffer ? std::string(buffer) : std::string());
-}
-
-std::string buildStructuredTextPrompt(
-	const std::string & systemPrompt,
-	const std::string & instruction,
-	const std::string & inputHeading,
-	const std::string & inputText,
-	const std::string & outputHeading) {
-	std::ostringstream prompt;
-	const std::string system = trim(systemPrompt);
-	if (!system.empty()) {
-		prompt << "System:\n" << system << "\n\n";
-	}
-	prompt << trim(instruction) << "\n";
-	if (!trim(inputHeading).empty()) {
-		prompt << trim(inputHeading) << ":\n";
-	}
-	prompt << inputText << "\n\n";
-	if (!trim(outputHeading).empty()) {
-		prompt << trim(outputHeading) << ":\n";
-	}
-	return prompt.str();
 }
 
 std::string formatSpeechTimestamp(double seconds) {
@@ -844,10 +823,6 @@ std::vector<std::string> extractPathList(const std::string & text) {
 // llama-completion may emit around the actual generated text.
 // Examples of markers removed: "user", "assistant", "system",
 // "<|...|>" ChatML tokens, and leading/trailing ">" prompt chars.
-std::string cleanChatOutput(const std::string & text) {
-	return ofxGgmlInference::sanitizeGeneratedText(text);
-}
-
 std::string formatConsoleLogText(const std::string & text, bool chatLike = false) {
 	std::string out = stripLiteralAnsiMarkers(stripAnsi(text));
 	if (chatLike) {
@@ -979,42 +954,6 @@ std::string describeExitCode(int code) {
 		return "killed by signal " + std::to_string(sig);
 	}
 	return "";
-}
-
-bool isLikelyCutoffOutput(const std::string & text, AiMode mode) {
-	const std::string t = trim(text);
-	if (t.empty()) return false;
-	if (t.rfind("[Error]", 0) == 0) return false;
-
-	const char last = t.back();
-	if (mode == AiMode::Script) {
-		if (last == '\n' || last == '}' || last == ')' || last == ']' || last == ';') {
-			return false;
-		}
-		return t.size() > 80;
-	}
-
-	if (last == '.' || last == '!' || last == '?' || last == '"' || last == '\'') {
-		return false;
-	}
-	return t.size() > 80;
-}
-
-std::string clampPromptToContext(const std::string & prompt, size_t contextTokens, bool & trimmed) {
-	trimmed = false;
-	if (contextTokens == 0) return prompt;
-	const size_t charBudget = std::max<size_t>(512, contextTokens * 3);
-	if (prompt.size() <= charBudget) return prompt;
-
-	trimmed = true;
-	const size_t head = std::min<size_t>(2048, charBudget / 4);
-	if (charBudget <= head + 96) {
-		return prompt.substr(prompt.size() - charBudget);
-	}
-	const size_t tail = charBudget - head - 32;
-	return prompt.substr(0, head)
-		+ "\n...[context trimmed to fit window]...\n"
-		+ prompt.substr(prompt.size() - tail);
 }
 
 std::string promptCachePathFor(const std::string & modelPath, AiMode mode) {
@@ -1376,14 +1315,6 @@ std::string buildScriptCommandHelpText() {
 		"- /fix [focus] -> produce a structured fix/edit plan\n"
 		"- /explain [focus] -> explain code or architecture\n"
 		"- /docs [focus] -> answer with grounded docs\n";
-}
-
-std::string truncatePromptPayload(const std::string & text, size_t maxChars) {
-	if (text.size() <= maxChars) {
-		return text;
-	}
-	return text.substr(0, maxChars) +
-		"\n...[truncated " + std::to_string(text.size() - maxChars) + " chars]";
 }
 
 WorkspaceDiffSnapshot captureWorkspaceDiffSnapshot(const std::string & workspaceRoot) {
@@ -7160,79 +7091,29 @@ std::string ofApp::flushSpeechRecordingToTempWav() {
 // ---------------------------------------------------------------------------
 
 void ofApp::drawStatusBar() {
-ImGuiWindowFlags flags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
-ImGuiWindowFlags_NoScrollbar;
-
-if (ImGui::Begin("##StatusBar", nullptr, flags)) {
-ImGui::Text("Engine: %s", engineStatus.c_str());
-ImGui::SameLine();
-if (!modelPresets.empty()) {
-ImGui::Text(" | Model: %s", modelPresets[static_cast<size_t>(selectedModelIndex)].name.c_str());
-ImGui::SameLine();
-}
-ImGui::Text(" | Mode: %s", modeLabels[static_cast<int>(activeMode)]);
-if (activeMode == AiMode::Chat &&
-	chatLanguageIndex > 0 &&
-	chatLanguageIndex < static_cast<int>(chatLanguages.size())) {
-	ImGui::SameLine();
-	ImGui::Text(" | Chat Lang: %s",
-		chatLanguages[static_cast<size_t>(chatLanguageIndex)].name.c_str());
-}
-if (activeMode == AiMode::Script && !scriptLanguages.empty()) {
-ImGui::SameLine();
-ImGui::Text(" | Lang: %s", scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].name.c_str());
-}
-ImGui::SameLine();
-ImGui::Text(" | Tokens: %d  Temp: %.2f  Top-P: %.2f  Top-K: %d  Min-P: %.2f",
-	maxTokens, temperature, topP, topK, minP);
-if (liveContextMode == LiveContextMode::Offline) {
-	ImGui::SameLine();
-	ImGui::TextDisabled(" | Offline");
-} else if (liveContextMode == LiveContextMode::LoadedSourcesOnly) {
-	ImGui::SameLine();
-	ImGui::TextDisabled(" | LoadedSourcesOnly");
-} else if (liveContextMode == LiveContextMode::LiveContextStrictCitations) {
-	ImGui::SameLine();
-	ImGui::TextDisabled(" | LiveContextStrictCitations");
-} else {
-	ImGui::SameLine();
-	ImGui::TextDisabled(" | LiveContext");
-}
-if (gpuLayers > 0) {
-ImGui::SameLine();
-if (detectedModelLayers > 0) {
-ImGui::Text(" | GPU: %d/%d layers", gpuLayers, detectedModelLayers);
-} else {
-ImGui::Text(" | GPU: %d layers", gpuLayers);
-}
-}
-if (generating.load()) {
-ImGui::SameLine();
-const char * spinner = "|/-\\";
-int spinIdx = static_cast<int>(ImGui::GetTime() / kSpinnerInterval) % 4;
-float elapsed = ofGetElapsedTimef() - generationStartTime;
-char statusLabel[64];
-snprintf(statusLabel, sizeof(statusLabel), " | %c Generating... (%.1fs)", spinner[spinIdx], elapsed);
-ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "%s", statusLabel);
-	std::string partial;
-	{
-		std::lock_guard<std::mutex> lock(streamMutex);
-		partial = streamingOutput;
-	}
-	if (elapsed > 0.2f && !partial.empty()) {
-		const float cps = static_cast<float>(partial.size()) / elapsed;
-		ImGui::SameLine();
-		ImGui::TextDisabled(" | %.0f chars/s", cps);
-	}
-} else if (lastComputeMs > 0.0f) {
-ImGui::SameLine();
-ImGui::TextDisabled(" | Last: %.1f ms", lastComputeMs);
-}
-ImGui::SameLine();
-ImGui::Text(" | FPS: %.0f", ofGetFrameRate());
-}
-ImGui::End();
+	statusBar.draw(
+		engineStatus,
+		modelPresets,
+		selectedModelIndex,
+		activeMode,
+		modeLabels,
+		chatLanguageIndex,
+		chatLanguages,
+		selectedLanguageIndex,
+		scriptLanguages,
+		maxTokens,
+		temperature,
+		topP,
+		topK,
+		minP,
+		liveContextMode,
+		gpuLayers,
+		detectedModelLayers,
+		generating,
+		generationStartTime,
+		streamingOutput,
+		streamMutex,
+		lastComputeMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -7240,31 +7121,7 @@ ImGui::End();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawDeviceInfoWindow() {
-ImGui::SetNextWindowSize(ImVec2(420, 300), ImGuiCond_FirstUseEver);
-if (ImGui::Begin("Device Info", &showDeviceInfo)) {
-ImGui::Text("Backend: %s", ggml.getBackendName().c_str());
-ImGui::Text("State: %s", ofxGgmlHelpers::stateName(ggml.getState()).c_str());
-ImGui::Separator();
-
-if (devices.empty()) {
-ImGui::TextDisabled("No devices discovered.");
-} else {
-for (size_t i = 0; i < devices.size(); i++) {
-const auto & d = devices[i];
-ImGui::PushID(static_cast<int>(i));
-ImGui::Text("%s", d.name.c_str());
-ImGui::SameLine();
-ImGui::TextDisabled("(%s)", d.description.c_str());
-ImGui::Text("  Type: %s  Memory: %s / %s",
-ofxGgmlHelpers::backendTypeName(d.type).c_str(),
-ofxGgmlHelpers::formatBytes(d.memoryFree).c_str(),
-ofxGgmlHelpers::formatBytes(d.memoryTotal).c_str());
-ImGui::Separator();
-ImGui::PopID();
-}
-}
-}
-ImGui::End();
+	deviceInfoPanel.draw(showDeviceInfo, ggml, devices);
 }
 
 // ---------------------------------------------------------------------------
@@ -7272,24 +7129,7 @@ ImGui::End();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawLogWindow() {
-ImGui::SetNextWindowSize(ImVec2(500, 300), ImGuiCond_FirstUseEver);
-if (ImGui::Begin("Engine Log", &showLog)) {
-if (ImGui::Button("Clear")) {
-std::lock_guard<std::mutex> lock(logMutex);
-logMessages.clear();
-}
-ImGui::Separator();
-ImGui::BeginChild("##LogScroll", ImVec2(0, 0), false);
-std::lock_guard<std::mutex> lock(logMutex);
-for (const auto & line : logMessages) {
-ImGui::TextWrapped("%s", line.c_str());
-}
-if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 10.0f) {
-ImGui::SetScrollHereY(1.0f);
-}
-ImGui::EndChild();
-}
-ImGui::End();
+	logPanel.draw(showLog, logMessages, logMutex);
 }
 
 // ---------------------------------------------------------------------------
@@ -10432,72 +10272,29 @@ break;
 // ---------------------------------------------------------------------------
 
 void ofApp::drawPerformanceWindow() {
-ImGui::SetNextWindowSize(ImVec2(380, 220), ImGuiCond_FirstUseEver);
-if (ImGui::Begin("Performance Metrics", &showPerformance)) {
-ImGui::Text("Last Computation:");
-ImGui::Separator();
-ImGui::Text("  Elapsed:    %.2f ms", lastComputeMs);
-ImGui::Text("  Nodes:      %d", lastNodeCount);
-ImGui::Text("  Backend:    %s", lastBackendUsed.empty() ? "(none)" : lastBackendUsed.c_str());
-ImGui::Spacing();
-
-ImGui::Text("Configuration:");
-ImGui::Separator();
-{
-std::string prefLabel = "(none)";
-if (selectedBackendIndex >= 0 &&
-	selectedBackendIndex < static_cast<int>(backendNames.size())) {
-	prefLabel = backendNames[selectedBackendIndex];
-}
-ImGui::Text("  Preference: %s", prefLabel.c_str());
-}
-ImGui::Text("  Threads:    %d", numThreads);
-ImGui::Text("  Context:    %d", contextSize);
-ImGui::Text("  Batch:      %d", batchSize);
-ImGui::Text("  Text path:  %s",
-	textInferenceBackend == TextInferenceBackend::LlamaServer
-		? "llama-server"
-		: "CLI");
-if (detectedModelLayers > 0) {
-ImGui::Text("  GPU Layers: %d / %d", gpuLayers, detectedModelLayers);
-} else {
-ImGui::Text("  GPU Layers: %d", gpuLayers);
-}
-ImGui::Text("  Seed:       %s", seed < 0 ? "random" : ofToString(seed).c_str());
-ImGui::Spacing();
-
-ImGui::Text("Sampling:");
-ImGui::Separator();
-ImGui::Text("  Tokens:     %d", maxTokens);
-ImGui::Text("  Temp:       %.2f", temperature);
-ImGui::Text("  Top-P:      %.2f", topP);
-ImGui::Text("  Top-K:      %d", topK);
-ImGui::Text("  Min-P:      %.2f", minP);
-ImGui::Text("  Repeat Pen: %.2f", repeatPenalty);
-ImGui::Spacing();
-
-// Device memory summary.
-if (!devices.empty()) {
-ImGui::Text("Devices:");
-ImGui::Separator();
-for (const auto & d : devices) {
-ImGui::Text("  %s (%s)", d.name.c_str(),
-ofxGgmlHelpers::backendTypeName(d.type).c_str());
-if (d.memoryTotal > 0) {
-float usedPct = 1.0f - static_cast<float>(d.memoryFree) /
-static_cast<float>(d.memoryTotal);
-ImGui::SameLine();
-ImGui::ProgressBar(usedPct, ImVec2(100, 14),
-ofxGgmlHelpers::formatBytes(d.memoryTotal).c_str());
-}
-}
-}
-
-if (ImGui::Button("Refresh Devices")) {
-devices = ggml.listDevices();
-}
-}
-ImGui::End();
+	performancePanel.draw(
+		showPerformance,
+		ggml,
+		devices,
+		lastComputeMs,
+		lastNodeCount,
+		lastBackendUsed,
+		selectedBackendIndex,
+		backendNames,
+		numThreads,
+		contextSize,
+		batchSize,
+		textInferenceBackend,
+		detectedModelLayers,
+		gpuLayers,
+		seed,
+		maxTokens,
+		temperature,
+		topP,
+		topK,
+		minP,
+		repeatPenalty,
+		devices);  // Pass devices as out parameter for refresh
 }
 
 // ---------------------------------------------------------------------------
