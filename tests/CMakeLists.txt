@@ -123,6 +123,9 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/inference/ofxGgmlSpeechInference.cpp
         ../src/inference/ofxGgmlVisionInference.cpp
         ../src/inference/ofxGgmlVideoInference.cpp
+        ../src/inference/ofxGgmlTtsInference.cpp
+        ../src/inference/ofxGgmlClipInference.cpp
+        ../src/inference/ofxGgmlLiveSpeechTranscriber.cpp
         ../src/support/ofxGgmlScriptSource.cpp
         ../src/assistants/ofxGgmlCodeAssistant.cpp
         ../src/assistants/ofxGgmlWorkspaceAssistant.cpp
@@ -139,6 +142,9 @@ set(TEST_SOURCES
     test_model.cpp
     test_project_memory.cpp
     test_integration.cpp
+    test_helpers.cpp
+    test_resource_guards.cpp
+    test_srt_parser.cpp
 )
 
 if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
@@ -152,7 +158,11 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         test_code_assistant.cpp
         test_text_assistant.cpp
         test_workspace_assistant.cpp
-        test_code_review.cpp)
+        test_code_review.cpp
+        test_tts_inference.cpp
+        test_clip_inference.cpp
+        test_diffusion_inference.cpp
+        test_live_speech_transcriber.cpp)
 endif()
 
 if(OFXGGML_ENABLE_BENCHMARK_TESTS)
