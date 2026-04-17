@@ -2031,14 +2031,16 @@ bool ofApp::ensureTextServerReady(bool logResult, bool allowLaunch) {
 		effectiveTextServerUrl(textServerUrl),
 		getSelectedModelPath(),
 		logResult,
-		allowLaunch);
+		allowLaunch,
+		false);
 }
 
 bool ofApp::ensureLlamaServerReadyForModel(
 	const std::string & configuredUrl,
 	const std::string & modelPath,
 	bool logResult,
-	bool allowLaunch) {
+	bool allowLaunch,
+	bool allowMmproj) {
 	const std::string effectiveUrl = trim(configuredUrl).empty()
 		? std::string(kDefaultTextServerUrl)
 		: trim(configuredUrl);
@@ -2119,7 +2121,7 @@ bool ofApp::ensureLlamaServerReadyForModel(
 	}
 
 	if (!isManagedTextServerRunning()) {
-		startLocalLlamaServerForModel(effectiveUrl, modelPath);
+		startLocalLlamaServerForModel(effectiveUrl, modelPath, allowMmproj);
 	}
 
 	for (int attempt = 0; attempt < 20; ++attempt) {
@@ -2206,12 +2208,14 @@ void ofApp::startLocalTextServer() {
 
 	startLocalLlamaServerForModel(
 		effectiveTextServerUrl(textServerUrl),
-		getSelectedModelPath());
+		getSelectedModelPath(),
+		false);
 }
 
 void ofApp::startLocalLlamaServerForModel(
 	const std::string & configuredUrl,
-	const std::string & modelPath) {
+	const std::string & modelPath,
+	bool allowMmproj) {
 	if (isManagedTextServerRunning()) {
 		logWithLevel(OF_LOG_NOTICE, "Local llama-server is already running.");
 		const std::string savedTextServerUrl = textServerUrl;
@@ -2240,7 +2244,9 @@ void ofApp::startLocalLlamaServerForModel(
 
 	const auto [host, port] = parseServerHostPort(configuredUrl);
 	const int gpuLayerCount = std::max(0, gpuLayers > 0 ? gpuLayers : detectedModelLayers);
-	const std::string mmprojPath = findMatchingMmprojPath(modelPath);
+	const std::string mmprojPath = allowMmproj
+		? findMatchingMmprojPath(modelPath)
+		: std::string{};
 
 #ifdef _WIN32
 	std::vector<std::string> args = {
@@ -8146,7 +8152,8 @@ void ofApp::runVisionInference() {
 				effectiveServerUrl,
 				profile.modelPath,
 				false,
-				shouldManageLocalTextServer(effectiveServerUrl));
+				shouldManageLocalTextServer(effectiveServerUrl),
+				true);
 			if (!serverReady) {
 				std::string detail = textServerStatusMessage;
 				if (detail.empty() && shouldManageLocalTextServer(effectiveServerUrl)) {
@@ -8358,7 +8365,8 @@ void ofApp::runVideoInference() {
 				effectiveServerUrl,
 				profile.modelPath,
 				false,
-				shouldManageLocalTextServer(effectiveServerUrl));
+				shouldManageLocalTextServer(effectiveServerUrl),
+				true);
 			if (!serverReady) {
 				std::string detail = textServerStatusMessage;
 				if (detail.empty() && shouldManageLocalTextServer(effectiveServerUrl)) {
