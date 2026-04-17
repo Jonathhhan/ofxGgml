@@ -832,72 +832,33 @@ void ofApp::scheduleDeferredTextServerWarmup(const std::string & configuredUrl) 
 	const std::string effectiveUrl = trim(configuredUrl).empty()
 		? std::string(kDefaultTextServerUrl)
 		: trim(configuredUrl);
-	deferredTextServerWarmupPending = true;
-	deferredTextServerWarmupUrl = effectiveUrl;
-	deferredTextServerWarmupDeadline = ofGetElapsedTimef() + 3.5f;
-	deferredTextServerWarmupNextProbeTime = ofGetElapsedTimef() + 0.15f;
+	textServerManager.scheduleDeferredWarmup(effectiveUrl, 3.5f);
+
+	// Update local UI state
 	textServerStatus = ServerStatusState::Unknown;
 	textServerStatusMessage = "Local llama-server is starting...";
 	textServerCapabilityHint.clear();
 }
 
 void ofApp::updateDeferredTextServerWarmup() {
-	if (!deferredTextServerWarmupPending) {
-		return;
-	}
-
-	if (effectiveTextServerUrl(textServerUrl) != deferredTextServerWarmupUrl) {
-		deferredTextServerWarmupPending = false;
-		return;
-	}
-
-	const float now = ofGetElapsedTimef();
-	if (now < deferredTextServerWarmupNextProbeTime) {
-		return;
-	}
-	deferredTextServerWarmupNextProbeTime = now + 0.15f;
-
-	checkTextServerStatus(false);
-	if (textServerStatus == ServerStatusState::Reachable) {
-		deferredTextServerWarmupPending = false;
-		return;
-	}
-
-	if (now >= deferredTextServerWarmupDeadline) {
-		deferredTextServerWarmupPending = false;
-		if (!textServerStatusMessage.empty()) {
-			logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
-		}
-	}
+	textServerManager.updateDeferredWarmup(effectiveTextServerUrl(textServerUrl));
 }
 
 void ofApp::checkTextServerStatus(bool logResult) {
 	const std::string configuredUrl = effectiveTextServerUrl(textServerUrl);
-	const ofxGgmlServerProbeResult probe =
-		ofxGgmlInference::probeServer(configuredUrl, true);
-	if (probe.reachable) {
-		textServerStatus = ServerStatusState::Reachable;
-		textServerStatusMessage = "Server reachable at " + probe.baseUrl + ".";
-		if (!probe.activeModel.empty()) {
-			textServerStatusMessage += " Model: " + probe.activeModel + ".";
-		}
-		textServerCapabilityHint = probe.capabilitySummary.empty()
-			? std::string()
-			: "Server profile: " + probe.capabilitySummary + ".";
-		if (logResult) {
-			logWithLevel(OF_LOG_NOTICE, textServerStatusMessage);
-		}
-		return;
-	}
+	textServerManager.checkStatus(configuredUrl, false);
 
-	textServerStatus = ServerStatusState::Unreachable;
-	textServerStatusMessage = "Server not reachable at " + probe.baseUrl + ".";
-	textServerCapabilityHint.clear();
-	if (!probe.error.empty()) {
-		textServerStatusMessage += " " + probe.error;
-	}
+	// Update local cached state for UI display
+	textServerStatus = textServerManager.getStatus();
+	textServerStatusMessage = textServerManager.getStatusMessage();
+	textServerCapabilityHint = textServerManager.getCapabilityHint();
+
 	if (logResult) {
-		logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
+		if (textServerStatus == ServerStatusState::Reachable) {
+			logWithLevel(OF_LOG_NOTICE, textServerStatusMessage);
+		} else {
+			logWithLevel(OF_LOG_WARNING, textServerStatusMessage);
+		}
 	}
 }
 
@@ -1034,57 +995,13 @@ bool ofApp::ensureLlamaServerReadyForModel(
 }
 
 std::string ofApp::findLocalTextServerExecutable(bool refresh) {
-	if (textServerExecutableCached && !refresh) {
-		return cachedTextServerExecutable;
-	}
-	std::vector<std::filesystem::path> candidates;
-	const std::filesystem::path exeDir(ofFilePath::getCurrentExeDir());
-#ifdef _WIN32
-	candidates.push_back(exeDir / ".." / ".." / "libs" / "llama" / "bin" / "llama-server.exe");
-	candidates.push_back(exeDir / ".." / ".." / "build" / "llama.cpp-build" / "bin" / "Release" / "llama-server.exe");
-	candidates.push_back(exeDir / "llama-server.exe");
-#else
-	candidates.push_back(exeDir / ".." / ".." / "libs" / "llama" / "bin" / "llama-server");
-	candidates.push_back(exeDir / ".." / ".." / "build" / "llama.cpp-build" / "bin" / "llama-server");
-	candidates.push_back(exeDir / ".." / ".." / "build" / "llama.cpp-build" / "bin" / "Release" / "llama-server");
-	candidates.push_back(exeDir / "llama-server");
-#endif
-	cachedTextServerExecutable = probeServerExecutable(candidates);
-	textServerExecutableCached = true;
-	return cachedTextServerExecutable;
+	return textServerManager.findLocalExecutable(refresh);
 }
 
 bool ofApp::isManagedTextServerRunning() {
-	if (!textServerManagedByApp) {
-		return false;
-	}
-#ifdef _WIN32
-	if (!textServerProcessHandle) {
-		textServerManagedByApp = false;
-		textServerProcessId = 0;
-		return false;
-	}
-	const DWORD waitCode = WaitForSingleObject(textServerProcessHandle, 0);
-	if (waitCode == WAIT_TIMEOUT) {
-		return true;
-	}
-	CloseHandle(textServerProcessHandle);
-	textServerProcessHandle = nullptr;
-	textServerProcessId = 0;
-	textServerManagedByApp = false;
-	return false;
-#else
-	if (textServerProcessId <= 0) {
-		textServerManagedByApp = false;
-		return false;
-	}
-	if (kill(textServerProcessId, 0) == 0) {
-		return true;
-	}
-	textServerProcessId = 0;
-	textServerManagedByApp = false;
-	return false;
-#endif
+	const bool running = textServerManager.isRunning();
+	textServerManagedByApp = textServerManager.isManagedByApp();
+	return running;
 }
 
 void ofApp::startLocalTextServer() {
@@ -1113,237 +1030,64 @@ void ofApp::startLocalLlamaServerForModel(
 		return;
 	}
 
-	const std::string serverExe = findLocalTextServerExecutable(true);
-	if (serverExe.empty()) {
-		logWithLevel(OF_LOG_ERROR, "No local llama-server executable was found. Build or copy llama-server into libs/llama/bin first.");
-		textServerStatus = ServerStatusState::Unreachable;
-		textServerStatusMessage = "Local llama-server executable not found.";
-		textServerCapabilityHint.clear();
-		return;
-	}
+	// Delegate to manager
+	textServerManager.startLocalServer(
+		configuredUrl,
+		modelPath,
+		gpuLayers,
+		contextSize,
+		allowMmproj);
 
-	if (modelPath.empty() || !std::filesystem::exists(modelPath)) {
-		logWithLevel(OF_LOG_ERROR, "Cannot start local llama-server because the selected GGUF model is missing.");
-		textServerStatus = ServerStatusState::Unreachable;
-		textServerStatusMessage = "Selected GGUF model is missing; local server was not started.";
-		textServerCapabilityHint.clear();
-		return;
-	}
+	// Update local UI state
+	textServerStatus = textServerManager.getStatus();
+	textServerStatusMessage = textServerManager.getStatusMessage();
+	textServerCapabilityHint = textServerManager.getCapabilityHint();
+	textServerManagedByApp = textServerManager.isManagedByApp();
 
-	const auto [host, port] = parseServerHostPort(configuredUrl);
-	const int gpuLayerCount = std::max(0, gpuLayers > 0 ? gpuLayers : detectedModelLayers);
-	const std::string mmprojPath = allowMmproj
-		? findMatchingMmprojPath(modelPath)
-		: std::string{};
-
-#ifdef _WIN32
-	std::vector<std::string> args = {
-		serverExe,
-		"-m", modelPath,
-		"--host", host,
-		"--port", ofToString(port),
-		"-ngl", ofToString(gpuLayerCount)
-	};
-	if (!mmprojPath.empty()) {
-		args.emplace_back("--mmproj");
-		args.emplace_back(mmprojPath);
-	}
-	if (contextSize > 0) {
-		args.emplace_back("-c");
-		args.emplace_back(ofToString(contextSize));
-	}
-
-	std::string cmdLine;
-	for (size_t i = 0; i < args.size(); ++i) {
-		if (i > 0) cmdLine += " ";
-		const bool needsQuotes = args[i].find_first_of(" \t\"") != std::string::npos;
-		if (!needsQuotes) {
-			cmdLine += args[i];
-			continue;
-		}
-		cmdLine += "\"";
-		for (char c : args[i]) {
-			if (c == '"') cmdLine += '\\';
-			cmdLine += c;
-		}
-		cmdLine += "\"";
-	}
-
-	std::wstring wideCmd = ofxGgmlWideFromUtf8(cmdLine);
-	std::wstring wideCwd = ofxGgmlWideFromUtf8(std::filesystem::path(serverExe).parent_path().string());
-	if (wideCmd.empty()) {
-		logWithLevel(OF_LOG_ERROR, "Failed to prepare local llama-server command line.");
-		return;
-	}
-
-	std::vector<wchar_t> mutableCmd(wideCmd.begin(), wideCmd.end());
-	mutableCmd.push_back(L'\0');
-
-	STARTUPINFOW si{};
-	si.cb = sizeof(si);
-	PROCESS_INFORMATION pi{};
-	const BOOL ok = CreateProcessW(
-		nullptr,
-		mutableCmd.data(),
-		nullptr,
-		nullptr,
-		FALSE,
-		CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-		nullptr,
-		wideCwd.empty() ? nullptr : wideCwd.c_str(),
-		&si,
-		&pi);
-	if (!ok) {
-		logWithLevel(OF_LOG_ERROR, "Failed to start local llama-server. Windows error: " + ofToString(static_cast<int>(GetLastError())));
-		textServerStatus = ServerStatusState::Unreachable;
-		textServerStatusMessage = "Failed to launch local llama-server.";
-		textServerCapabilityHint.clear();
-		return;
-	}
-
-	if (textServerProcessHandle) {
-		CloseHandle(textServerProcessHandle);
-	}
-	textServerProcessHandle = pi.hProcess;
-	textServerProcessId = pi.dwProcessId;
-	CloseHandle(pi.hThread);
-#else
-	std::vector<std::string> args = {
-		serverExe,
-		"-m", modelPath,
-		"--host", host,
-		"--port", ofToString(port),
-		"-ngl", ofToString(gpuLayerCount)
-	};
-	if (!mmprojPath.empty()) {
-		args.emplace_back("--mmproj");
-		args.emplace_back(mmprojPath);
-	}
-	if (contextSize > 0) {
-		args.emplace_back("-c");
-		args.emplace_back(ofToString(contextSize));
-	}
-	pid_t pid = fork();
-	if (pid == 0) {
-		chdir(std::filesystem::path(serverExe).parent_path().string().c_str());
-		std::vector<char *> argv;
-		argv.reserve(args.size() + 1);
-		for (auto & arg : args) {
-			argv.push_back(arg.data());
-		}
-		argv.push_back(nullptr);
-		execv(serverExe.c_str(), argv.data());
-		_exit(127);
-	}
-	if (pid <= 0) {
-		logWithLevel(OF_LOG_ERROR, "Failed to fork local llama-server process.");
-		return;
-	}
-	textServerProcessId = pid;
-#endif
-
-	textServerManagedByApp = true;
-	textServerStatus = ServerStatusState::Unknown;
-	textServerStatusMessage = "Local llama-server started. The app will probe it automatically.";
-	textServerCapabilityHint.clear();
-	logWithLevel(
-		OF_LOG_NOTICE,
-		"Started local llama-server on " + host + ":" + ofToString(port) +
-		" using model " + ofFilePath::getFileName(modelPath) + ".");
-	if (!mmprojPath.empty()) {
+	// Log the result
+	if (textServerManagedByApp) {
+		const auto [host, port] = parseServerHostPort(configuredUrl);
 		logWithLevel(
 			OF_LOG_NOTICE,
-			"Using multimodal projector " + ofFilePath::getFileName(mmprojPath) + ".");
+			"Started local llama-server on " + host + ":" + ofToString(port) +
+			" using model " + ofFilePath::getFileName(modelPath) + ".");
+		const std::string mmprojPath = allowMmproj ? findMatchingMmprojPath(modelPath) : std::string{};
+		if (!mmprojPath.empty()) {
+			logWithLevel(
+				OF_LOG_NOTICE,
+				"Using multimodal projector " + ofFilePath::getFileName(mmprojPath) + ".");
+		}
+	} else if (!textServerStatusMessage.empty()) {
+		logWithLevel(OF_LOG_ERROR, textServerStatusMessage);
 	}
 }
 
 void ofApp::stopLocalTextServer(bool logResult) {
-	if (!isManagedTextServerRunning()) {
-		textServerManagedByApp = false;
-		textServerStatus = ServerStatusState::Unknown;
-		textServerCapabilityHint.clear();
-		if (logResult) {
-			logWithLevel(OF_LOG_NOTICE, "No app-managed local llama-server is currently running.");
-		}
-		return;
-	}
+	textServerManager.stopLocalServer(logResult);
 
-#ifdef _WIN32
-	TerminateProcess(textServerProcessHandle, 0);
-	CloseHandle(textServerProcessHandle);
-	textServerProcessHandle = nullptr;
-	textServerProcessId = 0;
-#else
-	kill(textServerProcessId, SIGTERM);
-	textServerProcessId = 0;
-#endif
-	textServerManagedByApp = false;
-	textServerStatus = ServerStatusState::Unknown;
-	textServerStatusMessage = "Local llama-server stopped.";
-	textServerCapabilityHint.clear();
+	// Update local UI state
+	textServerManagedByApp = textServerManager.isManagedByApp();
+	textServerStatus = textServerManager.getStatus();
+	textServerStatusMessage = textServerManager.getStatusMessage();
+	textServerCapabilityHint = textServerManager.getCapabilityHint();
+
 	if (logResult) {
 		logWithLevel(OF_LOG_NOTICE, textServerStatusMessage);
 	}
 }
 
 std::string ofApp::findLocalSpeechServerExecutable(bool refresh) {
-	if (speechServerExecutableCached && !refresh) {
-		return cachedSpeechServerExecutable;
-	}
-	std::string resolved =
-		ofxGgmlSpeechInference::resolveWhisperServerExecutable();
-	if (resolved == "whisper-server") {
-		resolved.clear();
-	}
-	cachedSpeechServerExecutable = std::move(resolved);
-	speechServerExecutableCached = true;
-	return cachedSpeechServerExecutable;
+	return speechServerManager.findLocalServerExecutable(refresh);
 }
 
 std::string ofApp::findLocalSpeechCliExecutable(bool refresh) {
-	if (speechCliExecutableCached && !refresh) {
-		return cachedSpeechCliExecutable;
-	}
-	std::string resolved = ofxGgmlSpeechInference::resolveWhisperCliExecutable();
-	if (resolved == "whisper-cli") {
-		resolved.clear();
-	}
-	cachedSpeechCliExecutable = std::move(resolved);
-	speechCliExecutableCached = true;
-	return cachedSpeechCliExecutable;
+	return speechServerManager.findLocalCliExecutable(refresh);
 }
 
 bool ofApp::isManagedSpeechServerRunning() {
-	if (!speechServerManagedByApp) {
-		return false;
-	}
-#ifdef _WIN32
-	if (!speechServerProcessHandle) {
-		speechServerManagedByApp = false;
-		speechServerProcessId = 0;
-		return false;
-	}
-	const DWORD waitCode = WaitForSingleObject(speechServerProcessHandle, 0);
-	if (waitCode == WAIT_TIMEOUT) {
-		return true;
-	}
-	CloseHandle(speechServerProcessHandle);
-	speechServerProcessHandle = nullptr;
-	speechServerProcessId = 0;
-	speechServerManagedByApp = false;
-	return false;
-#else
-	if (speechServerProcessId <= 0) {
-		speechServerManagedByApp = false;
-		return false;
-	}
-	if (kill(speechServerProcessId, 0) == 0) {
-		return true;
-	}
-	speechServerProcessId = 0;
-	speechServerManagedByApp = false;
-	return false;
-#endif
+	const bool running = speechServerManager.isRunning();
+	speechServerManagedByApp = speechServerManager.isManagedByApp();
+	return running;
 }
 
 void ofApp::startLocalSpeechServer() {
