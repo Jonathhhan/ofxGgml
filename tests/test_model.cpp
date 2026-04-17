@@ -235,16 +235,17 @@ TEST_CASE("Model weight loading", "[model][requires-file]") {
 	}
 
 	ofxGgml ggml;
-	ggml.setup();
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	ofxGgmlModel model;
 	model.load(testModelPath);
 
 	SECTION("Load model weights to backend") {
-		bool ok = ggml.loadModelWeights(model);
+		auto result = ggml.loadModelWeights(model);
 		// May fail if model is too large or backend doesn't support it
 		// Just check it doesn't crash
-		REQUIRE((ok == true || ok == false));
+		REQUIRE((result.isOk() || result.isError()));
 	}
 }
 

@@ -7,7 +7,8 @@
 
 TEST_CASE("Integration: Matrix multiplication", "[integration]") {
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	ofxGgmlGraph graph;
 
@@ -22,7 +23,8 @@ TEST_CASE("Integration: Matrix multiplication", "[integration]") {
 	graph.setOutput(result);
 	graph.build(result);
 
-	ggml.allocGraph(graph);
+	auto allocResult = ggml.allocGraph(graph);
+	REQUIRE(allocResult.isOk());
 
 	// A = [[1, 2, 3],
 	//      [4, 5, 6]]
@@ -59,7 +61,8 @@ TEST_CASE("Integration: Matrix multiplication", "[integration]") {
 
 TEST_CASE("Integration: Element-wise operations chain", "[integration]") {
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	ofxGgmlGraph graph;
 	auto a = graph.newTensor1d(ofxGgmlType::F32, 5);
@@ -78,7 +81,8 @@ TEST_CASE("Integration: Element-wise operations chain", "[integration]") {
 	graph.setOutput(result);
 	graph.build(result);
 
-	ggml.allocGraph(graph);
+	auto allocResult = ggml.allocGraph(graph);
+	REQUIRE(allocResult.isOk());
 
 	float dataA[] = {1, 2, 3, 4, 5};
 	float dataB[] = {5, 4, 3, 2, 1};
@@ -103,7 +107,8 @@ TEST_CASE("Integration: Element-wise operations chain", "[integration]") {
 
 TEST_CASE("Integration: Activation functions", "[integration]") {
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	SECTION("ReLU") {
 		ofxGgmlGraph graph;
@@ -113,13 +118,14 @@ TEST_CASE("Integration: Activation functions", "[integration]") {
 		graph.setOutput(output);
 		graph.build(output);
 
-		ggml.allocGraph(graph);
+		auto allocResult = ggml.allocGraph(graph);
+		REQUIRE(allocResult.isOk());
 
 		float data[] = {-2, -1, 0, 1, 2};
 		ggml.setTensorData(input, data, sizeof(data));
 
-		auto result = ggml.computeGraph(graph);
-		REQUIRE(result.success);
+		auto computeResult = ggml.computeGraph(graph);
+		REQUIRE(computeResult.success);
 
 		std::vector<float> outData(5);
 		ggml.getTensorData(output, outData.data(), outData.size() * sizeof(float));
@@ -140,13 +146,14 @@ TEST_CASE("Integration: Activation functions", "[integration]") {
 		graph.setOutput(output);
 		graph.build(output);
 
-		ggml.allocGraph(graph);
+		auto allocResult = ggml.allocGraph(graph);
+		REQUIRE(allocResult.isOk());
 
 		float data[] = {-10, 0, 10};
 		ggml.setTensorData(input, data, sizeof(data));
 
-		auto result = ggml.computeGraph(graph);
-		REQUIRE(result.success);
+		auto computeResult = ggml.computeGraph(graph);
+		REQUIRE(computeResult.success);
 
 		std::vector<float> outData(3);
 		ggml.getTensorData(output, outData.data(), outData.size() * sizeof(float));
@@ -162,7 +169,8 @@ TEST_CASE("Integration: Activation functions", "[integration]") {
 
 TEST_CASE("Integration: Reduction operations", "[integration]") {
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	SECTION("Sum") {
 		ofxGgmlGraph graph;
@@ -172,14 +180,15 @@ TEST_CASE("Integration: Reduction operations", "[integration]") {
 		graph.setOutput(output);
 		graph.build(output);
 
-		ggml.allocGraph(graph);
+		auto allocResult = ggml.allocGraph(graph);
+		REQUIRE(allocResult.isOk());
 
 		std::vector<float> data(10);
 		for (int i = 0; i < 10; i++) data[i] = i + 1; // 1,2,3,...,10
 		ggml.setTensorData(input, data.data(), data.size() * sizeof(float));
 
-		auto result = ggml.computeGraph(graph);
-		REQUIRE(result.success);
+		auto computeResult = ggml.computeGraph(graph);
+		REQUIRE(computeResult.success);
 
 		float outData;
 		ggml.getTensorData(output, &outData, sizeof(float));
@@ -196,13 +205,14 @@ TEST_CASE("Integration: Reduction operations", "[integration]") {
 		graph.setOutput(output);
 		graph.build(output);
 
-		ggml.allocGraph(graph);
+		auto allocResult = ggml.allocGraph(graph);
+		REQUIRE(allocResult.isOk());
 
 		float data[] = {2, 4, 6, 8};
 		ggml.setTensorData(input, data, sizeof(data));
 
-		auto result = ggml.computeGraph(graph);
-		REQUIRE(result.success);
+		auto computeResult = ggml.computeGraph(graph);
+		REQUIRE(computeResult.success);
 
 		float outData;
 		ggml.getTensorData(output, &outData, sizeof(float));
@@ -214,7 +224,8 @@ TEST_CASE("Integration: Reduction operations", "[integration]") {
 
 TEST_CASE("Integration: Normalization", "[integration]") {
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	SECTION("RMS Normalization") {
 		ofxGgmlGraph graph;
@@ -224,13 +235,14 @@ TEST_CASE("Integration: Normalization", "[integration]") {
 		graph.setOutput(output);
 		graph.build(output);
 
-		ggml.allocGraph(graph);
+		auto allocResult = ggml.allocGraph(graph);
+		REQUIRE(allocResult.isOk());
 
 		float data[] = {1, 2, 3, 4};
 		ggml.setTensorData(input, data, sizeof(data));
 
-		auto result = ggml.computeGraph(graph);
-		REQUIRE(result.success);
+		auto computeResult = ggml.computeGraph(graph);
+		REQUIRE(computeResult.success);
 
 		std::vector<float> outData(4);
 		ggml.getTensorData(output, outData.data(), outData.size() * sizeof(float));
@@ -243,7 +255,8 @@ TEST_CASE("Integration: Normalization", "[integration]") {
 
 TEST_CASE("Integration: Complex neural network layer", "[integration]") {
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	// Simulate a simple neural network layer: output = ReLU(W * input + bias)
 	ofxGgmlGraph graph;
@@ -264,7 +277,8 @@ TEST_CASE("Integration: Complex neural network layer", "[integration]") {
 	graph.setOutput(output);
 	graph.build(output);
 
-	ggml.allocGraph(graph);
+	auto allocResult = ggml.allocGraph(graph);
+	REQUIRE(allocResult.isOk());
 
 	// Set input data
 	float inputData[] = {1.0f, 2.0f, 3.0f};
@@ -293,7 +307,8 @@ TEST_CASE("Integration: Complex neural network layer", "[integration]") {
 
 TEST_CASE("Integration: Multiple sequential computations", "[integration]") {
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	ofxGgmlGraph graph;
 	auto input = graph.newTensor1d(ofxGgmlType::F32, 5);
@@ -302,15 +317,16 @@ TEST_CASE("Integration: Multiple sequential computations", "[integration]") {
 	graph.setOutput(output);
 	graph.build(output);
 
-	ggml.allocGraph(graph);
+	auto allocResult = ggml.allocGraph(graph);
+	REQUIRE(allocResult.isOk());
 
 	SECTION("Run computation multiple times") {
 		for (int iter = 0; iter < 3; iter++) {
 			std::vector<float> data(5, iter + 1.0f);
 			ggml.setTensorData(input, data.data(), data.size() * sizeof(float));
 
-			auto result = ggml.computeGraph(graph);
-			REQUIRE(result.success);
+			auto computeResult = ggml.computeGraph(graph);
+			REQUIRE(computeResult.success);
 
 			std::vector<float> outData(5);
 			ggml.getTensorData(output, outData.data(), outData.size() * sizeof(float));
@@ -324,7 +340,8 @@ TEST_CASE("Integration: Multiple sequential computations", "[integration]") {
 
 TEST_CASE("Integration: Async computation workflow", "[integration]") {
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	ofxGgmlGraph graph;
 	auto input = graph.newTensor1d(ofxGgmlType::F32, 100);
@@ -333,7 +350,8 @@ TEST_CASE("Integration: Async computation workflow", "[integration]") {
 	graph.setOutput(output);
 	graph.build(output);
 
-	ggml.allocGraph(graph);
+	auto allocResult = ggml.allocGraph(graph);
+	REQUIRE(allocResult.isOk());
 
 	std::vector<float> data(100);
 	for (int i = 0; i < 100; i++) data[i] = i * 0.1f;
@@ -359,20 +377,21 @@ TEST_CASE("Integration: Async computation workflow", "[integration]") {
 
 TEST_CASE("Integration: Graph reuse and allocation", "[integration]") {
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	ofxGgmlGraph graph;
 	auto a = graph.newTensor2d(ofxGgmlType::F32, 2, 2);
 	auto b = graph.newTensor2d(ofxGgmlType::F32, 2, 2);
 	graph.setInput(a);
 	graph.setInput(b);
-	auto result = graph.add(a, b);
-	graph.setOutput(result);
-	graph.build(result);
+	auto graphResult = graph.add(a, b);
+	graph.setOutput(graphResult);
+	graph.build(graphResult);
 
 	// First allocation
-	bool ok1 = ggml.allocGraph(graph);
-	REQUIRE(ok1);
+	auto allocResult = ggml.allocGraph(graph);
+	REQUIRE(allocResult.isOk());
 
 	// Run computation
 	float data1[] = {1, 2, 3, 4};
@@ -393,7 +412,7 @@ TEST_CASE("Integration: Graph reuse and allocation", "[integration]") {
 	REQUIRE(r2.success);
 
 	std::vector<float> output(4);
-	ggml.getTensorData(result, output.data(), output.size() * sizeof(float));
+	ggml.getTensorData(graphResult, output.data(), output.size() * sizeof(float));
 
 	// Should have result from second computation
 	REQUIRE(std::abs(output[0] - 60.0f) < 0.001f);
@@ -402,7 +421,8 @@ TEST_CASE("Integration: Graph reuse and allocation", "[integration]") {
 
 TEST_CASE("Integration: Large tensor computation", "[integration][slow]") {
 	ofxGgml ggml;
-	REQUIRE(ggml.setup());
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	// Test with larger tensors to stress the system
 	ofxGgmlGraph graph;
@@ -410,11 +430,12 @@ TEST_CASE("Integration: Large tensor computation", "[integration][slow]") {
 	auto b = graph.newTensor2d(ofxGgmlType::F32, 100, 100);
 	graph.setInput(a);
 	graph.setInput(b);
-	auto result = graph.add(a, b);
-	graph.setOutput(result);
-	graph.build(result);
+	auto graphResult = graph.add(a, b);
+	graph.setOutput(graphResult);
+	graph.build(graphResult);
 
-	ggml.allocGraph(graph);
+	auto allocResult = ggml.allocGraph(graph);
+	REQUIRE(allocResult.isOk());
 
 	std::vector<float> dataA(10000, 1.0f);
 	std::vector<float> dataB(10000, 2.0f);
@@ -428,7 +449,7 @@ TEST_CASE("Integration: Large tensor computation", "[integration][slow]") {
 
 	// Verify a sample of outputs
 	std::vector<float> output(10000);
-	ggml.getTensorData(result, output.data(), output.size() * sizeof(float));
+	ggml.getTensorData(graphResult, output.data(), output.size() * sizeof(float));
 
 	for (int i = 0; i < 100; i += 10) {
 		REQUIRE(std::abs(output[i] - 3.0f) < 0.001f);

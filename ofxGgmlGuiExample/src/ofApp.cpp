@@ -10272,7 +10272,8 @@ void ofApp::initializeBackendEngine(bool announceReinit) {
 		shouldDisableVulkanForCurrentSelection(backendNames, selectedBackendIndex));
 	settings.graphSize = static_cast<size_t>(contextSize);
 
-	engineReady = ggml.setup(settings);
+	auto result = ggml.setup(settings);
+	engineReady = result.isOk();
 	if (engineReady) {
 		engineStatus = "Ready (" + ggml.getBackendName() + ")";
 		devices = ggml.listDevices();

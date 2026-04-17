@@ -7,8 +7,8 @@ TEST_CASE("Core initialization", "[core]") {
 	ofxGgml ggml;
 
 	SECTION("Default initialization succeeds") {
-		bool ok = ggml.setup();
-		REQUIRE(ok);
+		auto result = ggml.setup();
+		REQUIRE(result.isOk());
 		REQUIRE(ggml.isReady());
 		REQUIRE(ggml.getState() == ofxGgmlState::Ready);
 	}
@@ -21,31 +21,34 @@ TEST_CASE("Core initialization", "[core]") {
 	SECTION("Custom settings initialization") {
 		ofxGgmlSettings settings;
 		settings.threads = 2;
-		bool ok = ggml.setup(settings);
-		REQUIRE(ok);
+		auto result = ggml.setup(settings);
+		REQUIRE(result.isOk());
 		REQUIRE(ggml.isReady());
 	}
 
 	SECTION("Close releases resources") {
-		ggml.setup();
+		auto result = ggml.setup();
+		REQUIRE(result.isOk());
 		REQUIRE(ggml.isReady());
 		ggml.close();
 		REQUIRE_FALSE(ggml.isReady());
 	}
 
 	SECTION("Multiple setup calls") {
-		ggml.setup();
+		auto result1 = ggml.setup();
+		REQUIRE(result1.isOk());
 		REQUIRE(ggml.isReady());
 		// Second setup should work (re-init)
-		bool ok = ggml.setup();
-		REQUIRE(ok);
+		auto result2 = ggml.setup();
+		REQUIRE(result2.isOk());
 		REQUIRE(ggml.isReady());
 	}
 }
 
 TEST_CASE("Backend information", "[core]") {
 	ofxGgml ggml;
-	ggml.setup();
+	auto result = ggml.setup();
+	REQUIRE(result.isOk());
 
 	SECTION("Backend name is available") {
 		std::string name = ggml.getBackendName();
@@ -61,7 +64,8 @@ TEST_CASE("Backend information", "[core]") {
 
 TEST_CASE("Device enumeration", "[core]") {
 	ofxGgml ggml;
-	ggml.setup();
+	auto result = ggml.setup();
+	REQUIRE(result.isOk());
 
 	SECTION("List devices returns at least one") {
 		auto devices = ggml.listDevices();
@@ -95,7 +99,8 @@ TEST_CASE("Device enumeration", "[core]") {
 
 TEST_CASE("Graph allocation", "[core]") {
 	ofxGgml ggml;
-	ggml.setup();
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	SECTION("Allocate simple graph") {
 		ofxGgmlGraph graph;
@@ -107,8 +112,8 @@ TEST_CASE("Graph allocation", "[core]") {
 		graph.setOutput(c);
 		graph.build(c);
 
-		bool ok = ggml.allocGraph(graph);
-		REQUIRE(ok);
+		auto result = ggml.allocGraph(graph);
+		REQUIRE(result.isOk());
 	}
 
 	SECTION("Allocate graph with operations") {
@@ -121,14 +126,15 @@ TEST_CASE("Graph allocation", "[core]") {
 		graph.setOutput(c);
 		graph.build(c);
 
-		bool ok = ggml.allocGraph(graph);
-		REQUIRE(ok);
+		auto result = ggml.allocGraph(graph);
+		REQUIRE(result.isOk());
 	}
 }
 
 TEST_CASE("Tensor data operations", "[core]") {
 	ofxGgml ggml;
-	ggml.setup();
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	ofxGgmlGraph graph;
 	auto a = graph.newTensor2d(ofxGgmlType::F32, 2, 2);
@@ -138,7 +144,8 @@ TEST_CASE("Tensor data operations", "[core]") {
 	auto t = graph.add(a, b);
 	graph.setOutput(t);
 	graph.build(t);
-	ggml.allocGraph(graph);
+	auto allocResult = ggml.allocGraph(graph);
+	REQUIRE(allocResult.isOk());
 
 	SECTION("Set and get tensor data") {
 		float inputA[] = {1.0f, 2.0f, 3.0f, 4.0f};
@@ -183,7 +190,8 @@ TEST_CASE("Tensor data operations", "[core]") {
 
 TEST_CASE("Graph computation", "[core]") {
 	ofxGgml ggml;
-	ggml.setup();
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	SECTION("Compute simple addition") {
 		ofxGgmlGraph graph;
@@ -195,7 +203,8 @@ TEST_CASE("Graph computation", "[core]") {
 		graph.setOutput(c);
 		graph.build(c);
 
-		ggml.allocGraph(graph);
+		auto allocResult = ggml.allocGraph(graph);
+		REQUIRE(allocResult.isOk());
 
 		float dataA[] = {1.0f, 2.0f, 3.0f, 4.0f};
 		float dataB[] = {5.0f, 6.0f, 7.0f, 8.0f};
@@ -227,7 +236,8 @@ TEST_CASE("Graph computation", "[core]") {
 		graph.setOutput(c);
 		graph.build(c);
 
-		ggml.allocGraph(graph);
+		auto allocResult = ggml.allocGraph(graph);
+		REQUIRE(allocResult.isOk());
 
 		float dataA[] = {1.0f, 2.0f, 3.0f, 4.0f};
 		float dataB[] = {1.0f, 0.0f, 0.0f, 1.0f};
@@ -246,7 +256,8 @@ TEST_CASE("Graph computation", "[core]") {
 		graph.setOutput(b);
 		graph.build(b);
 
-		ggml.allocGraph(graph);
+		auto allocResult = ggml.allocGraph(graph);
+		REQUIRE(allocResult.isOk());
 
 		std::vector<float> data(100, 2.0f);
 		ggml.setTensorData(a, data.data(), data.size() * sizeof(float));
@@ -259,7 +270,8 @@ TEST_CASE("Graph computation", "[core]") {
 
 TEST_CASE("Async computation", "[core]") {
 	ofxGgml ggml;
-	ggml.setup();
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	ofxGgmlGraph graph;
 	auto a = graph.newTensor1d(ofxGgmlType::F32, 10);
@@ -268,7 +280,8 @@ TEST_CASE("Async computation", "[core]") {
 	graph.setOutput(b);
 	graph.build(b);
 
-	ggml.allocGraph(graph);
+	auto allocResult = ggml.allocGraph(graph);
+	REQUIRE(allocResult.isOk());
 
 	float data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 	ggml.setTensorData(a, data, sizeof(data));
@@ -291,7 +304,8 @@ TEST_CASE("Async computation", "[core]") {
 
 TEST_CASE("Timings tracking", "[core]") {
 	ofxGgml ggml;
-	ggml.setup();
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
 	ofxGgmlGraph graph;
 	auto a = graph.newTensor2d(ofxGgmlType::F32, 10, 10);
@@ -300,7 +314,8 @@ TEST_CASE("Timings tracking", "[core]") {
 	graph.setOutput(b);
 	graph.build(b);
 
-	ggml.allocGraph(graph);
+	auto allocResult = ggml.allocGraph(graph);
+	REQUIRE(allocResult.isOk());
 
 	std::vector<float> data(100, 1.0f);
 	ggml.setTensorData(a, data.data(), data.size() * sizeof(float));
@@ -328,7 +343,8 @@ TEST_CASE("Log callback", "[core]") {
 			logMessages.push_back(message);
 		});
 
-		ggml.setup();
+		auto result = ggml.setup();
+		REQUIRE(result.isOk());
 
 		// Should have captured some log messages during setup
 		// (May be empty on some platforms, so just check it doesn't crash)
@@ -337,49 +353,50 @@ TEST_CASE("Log callback", "[core]") {
 
 	SECTION("Null log callback (silent mode)") {
 		ggml.setLogCallback([](int, const std::string &) {});
-		bool ok = ggml.setup();
-		REQUIRE(ok);
+		auto result = ggml.setup();
+		REQUIRE(result.isOk());
 	}
 }
 
-TEST_CASE("Result<T> Ex variants - setupEx", "[core][result]") {
+TEST_CASE("Result<T> variants - setup", "[core][result]") {
 	ofxGgml ggml;
 
-	SECTION("setupEx succeeds with default settings") {
-		auto result = ggml.setupEx();
+	SECTION("setup succeeds with default settings") {
+		auto result = ggml.setup();
 		REQUIRE(result.isOk());
 		REQUIRE_FALSE(result.isError());
 		REQUIRE(ggml.isReady());
 	}
 
-	SECTION("setupEx succeeds with custom settings") {
+	SECTION("setup succeeds with custom settings") {
 		ofxGgmlSettings settings;
 		settings.threads = 2;
-		auto result = ggml.setupEx(settings);
+		auto result = ggml.setup(settings);
 		REQUIRE(result.isOk());
 		REQUIRE(ggml.isReady());
 	}
 
-	SECTION("setupEx allows multiple calls") {
-		auto result1 = ggml.setupEx();
+	SECTION("setup allows multiple calls") {
+		auto result1 = ggml.setup();
 		REQUIRE(result1.isOk());
 
-		auto result2 = ggml.setupEx();
+		auto result2 = ggml.setup();
 		REQUIRE(result2.isOk());
 		REQUIRE(ggml.isReady());
 	}
 
-	SECTION("setupEx explicit bool conversion") {
-		auto result = ggml.setupEx();
+	SECTION("setup explicit bool conversion") {
+		auto result = ggml.setup();
 		REQUIRE(static_cast<bool>(result));
 	}
 }
 
-TEST_CASE("Result<T> Ex variants - allocGraphEx", "[core][result]") {
+TEST_CASE("Result<T> variants - allocGraph", "[core][result]") {
 	ofxGgml ggml;
-	ggml.setup();
+	auto setupResult = ggml.setup();
+	REQUIRE(setupResult.isOk());
 
-	SECTION("allocGraphEx succeeds with valid graph") {
+	SECTION("allocGraph succeeds with valid graph") {
 		ofxGgmlGraph graph;
 		auto a = graph.newTensor2d(ofxGgmlType::F32, 10, 10);
 		graph.setInput(a);
@@ -387,25 +404,25 @@ TEST_CASE("Result<T> Ex variants - allocGraphEx", "[core][result]") {
 		graph.setOutput(b);
 		graph.build(b);
 
-		auto result = ggml.allocGraphEx(graph);
+		auto result = ggml.allocGraph(graph);
 		REQUIRE(result.isOk());
 		REQUIRE_FALSE(result.isError());
 	}
 
-	SECTION("allocGraphEx fails with unbuilt graph") {
+	SECTION("allocGraph fails with unbuilt graph") {
 		ofxGgmlGraph graph;
 		// Don't build the graph
 
-		auto result = ggml.allocGraphEx(graph);
+		auto result = ggml.allocGraph(graph);
 		REQUIRE(result.isError());
 		REQUIRE(result.error().code == ofxGgmlErrorCode::GraphNotBuilt);
 		REQUIRE_FALSE(result.error().message.empty());
 	}
 
-	SECTION("allocGraphEx error message is descriptive") {
+	SECTION("allocGraph error message is descriptive") {
 		ofxGgmlGraph graph;
 
-		auto result = ggml.allocGraphEx(graph);
+		auto result = ggml.allocGraph(graph);
 		REQUIRE(result.isError());
 
 		std::string errMsg = result.error().toString();
@@ -414,13 +431,13 @@ TEST_CASE("Result<T> Ex variants - allocGraphEx", "[core][result]") {
 	}
 }
 
-TEST_CASE("Result<T> Ex variants - error handling", "[core][result]") {
+TEST_CASE("Result<T> variants - error handling", "[core][result]") {
 	SECTION("Error details are accessible") {
 		ofxGgml ggml;
 		ofxGgmlGraph graph;
 
 		// Try to allocate without setup
-		auto result = ggml.allocGraphEx(graph);
+		auto result = ggml.allocGraph(graph);
 		REQUIRE(result.isError());
 
 		const auto & err = result.error();
@@ -434,52 +451,8 @@ TEST_CASE("Result<T> Ex variants - error handling", "[core][result]") {
 
 	SECTION("Success and error are mutually exclusive") {
 		ofxGgml ggml;
-		auto result = ggml.setupEx();
+		auto result = ggml.setup();
 
 		REQUIRE(result.isOk() != result.isError());
-	}
-}
-
-TEST_CASE("Result<T> Ex variants - backward compatibility", "[core][result]") {
-	SECTION("bool and Result<void> variants work together") {
-		ofxGgml ggml;
-
-		// Use bool variant
-		bool boolResult = ggml.setup();
-		REQUIRE(boolResult);
-
-		// Close and try Ex variant
-		ggml.close();
-		auto resultVariant = ggml.setupEx();
-		REQUIRE(resultVariant.isOk());
-
-		// Both should reach the same state
-		REQUIRE(ggml.isReady());
-	}
-
-	SECTION("allocGraph and allocGraphEx are consistent") {
-		ofxGgml ggml;
-		ggml.setup();
-
-		ofxGgmlGraph graph1;
-		auto a1 = graph1.newTensor2d(ofxGgmlType::F32, 10, 10);
-		graph1.setInput(a1);
-		auto b1 = graph1.sqr(a1);
-		graph1.setOutput(b1);
-		graph1.build(b1);
-
-		ofxGgmlGraph graph2;
-		auto a2 = graph2.newTensor2d(ofxGgmlType::F32, 10, 10);
-		graph2.setInput(a2);
-		auto b2 = graph2.sqr(a2);
-		graph2.setOutput(b2);
-		graph2.build(b2);
-
-		// Use both variants
-		bool boolResult = ggml.allocGraph(graph1);
-		auto resultResult = ggml.allocGraphEx(graph2);
-
-		REQUIRE(boolResult);
-		REQUIRE(resultResult.isOk());
 	}
 }

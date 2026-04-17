@@ -37,11 +37,8 @@ public:
 	// ---------------------------------------------------------------------------
 
 	/// Initialize backends according to the provided settings.
-	bool setup(const ofxGgmlSettings & settings = {});
-
-	/// Initialize backends with detailed error reporting.
-	/// This is the Result<T> variant of setup() that provides rich error context.
-	Result<void> setupEx(const ofxGgmlSettings & settings = {});
+	/// Returns Result<void> for detailed error reporting.
+	Result<void> setup(const ofxGgmlSettings & settings = {});
 
 	/// Shut down backends and release owned resources.
 	void close();
@@ -75,11 +72,8 @@ public:
 	// ---------------------------------------------------------------------------
 
 	/// Allocate backend buffers for all tensors in the graph.
-	bool allocGraph(ofxGgmlGraph & graph);
-
-	/// Allocate backend buffers with detailed error reporting.
-	/// This is the Result<T> variant of allocGraph() that provides rich error context.
-	Result<void> allocGraphEx(ofxGgmlGraph & graph);
+	/// Returns Result<void> for detailed error reporting.
+	Result<void> allocGraph(ofxGgmlGraph & graph);
 
 	/// Execute an already allocated graph synchronously.
 	ofxGgmlComputeResult computeGraph(ofxGgmlGraph & graph);
@@ -101,11 +95,8 @@ public:
 	// ---------------------------------------------------------------------------
 
 	/// Upload a loaded model's tensors into backend memory.
-	bool loadModelWeights(ofxGgmlModel & model);
-
-	/// Upload model weights with detailed error reporting.
-	/// This is the Result<T> variant of loadModelWeights() that provides rich error context.
-	Result<void> loadModelWeightsEx(ofxGgmlModel & model);
+	/// Returns Result<void> for detailed error reporting.
+	Result<void> loadModelWeights(ofxGgmlModel & model);
 
 	// ---------------------------------------------------------------------------
 	// Logging

@@ -13,8 +13,9 @@ void ofApp::setup() {
 
 	ofxGgmlSettings settings;
 	settings.threads = 4;
-	if (!ggml.setup(settings)) {
-		infoLines.push_back("ERROR: failed to initialize ggml");
+	auto result = ggml.setup(settings);
+	if (!result.isOk()) {
+		infoLines.push_back("ERROR: failed to initialize ggml - " + result.error().message);
 		return;
 	}
 
@@ -74,7 +75,7 @@ void ofApp::runMatrixDemo() {
 	graph.setOutput(resultTensor);
 	graph.build(resultTensor);
 
-	if (!ggml.allocGraph(graph)) {
+	if (!ggml.allocGraph(graph).isOk()) {
 		matrixLines.push_back("Matrix demo failed: graph allocation failed.");
 		return;
 	}
@@ -123,7 +124,7 @@ void ofApp::runBenchmark() {
 		graph.setOutput(c);
 		graph.build(c);
 
-		if (!ggml.allocGraph(graph)) {
+		if (!ggml.allocGraph(graph).isOk()) {
 			continue;
 		}
 

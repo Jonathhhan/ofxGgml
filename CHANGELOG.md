@@ -4,6 +4,9 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING**: `ofxGgml::setup()`, `ofxGgml::allocGraph()`, and `ofxGgml::loadModelWeights()` now return `Result<void>` instead of `bool` for richer error reporting. Users must update their code from `if (ggml.setup())` to `auto result = ggml.setup(); if (result.isOk())`. Error details are available via `result.error().code`, `result.error().message`, and `result.error().toString()`.
+
 ### Added
 - `ofxGgmlInference` live grounding now groups specialized sources under domain providers and keeps generic search as a separate fallback path.
 - `ofxGgmlClipInference` as a new bridge scaffold for optional CLIP-style text/image embedding and ranking backends, now with a generic bridge surface plus an optional `clip.cpp` adapter path and compatibility helpers for older `ofxStableDiffusion`-style naming.
