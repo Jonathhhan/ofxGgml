@@ -1,5 +1,6 @@
 #include "ofxGgmlCore.h"
 #include "core/ofxGgmlVersion.h"
+#include "core/ofxGgmlResourceGuards.h"
 
 #include "ggml.h"
 #include "ggml-alloc.h"
@@ -54,12 +55,14 @@ struct ofxGgml::Impl {
 	ofxGgmlState state = ofxGgmlState::Uninitialized;
 	ofxGgmlSettings settings;
 
-	ggml_backend_t backend = nullptr;
-	ggml_backend_t cpuBackend = nullptr;
-	ggml_backend_sched_t sched = nullptr;
+	GgmlBackendGuard backend;
+	/// When the main backend is CPU, cpuBackend will be null (we reuse backend).
+	/// When the main backend is GPU, cpuBackend will hold a separate CPU backend.
+	GgmlBackendGuard cpuBackend;
+	GgmlBackendSchedGuard sched;
 
 	/// Backend buffer for uploaded model weights.
-	ggml_backend_buffer_t modelWeightBuf = nullptr;
+	GgmlBackendBufferGuard modelWeightBuf;
 
 	/// Last graph reserved/allocated for scheduler reuse.
 	uint64_t reservedGraphToken = 0;
@@ -115,7 +118,7 @@ static bool synchronizePendingAsync(ofxGgml::Impl * impl, const char * context) 
 		impl->log(GGML_LOG_LEVEL_WARN,
 			std::string("ofxGgml: synchronizing pending async work before ") + context + "\n");
 	}
-	ggml_backend_sched_synchronize(impl->sched);
+	ggml_backend_sched_synchronize(impl->sched.get());
 	const auto t1 = std::chrono::steady_clock::now();
 	impl->timings.computeTotalMs =
 		std::chrono::duration<float, std::milli>(t1 - impl->asyncStart).count();
@@ -562,10 +565,10 @@ bool ofxGgml::setup(const ofxGgmlSettings & settings) {
 void ofxGgml::close() {
 	synchronizePendingAsync(m_impl.get(), "shutdown");
 
-	if (m_impl->sched) {
-		ggml_backend_sched_free(m_impl->sched);
-		m_impl->sched = nullptr;
-	}
+	// Reset guards in proper order: scheduler first, then buffers, then backends.
+	// The guards automatically free resources in their destructors.
+	m_impl->sched.reset();
+
 	// Graph tracking is tied to scheduler lifetime; after close(), any
 	// previously tracked graph allocations/reservations are invalid.
 	m_impl->reservedGraphToken = 0;
@@ -573,22 +576,15 @@ void ofxGgml::close() {
 	m_impl->allocatedGraphToken = 0;
 	m_impl->allocatedGraph = nullptr;
 	m_impl->hasPendingAsync = false;
+
 	// Free model weight buffer before backends.
-	if (m_impl->modelWeightBuf) {
-		ggml_backend_buffer_free(m_impl->modelWeightBuf);
-		m_impl->modelWeightBuf = nullptr;
-	}
-	// Guard: if backend and cpuBackend point to the same allocation,
-	// only free once to avoid double-free.
-	const bool sameBackend = (m_impl->backend && m_impl->backend == m_impl->cpuBackend);
-	if (m_impl->backend) {
-		ggml_backend_free(m_impl->backend);
-		m_impl->backend = nullptr;
-	}
-	if (m_impl->cpuBackend && !sameBackend) {
-		ggml_backend_free(m_impl->cpuBackend);
-	}
-	m_impl->cpuBackend = nullptr;
+	m_impl->modelWeightBuf.reset();
+
+	// Reset backends. When both point to the same allocation, we rely on
+	// the fact that cpuBackend will be empty (no ownership) in that case.
+	m_impl->backend.reset();
+	m_impl->cpuBackend.reset();
+
 	// ggml logging is process-global, so only unregister this instance and
 	// reactivate the previous live owner if one still exists.
 	unregisterLogCallbackOwner(m_impl.get());
