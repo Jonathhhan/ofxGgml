@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <sstream>
 
 namespace {
 
@@ -18,6 +19,40 @@ const char * const kMilkDropWaitingLabels[] = {
 	"generating..",
 	"generating..."
 };
+
+std::string summarizeValidation(const ofxGgmlMilkDropValidation & validation) {
+	if (validation.sanitizedPresetText.empty() && validation.issues.empty()) {
+		return {};
+	}
+	if (validation.valid) {
+		return "Validation passed.";
+	}
+	const auto firstError = std::find_if(
+		validation.issues.begin(),
+		validation.issues.end(),
+		[](const ofxGgmlMilkDropValidationIssue & issue) {
+			return issue.severity == "error";
+		});
+	if (firstError != validation.issues.end()) {
+		return firstError->message;
+	}
+	return "Validation reported warnings.";
+}
+
+std::string makeMilkDropGenerationSummary(
+	const std::string & actionLabel,
+	const std::string & pathLabel,
+	size_t count) {
+	std::ostringstream out;
+	out << actionLabel;
+	if (count > 0) {
+		out << " (" << count << ")";
+	}
+	if (!pathLabel.empty()) {
+		out << "\n\n" << pathLabel;
+	}
+	return out.str();
+}
 
 std::string makeFileUrl(const std::string & path) {
 	std::string normalized = ofFilePath::getAbsolutePath(path, true);
@@ -82,6 +117,11 @@ std::string ofApp::defaultMilkDropPresetDir() const {
 	return ofToDataPath("generated/milkdrop", true);
 }
 
+void ofApp::validateCurrentMilkDropPreset() {
+	milkdropValidation = ofxGgmlMilkDropGenerator::validatePreset(milkdropOutput);
+	milkdropPreviewStatus = summarizeValidation(milkdropValidation);
+}
+
 bool ofApp::saveMilkDropPresetToConfiguredPath() {
 	const std::string outputPath = trim(milkdropPresetPath);
 	if (outputPath.empty()) {
@@ -110,8 +150,8 @@ bool ofApp::ensureMilkDropPreviewReady() {
 		milkdropPreviewPlayer.useInternalTextureOnly();
 		milkdropPreviewPlayer.setWindowSize(512, 512);
 		milkdropPreviewPlayer.setTextureSearchPaths(defaultProjectMTextureSearchPaths());
-		milkdropPreviewPlayer.setPresetDuration(24.0);
-		milkdropPreviewPlayer.setBeatSensitivity(1.25f);
+		milkdropPreviewPlayer.setPresetDuration(milkdropPreviewPresetDuration);
+		milkdropPreviewPlayer.setBeatSensitivity(milkdropPreviewBeatSensitivity);
 		milkdropPreviewInitialized = milkdropPreviewPlayer.isInitialized();
 		if (!milkdropPreviewInitialized) {
 			milkdropPreviewError = "projectM preview could not be initialized.";
@@ -150,7 +190,10 @@ bool ofApp::loadMilkDropPresetIntoPreview(const std::string & presetText) {
 }
 #endif
 
-void ofApp::runMilkDropGeneration(bool editExisting) {
+void ofApp::runMilkDropGeneration(
+	bool editExisting,
+	bool generateVariants,
+	bool repairExisting) {
 	if (generating.load()) {
 		return;
 	}
@@ -171,7 +214,7 @@ void ofApp::runMilkDropGeneration(bool editExisting) {
 		return;
 	}
 
-	if (editExisting && trim(milkdropOutput).empty()) {
+	if ((editExisting || repairExisting) && trim(milkdropOutput).empty()) {
 		milkdropOutput = "[Error] Generate or load a preset before editing it.";
 		return;
 	}
@@ -197,48 +240,94 @@ void ofApp::runMilkDropGeneration(bool editExisting) {
 	request.randomness = milkdropRandomness;
 	request.audioReactive = true;
 	request.seamlessLoop = true;
-	request.existingPresetText = editExisting ? milkdropOutput : std::string();
+	request.existingPresetText = (editExisting || repairExisting) ? milkdropOutput : std::string();
 	request.presetNameHint = ofxGgmlMilkDropGenerator::makeSuggestedFileName(prompt, category);
+	const int variantCount = milkdropVariantCount;
 
 	cancelRequested.store(false);
 	generating.store(true);
 	activeGenerationMode = AiMode::MilkDrop;
 	streamingOutput.clear();
 	generationStartTime = ofGetElapsedTimef();
-	generatingStatus = editExisting
-		? "Editing MilkDrop preset..."
-		: "Generating MilkDrop preset...";
+	generatingStatus = generateVariants
+		? "Generating MilkDrop preset variants..."
+		: repairExisting
+			? "Repairing MilkDrop preset..."
+			: editExisting
+				? "Editing MilkDrop preset..."
+				: "Generating MilkDrop preset...";
 	if (workerThread.joinable()) {
 		workerThread.join();
 	}
 
-	workerThread = std::thread([this, modelPath, request, settings]() mutable {
+	workerThread = std::thread([this, modelPath, request, settings, generateVariants, repairExisting, variantCount]() mutable {
 		auto streamCallback = [this](const std::string & delta) -> bool {
 			std::lock_guard<std::mutex> lock(streamMutex);
 			streamingOutput += delta;
 			return !cancelRequested.load();
 		};
 
-		const ofxGgmlMilkDropResult result = milkdropGenerator.generatePreset(
-			modelPath,
-			request,
-			settings,
-			streamCallback);
-
 		std::string outputText;
-		if (result.success) {
-			outputText = result.presetText;
+		{
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingMode = AiMode::MilkDrop;
+			pendingMilkDropValidation = {};
+			pendingMilkDropVariants.clear();
+		}
+
+		if (generateVariants) {
+			const ofxGgmlMilkDropVariantResult variantResult =
+				milkdropGenerator.generateVariants(
+					modelPath,
+					request,
+					variantCount,
+					settings);
+			if (variantResult.success && !variantResult.variants.empty()) {
+				outputText = variantResult.variants.front().presetText;
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingMilkDropValidation =
+						variantResult.variants.front().validation;
+					pendingMilkDropVariants = variantResult.variants;
+				}
+			} else {
+				outputText = "[Error] " + (variantResult.error.empty()
+					? std::string("MilkDrop variant generation failed.")
+					: variantResult.error);
+			}
 		} else {
-			outputText = "[Error] " + (!result.error.empty()
-				? result.error
-				: result.inference.error.empty()
-					? std::string("MilkDrop generation failed.")
-					: result.inference.error);
+			const ofxGgmlMilkDropResult result = repairExisting
+				? milkdropGenerator.repairPreset(
+					modelPath,
+					request.existingPresetText,
+					request.category,
+					std::min(request.randomness, 0.35f),
+					"",
+					settings,
+					streamCallback)
+				: milkdropGenerator.generatePreset(
+					modelPath,
+					request,
+					settings,
+					streamCallback);
+
+			if (result.success) {
+				outputText = result.presetText;
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingMilkDropValidation = result.validation;
+				}
+			} else {
+				outputText = "[Error] " + (!result.error.empty()
+					? result.error
+					: result.inference.error.empty()
+						? std::string("MilkDrop generation failed.")
+						: result.inference.error);
+			}
 		}
 
 		{
 			std::lock_guard<std::mutex> lock(outputMutex);
-			pendingMode = AiMode::MilkDrop;
 			pendingOutput = outputText;
 		}
 
@@ -315,7 +404,11 @@ void ofApp::drawMilkDropPanel() {
 	}
 
 	ImGui::SliderFloat("Randomness", &milkdropRandomness, 0.0f, 1.0f, "%.2f");
+	ImGui::SetNextItemWidth(180.0f);
+	ImGui::SliderInt("Variant count", &milkdropVariantCount, 1, 6);
 	ImGui::Checkbox("Auto preview after generation", &milkdropAutoPreview);
+	ImGui::SameLine();
+	ImGui::Checkbox("Feed mic while recording", &milkdropPreviewFeedMicWhileRecording);
 
 	ImGui::InputText("Preset output path", milkdropPresetPath, sizeof(milkdropPresetPath));
 	ImGui::SameLine();
@@ -329,19 +422,35 @@ void ofApp::drawMilkDropPanel() {
 		runMilkDropGeneration(false);
 	}
 	ImGui::SameLine();
-	if (ImGui::Button("Edit Current", ImVec2(120, 0))) {
-		runMilkDropGeneration(true);
+	if (ImGui::Button("Generate Variants", ImVec2(150, 0))) {
+		runMilkDropGeneration(false, true, false);
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Edit Current", ImVec2(110, 0))) {
+		runMilkDropGeneration(true, false, false);
 	}
 	ImGui::EndDisabled();
 
 	ImGui::SameLine();
-	ImGui::BeginDisabled(trim(milkdropOutput).empty());
+	const bool hasPresetText = !trim(milkdropOutput).empty();
+	ImGui::BeginDisabled(!hasPresetText);
+	if (ImGui::Button("Repair Current", ImVec2(120, 0))) {
+		runMilkDropGeneration(false, false, true);
+	}
+	ImGui::EndDisabled();
+
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!hasPresetText);
+	if (ImGui::Button("Validate", ImVec2(90, 0))) {
+		validateCurrentMilkDropPreset();
+	}
+	ImGui::SameLine();
 	if (ImGui::Button("Save .milk", ImVec2(100, 0))) {
 		saveMilkDropPresetToConfiguredPath();
 	}
 	ImGui::EndDisabled();
 	ImGui::SameLine();
-	ImGui::BeginDisabled(trim(milkdropOutput).empty());
+	ImGui::BeginDisabled(!hasPresetText);
 	if (ImGui::Button("Copy", ImVec2(80, 0))) {
 		copyToClipboard(milkdropOutput);
 	}
@@ -354,6 +463,36 @@ void ofApp::drawMilkDropPanel() {
 		ImGui::TextWrapped("%s", milkdropPreviewStatus.c_str());
 	}
 
+	if (!milkdropValidation.sanitizedPresetText.empty() || !milkdropValidation.issues.empty()) {
+		const ImVec4 statusColor = milkdropValidation.valid
+			? ImVec4(0.45f, 0.85f, 0.55f, 1.0f)
+			: ImVec4(0.95f, 0.65f, 0.30f, 1.0f);
+		ImGui::TextColored(
+			statusColor,
+			"Validation: %s (%d issues, %d assignments)",
+			milkdropValidation.valid ? "passed" : "needs review",
+			static_cast<int>(milkdropValidation.issues.size()),
+			milkdropValidation.assignmentCount);
+		if (ImGui::TreeNode("Validation details")) {
+			if (milkdropValidation.issues.empty()) {
+				ImGui::TextDisabled("No issues detected.");
+			} else {
+				for (const auto & issue : milkdropValidation.issues) {
+					std::string issueLine;
+					if (issue.line > 0) {
+						issueLine = "line " + ofToString(issue.line) + ": ";
+					}
+					std::string detail = issueLine + issue.message;
+					if (!issue.suggestion.empty()) {
+						detail += " Suggestion: " + issue.suggestion;
+					}
+					ImGui::BulletText("%s", detail.c_str());
+				}
+			}
+			ImGui::TreePop();
+		}
+	}
+
 	ImGui::Separator();
 	ImGui::Text("Generated preset:");
 	drawMilkDropOutputChild(
@@ -361,6 +500,47 @@ void ofApp::drawMilkDropPanel() {
 		generating.load() && activeGenerationMode == AiMode::MilkDrop,
 		streamMutex,
 		streamingOutput);
+
+	if (!milkdropVariants.empty()) {
+		ImGui::Separator();
+		ImGui::Text("Preset variants:");
+		for (size_t i = 0; i < milkdropVariants.size(); ++i) {
+			const auto & variant = milkdropVariants[i];
+			ImGui::PushID(static_cast<int>(i));
+			const std::string label =
+				variant.label.empty() ? ("Variant " + ofToString(i + 1)) : variant.label;
+			if (ImGui::Selectable(
+					label.c_str(),
+					milkdropSelectedVariantIndex == static_cast<int>(i),
+					ImGuiSelectableFlags_AllowDoubleClick)) {
+				milkdropSelectedVariantIndex = static_cast<int>(i);
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled(
+				"%s",
+				variant.success
+					? (variant.validation.valid ? "valid" : "warning")
+					: "error");
+			if (variant.success) {
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Use")) {
+					milkdropOutput = variant.presetText;
+					milkdropValidation = variant.validation;
+					milkdropSelectedVariantIndex = static_cast<int>(i);
+#if OFXGGML_HAS_OFXPROJECTM
+					if (milkdropAutoPreview) {
+						loadMilkDropPresetIntoPreview(milkdropOutput);
+					}
+#endif
+				}
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Copy")) {
+					copyToClipboard(variant.presetText);
+				}
+			}
+			ImGui::PopID();
+		}
+	}
 
 	ImGui::Separator();
 	ImGui::Text("projectM preview:");
@@ -370,6 +550,14 @@ void ofApp::drawMilkDropPanel() {
 			ImVec4(0.95f, 0.45f, 0.35f, 1.0f),
 			"%s",
 			milkdropPreviewError.c_str());
+	}
+	ImGui::SetNextItemWidth(180.0f);
+	ImGui::SliderFloat("Beat sensitivity", &milkdropPreviewBeatSensitivity, 0.2f, 3.0f, "%.2f");
+	ImGui::SetNextItemWidth(180.0f);
+	ImGui::SliderFloat("Preset duration", &milkdropPreviewPresetDuration, 4.0f, 60.0f, "%.1f s");
+	if (milkdropPreviewFeedMicWhileRecording) {
+		ImGui::TextDisabled(
+			"Mic audio drives preview while Speech recording is active.");
 	}
 	ImGui::BeginDisabled(trim(milkdropOutput).empty());
 	if (ImGui::Button("Preview in projectM", ImVec2(150, 0))) {

@@ -26,6 +26,21 @@ struct ofxGgmlMilkDropPreparedPrompt {
 	std::string label;
 };
 
+struct ofxGgmlMilkDropValidationIssue {
+	std::string severity;
+	int line = 0;
+	std::string message;
+	std::string suggestion;
+};
+
+struct ofxGgmlMilkDropValidation {
+	bool valid = false;
+	bool hasPresetHeader = false;
+	int assignmentCount = 0;
+	std::string sanitizedPresetText;
+	std::vector<ofxGgmlMilkDropValidationIssue> issues;
+};
+
 struct ofxGgmlMilkDropResult {
 	bool success = false;
 	ofxGgmlMilkDropPreparedPrompt prepared;
@@ -33,6 +48,22 @@ struct ofxGgmlMilkDropResult {
 	std::string presetText;
 	std::string savedPath;
 	std::string error;
+	ofxGgmlMilkDropValidation validation;
+};
+
+struct ofxGgmlMilkDropVariant {
+	bool success = false;
+	std::string label;
+	ofxGgmlInferenceResult inference;
+	std::string presetText;
+	std::string error;
+	ofxGgmlMilkDropValidation validation;
+};
+
+struct ofxGgmlMilkDropVariantResult {
+	bool success = false;
+	std::string error;
+	std::vector<ofxGgmlMilkDropVariant> variants;
 };
 
 class ofxGgmlMilkDropGenerator {
@@ -59,12 +90,28 @@ public:
 		const ofxGgmlInferenceSettings & settings = {},
 		std::function<bool(const std::string &)> onChunk = nullptr) const;
 
+	ofxGgmlMilkDropResult repairPreset(
+		const std::string & modelPath,
+		const std::string & presetText,
+		const std::string & category = "General",
+		float randomness = 0.25f,
+		const std::string & repairInstruction = "",
+		const ofxGgmlInferenceSettings & settings = {},
+		std::function<bool(const std::string &)> onChunk = nullptr) const;
+
+	ofxGgmlMilkDropVariantResult generateVariants(
+		const std::string & modelPath,
+		const ofxGgmlMilkDropRequest & request,
+		int variantCount,
+		const ofxGgmlInferenceSettings & settings = {}) const;
+
 	std::string savePreset(
 		const std::string & presetText,
 		const std::string & outputPath) const;
 
 	static std::vector<ofxGgmlMilkDropCategoryOption> defaultCategories();
 	static std::string sanitizePresetText(const std::string & rawText);
+	static ofxGgmlMilkDropValidation validatePreset(const std::string & rawText);
 	static std::string makeSuggestedFileName(
 		const std::string & prompt,
 		const std::string & category);

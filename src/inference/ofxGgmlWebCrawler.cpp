@@ -47,6 +47,136 @@ std::string trimCopy(const std::string & text) {
 	return text.substr(start, end - start);
 }
 
+std::string toLowerCopy(const std::string & text) {
+	std::string lowered = text;
+	std::transform(
+		lowered.begin(),
+		lowered.end(),
+		lowered.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return lowered;
+}
+
+std::string stripTrailingDot(std::string value) {
+	while (!value.empty() && value.back() == '.') {
+		value.pop_back();
+	}
+	return value;
+}
+
+std::string parseUrlHost(const std::string & rawUrl) {
+	const std::string trimmed = trimCopy(rawUrl);
+	const size_t schemePos = trimmed.find("://");
+	if (schemePos == std::string::npos) {
+		return {};
+	}
+	const size_t hostStart = schemePos + 3;
+	size_t hostEnd = trimmed.find_first_of("/?#", hostStart);
+	if (hostEnd == std::string::npos) {
+		hostEnd = trimmed.size();
+	}
+	std::string hostPort = trimmed.substr(hostStart, hostEnd - hostStart);
+	const size_t atPos = hostPort.rfind('@');
+	if (atPos != std::string::npos) {
+		hostPort = hostPort.substr(atPos + 1);
+	}
+	if (!hostPort.empty() && hostPort.front() == '[') {
+		const size_t closing = hostPort.find(']');
+		if (closing != std::string::npos) {
+			return stripTrailingDot(toLowerCopy(hostPort.substr(0, closing + 1)));
+		}
+	}
+	const size_t colonPos = hostPort.find(':');
+	if (colonPos != std::string::npos) {
+		hostPort = hostPort.substr(0, colonPos);
+	}
+	return stripTrailingDot(toLowerCopy(hostPort));
+}
+
+bool hostMatchesAllowedDomain(
+	const std::string & host,
+	const std::string & allowedDomain) {
+	const std::string normalizedHost = stripTrailingDot(toLowerCopy(host));
+	std::string normalizedDomain = stripTrailingDot(toLowerCopy(trimCopy(allowedDomain)));
+	if (normalizedHost.empty() || normalizedDomain.empty()) {
+		return false;
+	}
+	if (normalizedDomain.rfind("*.", 0) == 0) {
+		normalizedDomain = normalizedDomain.substr(2);
+	}
+	if (normalizedHost == normalizedDomain) {
+		return true;
+	}
+	if (normalizedHost.size() <= normalizedDomain.size()) {
+		return false;
+	}
+	return normalizedHost.compare(
+			normalizedHost.size() - normalizedDomain.size(),
+			normalizedDomain.size(),
+			normalizedDomain) == 0 &&
+		normalizedHost[normalizedHost.size() - normalizedDomain.size() - 1] == '.';
+}
+
+bool isUrlAllowedForDomains(
+	const std::string & rawUrl,
+	const std::vector<std::string> & allowedDomains) {
+	if (allowedDomains.empty()) {
+		return true;
+	}
+	const std::string host = parseUrlHost(rawUrl);
+	if (host.empty()) {
+		return false;
+	}
+	return std::any_of(
+		allowedDomains.begin(),
+		allowedDomains.end(),
+		[&](const std::string & domain) {
+			return hostMatchesAllowedDomain(host, domain);
+		});
+}
+
+std::string extractSourceUrlFromMarkdown(const std::string & markdown) {
+	std::istringstream stream(markdown);
+	std::string line;
+	bool inFrontMatter = false;
+	bool frontMatterConsumed = false;
+	while (std::getline(stream, line)) {
+		const std::string trimmed = trimCopy(line);
+		if (!frontMatterConsumed && trimmed == "---") {
+			inFrontMatter = !inFrontMatter;
+			frontMatterConsumed = inFrontMatter;
+			continue;
+		}
+		if (inFrontMatter) {
+			const std::array<std::string, 3> keys = {
+				"url:",
+				"source_url:",
+				"source:"
+			};
+			for (const auto & key : keys) {
+				if (trimmed.rfind(key, 0) == 0) {
+					return trimCopy(trimmed.substr(key.size()));
+				}
+			}
+			continue;
+		}
+		if (trimmed.empty()) {
+			continue;
+		}
+		if (trimmed.rfind("URL:", 0) == 0 || trimmed.rfind("Url:", 0) == 0) {
+			return trimCopy(trimmed.substr(4));
+		}
+		if (trimmed.rfind("Source URL:", 0) == 0) {
+			return trimCopy(trimmed.substr(11));
+		}
+		if (trimmed.front() == '#') {
+			continue;
+		}
+		break;
+	}
+	return {};
+}
+
 float elapsedMsSince(const std::chrono::steady_clock::time_point & start) {
 	return std::chrono::duration<float, std::milli>(
 		std::chrono::steady_clock::now() - start).count();
@@ -456,6 +586,16 @@ ofxGgmlWebCrawlerResult ofxGgmlMojoWebCrawlerBackend::crawl(
 	args.push_back(result.startUrl);
 
 	result.normalizedCommand = buildNormalizedCommand(args);
+	if (!request.allowedDomains.empty() &&
+		!isUrlAllowedForDomains(result.startUrl, request.allowedDomains)) {
+		result.error =
+			"Crawler start URL is outside the allowedDomains restriction.";
+		result.elapsedMs = elapsedMsSince(start);
+		if (createdTempDir && !request.keepOutputFiles) {
+			std::filesystem::remove_all(result.outputDir, ec);
+		}
+		return result;
+	}
 	const std::string workingDirectory =
 		std::filesystem::path(result.outputDir).parent_path().string();
 	if (!runProcessCapture(
@@ -493,9 +633,18 @@ ofxGgmlWebCrawlerResult ofxGgmlMojoWebCrawlerBackend::crawl(
 		document.localPath = markdownPath.string();
 		document.markdown = std::move(markdown);
 		document.byteSize = byteSize;
+		document.sourceUrl = extractSourceUrlFromMarkdown(document.markdown);
+		if (document.sourceUrl.empty()) {
+			document.sourceUrl = result.startUrl;
+		}
+		document.crawlDepth = 0;
 		document.title = extractMarkdownTitle(document.markdown);
 		if (document.title.empty()) {
 			document.title = markdownPath.stem().string();
+		}
+		if (!request.allowedDomains.empty() &&
+			!isUrlAllowedForDomains(document.sourceUrl, request.allowedDomains)) {
+			continue;
 		}
 		result.savedFiles.push_back(document.localPath);
 		result.documents.push_back(std::move(document));
@@ -519,8 +668,9 @@ ofxGgmlWebCrawlerResult ofxGgmlMojoWebCrawlerBackend::crawl(
 			result.commandOutput.push_back('\n');
 		}
 		result.commandOutput +=
-			"Note: allowedDomains is defined in the addon request, but the "
-			"default Mojo adapter does not map that field to a CLI flag yet.\n";
+			"Note: default Mojo integration validates the start URL and filters "
+			"normalized results by allowedDomains, but full crawl-time domain "
+			"restriction still depends on backend-specific CLI support.\n";
 	}
 	if (createdTempDir && !request.keepOutputFiles) {
 		std::filesystem::remove_all(result.outputDir, ec);

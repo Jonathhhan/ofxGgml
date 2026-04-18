@@ -225,8 +225,12 @@ private:
 	char milkdropPrompt[4096] = {};
 	char milkdropPresetPath[1024] = {};
 	int milkdropCategoryIndex = 0;
+	int milkdropVariantCount = 3;
 	float milkdropRandomness = 0.55f;
 	bool milkdropAutoPreview = true;
+	float milkdropPreviewBeatSensitivity = 1.25f;
+	float milkdropPreviewPresetDuration = 24.0f;
+	bool milkdropPreviewFeedMicWhileRecording = true;
 	bool speechServerManagedByApp = false;
 	ServerStatusState speechServerStatus = ServerStatusState::Unknown;
 	std::string speechServerStatusMessage;
@@ -256,6 +260,9 @@ private:
 	std::string milkdropOutput;
 	std::string milkdropSavedPresetPath;
 	std::string milkdropPreviewStatus;
+	ofxGgmlMilkDropValidation milkdropValidation;
+	std::vector<ofxGgmlMilkDropVariant> milkdropVariants;
+	int milkdropSelectedVariantIndex = -1;
 	ofImage visionPreviewImage;
 	std::string visionPreviewImageLoadedPath;
 	std::string visionPreviewImageError;
@@ -333,6 +340,10 @@ private:
 	bool milkdropPreviewInitialized = false;
 	std::string milkdropPreviewError;
 #endif
+	std::vector<float> milkdropPreviewAudioSamples;
+	int milkdropPreviewAudioFrames = 0;
+	int milkdropPreviewAudioChannels = 0;
+	std::mutex milkdropPreviewAudioMutex;
 	std::string speechRecordedTempPath;
 	bool speechRecording = false;
 	float speechRecordingStartTime = 0.0f;
@@ -370,6 +381,8 @@ private:
 	std::string pendingTtsResolvedSpeakerPath;
 	std::vector<ofxGgmlTtsAudioArtifact> pendingTtsAudioFiles;
 	std::vector<std::pair<std::string, std::string>> pendingTtsMetadata;
+	ofxGgmlMilkDropValidation pendingMilkDropValidation;
+	std::vector<ofxGgmlMilkDropVariant> pendingMilkDropVariants;
 	std::string pendingDiffusionBackendName;
 	float pendingDiffusionElapsedMs = 0.0f;
 	std::vector<ofxGgmlGeneratedImage> pendingDiffusionImages;
@@ -583,7 +596,10 @@ private:
 	void runImageSearch();
 	void runCitationSearch();
 	void runClipInference();
-	void runMilkDropGeneration(bool editExisting = false);
+	void runMilkDropGeneration(
+		bool editExisting = false,
+		bool generateVariants = false,
+		bool repairExisting = false);
 	bool ensureClipBackendConfigured(
 		const std::string & modelPath,
 		int verbosity,
@@ -715,6 +731,7 @@ private:
 	bool ensureMilkDropPreviewReady();
 	bool loadMilkDropPresetIntoPreview(const std::string & presetText);
 #endif
+	void validateCurrentMilkDropPreset();
 	bool ensureTtsProfilesLoaded();
 	ofxGgmlTtsModelProfile getSelectedTtsProfile() const;
 	void applyTtsProfileDefaults(

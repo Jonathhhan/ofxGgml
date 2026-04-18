@@ -29,3 +29,20 @@ TEST_CASE("MilkDrop generator sanitizes fenced preset output", "[milkdrop]") {
 	REQUIRE(sanitized.find("```") == std::string::npos);
 	REQUIRE(sanitized.find("zoom=1.02") != std::string::npos);
 }
+
+TEST_CASE("MilkDrop generator validates basic preset structure", "[milkdrop]") {
+	const auto valid = ofxGgmlMilkDropGenerator::validatePreset(
+		"[preset00]\n"
+		"fRating=3.0\n"
+		"zoom=1.02\n"
+		"decay=0.97\n");
+	REQUIRE(valid.valid);
+	REQUIRE(valid.hasPresetHeader);
+	REQUIRE(valid.assignmentCount >= 3);
+
+	const auto invalid = ofxGgmlMilkDropGenerator::validatePreset(
+		"zoom=(1.02\n"
+		"decay=0.97\n");
+	REQUIRE_FALSE(invalid.valid);
+	REQUIRE_FALSE(invalid.issues.empty());
+}

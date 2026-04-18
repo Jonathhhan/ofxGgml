@@ -51,6 +51,62 @@ std::string createEasyApiExecutable(const std::string & outputLine) {
 	return exe.string();
 }
 
+std::string createFakeMojoCrawlerExecutable() {
+	const auto dir = makeEasyApiTestDir("mojo");
+#ifdef _WIN32
+	const auto exe = dir / "fake_mojo.bat";
+	std::ofstream out(exe);
+	out
+		<< "@echo off\r\n"
+		<< "setlocal\r\n"
+		<< "set OUTPUT=%4\r\n"
+		<< "if not exist \"%OUTPUT%\" mkdir \"%OUTPUT%\"\r\n"
+		<< "(\r\n"
+		<< "echo ---\r\n"
+		<< "echo title: Allowed Doc\r\n"
+		<< "echo source_url: https://allowed.example/article\r\n"
+		<< "echo ---\r\n"
+		<< "echo # Allowed Doc\r\n"
+		<< "echo Kept content.\r\n"
+		<< ") > \"%OUTPUT%\\allowed.md\"\r\n"
+		<< "(\r\n"
+		<< "echo ---\r\n"
+		<< "echo title: Blocked Doc\r\n"
+		<< "echo source_url: https://blocked.example/post\r\n"
+		<< "echo ---\r\n"
+		<< "echo # Blocked Doc\r\n"
+		<< "echo Removed content.\r\n"
+		<< ") > \"%OUTPUT%\\blocked.md\"\r\n";
+#else
+	const auto exe = dir / "fake_mojo.sh";
+	std::ofstream out(exe);
+	out
+		<< "#!/usr/bin/env bash\n"
+		<< "set -euo pipefail\n"
+		<< "OUTPUT=\"$4\"\n"
+		<< "mkdir -p \"$OUTPUT\"\n"
+		<< "cat > \"$OUTPUT/allowed.md\" <<'EOF'\n"
+		<< "---\n"
+		<< "title: Allowed Doc\n"
+		<< "source_url: https://allowed.example/article\n"
+		<< "---\n"
+		<< "# Allowed Doc\n"
+		<< "Kept content.\n"
+		<< "EOF\n"
+		<< "cat > \"$OUTPUT/blocked.md\" <<'EOF'\n"
+		<< "---\n"
+		<< "title: Blocked Doc\n"
+		<< "source_url: https://blocked.example/post\n"
+		<< "---\n"
+		<< "# Blocked Doc\n"
+		<< "Removed content.\n"
+		<< "EOF\n";
+	out.close();
+	chmod(exe.c_str(), 0755);
+#endif
+	return exe.string();
+}
+
 class FakeEasySpeechBackend final : public ofxGgmlSpeechBackend {
 public:
 	std::string backendName() const override {
@@ -145,6 +201,34 @@ TEST_CASE("Easy API wraps common text workflows", "[easy_api]") {
 		0.5f);
 	REQUIRE(preset.success);
 	REQUIRE(preset.presetText.find("[preset00]") == 0);
+	REQUIRE(preset.validation.valid);
+
+	const auto variants = easy.generateMilkDropVariants(
+		"Neon tunnel with pulsing geometry.",
+		"Geometric",
+		0.5f,
+		3);
+	REQUIRE(variants.success);
+	REQUIRE(variants.variants.size() == 3);
+	REQUIRE(variants.variants.front().validation.valid);
+
+	const auto validation = easy.validateMilkDropPreset("[preset00]\nzoom=1.02\nfRating=3.0\n");
+	REQUIRE(validation.valid);
+
+	const auto repaired = easy.repairMilkDropPreset(
+		"[preset00]\nzoom=(1.0\n",
+		"General",
+		0.25f,
+		"Repair the broken parentheses and keep it conservative.");
+	REQUIRE(repaired.success);
+	REQUIRE(repaired.validation.valid);
+
+	const auto saveDir = makeEasyApiTestDir("milkdrop_save");
+	const auto savedPath = easy.saveMilkDropPreset(
+		preset.presetText,
+		(saveDir / "preset").string());
+	REQUIRE_FALSE(savedPath.empty());
+	REQUIRE(std::filesystem::exists(savedPath));
 }
 
 TEST_CASE("Easy API can reuse a custom speech backend", "[easy_api]") {
@@ -251,4 +335,31 @@ TEST_CASE("Easy API exposes citation and video edit helpers", "[easy_api]") {
 			citationResult.error.find("Crawler did not return any usable markdown documents.") != std::string::npos;
 		REQUIRE(hasExpectedCitationError);
 	}
+}
+
+TEST_CASE("Mojo crawler keeps canonical source URLs and filters allowed domains", "[easy_api][crawler]") {
+	const std::string fakeMojo = createFakeMojoCrawlerExecutable();
+
+	ofxGgmlWebCrawler crawler;
+	crawler.setBackend(std::make_shared<ofxGgmlMojoWebCrawlerBackend>(fakeMojo));
+
+	ofxGgmlWebCrawlerRequest request;
+	request.startUrl = "https://allowed.example/root";
+	request.keepOutputFiles = false;
+	request.allowedDomains = {"allowed.example"};
+
+	const auto result = crawler.crawl(request);
+	REQUIRE(result.success);
+	REQUIRE(result.documents.size() == 1);
+	REQUIRE(result.documents.front().sourceUrl == "https://allowed.example/article");
+	REQUIRE(result.documents.front().localPath.empty());
+
+	ofxGgmlWebCrawlerRequest blockedRequest = request;
+	blockedRequest.startUrl = "https://blocked.example/root";
+	const auto blockedResult = crawler.crawl(blockedRequest);
+	REQUIRE_FALSE(blockedResult.success);
+	const bool hasAllowedDomainError =
+		blockedResult.error.find("allowedDomains") != std::string::npos ||
+		blockedResult.error.find("allowed domains") != std::string::npos;
+	REQUIRE(hasAllowedDomainError);
 }

@@ -18,7 +18,7 @@ This addon is released under the [MIT License](LICENSE).
 
 ## Release
 
-- addon release version: `1.0.3`
+- addon release version: `1.0.4`
 - changelog: `CHANGELOG.md`
 
 ## Highlights
@@ -50,8 +50,10 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlWebCrawler` as an optional website-ingestion bridge layer, with a `Mojo` CLI adapter for local website-to-Markdown crawling workflows
 - `ofxGgmlCitationSearch` for topic-oriented source-grounded quote extraction, with structured citation items built from loaded URLs or crawler-ingested website content
 - `ofxGgmlMilkDropGenerator` for MilkDrop / projectM preset generation and editing through the existing text-inference backend, with prompt preparation, preset sanitization, and `.milk` file saving helpers
+- `ofxGgmlMilkDropGenerator` now also supports basic preset validation, conservative repair prompts, and multi-variant preset generation for quicker visual iteration
 - `ofxGgmlEasy` as a small high-level facade for common text, chat, translation, vision, and speech tasks without wiring the lower-level assistants by hand
 - `ofxGgmlEasy` now also covers crawler-backed citation research, subtitle-montage planning/export, AI-assisted video-edit planning, and MilkDrop preset generation/editing so apps can reuse the higher-level workflow helpers without depending on the full GUI example
+- `ofxGgmlEasy` now keeps text inference, crawling, and citation search on one persistent helper path, so `configureText()`, `configureWebCrawler()`, `getWebCrawler()`, `getCitationSearch()`, and `findCitations()` operate on the same configured pipeline
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
 - `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
 - `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, shadow-workspace safe apply, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
@@ -69,6 +71,7 @@ This addon is released under the [MIT License](LICENSE).
 - when the GUI example is regenerated with `ofxVlc4` enabled in `addons.make`, Montage mode can also load the active subtitle track directly into an optional `ofxVlc4` preview with subtitle delay / scale controls
 - GUI example Summarize mode now includes a dedicated citation-research section that can extract quoted evidence from loaded URLs or crawl a seed website before building a cited summary
 - GUI example MilkDrop mode can generate `.milk` preset text from prompts, save presets, and optionally preview the result live through `ofxProjectM` when the example is regenerated with that addon enabled
+- GUI example MilkDrop mode now also includes validation, preset repair, quick variants, and projectM preview controls for beat sensitivity, preset duration, and microphone-driven reactive preview while Speech recording is active
 
 ## Source layout
 
@@ -104,6 +107,7 @@ Developer tooling:
 - `scripts/run-clang-tidy.ps1` for Windows / Visual Studio workflows
 - `scripts/run-clang-tidy.sh` for Linux/macOS compile-database workflows
 - `docs/CLANG_TIDY.md` for usage and recommended scope
+- `docs/OFXIMGUI_ASSISTANT_SPEC.md` for the proposed specialized `ofxImGui` / openFrameworks GUI assistant design
 
 ## Compatibility policy
 
@@ -160,6 +164,8 @@ to the process DLL search path at startup, so development builds do not need dup
 ## Easy API
 
 If you want a shorter setup path than wiring `ofxGgmlInference`, `ofxGgmlTextAssistant`, `ofxGgmlVisionInference`, and `ofxGgmlSpeechInference` manually, use `ofxGgmlEasy`.
+
+`ofxGgmlEasy` keeps one owned crawler/citation path internally. Configuration changes made through `configureText()`, `configureWebCrawler()`, `getWebCrawler()`, or `getCitationSearch()` are reused by later `crawlWebsite()` and `findCitations()` calls instead of being rebuilt on a separate temporary helper.
 
 Minimal text setup:
 
@@ -239,6 +245,17 @@ if (milkdrop.success) {
     ai.getMilkDropGenerator().savePreset(
         milkdrop.presetText,
         "data/generated/milkdrop/neon-tunnel.milk");
+}
+
+auto variants = ai.generateMilkDropVariants(
+    "liquid neon lattice with soft beat pulses",
+    "Liquid",
+    0.6f,
+    3);
+
+auto validation = ai.validateMilkDropPreset(milkdrop.presetText);
+if (!validation.valid) {
+    auto repaired = ai.repairMilkDropPreset(milkdrop.presetText);
 }
 ```
 
@@ -879,6 +896,8 @@ The default `Mojo` adapter currently supports:
 - optional JavaScript rendering
 - explicit output directory or temporary crawl directories
 - normalized command output and discovered Markdown documents
+- canonical source URL recovery from markdown metadata/frontmatter when available, with fallback to the crawl start URL
+- `allowedDomains` enforcement on the requested start URL plus post-crawl filtering of normalized documents
 
 Use it when an app wants to turn a website into local Markdown/documents for later embedding, retrieval, citation scraping, or RAG-style prompt grounding without coupling the addon to one crawler implementation.
 

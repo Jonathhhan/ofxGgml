@@ -168,11 +168,26 @@ public:
 		const std::string & prompt,
 		const std::string & category = "General",
 		float randomness = 0.55f) const;
+	ofxGgmlMilkDropVariantResult generateMilkDropVariants(
+		const std::string & prompt,
+		const std::string & category = "General",
+		float randomness = 0.55f,
+		int variantCount = 3) const;
 	ofxGgmlMilkDropResult editMilkDropPreset(
 		const std::string & existingPresetText,
 		const std::string & editInstruction,
 		const std::string & category = "General",
 		float randomness = 0.45f) const;
+	ofxGgmlMilkDropResult repairMilkDropPreset(
+		const std::string & presetText,
+		const std::string & category = "General",
+		float randomness = 0.25f,
+		const std::string & repairInstruction = "") const;
+	ofxGgmlMilkDropValidation validateMilkDropPreset(
+		const std::string & presetText) const;
+	std::string saveMilkDropPreset(
+		const std::string & presetText,
+		const std::string & outputPath) const;
 
 private:
 	ofxGgmlInferenceSettings makeTextSettings() const;
@@ -193,7 +208,6 @@ private:
 	ofxGgmlTextAssistant m_textAssistant;
 	ofxGgmlVisionInference m_visionInference;
 	ofxGgmlSpeechInference m_speechInference;
-	ofxGgmlWebCrawler m_webCrawler;
 	ofxGgmlCitationSearch m_citationSearch;
 	ofxGgmlVideoPlanner m_videoPlanner;
 	ofxGgmlMilkDropGenerator m_milkDropGenerator;

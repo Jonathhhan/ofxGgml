@@ -4,7 +4,10 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-04-19
+
 ### Added
+- `docs/OFXIMGUI_ASSISTANT_SPEC.md` as a concrete design spec for a specialized `ofxImGui` / openFrameworks GUI coding assistant, including retrieval rules, prompt contract, UI-specific review heuristics, and a staged integration path on top of the existing assistant stack.
 - Repo-level `.clang-tidy` defaults for addon and GUI-example sources, tuned for practical `bugprone`, `performance`, `portability`, `readability`, and `modernize` coverage without enabling the noisiest style-only checks.
 - `scripts/run-clang-tidy.ps1` for Windows / Visual Studio analysis runs, with compile-database preference and an optional MSBuild Clang-Tidy fallback.
 - `scripts/run-clang-tidy.sh` for Linux/macOS compile-database workflows.
@@ -13,7 +16,8 @@ All notable changes to `ofxGgml` are documented in this file.
 - `ofxGgmlEasy` now also exposes higher-level helpers for website crawling, citation extraction, subtitle montage planning/export, and AI-assisted video-edit planning/workflow generation.
 - `ofxGgmlEasy` now initializes its default crawler / speech backends more predictably, documents the newer workflow helpers directly in the README, and avoids mutating internal citation-search state through a `const_cast` during `findCitations()`.
 - `ofxGgmlMilkDropGenerator` as a new text-backend-driven helper for generating, editing, sanitizing, and saving MilkDrop / projectM preset files.
-- `ofxGgmlEasy` now also exposes MilkDrop helpers so apps can generate and edit presets without wiring the lower-level generator directly.
+- `ofxGgmlMilkDropGenerator` now also exposes basic preset validation, conservative repair flows, and multi-variant generation for faster prompt iteration.
+- `ofxGgmlEasy` now also exposes MilkDrop helpers so apps can generate, edit, validate, repair, save, and generate preset variants without wiring the lower-level generator directly.
 - Headless test coverage for the montage preview/export bridge, including bundle assembly, cue lookup, SRT/VTT text generation, and file export.
 - `ofxGgmlMontagePreviewBridge` as a new playback-facing bridge API for source-timed versus montage-timed subtitle tracks, cue lookup by time, and playlist-oriented montage preview bundles that can be consumed by companions such as `ofxVlc4`.
 - GUI-example montage subtitle preview/export updates, including generated montage-timed and source-timed subtitle tracks, inline cue preview, live preview playback text, and one-click SRT/VTT copying.
@@ -26,6 +30,8 @@ All notable changes to `ofxGgml` are documented in this file.
 ### Changed
 - `.gitignore` now ignores generated `compile_commands.json` files so local clang-tidy workflows do not pollute the worktree.
 - Citation-search source collection now normalizes and deduplicates explicit URLs plus crawler-returned markdown documents before extraction, reducing repeated citations and empty-source noise.
+- `ofxGgmlEasy` now routes `findCitations()` and `crawlWebsite()` through the same owned crawler/citation helpers that `configureText()`, `configureWebCrawler()`, `getWebCrawler()`, and `getCitationSearch()` expose, so facade-level configuration stays consistent across calls.
+- The default `Mojo` crawler adapter now preserves canonical source URLs from markdown metadata when possible, falls back to the crawl start URL when needed, validates the requested start URL against `allowedDomains`, and filters normalized crawl results by the same domain policy.
 - The GUI example and helper scripts now prefer a shared addon-level `models/` folder instead of per-example `bin/data/models` copies, with `bin/data/models` kept as a standalone-app fallback.
 - On Windows, the GUI example now registers central runtime directories such as `libs/llama/bin`, `libs/whisper/bin`, `libs/chatllm/bin`, and the built `ggml` output folders as DLL search paths at startup, reducing duplicate development-time DLL copies in `bin/`.
 - Prompt-echo cleanup in `ofxGgmlInference` is more conservative now, so legitimate greeting-style replies such as `hello! ...` are preserved instead of being clipped as false positive prompt echoes.
@@ -34,7 +40,7 @@ All notable changes to `ofxGgml` are documented in this file.
 - The GUI example video-editing section now turns structured edit plans into clickable workflow steps, so Frame-style `analyze -> plan -> handoff` flows can jump directly into the already available Vision, Write, Diffusion, Custom, and Montage tools.
 - The GUI example video-editing workflow now keeps an active step, done/undone state, quick `Open next step` actions, and session persistence so longer editing passes can be resumed instead of re-triaged.
 - The GUI example video-editing workflow now also includes reusable editor presets such as `Trailer`, `Montage`, `Recap`, `Music Video`, `Social Short`, and `Product Teaser`, with one-click defaults for edit goal, clip count, target duration, and grounding.
-- The GUI example now includes a dedicated MilkDrop mode for prompt-driven `.milk` preset generation, save/open actions, and optional live preview through `ofxProjectM` when that addon is available.
+- The GUI example now includes a dedicated MilkDrop mode for prompt-driven `.milk` preset generation, save/open actions, validation/repair, quick variants, and optional live preview through `ofxProjectM` with beat-sensitivity, preset-duration, and microphone-reactive preview controls when that addon is available.
 - The GUI example text-heavy modes are now split into a dedicated `TextModes.cpp` translation unit, reducing `ofApp.cpp` concentration and making mode-level maintenance easier.
 - The GUI example speech and TTS flow now lives in a dedicated `SpeechTts.cpp` translation unit, further reducing `ofApp.cpp` concentration and keeping microphone, Whisper, and `chatllm.cpp` UI/runtime glue in one place.
 - GUI-example session persistence now lives in its own `SessionPersistence.cpp` translation unit, and stale disabled text-mode copies have been removed from `ofApp.cpp` so the remaining example shell is easier to navigate.

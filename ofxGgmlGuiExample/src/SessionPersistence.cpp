@@ -188,7 +188,8 @@ bool ofApp::saveSession(const std::string & path) {
 		{"imageSearchMaxResults", imageSearchMaxResults},
 		{"clipTopK", clipTopK},
 		{"clipVerbosity", clipVerbosity},
-		{"milkdropCategoryIndex", milkdropCategoryIndex}
+		{"milkdropCategoryIndex", milkdropCategoryIndex},
+		{"milkdropVariantCount", milkdropVariantCount}
 	};
 
 	session["floats"] = {
@@ -201,7 +202,9 @@ bool ofApp::saveSession(const std::string & path) {
 		{"ttsMinP", ttsMinP},
 		{"diffusionCfgScale", diffusionCfgScale},
 		{"diffusionStrength", diffusionStrength},
-		{"milkdropRandomness", milkdropRandomness}
+		{"milkdropRandomness", milkdropRandomness},
+		{"milkdropPreviewBeatSensitivity", milkdropPreviewBeatSensitivity},
+		{"milkdropPreviewPresetDuration", milkdropPreviewPresetDuration}
 	};
 
 	session["bools"] = {
@@ -217,7 +220,8 @@ bool ofApp::saveSession(const std::string & path) {
 		{"diffusionNormalizeClipEmbeddings", diffusionNormalizeClipEmbeddings},
 		{"diffusionSaveMetadata", diffusionSaveMetadata},
 		{"clipNormalizeEmbeddings", clipNormalizeEmbeddings},
-		{"milkdropAutoPreview", milkdropAutoPreview}
+		{"milkdropAutoPreview", milkdropAutoPreview},
+		{"milkdropPreviewFeedMicWhileRecording", milkdropPreviewFeedMicWhileRecording}
 	};
 
 	session["montagePreview"] = {
@@ -478,6 +482,10 @@ bool ofApp::loadSession(const std::string & path) {
 	clipTopK = std::clamp(getInt(indices, "clipTopK", clipTopK), 0, 16);
 	clipVerbosity = std::clamp(getInt(indices, "clipVerbosity", clipVerbosity), 0, 2);
 	milkdropCategoryIndex = std::max(0, getInt(indices, "milkdropCategoryIndex", milkdropCategoryIndex));
+	milkdropVariantCount = std::clamp(
+		getInt(indices, "milkdropVariantCount", milkdropVariantCount),
+		1,
+		6);
 	citationMaxResults = std::clamp(getInt(settings, "citationMaxResults", citationMaxResults), 1, 12);
 
 	videoPlanDurationSeconds = std::clamp(getFloat(floats, "videoPlanDurationSeconds", videoPlanDurationSeconds), 1.0f, 30.0f);
@@ -490,6 +498,14 @@ bool ofApp::loadSession(const std::string & path) {
 	diffusionCfgScale = std::clamp(getFloat(floats, "diffusionCfgScale", diffusionCfgScale), 0.0f, 30.0f);
 	diffusionStrength = std::clamp(getFloat(floats, "diffusionStrength", diffusionStrength), 0.0f, 1.0f);
 	milkdropRandomness = std::clamp(getFloat(floats, "milkdropRandomness", milkdropRandomness), 0.0f, 1.0f);
+	milkdropPreviewBeatSensitivity = std::clamp(
+		getFloat(floats, "milkdropPreviewBeatSensitivity", milkdropPreviewBeatSensitivity),
+		0.2f,
+		3.0f);
+	milkdropPreviewPresetDuration = std::clamp(
+		getFloat(floats, "milkdropPreviewPresetDuration", milkdropPreviewPresetDuration),
+		4.0f,
+		60.0f);
 
 	videoPlanMultiScene = getBool(bools, "videoPlanMultiScene", videoPlanMultiScene);
 	videoPlanUseForGeneration = getBool(bools, "videoPlanUseForGeneration", videoPlanUseForGeneration);
@@ -530,6 +546,10 @@ bool ofApp::loadSession(const std::string & path) {
 	diffusionSaveMetadata = getBool(bools, "diffusionSaveMetadata", diffusionSaveMetadata);
 	clipNormalizeEmbeddings = getBool(bools, "clipNormalizeEmbeddings", clipNormalizeEmbeddings);
 	milkdropAutoPreview = getBool(bools, "milkdropAutoPreview", milkdropAutoPreview);
+	milkdropPreviewFeedMicWhileRecording = getBool(
+		bools,
+		"milkdropPreviewFeedMicWhileRecording",
+		milkdropPreviewFeedMicWhileRecording);
 	citationUseCrawler = getBool(settings, "citationUseCrawler", citationUseCrawler);
 
 	speechLiveIntervalSeconds = std::clamp(getFloat(liveSpeech, "intervalSeconds", speechLiveIntervalSeconds), 0.5f, 5.0f);

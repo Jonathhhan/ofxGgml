@@ -48,6 +48,12 @@ void ofApp::audioIn(ofSoundBuffer & input) {
 
 	const size_t channels = std::max<size_t>(1, input.getNumChannels());
 	const size_t frames = input.getNumFrames();
+	if (milkdropPreviewFeedMicWhileRecording) {
+		std::lock_guard<std::mutex> previewLock(milkdropPreviewAudioMutex);
+		milkdropPreviewAudioSamples.assign(input.getBuffer().begin(), input.getBuffer().end());
+		milkdropPreviewAudioFrames = static_cast<int>(frames);
+		milkdropPreviewAudioChannels = static_cast<int>(channels);
+	}
 	std::vector<float> monoSamples;
 	monoSamples.reserve(frames);
 	{

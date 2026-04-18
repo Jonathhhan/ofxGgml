@@ -54,6 +54,7 @@ ofxGgmlEasy::ofxGgmlEasy() {
 void ofxGgmlEasy::configureText(const ofxGgmlEasyTextConfig & config) {
 	m_textConfig = config;
 	applyInferenceExecutables(m_inference, m_textConfig);
+	applyInferenceExecutables(m_citationSearch.getInference(), m_textConfig);
 	m_chatAssistant.setCompletionExecutable(m_textConfig.completionExecutable);
 	m_textAssistant.setCompletionExecutable(m_textConfig.completionExecutable);
 	m_milkDropGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
@@ -130,11 +131,11 @@ const ofxGgmlSpeechInference & ofxGgmlEasy::getSpeechInference() const {
 }
 
 ofxGgmlWebCrawler & ofxGgmlEasy::getWebCrawler() {
-	return m_webCrawler;
+	return m_citationSearch.getWebCrawler();
 }
 
 const ofxGgmlWebCrawler & ofxGgmlEasy::getWebCrawler() const {
-	return m_webCrawler;
+	return m_citationSearch.getWebCrawler();
 }
 
 ofxGgmlCitationSearch & ofxGgmlEasy::getCitationSearch() {
@@ -201,7 +202,7 @@ ofxGgmlWebCrawlerRequest ofxGgmlEasy::makeCrawlerRequest(
 }
 
 void ofxGgmlEasy::syncCrawlerBackend() {
-	m_webCrawler.setBackend(
+	m_citationSearch.getWebCrawler().setBackend(
 		std::make_shared<ofxGgmlMojoWebCrawlerBackend>(m_crawlerConfig.executablePath));
 }
 
@@ -387,7 +388,7 @@ ofxGgmlWebCrawlerResult ofxGgmlEasy::crawlWebsite(
 		result.error = "Easy API crawler start URL is empty.";
 		return result;
 	}
-	return m_webCrawler.crawl(makeCrawlerRequest(startUrl, maxDepth));
+	return m_citationSearch.getWebCrawler().crawl(makeCrawlerRequest(startUrl, maxDepth));
 }
 
 ofxGgmlCitationSearchResult ofxGgmlEasy::findCitations(
@@ -405,10 +406,7 @@ ofxGgmlCitationSearchResult ofxGgmlEasy::findCitations(
 		request.useCrawler = true;
 		request.crawlerRequest = makeCrawlerRequest(crawlerUrl);
 	}
-	ofxGgmlCitationSearch citationSearch;
-	applyInferenceExecutables(citationSearch.getInference(), m_textConfig);
-	citationSearch.getWebCrawler().setBackend(m_webCrawler.getBackend());
-	return citationSearch.search(request);
+	return m_citationSearch.search(request);
 }
 
 ofxGgmlEasyMontageResult ofxGgmlEasy::planMontageFromSrt(
@@ -511,6 +509,29 @@ ofxGgmlMilkDropResult ofxGgmlEasy::generateMilkDropPreset(
 		makeTextSettings());
 }
 
+ofxGgmlMilkDropVariantResult ofxGgmlEasy::generateMilkDropVariants(
+	const std::string & prompt,
+	const std::string & category,
+	float randomness,
+	int variantCount) const {
+	ofxGgmlMilkDropVariantResult result;
+	if (m_textConfig.modelPath.empty()) {
+		result.error =
+			"Easy API text model is not configured. Call configureText(...) first.";
+		return result;
+	}
+
+	ofxGgmlMilkDropRequest request;
+	request.prompt = prompt;
+	request.category = category;
+	request.randomness = randomness;
+	return m_milkDropGenerator.generateVariants(
+		m_textConfig.modelPath,
+		request,
+		variantCount,
+		makeTextSettings());
+}
+
 ofxGgmlMilkDropResult ofxGgmlEasy::editMilkDropPreset(
 	const std::string & existingPresetText,
 	const std::string & editInstruction,
@@ -530,4 +551,36 @@ ofxGgmlMilkDropResult ofxGgmlEasy::editMilkDropPreset(
 		category,
 		randomness,
 		makeTextSettings());
+}
+
+ofxGgmlMilkDropResult ofxGgmlEasy::repairMilkDropPreset(
+	const std::string & presetText,
+	const std::string & category,
+	float randomness,
+	const std::string & repairInstruction) const {
+	ofxGgmlMilkDropResult result;
+	if (m_textConfig.modelPath.empty()) {
+		result.error =
+			"Easy API text model is not configured. Call configureText(...) first.";
+		return result;
+	}
+
+	return m_milkDropGenerator.repairPreset(
+		m_textConfig.modelPath,
+		presetText,
+		category,
+		randomness,
+		repairInstruction,
+		makeTextSettings());
+}
+
+ofxGgmlMilkDropValidation ofxGgmlEasy::validateMilkDropPreset(
+	const std::string & presetText) const {
+	return m_milkDropGenerator.validatePreset(presetText);
+}
+
+std::string ofxGgmlEasy::saveMilkDropPreset(
+	const std::string & presetText,
+	const std::string & outputPath) const {
+	return m_milkDropGenerator.savePreset(presetText, outputPath);
 }
