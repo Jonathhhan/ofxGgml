@@ -1,5 +1,6 @@
 #include "ofxGgmlWorkspaceAssistant.h"
 #include "core/ofxGgmlWindowsUtf8.h"
+#include "support/ofxGgmlProcessSecurity.h"
 
 #include <algorithm>
 #include <array>
@@ -73,108 +74,6 @@ std::string getEnvVarString(const char * name) {
 }
 
 #ifdef _WIN32
-std::string quoteWindowsArg(const std::string & arg) {
-	const bool needsQuotes =
-		arg.find_first_of(" \t\"%^&|<>") != std::string::npos;
-	if (!needsQuotes) {
-		return arg;
-	}
-
-	std::string out;
-	out.push_back('"');
-	size_t backslashes = 0;
-	for (char c : arg) {
-		if (c == '\\') {
-			++backslashes;
-			continue;
-		}
-		if (c == '"') {
-			out.append(backslashes * 2 + 1, '\\');
-			out.push_back('"');
-			backslashes = 0;
-			continue;
-		}
-		if (backslashes > 0) {
-			out.append(backslashes, '\\');
-			backslashes = 0;
-		}
-		out.push_back(c);
-	}
-	if (backslashes > 0) {
-		out.append(backslashes * 2, '\\');
-	}
-	out.push_back('"');
-	return out;
-}
-
-bool isWindowsBatchScript(const std::string & path) {
-	std::string ext = std::filesystem::path(path).extension().string();
-	std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
-		return static_cast<char>(std::tolower(c));
-	});
-	return ext == ".bat" || ext == ".cmd";
-}
-
-std::string resolveWindowsLaunchPath(const std::string & executable) {
-	if (executable.empty()) {
-		return {};
-	}
-
-	auto hasPathSeparator = [](const std::string & value) {
-		return value.find('\\') != std::string::npos ||
-			value.find('/') != std::string::npos;
-	};
-
-	const std::filesystem::path inputPath(executable);
-	if (inputPath.is_absolute() || inputPath.has_parent_path() ||
-		hasPathSeparator(executable)) {
-		return executable;
-	}
-
-	std::vector<std::string> exts;
-	const std::string pathext = getEnvVarString("PATHEXT");
-	if (!pathext.empty()) {
-		std::istringstream stream(pathext);
-		std::string ext;
-		while (std::getline(stream, ext, ';')) {
-			if (!ext.empty()) {
-				exts.push_back(ext);
-			}
-		}
-	}
-	if (exts.empty()) {
-		exts = {".exe", ".bat", ".cmd", ".com"};
-	}
-
-	const std::string envPath = getEnvVarString("PATH");
-	std::istringstream pathStream(envPath);
-	std::string dir;
-	while (std::getline(pathStream, dir, ';')) {
-		if (dir.empty()) {
-			continue;
-		}
-
-		const std::filesystem::path base(dir);
-		std::error_code ec;
-		if (!std::filesystem::is_directory(base, ec) || ec) {
-			continue;
-		}
-
-		const std::filesystem::path direct = base / executable;
-		if (std::filesystem::exists(direct, ec) && !ec) {
-			return direct.string();
-		}
-		for (const auto & ext : exts) {
-			const std::filesystem::path candidate = base / (executable + ext);
-			if (std::filesystem::exists(candidate, ec) && !ec) {
-				return candidate.string();
-			}
-		}
-	}
-
-	return executable;
-}
-
 std::string runWindowsProcessCaptureFirstLine(
 	const std::string & executable,
 	const std::vector<std::string> & arguments) {
@@ -200,10 +99,10 @@ std::string runWindowsProcessCaptureFirstLine(
 	si.hStdOutput = writePipe;
 	si.hStdError = writePipe;
 
-	std::string commandLine = quoteWindowsArg(executable);
+	std::string commandLine = ofxGgmlProcessSecurity::quoteWindowsArg(executable);
 	for (const auto & arg : arguments) {
 		commandLine.push_back(' ');
-		commandLine += quoteWindowsArg(arg);
+		commandLine += ofxGgmlProcessSecurity::quoteWindowsArg(arg);
 	}
 
 	std::wstring wideCommandLine = ofxGgmlWideFromUtf8(commandLine);
@@ -361,82 +260,7 @@ std::string chooseBestVisualStudioProjectPath(
 }
 
 bool isValidExecutablePath(const std::string & path) {
-	if (path.empty()) return false;
-	if (path.find('\0') != std::string::npos) return false;
-
-	auto containsPathSeparator = [](const std::string & value) {
-		return value.find('/') != std::string::npos ||
-			value.find('\\') != std::string::npos;
-	};
-	auto isLikelyPath = [&](const std::string & value) {
-		std::filesystem::path fsPath(value);
-		return fsPath.is_absolute() || fsPath.has_parent_path() ||
-			containsPathSeparator(value);
-	};
-	auto isRegularExecutableFile = [](
-		const std::filesystem::path & candidate) {
-		std::error_code ec;
-		if (!std::filesystem::exists(candidate, ec) || ec) return false;
-		if (!std::filesystem::is_regular_file(candidate, ec) || ec) return false;
-#ifndef _WIN32
-		return access(candidate.c_str(), X_OK) == 0;
-#else
-		return true;
-#endif
-	};
-
-	if (isLikelyPath(path)) {
-		std::error_code ec;
-		const std::filesystem::path fsPath(path);
-		const std::filesystem::path canonical =
-			std::filesystem::weakly_canonical(fsPath, ec);
-		if (!ec && isRegularExecutableFile(canonical)) return true;
-		return isRegularExecutableFile(fsPath);
-	}
-
-	for (char c : path) {
-		const unsigned char uc = static_cast<unsigned char>(c);
-		if (std::iscntrl(uc) || std::isspace(uc)) return false;
-	}
-	const std::string envPath = getEnvVarString("PATH");
-	if (envPath.empty()) return false;
-
-#ifdef _WIN32
-	const char pathSep = ';';
-	std::vector<std::string> executableExtensions;
-	const std::string envPathext = getEnvVarString("PATHEXT");
-	if (!envPathext.empty()) {
-		std::istringstream extStream(envPathext);
-		std::string ext;
-		while (std::getline(extStream, ext, ';')) {
-			if (!ext.empty()) executableExtensions.push_back(ext);
-		}
-	}
-	if (executableExtensions.empty()) {
-		executableExtensions = {".exe", ".bat", ".cmd", ".com"};
-	}
-#else
-	const char pathSep = ':';
-#endif
-
-	std::istringstream pathEntries(envPath);
-	std::string dir;
-	while (std::getline(pathEntries, dir, pathSep)) {
-		if (dir.empty()) continue;
-		const std::filesystem::path base(dir);
-		if (!std::filesystem::is_directory(base)) continue;
-#ifdef _WIN32
-		std::filesystem::path candidate = base / path;
-		if (isRegularExecutableFile(candidate)) return true;
-		for (const auto & ext : executableExtensions) {
-			candidate = base / (path + ext);
-			if (isRegularExecutableFile(candidate)) return true;
-		}
-#else
-		if (isRegularExecutableFile(base / path)) return true;
-#endif
-	}
-	return false;
+	return ofxGgmlProcessSecurity::isValidExecutablePath(path);
 }
 
 bool runCommandCapture(
@@ -478,31 +302,15 @@ bool runCommandCapture(
 	si.hStdError = writePipe;
 
 	PROCESS_INFORMATION pi {};
-	std::string cmdLine;
-	const std::string resolvedExecutable = resolveWindowsLaunchPath(args.front());
-	const bool useCmdWrapper = isWindowsBatchScript(resolvedExecutable);
-	const std::string comspec = [&]() {
-		const std::string envComspec = getEnvVarString("COMSPEC");
-		return envComspec.empty()
-			? std::string("C:\\Windows\\System32\\cmd.exe")
-			: envComspec;
-	}();
-	if (useCmdWrapper) {
-		cmdLine += quoteWindowsArg(comspec);
-		cmdLine += " /d /s /c \"";
-		cmdLine += quoteWindowsArg(resolvedExecutable);
-		for (size_t i = 1; i < args.size(); ++i) {
-			cmdLine.push_back(' ');
-			cmdLine += quoteWindowsArg(args[i]);
+	const std::string cmdLine =
+		ofxGgmlProcessSecurity::buildWindowsCommandLine(args);
+	if (cmdLine.empty()) {
+		CloseHandle(readPipe);
+		CloseHandle(writePipe);
+		if (nullInput != INVALID_HANDLE_VALUE) {
+			CloseHandle(nullInput);
 		}
-		cmdLine += "\"";
-	} else {
-		for (size_t i = 0; i < args.size(); ++i) {
-			if (i > 0) {
-				cmdLine.push_back(' ');
-			}
-			cmdLine += quoteWindowsArg(i == 0 ? resolvedExecutable : args[i]);
-		}
+		return false;
 	}
 
 	std::wstring wideCmdLine = ofxGgmlWideFromUtf8(cmdLine);
@@ -2049,6 +1857,25 @@ ofxGgmlWorkspaceVerificationResult ofxGgmlWorkspaceAssistant::runVerification(
 	return result;
 }
 
+Result<ofxGgmlWorkspaceVerificationResult>
+ofxGgmlWorkspaceAssistant::runVerificationEx(
+	const std::vector<ofxGgmlCodeAssistantCommandSuggestion> & commands,
+	const ofxGgmlWorkspaceSettings & settings,
+	ofxGgmlWorkspaceCommandRunner commandRunner) const {
+	const ofxGgmlWorkspaceVerificationResult result = runVerification(
+		commands,
+		settings,
+		std::move(commandRunner));
+	if (result.success) {
+		return result;
+	}
+	return ofxGgmlError(
+		ofxGgmlErrorCode::ComputeFailed,
+		trimCopy(result.summary).empty()
+			? "workspace verification failed"
+			: result.summary);
+}
+
 ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 	const std::string & modelPath,
 	const ofxGgmlCodeAssistantRequest & request,
@@ -2337,4 +2164,38 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 		std::filesystem::remove_all(result.shadowWorkspaceRoot, cleanupEc);
 	}
 	return result;
+}
+
+Result<ofxGgmlWorkspaceResult> ofxGgmlWorkspaceAssistant::runTaskEx(
+	const std::string & modelPath,
+	const ofxGgmlCodeAssistantRequest & request,
+	const ofxGgmlCodeAssistantContext & context,
+	const ofxGgmlWorkspaceSettings & workspaceSettings,
+	const ofxGgmlInferenceSettings & inferenceSettings,
+	const ofxGgmlPromptSourceSettings & sourceSettings,
+	ofxGgmlWorkspaceCommandRunner commandRunner,
+	ofxGgmlWorkspaceRetryProvider retryProvider) const {
+	const ofxGgmlWorkspaceResult result = runTask(
+		modelPath,
+		request,
+		context,
+		workspaceSettings,
+		inferenceSettings,
+		sourceSettings,
+		std::move(commandRunner),
+		std::move(retryProvider));
+	if (result.success) {
+		return result;
+	}
+	std::string error;
+	if (!result.applyResult.messages.empty()) {
+		error = result.applyResult.messages.back();
+	}
+	if (trimCopy(error).empty()) {
+		error = result.verificationResult.summary;
+	}
+	if (trimCopy(error).empty()) {
+		error = "workspace task failed";
+	}
+	return ofxGgmlError(ofxGgmlErrorCode::ComputeFailed, error);
 }

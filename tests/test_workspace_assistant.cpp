@@ -247,6 +247,42 @@ TEST_CASE("Workspace assistant suggests verification commands from changed files
 	REQUIRE(hasExpectedAssistantOutcome);
 }
 
+TEST_CASE("Workspace assistant typed verification results expose success and failure payloads", "[workspace_assistant]") {
+	ofxGgmlWorkspaceAssistant assistant;
+	ofxGgmlWorkspaceSettings settings;
+	settings.stopOnFirstFailedCommand = true;
+
+	ofxGgmlCodeAssistantCommandSuggestion command;
+	command.label = "verify";
+	command.executable = "verify-tool";
+	command.arguments = {"--quick"};
+
+	auto successRunner = [](const ofxGgmlCodeAssistantCommandSuggestion & suggestion) {
+		ofxGgmlWorkspaceCommandResult result;
+		result.command = suggestion;
+		result.success = true;
+		result.exitCode = 0;
+		result.output = "ok";
+		return result;
+	};
+	const auto success = assistant.runVerificationEx({command}, settings, successRunner);
+	REQUIRE(success.isOk());
+	REQUIRE(success.value().success);
+
+	auto failureRunner = [](const ofxGgmlCodeAssistantCommandSuggestion & suggestion) {
+		ofxGgmlWorkspaceCommandResult result;
+		result.command = suggestion;
+		result.success = false;
+		result.exitCode = 2;
+		result.output = "failed";
+		return result;
+	};
+	const auto failure = assistant.runVerificationEx({command}, settings, failureRunner);
+	REQUIRE(failure.isError());
+	REQUIRE(failure.error().code == ofxGgmlErrorCode::ComputeFailed);
+	REQUIRE(failure.error().message.find("failed") != std::string::npos);
+}
+
 TEST_CASE("Script source parses GitHub URLs and detects Visual Studio workspaces", "[workspace_assistant]") {
 	ofxGgmlScriptSource githubSource;
 	REQUIRE(githubSource.setGitHubRepoFromInput(
