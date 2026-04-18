@@ -49,6 +49,19 @@ public:
 		size_t totalDeallocations = 0;
 	};
 
+	struct BatchStats {
+		size_t totalBatches = 0;
+		size_t successfulBatches = 0;
+		size_t failedBatches = 0;
+		size_t totalRequests = 0;
+		size_t processedRequests = 0;
+		size_t failedRequests = 0;
+		double totalBatchTimeMs = 0.0;
+		double minBatchTimeMs = std::numeric_limits<double>::max();
+		double maxBatchTimeMs = 0.0;
+		size_t activeBatches = 0;
+	};
+
 	/// Get singleton instance.
 	static ofxGgmlMetrics& getInstance() {
 		static ofxGgmlMetrics instance;
@@ -208,6 +221,42 @@ public:
 		return 0.0;
 	}
 
+	/// Record batch start.
+	void recordBatchStart(const std::string& modelName, size_t requestCount) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		auto& stats = m_batchStats[modelName];
+		stats.totalBatches++;
+		stats.totalRequests += requestCount;
+		stats.activeBatches++;
+	}
+
+	/// Record batch end.
+	void recordBatchEnd(const std::string& modelName, size_t processedCount, size_t failedCount,
+		double elapsedMs, bool success = true) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		auto& stats = m_batchStats[modelName];
+		if (stats.activeBatches > 0) {
+			stats.activeBatches--;
+		}
+		if (success) {
+			stats.successfulBatches++;
+		} else {
+			stats.failedBatches++;
+		}
+		stats.processedRequests += processedCount;
+		stats.failedRequests += failedCount;
+		stats.totalBatchTimeMs += elapsedMs;
+		stats.minBatchTimeMs = std::min(stats.minBatchTimeMs, elapsedMs);
+		stats.maxBatchTimeMs = std::max(stats.maxBatchTimeMs, elapsedMs);
+	}
+
+	/// Get batch stats for a model.
+	BatchStats getBatchStats(const std::string& modelName) const {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		auto it = m_batchStats.find(modelName);
+		return (it != m_batchStats.end()) ? it->second : BatchStats{};
+	}
+
 	/// Get formatted summary of all metrics.
 	std::string getSummary() const;
 
@@ -217,6 +266,7 @@ public:
 		m_inferenceStats.clear();
 		m_cacheStats.clear();
 		m_memoryStats.clear();
+		m_batchStats.clear();
 		m_counters.clear();
 		m_gauges.clear();
 		m_timings.clear();
@@ -226,6 +276,7 @@ public:
 	void resetModel(const std::string& modelName) {
 		std::lock_guard<std::mutex> lock(m_mutex);
 		m_inferenceStats.erase(modelName);
+		m_batchStats.erase(modelName);
 	}
 
 private:
@@ -243,6 +294,7 @@ private:
 	std::map<std::string, InferenceStats> m_inferenceStats;
 	std::map<std::string, CacheStats> m_cacheStats;
 	std::map<std::string, MemoryStats> m_memoryStats;
+	std::map<std::string, BatchStats> m_batchStats;
 	std::map<std::string, size_t> m_counters;
 	std::map<std::string, double> m_gauges;
 	std::map<std::string, std::vector<double>> m_timings;

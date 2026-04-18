@@ -145,6 +145,46 @@ struct ofxGgmlSimilarityHit {
 	size_t index = 0;
 };
 
+/// Request for batched inference.
+struct ofxGgmlBatchRequest {
+	std::string id;
+	std::string prompt;
+	ofxGgmlInferenceSettings settings;
+	std::function<bool(const std::string &)> onChunk;
+
+	ofxGgmlBatchRequest() = default;
+	ofxGgmlBatchRequest(const std::string & requestId, const std::string & requestPrompt,
+		const ofxGgmlInferenceSettings & requestSettings = {},
+		std::function<bool(const std::string &)> chunkCallback = nullptr)
+		: id(requestId), prompt(requestPrompt), settings(requestSettings), onChunk(chunkCallback) {}
+};
+
+/// Result for a single item in a batch.
+struct ofxGgmlBatchItemResult {
+	std::string id;
+	ofxGgmlInferenceResult result;
+	size_t batchIndex = 0;
+};
+
+/// Overall result for batch inference.
+struct ofxGgmlBatchResult {
+	bool success = false;
+	float totalElapsedMs = 0.0f;
+	std::vector<ofxGgmlBatchItemResult> results;
+	std::string error;
+	size_t processedCount = 0;
+	size_t failedCount = 0;
+};
+
+/// Settings for batch processing behavior.
+struct ofxGgmlBatchSettings {
+	bool allowParallelProcessing = true;
+	bool stopOnFirstError = false;
+	size_t maxConcurrentRequests = 4;
+	bool preferServerBatch = true;
+	bool fallbackToSequential = true;
+};
+
 /// Inference helper for llama.cpp CLI tools and OpenAI-compatible local servers.
 class ofxGgmlInference {
 public:
@@ -200,6 +240,25 @@ public:
 		const ofxGgmlInferenceSettings & settings = {},
 		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {},
 		std::function<bool(const std::string &)> onChunk = nullptr) const;
+
+	/// Process multiple inference requests in a batch.
+	ofxGgmlBatchResult generateBatch(
+		const std::string & modelPath,
+		const std::vector<ofxGgmlBatchRequest> & requests,
+		const ofxGgmlBatchSettings & batchSettings = {}) const;
+
+	/// Process multiple inference requests with shared settings.
+	ofxGgmlBatchResult generateBatchSimple(
+		const std::string & modelPath,
+		const std::vector<std::string> & prompts,
+		const ofxGgmlInferenceSettings & settings = {},
+		const ofxGgmlBatchSettings & batchSettings = {}) const;
+
+	/// Process multiple embedding requests in a batch.
+	std::vector<ofxGgmlEmbeddingResult> embedBatch(
+		const std::string & modelPath,
+		const std::vector<std::string> & texts,
+		const ofxGgmlEmbeddingSettings & settings = {}) const;
 
 	ofxGgmlEmbeddingResult embed(
 		const std::string & modelPath,
@@ -269,6 +328,19 @@ private:
 
 	mutable std::unordered_map<std::string, int> m_tokenCountCache;
 	mutable std::mutex m_tokenCountCacheMutex;
+
+	/// Helper to process batch via server backend
+	ofxGgmlBatchResult processBatchViaServer(
+		const std::string & modelPath,
+		const std::vector<ofxGgmlBatchRequest> & requests,
+		const ofxGgmlInferenceSettings & sharedSettings,
+		const ofxGgmlBatchSettings & batchSettings) const;
+
+	/// Helper to process batch sequentially (CLI fallback)
+	ofxGgmlBatchResult processBatchSequentially(
+		const std::string & modelPath,
+		const std::vector<ofxGgmlBatchRequest> & requests,
+		const ofxGgmlBatchSettings & batchSettings) const;
 };
 
 /// Lightweight in-memory similarity index for RAG-style retrieval.

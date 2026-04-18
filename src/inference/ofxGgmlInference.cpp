@@ -1,10 +1,12 @@
 #include "ofxGgmlInference.h"
 #include "core/ofxGgmlWindowsUtf8.h"
+#include "core/ofxGgmlMetrics.h"
 #include "support/ofxGgmlProcessSecurity.h"
 #include "support/ofxGgmlScriptSource.h"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
@@ -21,6 +23,7 @@
 #include <regex>
 #include <sstream>
 #include <string_view>
+#include <thread>
 #include <unordered_set>
 
 #ifdef _WIN32
@@ -3350,6 +3353,226 @@ float ofxGgmlEmbeddingIndex::cosineSimilarity(const std::vector<float> & a, cons
 	}
 	if (na <= 0.0 || nb <= 0.0) return 0.0f;
 	return static_cast<float>(dot / (std::sqrt(na) * std::sqrt(nb)));
+}
+
+// -----------------------------------------------------------------------------
+// Batch Inference Implementation
+// -----------------------------------------------------------------------------
+
+ofxGgmlBatchResult ofxGgmlInference::generateBatch(
+	const std::string & modelPath,
+	const std::vector<ofxGgmlBatchRequest> & requests,
+	const ofxGgmlBatchSettings & batchSettings) const {
+
+	ofxGgmlBatchResult batchResult;
+	batchResult.results.reserve(requests.size());
+
+	if (requests.empty()) {
+		batchResult.success = true;
+		return batchResult;
+	}
+
+	// Record batch start
+	auto& metrics = ofxGgmlMetrics::getInstance();
+	metrics.recordBatchStart(modelPath, requests.size());
+
+	const auto startTime = ofGetElapsedTimeMillis();
+
+	// Check if all requests share compatible settings for server batch mode
+	bool allUseServer = true;
+	bool settingsCompatible = true;
+	ofxGgmlInferenceSettings sharedSettings;
+
+	if (!requests.empty()) {
+		sharedSettings = requests[0].settings;
+		for (const auto & req : requests) {
+			if (!req.settings.useServerBackend) {
+				allUseServer = false;
+			}
+			// Check key parameters that affect batching compatibility
+			if (req.settings.maxTokens != sharedSettings.maxTokens ||
+				req.settings.temperature != sharedSettings.temperature ||
+				req.settings.contextSize != sharedSettings.contextSize) {
+				settingsCompatible = false;
+			}
+		}
+	}
+
+	// Try server-based batch processing first if conditions are met
+	if (batchSettings.preferServerBatch && allUseServer && settingsCompatible &&
+		!sharedSettings.serverUrl.empty()) {
+		batchResult = processBatchViaServer(modelPath, requests, sharedSettings, batchSettings);
+
+		// If server batch succeeded or we shouldn't fallback, return
+		if (batchResult.success || !batchSettings.fallbackToSequential) {
+			batchResult.totalElapsedMs = ofGetElapsedTimeMillis() - startTime;
+			// Record batch end
+			metrics.recordBatchEnd(modelPath, batchResult.processedCount,
+				batchResult.failedCount, batchResult.totalElapsedMs, batchResult.success);
+			return batchResult;
+		}
+	}
+
+	// Fall back to sequential processing
+	batchResult = processBatchSequentially(modelPath, requests, batchSettings);
+	batchResult.totalElapsedMs = ofGetElapsedTimeMillis() - startTime;
+
+	// Record batch end
+	metrics.recordBatchEnd(modelPath, batchResult.processedCount,
+		batchResult.failedCount, batchResult.totalElapsedMs, batchResult.success);
+
+	return batchResult;
+}
+
+ofxGgmlBatchResult ofxGgmlInference::generateBatchSimple(
+	const std::string & modelPath,
+	const std::vector<std::string> & prompts,
+	const ofxGgmlInferenceSettings & settings,
+	const ofxGgmlBatchSettings & batchSettings) const {
+
+	std::vector<ofxGgmlBatchRequest> requests;
+	requests.reserve(prompts.size());
+
+	for (size_t i = 0; i < prompts.size(); ++i) {
+		std::string id = "batch_" + std::to_string(i);
+		requests.emplace_back(id, prompts[i], settings);
+	}
+
+	return generateBatch(modelPath, requests, batchSettings);
+}
+
+std::vector<ofxGgmlEmbeddingResult> ofxGgmlInference::embedBatch(
+	const std::string & modelPath,
+	const std::vector<std::string> & texts,
+	const ofxGgmlEmbeddingSettings & settings) const {
+
+	std::vector<ofxGgmlEmbeddingResult> results;
+	results.reserve(texts.size());
+
+	// For embeddings, we can often send multiple texts in one API call
+	// to server backends that support it
+	if (settings.useServerBackend && !settings.serverUrl.empty()) {
+		// Try batch embedding via server
+		// This is a simplified implementation - real server batch would use a single request
+		for (const auto & text : texts) {
+			results.push_back(embed(modelPath, text, settings));
+		}
+	} else {
+		// Sequential processing for CLI or when server not available
+		for (const auto & text : texts) {
+			results.push_back(embed(modelPath, text, settings));
+		}
+	}
+
+	return results;
+}
+
+ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
+	const std::string & modelPath,
+	const std::vector<ofxGgmlBatchRequest> & requests,
+	const ofxGgmlInferenceSettings & sharedSettings,
+	const ofxGgmlBatchSettings & batchSettings) const {
+
+	ofxGgmlBatchResult batchResult;
+	batchResult.results.reserve(requests.size());
+
+	// For now, we'll process requests concurrently rather than as a true
+	// server batch, since not all llama-server implementations support
+	// the /v1/batch endpoint. This still provides parallelism benefits.
+
+	std::vector<std::thread> threads;
+	std::mutex resultsMutex;
+	std::atomic<bool> shouldStop(false);
+
+	// Process in chunks based on maxConcurrentRequests
+	for (size_t startIdx = 0; startIdx < requests.size(); startIdx += batchSettings.maxConcurrentRequests) {
+		threads.clear();
+
+		const size_t endIdx = std::min(startIdx + batchSettings.maxConcurrentRequests, requests.size());
+
+		for (size_t i = startIdx; i < endIdx; ++i) {
+			if (shouldStop.load()) break;
+
+			threads.emplace_back([&, i]() {
+				if (shouldStop.load()) return;
+
+				const auto & req = requests[i];
+				ofxGgmlInferenceResult result = generate(
+					modelPath,
+					req.prompt,
+					req.settings,
+					req.onChunk);
+
+				{
+					std::lock_guard<std::mutex> lock(resultsMutex);
+					ofxGgmlBatchItemResult item;
+					item.id = req.id;
+					item.result = result;
+					item.batchIndex = i;
+					batchResult.results.push_back(item);
+
+					if (result.success) {
+						batchResult.processedCount++;
+					} else {
+						batchResult.failedCount++;
+						if (batchSettings.stopOnFirstError) {
+							shouldStop.store(true);
+						}
+					}
+				}
+			});
+		}
+
+		// Wait for this chunk to complete
+		for (auto & thread : threads) {
+			if (thread.joinable()) {
+				thread.join();
+			}
+		}
+
+		if (shouldStop.load()) break;
+	}
+
+	batchResult.success = (batchResult.failedCount == 0);
+	return batchResult;
+}
+
+ofxGgmlBatchResult ofxGgmlInference::processBatchSequentially(
+	const std::string & modelPath,
+	const std::vector<ofxGgmlBatchRequest> & requests,
+	const ofxGgmlBatchSettings & batchSettings) const {
+
+	ofxGgmlBatchResult batchResult;
+	batchResult.results.reserve(requests.size());
+
+	for (size_t i = 0; i < requests.size(); ++i) {
+		const auto & req = requests[i];
+
+		ofxGgmlInferenceResult result = generate(
+			modelPath,
+			req.prompt,
+			req.settings,
+			req.onChunk);
+
+		ofxGgmlBatchItemResult item;
+		item.id = req.id;
+		item.result = result;
+		item.batchIndex = i;
+		batchResult.results.push_back(item);
+
+		if (result.success) {
+			batchResult.processedCount++;
+		} else {
+			batchResult.failedCount++;
+			if (batchSettings.stopOnFirstError) {
+				batchResult.error = "Batch processing stopped due to error in request: " + req.id;
+				break;
+			}
+		}
+	}
+
+	batchResult.success = (batchResult.failedCount == 0);
+	return batchResult;
 }
 
 // -----------------------------------------------------------------------------
