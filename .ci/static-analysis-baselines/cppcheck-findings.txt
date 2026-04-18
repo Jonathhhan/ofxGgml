@@ -5,7 +5,6 @@ src/assistants/ofxGgmlCodeAssistant.cpp:2053:75: style: Consider using std::any_
 src/assistants/ofxGgmlCodeAssistant.cpp:423:51: style: Consider using std::any_of algorithm instead of a raw loop. [useStlAlgorithm]
 src/assistants/ofxGgmlCodeAssistant.cpp:492:50: style: Consider using std::any_of algorithm instead of a raw loop. [useStlAlgorithm]
 src/assistants/ofxGgmlCodeAssistant.cpp:698:2: style: Consider using std::all_of or std::none_of algorithm instead of a raw loop. [useStlAlgorithm]
-src/assistants/ofxGgmlCodeAssistant.cpp:736:14: performance: Ineffective call of function 'substr' because a prefix of the string is assigned to itself. Use resize() or pop_back() instead. [uselessCallsSubstr]
 src/assistants/ofxGgmlCodeAssistant.cpp:848:2: style: Consider using std::any_of algorithm instead of a raw loop. [useStlAlgorithm]
 src/assistants/ofxGgmlCodeAssistant.cpp:974:54: style: Consider using std::find_if algorithm instead of a raw loop. [useStlAlgorithm]
 src/assistants/ofxGgmlCodeReview.cpp:1026:13: style: Local variable 'hasSuffix' shadows outer function [shadowFunction]

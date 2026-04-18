@@ -733,7 +733,7 @@ std::string sanitizeInlineCompletionText(
 	if (request.singleLine) {
 		const size_t newline = cleaned.find('\n');
 		if (newline != std::string::npos) {
-			cleaned = cleaned.substr(0, newline);
+			cleaned.resize(newline);
 		}
 		return trimCopy(cleaned);
 	}
