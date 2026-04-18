@@ -68,8 +68,6 @@ src/support/ofxGgmlProcessSecurity.cpp:69:2: style: Consider using std::all_of o
 src/support/ofxGgmlScriptSource.cpp:1304:7: style: The scope of the variable 'wasFetching' can be reduced. [variableScope]
 src/support/ofxGgmlScriptSource.cpp:1305:7: style: The scope of the variable 'hadWorker' can be reduced. [variableScope]
 src/support/ofxGgmlScriptSource.cpp:1387:24: style: Condition 'm_localFolderPath!=localFolderPath' is always false [knownConditionTrueFalse]
-src/support/ofxGgmlScriptSource.cpp:1746:18: performance: Ineffective call of function 'substr' because a prefix of the string is assigned to itself. Use resize() or pop_back() instead. [uselessCallsSubstr]
-src/support/ofxGgmlScriptSource.cpp:1770:18: performance: Ineffective call of function 'substr' because a prefix of the string is assigned to itself. Use resize() or pop_back() instead. [uselessCallsSubstr]
 src/support/ofxGgmlScriptSource.cpp:1822:2: style: Consider using std::all_of or std::none_of algorithm instead of a raw loop. [useStlAlgorithm]
 src/support/ofxGgmlScriptSource.cpp:1841:2: style: Consider using std::all_of or std::none_of algorithm instead of a raw loop. [useStlAlgorithm]
 src/support/ofxGgmlScriptSource.cpp:1867:2: style: Consider using std::all_of or std::none_of algorithm instead of a raw loop. [useStlAlgorithm]
