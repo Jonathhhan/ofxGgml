@@ -1743,7 +1743,7 @@ bool ofxGgmlScriptSource::parseGitHubInput(
 			normalized = normalized.substr(std::string("github.com/").size());
 			const size_t queryPos = normalized.find_first_of("?#");
 			if (queryPos != std::string::npos) {
-				normalized = normalized.substr(0, queryPos);
+				normalized.resize(queryPos);
 			}
 			std::vector<std::string> parts = splitNonEmpty(normalized, '/');
 			if (parts.size() >= 2) {
@@ -1767,7 +1767,7 @@ bool ofxGgmlScriptSource::parseGitHubInput(
 			normalized = normalized.substr(std::string("raw.githubusercontent.com/").size());
 			const size_t queryPos = normalized.find_first_of("?#");
 			if (queryPos != std::string::npos) {
-				normalized = normalized.substr(0, queryPos);
+				normalized.resize(queryPos);
 			}
 			std::vector<std::string> parts = splitNonEmpty(normalized, '/');
 			if (parts.size() >= 3) {

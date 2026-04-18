@@ -745,7 +745,8 @@ static std::string formatSourceLabel(const ofxGgmlPromptSource & source) {
 		label = "Source";
 	}
 	if (label.size() > kMaxSourceLabelChars) {
-		label = label.substr(0, kMaxSourceLabelChars - 3) + "...";
+		label.resize(kMaxSourceLabelChars - 3);
+		label += "...";
 	}
 	return label;
 }
@@ -818,7 +819,7 @@ static std::string detectWeatherLocation(const std::string & text) {
 	if (std::regex_search(text, match, weatherLocRegex) && match.size() >= 2) {
 		std::string location = trim(match[1].str());
 		if (location.size() > 64) {
-			location = location.substr(0, 64);
+			location.resize(64);
 		}
 		return location;
 	}
