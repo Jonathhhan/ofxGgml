@@ -1592,33 +1592,62 @@ std::string ofxGgmlCodeAssistant::defaultActionBody(
 		return trimmedInput;
 	case ofxGgmlCodeAssistantAction::Generate:
 		if (hasFocusedFile && trimmedInput.empty()) {
-			return "Generate improved code for the focused file.";
+			return "Generate improved, production-quality code for the focused file. "
+				"Follow best practices, add appropriate error handling, and include clear comments.";
+		}
+		if (!trimmedInput.empty() && hasFocusedFile) {
+			return "Generate code for the focused file based on these requirements:\n" + trimmedInput +
+				"\n\nFollow best practices, add error handling, and maintain consistency with existing code.";
 		}
 		return trimmedInput;
 	case ofxGgmlCodeAssistantAction::Explain:
 		return withExtraInstructions(
-			"Explain the focused file code.",
-			"Explain the following code:\n");
+			"Explain the focused file code clearly and thoroughly. "
+			"Cover the purpose, key logic, data structures, algorithms, and important patterns. "
+			"Use clear language suitable for developers unfamiliar with this code.",
+			"Explain the following code clearly and thoroughly. "
+			"Cover its purpose, key logic, data structures, algorithms, and patterns:\n");
 	case ofxGgmlCodeAssistantAction::Debug:
 		return withExtraInstructions(
-			"Find bugs in the focused file code.",
-			"Find bugs in the following code:\n");
+			"Analyze the focused file for bugs, edge cases, and logical errors. "
+			"Identify specific issues with line numbers, explain the problem, and suggest fixes.",
+			"Find bugs, edge cases, and logical errors in the following code. "
+			"Provide line numbers, explain each issue, and suggest fixes:\n");
 	case ofxGgmlCodeAssistantAction::Optimize:
 		return withExtraInstructions(
-			"Optimize the focused file code for performance. Show the improved version and explain what changed.",
-			"Optimize the following code for performance. Show the improved version and explain what changed:\n");
+			"Optimize the focused file for performance and efficiency. "
+			"Identify bottlenecks, propose improvements with benchmarks or complexity analysis, "
+			"and show the optimized version with explanations.",
+			"Optimize the following code for performance. "
+			"Identify bottlenecks, suggest improvements, show the optimized version, "
+			"and explain the expected performance gains:\n");
 	case ofxGgmlCodeAssistantAction::Edit:
 		return withExtraInstructions(
-			"Edit the focused file to satisfy the request. Keep unrelated code unchanged.",
-			"Edit the following code to satisfy the request. Keep unrelated code unchanged:\n");
+			"Edit the focused file to satisfy the request. "
+			"Make only the necessary changes. Keep unrelated code unchanged. "
+			"Preserve existing style, patterns, and conventions.",
+			"Edit the following code to satisfy the request. "
+			"Make only necessary changes. Keep unrelated code and style unchanged:\n");
 	case ofxGgmlCodeAssistantAction::Refactor:
 		return withExtraInstructions(
-			"Refactor the focused file code to improve readability, maintainability, and structure. Show the refactored version.",
-			"Refactor the following code to improve readability, maintainability, and structure. Show the refactored version:\n");
+			"Refactor the focused file to improve code quality. "
+			"Address readability, maintainability, testability, and structural issues. "
+			"Extract helper functions, improve naming, reduce complexity, and eliminate code smells. "
+			"Show the refactored version with clear explanations of improvements.",
+			"Refactor the following code to improve quality. "
+			"Extract helpers, improve naming, reduce complexity, eliminate code smells. "
+			"Show the refactored version with explanations:\n");
 	case ofxGgmlCodeAssistantAction::Review:
 		return withExtraInstructions(
-			"Review the focused file code for bugs, security issues, and style. Return findings with severity and suggested fixes.",
-			"Review the following code for bugs, security issues, and style. Return findings with severity and suggested fixes:\n");
+			"Perform a comprehensive code review of the focused file. "
+			"Check for bugs, security vulnerabilities, performance issues, code style violations, "
+			"maintainability concerns, and best practice violations. "
+			"Return findings with severity (1=critical, 2=important, 3=minor), confidence, "
+			"affected lines, and concrete fix suggestions.",
+			"Review the following code comprehensively. "
+			"Check for bugs, security issues, performance problems, style violations, "
+			"and maintainability concerns. Return findings with severity, confidence, "
+			"line numbers, and suggested fixes:\n");
 	case ofxGgmlCodeAssistantAction::NextEdit:
 		return withExtraInstructions(
 			"Predict the most likely next edit in the focused file or nearby files. Return the next edit target, why it matters, and an optional patch or diff for that single next change.",
@@ -1628,10 +1657,14 @@ std::string ofxGgmlCodeAssistant::defaultActionBody(
 			trimmedInput;
 	case ofxGgmlCodeAssistantAction::FixBuild:
 		if (!trimmedOutput.empty()) {
-			return "Fix the build or test failure described below. Identify likely files, propose changes, and include verification commands.\n\n" +
+			return "Fix the build or test failure described below. "
+				"Analyze the error messages, identify root causes, determine which files need changes, "
+				"propose specific fixes with patches or diffs, and include verification commands to confirm the fix.\n\n" +
 				trimmedOutput;
 		}
-		return "Fix the build or test failure for this request. Identify likely files, propose changes, and include verification commands.\n\n" +
+		return "Fix the build or test failure for this request. "
+			"Analyze error messages, identify root causes, determine affected files, "
+			"propose fixes with patches, and include verification commands.\n\n" +
 			trimmedInput;
 	case ofxGgmlCodeAssistantAction::GroundedDocs:
 		return "Answer the request using grounded documentation and source material only. Cite concrete supporting sources where possible.\n\n" +
@@ -2583,30 +2616,45 @@ ofxGgmlCodeAssistantRiskAssessment ofxGgmlCodeAssistant::assessRisk(
 std::string ofxGgmlCodeAssistant::buildStructuredResponseInstructions() {
 	return
 		"Return a structured plan using one item per line with these tags:\n"
-		"GOAL: short summary\n"
-		"APPROACH: short summary\n"
-		"STEP: concrete next step\n"
-		"ACCEPT: acceptance criterion or invariant\n"
-		"FILE: relative/path | why it matters | comma,separated,symbols\n"
-		"PATCH: write|replace|append|delete | relative/path | short summary\n"
-		"SEARCH: escaped single-line search text for the previous PATCH when using replace\n"
-		"REPLACE: escaped single-line replacement text for the previous PATCH when using replace\n"
-		"CONTENT: escaped single-line file content for write/append patches (use \\n for newlines)\n"
-		"DIFF: escaped unified diff text when you can express the change as a unified diff\n"
-		"COMMAND: label | cwd | executable | arg1 | arg2 ...\n"
-		"EXPECT: expected verification outcome for the previous COMMAND\n"
+		"\n"
+		"Planning tags:\n"
+		"GOAL: concise summary of the objective (one sentence)\n"
+		"APPROACH: high-level strategy (one sentence)\n"
+		"STEP: concrete actionable step (be specific)\n"
+		"ACCEPT: acceptance criterion or invariant (testable condition)\n"
+		"\n"
+		"File context tags:\n"
+		"FILE: relative/path | reason for touching | comma,separated,symbols\n"
+		"\n"
+		"Patch operation tags (prefer DIFF over PATCH when possible):\n"
+		"PATCH: write|replace|append|delete | relative/path | brief summary\n"
+		"SEARCH: escaped single-line search text (for replace operations only)\n"
+		"REPLACE: escaped single-line replacement text (for replace operations only)\n"
+		"CONTENT: escaped single-line file content (for write/append, use \\n for newlines)\n"
+		"DIFF: unified diff format (preferred for multi-line changes)\n"
+		"\n"
+		"Verification tags:\n"
+		"COMMAND: label | working-dir | executable | arg1 | arg2 | ...\n"
+		"EXPECT: expected outcome for the previous COMMAND\n"
 		"RETRY: true|false for the previous COMMAND\n"
-		"TEST: name | relative/test/file | rationale | command-label | command-tag\n"
-		"REVIEWER: reviewer persona for following FINDING lines\n"
-		"FINDING: priority | confidence | relative/path | line | title\n"
-		"DETAIL: description for the previous FINDING\n"
+		"TEST: test-name | relative/test/path | rationale | command-label | command-tag\n"
+		"\n"
+		"Review tags:\n"
+		"REVIEWER: reviewer persona for subsequent FINDING lines\n"
+		"FINDING: priority(1-3) | confidence(0.0-1.0) | relative/path | line | title\n"
+		"DETAIL: detailed description for the previous FINDING\n"
 		"FIX: concrete fix suggestion for the previous FINDING\n"
-		"CATEGORY: category for the previous FINDING\n"
-		"RISK-SCORE: 0.0 to 1.0 overall patch risk\n"
+		"CATEGORY: category for the previous FINDING (e.g., security, performance, style)\n"
+		"\n"
+		"Risk assessment tags:\n"
+		"RISK-SCORE: 0.0 to 1.0 overall change risk\n"
 		"RISK-LEVEL: low|medium|high|critical\n"
-		"RISK: possible risk or regression\n"
-		"QUESTION: unresolved question\n"
-		"Only use escaped single-line values for SEARCH, REPLACE, CONTENT, and DIFF.";
+		"RISK: specific possible risk or regression\n"
+		"QUESTION: unresolved question requiring clarification\n"
+		"\n"
+		"Important: Use escaped single-line values for SEARCH, REPLACE, CONTENT, and DIFF.\n"
+		"For DIFF, prefer unified diff format. For multi-line content, use \\n as newline separator.\n"
+		"Priority: 1=critical, 2=important, 3=minor. Always include at least GOAL and APPROACH.";
 }
 
 std::string ofxGgmlCodeAssistant::buildUnifiedDiffFromStructuredResult(
