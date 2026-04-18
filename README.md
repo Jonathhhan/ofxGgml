@@ -28,6 +28,12 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlGraph` fluent graph builder for common ggml operations
 - `ofxGgmlModel` GGUF inspection and backend weight upload
 - `ofxGgmlInference` llama.cpp helper for CLI and persistent `llama-server` generation, embeddings, cache reuse, capability probing, cutoff continuation, and source-grounded prompt building
+- **Quick Wins** for developer experience:
+  - `ofxGgmlStreamingContext` - streaming API with backpressure control, pause/resume/cancel
+  - `ofxGgmlLogger` - comprehensive logging with multiple levels and file/console output
+  - `ofxGgmlMetrics` - performance tracking for tokens/sec, cache rates, memory usage
+  - `ofxGgmlModelRegistry` - model version management and hot-swapping
+  - `ofxGgmlPromptTemplates` - 30+ reusable templates for common AI tasks
 - server-streamed text output now uses delta-based chunk handling so Chat and Script mode no longer duplicate partial text while `llama-server` replies are still arriving
 - addon-level `Live context` support for loaded sources, domain-provider grounding, generic search fallback, and stricter citation-oriented response modes
 - `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
@@ -95,6 +101,66 @@ scripts\setup_windows.bat
 ```
 
 After setup, add `ofxGgml` to your project's `addons.make`, regenerate with the openFrameworks Project Generator when needed, and build normally.
+
+## Quick Wins: Developer Experience Features
+
+ofxGgml includes four high-impact features for improved developer experience. See `docs/QUICK_WINS.md` for detailed documentation.
+
+### Streaming API with Backpressure Control
+
+`ofxGgmlStreamingContext` provides pause/resume/cancel capabilities and flow control:
+
+```cpp
+auto ctx = std::make_shared<ofxGgmlStreamingContext>();
+ctx->setBackpressureThreshold(1000);
+
+inference.generate(modelPath, prompt, settings, [ctx](const std::string& chunk) {
+    if (ctx->shouldPause()) ctx->waitForResume(5000);
+    if (ctx->isCancelled()) return false;
+    processChunk(chunk);
+    return true;
+});
+```
+
+### Logging and Metrics
+
+`ofxGgmlLogger` provides configurable logging, and `ofxGgmlMetrics` tracks performance:
+
+```cpp
+auto& logger = ofxGgmlLogger::getInstance();
+logger.setLevel(ofxGgmlLogger::Level::Debug);
+logger.info("Inference", "Starting generation");
+
+auto& metrics = ofxGgmlMetrics::getInstance();
+metrics.recordInferenceStart("llama-7b");
+// ... inference ...
+metrics.recordInferenceEnd("llama-7b", tokens, elapsedMs);
+std::cout << metrics.getSummary();
+```
+
+### Model Version Management
+
+`ofxGgmlModelRegistry` enables hot-swapping between model versions:
+
+```cpp
+auto& registry = ofxGgmlModelRegistry::getInstance();
+registry.registerModel(metadata_v1);
+registry.registerModel(metadata_v2);
+registry.setActiveVersion("llama-7b", "v2-q5"); // Hot-swap
+std::string path = registry.getActiveModelPath("llama-7b");
+```
+
+### Prompt Template Library
+
+`ofxGgmlPromptTemplates` provides 30+ reusable templates:
+
+```cpp
+auto& templates = ofxGgmlPromptTemplates::getInstance();
+std::string prompt = templates.fill("summarize", {
+    {"text", content},
+    {"max_length", "3 sentences"}
+});
+```
 
 ## Supported operations
 

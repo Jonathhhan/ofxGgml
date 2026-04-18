@@ -8,6 +8,12 @@ All notable changes to `ofxGgml` are documented in this file.
 - **BREAKING**: `ofxGgml::setup()`, `ofxGgml::allocGraph()`, and `ofxGgml::loadModelWeights()` now return `Result<void>` instead of `bool` for richer error reporting. Users must update their code from `if (ggml.setup())` to `auto result = ggml.setup(); if (result.isOk())`. Error details are available via `result.error().code`, `result.error().message`, and `result.error().toString()`.
 
 ### Added
+- **Quick Wins**: Four high-impact, low-effort features for improved developer experience:
+  - `ofxGgmlStreamingContext` for streaming API with backpressure control, pause/resume/cancel capabilities, and flow control
+  - `ofxGgmlLogger` for comprehensive configurable logging with multiple levels (Trace/Debug/Info/Warn/Error/Critical), console/file output, and custom callbacks
+  - `ofxGgmlMetrics` for performance tracking including tokens/sec, cache hit rates, memory usage, custom counters/gauges, and timing histograms
+  - `ofxGgmlModelRegistry` for model version management and hot-swapping with rich metadata tracking (architecture, quantization, parameters, etc.)
+  - `ofxGgmlPromptTemplates` library with 30+ built-in templates for common tasks (summarize, code review, Q&A, translation, etc.) and variable substitution support
 - `ofxGgmlInference` live grounding now groups specialized sources under domain providers and keeps generic search as a separate fallback path.
 - `ofxGgmlClipInference` as a new bridge scaffold for optional CLIP-style text/image embedding and ranking backends, now with a generic bridge surface plus an optional `clip.cpp` adapter path and compatibility helpers for older `ofxStableDiffusion`-style naming.
 - `ofxGgmlDiffusionInference` as a new bridge scaffold for optional image-generation backends, including a callback-friendly `ofxStableDiffusion` adapter surface.
