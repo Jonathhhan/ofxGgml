@@ -34,6 +34,20 @@ struct ofxGgmlMontageClip {
 	std::string note;
 };
 
+struct ofxGgmlMontageSubtitleCue {
+	int index = 0;
+	std::string sourceId;
+	std::string reelName;
+	double startSeconds = 0.0;
+	double endSeconds = 0.0;
+	std::string text;
+};
+
+struct ofxGgmlMontageSubtitleTrack {
+	std::string title;
+	std::vector<ofxGgmlMontageSubtitleCue> cues;
+};
+
 struct ofxGgmlMontagePlan {
 	std::string goal;
 	std::string strategy;
@@ -76,6 +90,14 @@ public:
 		const ofxGgmlMontagePlannerRequest & request);
 	static std::string summarizePlan(const ofxGgmlMontagePlan & plan);
 	static std::string buildEditorBrief(const ofxGgmlMontagePlan & plan);
+	static ofxGgmlMontageSubtitleTrack buildSubtitleTrack(
+		const ofxGgmlMontagePlan & plan,
+		const std::string & title = "MONTAGE");
+	static ofxGgmlMontageSubtitleTrack buildSourceSubtitleTrack(
+		const ofxGgmlMontagePlan & plan,
+		const std::string & title = "MONTAGE");
+	static std::string buildSrt(const ofxGgmlMontageSubtitleTrack & track);
+	static std::string buildVtt(const ofxGgmlMontageSubtitleTrack & track);
 	static std::string buildEdl(
 		const ofxGgmlMontagePlan & plan,
 		const std::string & title = "MONTAGE",

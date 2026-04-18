@@ -4,6 +4,21 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Repo-level `.clang-tidy` defaults for addon and GUI-example sources, tuned for practical `bugprone`, `performance`, `portability`, `readability`, and `modernize` coverage without enabling the noisiest style-only checks.
+- `scripts/run-clang-tidy.ps1` for Windows / Visual Studio analysis runs, with compile-database preference and an optional MSBuild Clang-Tidy fallback.
+- `scripts/run-clang-tidy.sh` for Linux/macOS compile-database workflows.
+- `docs/CLANG_TIDY.md` to document supported workflows, compile-database discovery, and recommended scope.
+- `ofxGgmlMontagePreviewBridge` as a new playback-facing bridge API for source-timed versus montage-timed subtitle tracks, cue lookup by time, and playlist-oriented montage preview bundles that can be consumed by companions such as `ofxVlc4`.
+- GUI-example montage subtitle preview/export updates, including generated montage-timed and source-timed subtitle tracks, inline cue preview, live preview playback text, and one-click SRT/VTT copying.
+- `ofxGgmlWebCrawler` as a new optional website-ingestion bridge, with a default `Mojo` CLI adapter for local website-to-Markdown crawling and normalized crawled-document results.
+
+### Changed
+- `.gitignore` now ignores generated `compile_commands.json` files so local clang-tidy workflows do not pollute the worktree.
+- Translate mode in the GUI example is more usable: source language can be set to `Auto detect`, prompt-copy buttons now update reliably through deferred ImGui buffer writes, and the panel exposes clearer `Detect Language`, `Natural`, `Literal`, and `Detect + Translate` actions.
+
+## [1.0.3] - 2026-04-18
+
 ### Changed
 - **BREAKING**: `ofxGgml::setup()`, `ofxGgml::allocGraph()`, and `ofxGgml::loadModelWeights()` now return `Result<void>` instead of `bool` for richer error reporting. Users must update their code from `if (ggml.setup())` to `auto result = ggml.setup(); if (result.isOk())`. Error details are available via `result.error().code`, `result.error().message`, and `result.error().toString()`.
 
@@ -31,6 +46,10 @@ All notable changes to `ofxGgml` are documented in this file.
 - `llama.cpp` runtime helpers now install `llama-server`, `llama-completion`, and `llama-cli` together into `libs/llama/bin` on Windows and Linux/macOS, so the text server path and addon-local CLI fallback can share one local upstream runtime in the same way as Whisper.
 - The Vision panel now includes quick actions such as `Scene Describe`, `Screenshot Review`, and `Document OCR`, plus an optional sampled-video path that reuses the stable multimodal server backend directly from the GUI.
 - Video `Action` and `Emotion` tasks can now optionally call a temporal sidecar service, with structured request/response plumbing and dedicated Vision-panel presets for those workflows.
+- `ofxGgmlLiveSpeechTranscriber` as an addon-level rolling Whisper helper for near-realtime microphone transcription with chunking, overlap, temp WAV handling, and live transcript state.
+- `ofxGgmlVideoPlanner` as a reusable planning layer for beat-based video prompts, multi-scene sequence plans, and AI-assisted edit briefs.
+- `ofxGgmlMontagePlanner` for subtitle-driven montage planning, ranked clip selection, editor briefs, and CMX-style EDL export.
+- `ofxGgmlImageSearch` as a provider-agnostic internet image-search layer, currently shipping with a Wikimedia Commons backend and example-side prompt reuse / local caching.
 
 ### Changed
 - `ofxGgmlGuiExample` replaces the old online/offline toggle with four `Live context` policies: `Offline`, `LoadedSourcesOnly`, `LiveContext`, and `LiveContextStrictCitations`.
@@ -47,9 +66,17 @@ All notable changes to `ofxGgml` are documented in this file.
 - Vision profile download hints can now use explicit direct URLs, and the default `LFM2.5-VL` GUI action now targets the correct `LFM2.5-VL-1.6B-Q4_0.gguf` file instead of a broken guessed link.
 - Video analysis now uses more structured sampled-frame prompts with frame-position labels, sample-count context, and clearer timeline guidance.
 - Streamed text generation now treats server chunks as deltas consistently across the inference and GUI layers, so live `llama-server` output no longer duplicates partial prefixes in Chat or Script mode.
+- The GUI example now adds inline image and video previews across Vision, Diffusion, and analyzed-video flows, plus cleaner cross-panel reuse for Vision, Diffusion, CLIP, and internet image search.
+- Diffusion workflows now use the real `ofxStableDiffusion` runtime path when present, clamp width / height to the same known-good size set used by the companion example, and surface clearer disable reasons in the GUI.
+- Vision / Video planning now supports selected-scene versus full-sequence generation modes, richer continuity context per scene, and AI-assisted edit-plan handoff into Write mode.
+- Subtitle montage planning now extracts goal keywords once per plan, sanitizes EDL titles before export, and exposes the editor brief inline in the GUI.
+- `ofxGgmlInference` batch processing now preserves request order without mutex-heavy result appends, and server-backed `embedBatch()` now performs bounded concurrent requests instead of a purely sequential loop.
+- The Script panel now exposes clearer assistant context, smarter suggested next steps, and stronger follow-up grounding by reusing recent touched files, cached verification commands, and the last failure reason directly in the coding assistant flow.
+- Inference internals are further split so server probing, source grounding, and text cleanup live behind dedicated internal seams instead of one monolithic translation unit.
+- `ofxGgmlCodeAssistant` and `ofxGgmlWorkspaceAssistant` now keep lightweight task memory for active mode, selected backend, recent files, and last failure reason; bias retrieval toward recently touched files; ask for a clearer inspect -> patch -> verify loop; and perform a structured-output recovery pass when a model returns weak freeform prose instead of the requested tagged format.
 
 ### Documentation
-- `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, repository instruction-file support, the new optional CLI build behavior, the microphone-driven speech workflow, the optional speech-server backend, the shared local `whisper.cpp` runtime helper path, the upgraded vision / sampled-video workflows, and the optional temporal sidecar contract for video action / emotion analysis.
+- `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, repository instruction-file support, the new optional CLI build behavior, the microphone-driven speech workflow, the optional speech-server backend, the shared local `whisper.cpp` runtime helper path, the upgraded vision / sampled-video workflows, the video-planning and montage helpers, internet image search, and the optional temporal sidecar contract for video action / emotion analysis.
 - Added `docs/COMPATIBILITY.md` to document the recommended `ggml` / `stable-diffusion.cpp` versioning policy, companion-addon runtime packaging rules, and the tested-matrix workflow for `ofxGgml` plus `ofxStableDiffusion`.
 
 ## [1.0.2] - 2026-04-16

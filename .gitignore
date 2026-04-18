@@ -1,5 +1,7 @@
 build/
 libs/ggml/build/
+compile_commands.json
+**/compile_commands.json
 
 # Visual Studio build artifacts
 .vs/

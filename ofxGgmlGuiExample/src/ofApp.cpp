@@ -16,6 +16,7 @@
 #include "config/ModelPresets.h"
 #include "ofJson.h"
 #include "core/ofxGgmlWindowsUtf8.h"
+#include "support/ofxGgmlSimpleSrtSubtitleParser.h"
 #include "gguf.h"
 
 #include <algorithm>
@@ -1865,16 +1866,34 @@ const bool hasUserInput = std::strlen(scriptInput) > 0;
 static char scriptBuildErrors[8192] = {};
 static bool restrictWorkspaceToFocusedFile = true;
 
-auto buildScriptAssistantContext = [this]() {
-	ofxGgmlCodeAssistantContext context;
-	context.scriptSource = &scriptSource;
-	context.projectMemory = &scriptProjectMemory;
-	context.focusedFileIndex = selectedScriptFileIndex;
-	context.includeRepoContext = scriptIncludeRepoContext;
-	context.maxRepoFiles = kMaxScriptContextFiles;
-	context.maxFocusedFileChars = kMaxFocusedFileSnippetChars;
-	return context;
-};
+	auto buildScriptAssistantContext = [this]() {
+		ofxGgmlCodeAssistantContext context;
+		context.scriptSource = &scriptSource;
+		context.projectMemory = &scriptProjectMemory;
+		context.focusedFileIndex = selectedScriptFileIndex;
+		context.includeRepoContext = scriptIncludeRepoContext;
+		context.maxRepoFiles = kMaxScriptContextFiles;
+		context.maxFocusedFileChars = kMaxFocusedFileSnippetChars;
+		context.activeMode = "Script";
+		if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
+			context.selectedBackend = "llama-server";
+			const std::string serverUrl = trim(textServerUrl);
+			if (!serverUrl.empty()) {
+				context.selectedBackend += " @ " + serverUrl;
+			}
+		} else {
+			context.selectedBackend = trim(llamaCliCommand).empty()
+				? "llama-completion"
+				: trim(llamaCliCommand);
+			const std::string ggmlBackend = trim(ggml.getBackendName());
+			if (!ggmlBackend.empty()) {
+				context.selectedBackend += " via " + ggmlBackend;
+			}
+		}
+		context.recentTouchedFiles = recentScriptTouchedFiles;
+		context.lastFailureReason = lastScriptFailureReason;
+		return context;
+	};
 
 auto buildWorkspaceAllowedFiles = [&]() {
 	std::vector<std::string> allowedFiles;
@@ -1993,6 +2012,19 @@ auto previewWorkspacePlan = [&](const std::string & label) {
 			workspaceRoot,
 			&workspaceInfoSnapshot)
 		: structured.verificationCommands;
+	if (!changedFiles.empty()) {
+		recentScriptTouchedFiles = changedFiles;
+	}
+	if (!verificationCommands.empty()) {
+		cachedScriptVerificationCommands = verificationCommands;
+	}
+	if (!validation.success) {
+		lastScriptFailureReason = validation.messages.empty()
+			? std::string("Workspace dry run validation failed.")
+			: validation.messages.front();
+	} else {
+		lastScriptFailureReason.clear();
+	}
 
 	std::ostringstream out;
 	out << label << "\n\n";
@@ -2279,12 +2311,14 @@ if ((ImGui::Button("Send to Chat", ImVec2(110, 0)) || scriptChatSubmitted) && ca
 }
 if (canSendScriptChat) ImGui::PopStyleColor();
 ImGui::SameLine();
-if (ImGui::Button("Clear Chat", ImVec2(90, 0))) {
-	scriptMessages.clear();
-	scriptOutput.clear();
-	lastScriptOutputLikelyCutoff = false;
-	lastScriptOutputTail.clear();
-}
+	if (ImGui::Button("Clear Chat", ImVec2(90, 0))) {
+		scriptMessages.clear();
+		scriptOutput.clear();
+		lastScriptFailureReason.clear();
+		recentScriptTouchedFiles.clear();
+		lastScriptOutputLikelyCutoff = false;
+		lastScriptOutputTail.clear();
+	}
 ImGui::SameLine();
 
 ImGui::BeginDisabled(generating.load() || !lastScriptOutputLikelyCutoff || lastScriptOutputTail.empty());
@@ -2356,11 +2390,139 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 	}
 }
 
-const bool hasScriptOutput = !scriptOutput.empty();
-const bool hasLastTask = !lastScriptRequest.empty();
+	const bool hasScriptOutput = !scriptOutput.empty();
+	const bool hasLastTask = !lastScriptRequest.empty();
+	const bool hasBuildErrors = trim(scriptBuildErrors).size() > 0;
+	const bool hasWorkspaceSource =
+		sourceType == ofxGgmlScriptSourceType::LocalFolder &&
+		!scriptSource.getLocalFolderPath().empty();
+	const std::string focusedScriptFileLabel =
+		(hasSelectedFile && selectedScriptFileIndex >= 0 &&
+		 selectedScriptFileIndex < static_cast<int>(scriptSourceFiles.size()))
+			? scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].name
+			: std::string();
+	const std::string scriptBackendLabel = [&]() {
+		if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
+			const std::string serverUrl = trim(textServerUrl);
+			return serverUrl.empty()
+				? std::string("llama-server")
+				: std::string("llama-server @ ") + serverUrl;
+		}
+		const std::string cliPath = trim(llamaCliCommand);
+		return cliPath.empty() ? std::string("llama-completion") : cliPath;
+	}();
+	const std::string scriptSourceLabel = [&]() {
+		switch (sourceType) {
+		case ofxGgmlScriptSourceType::LocalFolder: return std::string("local workspace");
+		case ofxGgmlScriptSourceType::GitHubRepo: return std::string("GitHub repo");
+		case ofxGgmlScriptSourceType::Internet: return std::string("internet sources");
+		case ofxGgmlScriptSourceType::None:
+		default:
+			return std::string("none");
+		}
+	}();
 
-// Save output to source.
-if (hasScriptOutput && sourceType == ofxGgmlScriptSourceType::LocalFolder) {
+	ImGui::Separator();
+	ImGui::TextDisabled("Assistant context");
+	ImGui::TextWrapped(
+		"Backend: %s | Source: %s | Focused file: %s",
+		scriptBackendLabel.c_str(),
+		scriptSourceLabel.c_str(),
+		focusedScriptFileLabel.empty() ? "none" : focusedScriptFileLabel.c_str());
+	ImGui::TextDisabled(
+		"Repo context: %s | Recent touched files: %d",
+		scriptIncludeRepoContext ? "on" : "off",
+		static_cast<int>(recentScriptTouchedFiles.size()));
+	if (!lastScriptFailureReason.empty()) {
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.68f, 0.35f, 1.0f),
+			"Last failure: %s",
+			lastScriptFailureReason.c_str());
+	}
+
+	ImGui::Spacing();
+	ImGui::TextDisabled("Suggested next step:");
+	if (!hasWorkspaceSource) {
+		if (ImGui::Button("Load local workspace...", ImVec2(170, 0))) {
+			ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
+			if (result.bSuccess) {
+				clearDeferredScriptSourceRestore();
+				selectedScriptFileIndex = -1;
+				if (!scriptLanguages.empty()) {
+					scriptSource.setPreferredExtension(
+						scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
+				}
+				scriptSource.setLocalFolder(result.getPath());
+			}
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("Load a local project to unlock grounded edit plans and dry runs.");
+	} else if (hasBuildErrors) {
+		ImGui::BeginDisabled(generating.load());
+		if (ImGui::Button("Fix Build Plan", ImVec2(150, 0))) {
+			submitScriptRequest(
+				ofxGgmlCodeAssistantAction::FixBuild,
+				scriptInput,
+				"",
+				"",
+				false,
+				true,
+				true,
+				scriptBuildErrors,
+				buildWorkspaceAllowedFiles());
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::TextDisabled("You already have compiler output loaded, so start with a grounded build fix.");
+	} else if (hasScriptOutput) {
+		const auto lastStructuredOutput = ofxGgmlCodeAssistant::parseStructuredResult(scriptOutput);
+		if (!lastStructuredOutput.unifiedDiff.empty() || !lastStructuredOutput.patchOperations.empty()) {
+			ImGui::BeginDisabled(generating.load());
+			if (ImGui::Button("Workspace Dry Run", ImVec2(150, 0))) {
+				previewWorkspacePlan("Workspace dry run");
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			ImGui::TextDisabled("Preview the latest structured edit plan before applying anything manually.");
+		} else if (hasSelectedFile && !hasUserInput) {
+			if (ImGui::Button("Explain focused file", ImVec2(150, 0))) {
+				copyStringToBuffer(
+					scriptInput,
+					sizeof(scriptInput),
+					("Explain how " + focusedScriptFileLabel + " works, including key functions, data flow, and risks.").c_str());
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("Seed the input from the selected file instead of starting from a blank prompt.");
+		}
+	} else if (hasWorkspaceSource && hasUserInput) {
+		ImGui::BeginDisabled(generating.load());
+		if (ImGui::Button("Grounded Edit Plan", ImVec2(150, 0))) {
+			submitScriptRequest(
+				ofxGgmlCodeAssistantAction::Edit,
+				scriptInput,
+				"",
+				"",
+				false,
+				true,
+				true,
+				"",
+				buildWorkspaceAllowedFiles());
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::TextDisabled("You have a workspace and a request loaded, so the strongest next step is a structured edit plan.");
+	} else if (hasWorkspaceSource) {
+		ImGui::BeginDisabled(generating.load());
+		if (ImGui::Button("Review workspace", ImVec2(150, 0))) {
+			runHierarchicalReview();
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::TextDisabled("No prompt yet. Start with a workspace review to surface the next useful change.");
+	}
+
+	// Save output to source.
+	if (hasScriptOutput && sourceType == ofxGgmlScriptSourceType::LocalFolder) {
 	ImGui::SameLine();
 	if (ImGui::Button("Save Output", ImVec2(120, 0))) {
 		std::string filename = buildScriptFilename();
@@ -3041,139 +3203,243 @@ void ofApp::drawTranslatePanel() {
 		ImGui::TextDisabled("%s", textServerCapabilityHint.c_str());
 	}
 
-if (translateLanguages.empty()) {
-	translateLanguages = ofxGgmlTextAssistant::defaultTranslateLanguages();
-}
-translateSourceLang = std::clamp(
-	translateSourceLang,
-	0,
-	std::max(0, static_cast<int>(translateLanguages.size()) - 1));
-translateTargetLang = std::clamp(
-	translateTargetLang,
-	0,
-	std::max(0, static_cast<int>(translateLanguages.size()) - 1));
-
-ImGui::Text("Source language:");
-ImGui::SameLine();
-ImGui::SetNextItemWidth(160);
-if (ImGui::BeginCombo("##SrcLang", translateLanguages[static_cast<size_t>(translateSourceLang)].name.c_str())) {
-	for (int i = 0; i < static_cast<int>(translateLanguages.size()); i++) {
-		const bool selected = (translateSourceLang == i);
-		if (ImGui::Selectable(translateLanguages[static_cast<size_t>(i)].name.c_str(), selected)) {
-			translateSourceLang = i;
-		}
-		if (selected) ImGui::SetItemDefaultFocus();
+	if (translateLanguages.empty()) {
+		translateLanguages = ofxGgmlTextAssistant::defaultTranslateLanguages();
 	}
-	ImGui::EndCombo();
-}
-ImGui::SameLine();
-ImGui::Text("  Target language:");
-ImGui::SameLine();
-ImGui::SetNextItemWidth(160);
-if (ImGui::BeginCombo("##TgtLang", translateLanguages[static_cast<size_t>(translateTargetLang)].name.c_str())) {
-	for (int i = 0; i < static_cast<int>(translateLanguages.size()); i++) {
-		const bool selected = (translateTargetLang == i);
-		if (ImGui::Selectable(translateLanguages[static_cast<size_t>(i)].name.c_str(), selected)) {
-			translateTargetLang = i;
-		}
-		if (selected) ImGui::SetItemDefaultFocus();
+	if (hasDeferredTranslateInput) {
+		copyStringToBuffer(
+			translateInput,
+			sizeof(translateInput),
+			deferredTranslateInput);
+		hasDeferredTranslateInput = false;
+		deferredTranslateInput.clear();
 	}
-	ImGui::EndCombo();
-}
-ImGui::SameLine();
-if (ImGui::Button("Swap", ImVec2(60, 0))) {
-std::swap(translateSourceLang, translateTargetLang);
-}
+	translateSourceLang = std::clamp(
+		translateSourceLang,
+		0,
+		std::max(0, static_cast<int>(translateLanguages.size()) - 1));
+	translateTargetLang = std::clamp(
+		translateTargetLang,
+		0,
+		std::max(0, static_cast<int>(translateLanguages.size()) - 1));
 
-ImGui::Text("Enter text to translate:");
-ImGui::InputTextMultiline("##TransIn", translateInput, sizeof(translateInput),
-ImVec2(-1, 120));
+	const auto currentSourceLanguage = [&]() -> std::string {
+		if (translateSourceLang < 0 ||
+			translateSourceLang >= static_cast<int>(translateLanguages.size())) {
+			return "Auto detect";
+		}
+		return translateLanguages[static_cast<size_t>(translateSourceLang)].name;
+	};
+	const auto currentTargetLanguage = [&]() -> std::string {
+		if (translateTargetLang < 0 ||
+			translateTargetLang >= static_cast<int>(translateLanguages.size())) {
+			return "English";
+		}
+		return translateLanguages[static_cast<size_t>(translateTargetLang)].name;
+	};
+	const auto sourceIsAutoDetect = [&]() -> bool {
+		return currentSourceLanguage() == "Auto detect";
+	};
+
+	ImGui::TextWrapped(
+		"Translate with cleaner output and quicker handoff from other panels. "
+		"Use Auto detect for unknown source text, then reuse the result in Write or as a fresh input.");
+
+	ImGui::Text("Source language:");
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(170);
+	if (ImGui::BeginCombo("##SrcLang", currentSourceLanguage().c_str())) {
+		for (int i = 0; i < static_cast<int>(translateLanguages.size()); i++) {
+			const bool selected = (translateSourceLang == i);
+			if (ImGui::Selectable(translateLanguages[static_cast<size_t>(i)].name.c_str(), selected)) {
+				translateSourceLang = i;
+				autoSaveSession();
+			}
+			if (selected) ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::SameLine();
+	ImGui::Text("Target language:");
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(170);
+	if (ImGui::BeginCombo("##TgtLang", currentTargetLanguage().c_str())) {
+		for (int i = 0; i < static_cast<int>(translateLanguages.size()); i++) {
+			if (translateLanguages[static_cast<size_t>(i)].name == "Auto detect") {
+				continue;
+			}
+			const bool selected = (translateTargetLang == i);
+			if (ImGui::Selectable(translateLanguages[static_cast<size_t>(i)].name.c_str(), selected)) {
+				translateTargetLang = i;
+				autoSaveSession();
+			}
+			if (selected) ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Swap", ImVec2(60, 0))) {
+		if (!sourceIsAutoDetect()) {
+			std::swap(translateSourceLang, translateTargetLang);
+		} else {
+			translateSourceLang = translateTargetLang;
+			for (int i = 0; i < static_cast<int>(translateLanguages.size()); ++i) {
+				if (translateLanguages[static_cast<size_t>(i)].name == "English") {
+					translateTargetLang = i;
+					break;
+				}
+			}
+		}
+		autoSaveSession();
+	}
+
+	const bool sameLanguages =
+		!sourceIsAutoDetect() &&
+		currentSourceLanguage() == currentTargetLanguage();
+	if (sameLanguages) {
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.7f, 0.3f, 1.0f),
+			"Source and target are currently the same language.");
+	}
+
+	ImGui::Separator();
+	ImGui::TextDisabled("Quick sources");
+	ImGui::BeginDisabled(trim(writeOutput).empty());
+	if (ImGui::SmallButton("Use Write output")) {
+		deferredTranslateInput = writeOutput;
+		hasDeferredTranslateInput = true;
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(customOutput).empty());
+	if (ImGui::SmallButton("Use Custom output")) {
+		deferredTranslateInput = customOutput;
+		hasDeferredTranslateInput = true;
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(speechOutput).empty());
+	if (ImGui::SmallButton("Use Speech output")) {
+		deferredTranslateInput = speechOutput;
+		hasDeferredTranslateInput = true;
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(translateOutput).empty());
+	if (ImGui::SmallButton("Use current translation")) {
+		deferredTranslateInput = translateOutput;
+		hasDeferredTranslateInput = true;
+	}
+	ImGui::EndDisabled();
+
+	ImGui::Text("Enter text to translate:");
+	ImGui::InputTextMultiline("##TransIn", translateInput, sizeof(translateInput),
+	ImVec2(-1, 120));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
 
 	bool hasInput = std::strlen(translateInput) > 0;
 	auto submitTranslatePrompt = [&](const std::string & instruction, const std::string & outputHeading) {
-		const std::string sourceLanguage =
-			translateLanguages[static_cast<size_t>(translateSourceLang)].name;
-		const std::string targetLanguage =
-			translateLanguages[static_cast<size_t>(translateTargetLang)].name;
+		const std::string sourceLanguage = currentSourceLanguage();
+		const std::string targetLanguage = currentTargetLanguage();
+		std::string languageLine = "Target language: " + targetLanguage + ".";
+		if (!sourceIsAutoDetect()) {
+			languageLine = "Source language: " + sourceLanguage + ". " + languageLine;
+		}
 		runInference(
 			AiMode::Translate,
 			translateInput,
 			"",
 			buildStructuredTextPrompt(
 				"You are a careful translator.",
-				instruction + " Source language: " + sourceLanguage + ". Target language: " + targetLanguage + ".",
+				instruction + " " + languageLine + " Preserve paragraph breaks and return only the requested result.",
 				"Text",
 				translateInput,
 				outputHeading));
 	};
-	ImGui::BeginDisabled(generating.load() || !hasInput);
+	ImGui::BeginDisabled(generating.load() || !hasInput || sameLanguages);
 	if (ImGui::Button("Translate", ImVec2(110, 0))) {
-	ofxGgmlTextAssistantRequest request;
-	request.task = ofxGgmlTextTask::Translate;
-	request.inputText = translateInput;
-	request.sourceLanguage = translateLanguages[static_cast<size_t>(translateSourceLang)].name;
-	request.targetLanguage = translateLanguages[static_cast<size_t>(translateTargetLang)].name;
-	const auto prepared = textAssistant.preparePrompt(request);
-	runInference(AiMode::Translate, request.inputText, "", prepared.prompt);
-}
-ImGui::SameLine();
+		ofxGgmlTextAssistantRequest request;
+		request.task = ofxGgmlTextTask::Translate;
+		request.inputText = translateInput;
+		request.sourceLanguage = currentSourceLanguage();
+		request.targetLanguage = currentTargetLanguage();
+		const auto prepared = textAssistant.preparePrompt(request);
+		runInference(AiMode::Translate, request.inputText, "", prepared.prompt);
+	}
+	ImGui::SameLine();
 	if (ImGui::Button("Detect Language", ImVec2(140, 0))) {
-	ofxGgmlTextAssistantRequest request;
-	request.task = ofxGgmlTextTask::DetectLanguage;
-	request.inputText = translateInput;
-	const auto prepared = textAssistant.preparePrompt(request);
-	runInference(AiMode::Translate, request.inputText, "", prepared.prompt);
+		ofxGgmlTextAssistantRequest request;
+		request.task = ofxGgmlTextTask::DetectLanguage;
+		request.inputText = translateInput;
+		const auto prepared = textAssistant.preparePrompt(request);
+		runInference(AiMode::Translate, request.inputText, "", prepared.prompt);
 	}
 	ImGui::EndDisabled();
-	ImGui::BeginDisabled(generating.load() || !hasInput);
+	ImGui::BeginDisabled(generating.load() || !hasInput || sameLanguages);
 	if (ImGui::Button("Natural", ImVec2(110, 0))) {
 		submitTranslatePrompt(
-			"Translate naturally and fluently for a native speaker while preserving intent and tone.",
+			"Translate naturally and fluently for a native speaker while preserving intent, tone, and formatting.",
 			"Natural translation");
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Literal", ImVec2(110, 0))) {
 		submitTranslatePrompt(
-			"Translate as literally as possible while remaining grammatical.",
+			"Translate as literally as possible while remaining grammatical and structurally faithful.",
 			"Literal translation");
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Detect + Translate", ImVec2(140, 0))) {
 		submitTranslatePrompt(
-			"Detect the source language first, then translate to the target language and mention the detected source language briefly.",
+			"Detect the source language first, then translate to the target language. Start with one short line naming the detected language, then provide the translation only.",
 			"Detected translation");
 	}
 	ImGui::EndDisabled();
 
 	ImGui::Separator();
 	ImGui::Text("Translation:");
-if (!translateOutput.empty()) {
-ImGui::SameLine();
-if (ImGui::SmallButton("Copy##TransCopy")) copyToClipboard(translateOutput);
-ImGui::SameLine();
-if (ImGui::SmallButton("Clear##TransClear")) translateOutput.clear();
-ImGui::SameLine();
-ImGui::TextDisabled("(%d chars)", static_cast<int>(translateOutput.size()));
-}
-if (generating.load() && activeGenerationMode == AiMode::Translate) {
-ImGui::BeginChild("##TransOut", ImVec2(0, 0), true);
-std::string partial;
-{
-std::lock_guard<std::mutex> lock(streamMutex);
-partial = streamingOutput;
-}
-if (partial.empty()) {
-int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
-ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
-} else {
-ImGui::TextWrapped("%s", partial.c_str());
-}
-ImGui::EndChild();
-} else {
-ImGui::BeginChild("##TransOut", ImVec2(0, 0), true);
-ImGui::TextWrapped("%s", translateOutput.c_str());
-ImGui::EndChild();
-}
+	if (!translateOutput.empty()) {
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Copy##TransCopy")) copyToClipboard(translateOutput);
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Use as input##TransReuse")) {
+			deferredTranslateInput = translateOutput;
+			hasDeferredTranslateInput = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Send to Write##TransToWrite")) {
+			copyStringToBuffer(writeInput, sizeof(writeInput), translateOutput);
+			activeMode = AiMode::Write;
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Clear##TransClear")) translateOutput.clear();
+		ImGui::SameLine();
+		ImGui::TextDisabled("(%d chars)", static_cast<int>(translateOutput.size()));
+	}
+	if (generating.load() && activeGenerationMode == AiMode::Translate) {
+		ImGui::BeginChild("##TransOut", ImVec2(0, 0), true);
+		std::string partial;
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			partial = streamingOutput;
+		}
+		if (partial.empty()) {
+			int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+			ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
+		} else {
+			ImGui::TextWrapped("%s", partial.c_str());
+		}
+		ImGui::EndChild();
+	} else {
+		ImGui::BeginChild("##TransOut", ImVec2(0, 0), true);
+		if (translateOutput.empty()) {
+			ImGui::TextDisabled("Translation results will appear here.");
+		} else {
+			ImGui::TextWrapped("%s", translateOutput.c_str());
+		}
+		ImGui::EndChild();
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -3486,6 +3752,60 @@ void ofApp::drawVisionImagePreview(const std::string & imagePath) {
 		"##VisionImagePreview");
 }
 
+int ofApp::findActiveMontageSourceCueIndex() const {
+	if (!montageSubtitlePlaybackEnabled ||
+		montageSourceSubtitleTrack.cues.empty() ||
+		!visionPreviewVideoReady ||
+		!visionPreviewVideo.isLoaded()) {
+		return -1;
+	}
+
+	const double durationSeconds = std::max(0.0, static_cast<double>(visionPreviewVideo.getDuration()));
+	const double currentSeconds = std::max(
+		0.0,
+		std::min(
+			durationSeconds,
+			static_cast<double>(visionPreviewVideo.getPosition()) * durationSeconds));
+	for (size_t i = 0; i < montageSourceSubtitleTrack.cues.size(); ++i) {
+		const auto & cue = montageSourceSubtitleTrack.cues[i];
+		if (currentSeconds >= cue.startSeconds && currentSeconds <= cue.endSeconds) {
+			return static_cast<int>(i);
+		}
+	}
+	return -1;
+}
+
+void ofApp::rebuildMontageSubtitleTrackFromText() {
+	montageSubtitleTrack = {};
+	if (trim(montageSrtText).empty()) {
+		selectedMontageCueIndex = -1;
+		return;
+	}
+
+	std::vector<ofxGgmlSimpleSrtCue> cues;
+	std::string error;
+	if (!ofxGgmlSimpleSrtSubtitleParser::parseText(montageSrtText, cues, error)) {
+		selectedMontageCueIndex = -1;
+		return;
+	}
+
+	montageSubtitleTrack.title = trim(montageEdlTitle).empty() ? "MONTAGE" : trim(montageEdlTitle);
+	montageSubtitleTrack.cues.reserve(cues.size());
+	for (size_t i = 0; i < cues.size(); ++i) {
+		const auto & cue = cues[i];
+		ofxGgmlMontageSubtitleCue montageCue;
+		montageCue.index = static_cast<int>(i + 1);
+		montageCue.startSeconds = std::max(0.0, static_cast<double>(cue.startMs) / 1000.0);
+		montageCue.endSeconds = std::max(montageCue.startSeconds, static_cast<double>(cue.endMs) / 1000.0);
+		montageCue.text = cue.text;
+		montageSubtitleTrack.cues.push_back(std::move(montageCue));
+	}
+
+	selectedMontageCueIndex = montageSubtitleTrack.cues.empty()
+		? -1
+		: std::clamp(selectedMontageCueIndex, 0, static_cast<int>(montageSubtitleTrack.cues.size()) - 1);
+}
+
 void ofApp::drawVisionVideoPreview(const std::string & videoPath) {
 	if (videoPath.empty()) {
 		return;
@@ -3504,6 +3824,43 @@ void ofApp::drawVisionVideoPreview(const std::string & videoPath) {
 		visionPreviewVideo.getWidth(),
 		visionPreviewVideo.getHeight());
 	drawMediaTexturePreview(visionPreviewVideo, "##VisionVideoPreview");
+
+	const float durationSeconds = std::max(0.0f, visionPreviewVideo.getDuration());
+	float previewPosition = std::clamp(visionPreviewVideo.getPosition(), 0.0f, 1.0f);
+	const float currentSeconds = previewPosition * durationSeconds;
+	if (ImGui::Button(visionPreviewVideo.isPaused() ? "Play preview" : "Pause preview", ImVec2(120, 0))) {
+		visionPreviewVideo.setPaused(!visionPreviewVideo.isPaused());
+		if (!visionPreviewVideo.isPaused()) {
+			visionPreviewVideo.play();
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Restart preview", ImVec2(120, 0))) {
+		visionPreviewVideo.play();
+		visionPreviewVideo.setPosition(0.0f);
+		if (visionPreviewVideo.isPaused()) {
+			visionPreviewVideo.update();
+		}
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("%.2fs / %.2fs", currentSeconds, durationSeconds);
+
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderFloat("Preview position", &previewPosition, 0.0f, 1.0f, "%.3f")) {
+		visionPreviewVideo.setPosition(previewPosition);
+		visionPreviewVideo.update();
+	}
+
+	if (montageSubtitlePlaybackEnabled && !montageSourceSubtitleTrack.cues.empty()) {
+		const int activeCueIndex = findActiveMontageSourceCueIndex();
+		if (activeCueIndex >= 0 &&
+			activeCueIndex < static_cast<int>(montageSourceSubtitleTrack.cues.size())) {
+			const auto & cue = montageSourceSubtitleTrack.cues[static_cast<size_t>(activeCueIndex)];
+			ImGui::Separator();
+			ImGui::TextDisabled("Live montage subtitle");
+			ImGui::TextWrapped("%s", cue.text.c_str());
+		}
+	}
 }
 
 void ofApp::ensureDiffusionPreviewResources() {
@@ -4471,6 +4828,18 @@ const int translateSourceLangSnapshot = translateSourceLang;
 const int translateTargetLangSnapshot = translateTargetLang;
 const int selectedScriptFileIndexSnapshot = selectedScriptFileIndex;
 const bool scriptIncludeRepoContextSnapshot = scriptIncludeRepoContext;
+const auto recentScriptTouchedFilesSnapshot = recentScriptTouchedFiles;
+const std::string lastScriptFailureReasonSnapshot = lastScriptFailureReason;
+const std::string scriptBackendLabelSnapshot = [&]() {
+	if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
+		const std::string serverUrl = trim(textServerUrl);
+		return serverUrl.empty()
+			? std::string("llama-server")
+			: std::string("llama-server @ ") + serverUrl;
+	}
+	const std::string cliPath = trim(llamaCliCommand);
+	return cliPath.empty() ? std::string("llama-completion") : cliPath;
+}();
 const auto chatLanguagesSnapshot = chatLanguages;
 const auto scriptLanguagesSnapshot = scriptLanguages;
 const auto translateLanguagesSnapshot = translateLanguages;
@@ -4494,6 +4863,8 @@ workerThread.join();
 		chatLanguageIndexSnapshot, selectedLanguageIndexSnapshot,
 		translateSourceLangSnapshot, translateTargetLangSnapshot,
 		selectedScriptFileIndexSnapshot, scriptIncludeRepoContextSnapshot,
+		recentScriptTouchedFilesSnapshot, lastScriptFailureReasonSnapshot,
+		scriptBackendLabelSnapshot,
 		chatLanguagesSnapshot, scriptLanguagesSnapshot, translateLanguagesSnapshot]() {
  try {
  const bool preserveLlamaInstructions = (mode == AiMode::Script);
@@ -4548,6 +4919,10 @@ workerThread.join();
 		context.includeRepoContext = scriptIncludeRepoContextSnapshot;
 		context.maxRepoFiles = kMaxScriptContextFiles;
 		context.maxFocusedFileChars = kMaxFocusedFileSnippetChars;
+		context.activeMode = "Script";
+		context.selectedBackend = scriptBackendLabelSnapshot;
+		context.recentTouchedFiles = recentScriptTouchedFilesSnapshot;
+		context.lastFailureReason = lastScriptFailureReasonSnapshot;
 		return scriptAssistant.preparePrompt(request, context).prompt;
 	}
 	case AiMode::Summarize: {
@@ -4830,6 +5205,32 @@ void ofApp::applyPendingOutput() {
 			scriptMessages.push_back({"assistant", pendingOutput, ofGetElapsedTimef()});
 			if (pendingOutput.rfind("[Error]", 0) != 0) {
 				scriptProjectMemory.addInteraction(lastScriptRequest, pendingOutput);
+				lastScriptFailureReason.clear();
+				const auto structured = ofxGgmlCodeAssistant::parseStructuredResult(pendingOutput);
+				std::vector<std::string> touchedFiles;
+				touchedFiles.reserve(
+					structured.filesToTouch.size() +
+					structured.patchOperations.size());
+				for (const auto & fileIntent : structured.filesToTouch) {
+					if (!fileIntent.filePath.empty()) {
+						touchedFiles.push_back(fileIntent.filePath);
+					}
+				}
+				for (const auto & patchOperation : structured.patchOperations) {
+					if (!patchOperation.filePath.empty()) {
+						touchedFiles.push_back(patchOperation.filePath);
+					}
+				}
+				std::sort(touchedFiles.begin(), touchedFiles.end());
+				touchedFiles.erase(
+					std::unique(touchedFiles.begin(), touchedFiles.end()),
+					touchedFiles.end());
+				recentScriptTouchedFiles = touchedFiles;
+				if (!structured.verificationCommands.empty()) {
+					cachedScriptVerificationCommands = structured.verificationCommands;
+				}
+			} else {
+				lastScriptFailureReason = pendingOutput;
 			}
 			fprintf(stderr, "%s\n", formatConsoleLogLine("Script", "AI", pendingOutput).c_str());
 			break;
@@ -4855,6 +5256,13 @@ void ofApp::applyPendingOutput() {
 			montageSummary = pendingMontageSummary;
 			montageEditorBrief = pendingMontageEditorBrief;
 			montageEdlText = pendingMontageEdlText;
+			montageSrtText = pendingMontageSrtText;
+			montageVttText = pendingMontageVttText;
+			montageSubtitleTrack = pendingMontageSubtitleTrack;
+			montageSourceSubtitleTrack = pendingMontageSourceSubtitleTrack;
+			selectedMontageCueIndex = montageSubtitleTrack.cues.empty()
+				? -1
+				: std::clamp(selectedMontageCueIndex, 0, static_cast<int>(montageSubtitleTrack.cues.size()) - 1);
 			videoPlanSummary = pendingVideoPlanSummary;
 			videoEditPlanSummary = pendingVideoEditPlanSummary;
 			if (!pendingVideoPlanJson.empty()) {
@@ -4934,6 +5342,10 @@ void ofApp::applyPendingOutput() {
 	pendingMontageSummary.clear();
 	pendingMontageEditorBrief.clear();
 	pendingMontageEdlText.clear();
+	pendingMontageSrtText.clear();
+	pendingMontageVttText.clear();
+	pendingMontageSubtitleTrack = {};
+	pendingMontageSourceSubtitleTrack = {};
 	pendingVideoPlanJson.clear();
 	pendingVideoPlanSummary.clear();
 	pendingVideoEditPlanJson.clear();
@@ -5011,6 +5423,1382 @@ break;
 
 void ofApp::copyToClipboard(const std::string & text) {
 ImGui::SetClipboardText(text.c_str());
+}
+
+void ofApp::drawStatusBar() {
+	statusBar.draw(
+		engineStatus,
+		modelPresets,
+		selectedModelIndex,
+		activeMode,
+		modeLabels,
+		chatLanguageIndex,
+		chatLanguages,
+		selectedLanguageIndex,
+		scriptLanguages,
+		maxTokens,
+		temperature,
+		topP,
+		topK,
+		minP,
+		liveContextMode,
+		gpuLayers,
+		detectedModelLayers,
+		generating,
+		generationStartTime,
+		streamingOutput,
+		streamMutex,
+		lastComputeMs);
+}
+
+void ofApp::drawDeviceInfoWindow() {
+	deviceInfoPanel.draw(showDeviceInfo, ggml, devices);
+}
+
+void ofApp::drawLogWindow() {
+	logPanel.draw(showLog, logMessages, logMutex);
+}
+
+ofxGgmlLiveSpeechSettings ofApp::makeLiveSpeechSettings() const {
+	ofxGgmlLiveSpeechSettings settings;
+	if (!speechProfiles.empty()) {
+		const int clampedIndex = std::clamp(
+			selectedSpeechProfileIndex,
+			0,
+			std::max(0, static_cast<int>(speechProfiles.size()) - 1));
+		settings.profile = speechProfiles[static_cast<size_t>(clampedIndex)];
+	}
+	settings.executable = trim(speechExecutable);
+	settings.modelPath = trim(speechModelPath);
+	settings.serverUrl = trim(speechServerUrl);
+	settings.serverModel = trim(speechServerModel);
+	settings.prompt = trim(speechPrompt);
+	settings.languageHint = trim(speechLanguageHint);
+	settings.task = static_cast<ofxGgmlSpeechTask>(std::clamp(speechTaskIndex, 0, 1));
+	settings.sampleRate = speechInputSampleRate;
+	settings.intervalSeconds = speechLiveIntervalSeconds;
+	settings.windowSeconds = speechLiveWindowSeconds;
+	settings.overlapSeconds = speechLiveOverlapSeconds;
+	settings.enabled = speechLiveTranscriptionEnabled;
+	settings.returnTimestamps = false;
+	return settings;
+}
+
+void ofApp::applyLiveSpeechTranscriberSettings() {
+	speechLiveTranscriber.setSettings(makeLiveSpeechSettings());
+	speechLiveTranscriber.setLogCallback(
+		[this](ofLogLevel level, const std::string & message) {
+			logWithLevel(level, message);
+		});
+}
+
+void ofApp::audioIn(ofSoundBuffer & input) {
+	if (!speechRecording) {
+		return;
+	}
+
+	const size_t channels = std::max<size_t>(1, input.getNumChannels());
+	const size_t frames = input.getNumFrames();
+	std::vector<float> monoSamples;
+	monoSamples.reserve(frames);
+	{
+		std::lock_guard<std::mutex> lock(speechRecordMutex);
+		speechRecordedSamples.reserve(speechRecordedSamples.size() + frames);
+		for (size_t frame = 0; frame < frames; ++frame) {
+			float mono = 0.0f;
+			for (size_t channel = 0; channel < channels; ++channel) {
+				mono += input[frame * channels + channel];
+			}
+			mono /= static_cast<float>(channels);
+			speechRecordedSamples.push_back(mono);
+			monoSamples.push_back(mono);
+		}
+	}
+	if (!monoSamples.empty()) {
+		speechLiveTranscriber.appendMonoSamples(monoSamples);
+	}
+}
+
+bool ofApp::ensureSpeechInputStreamReady() {
+	const bool configMatches =
+		speechInputStreamConfigured &&
+		speechInputStreamConfigSampleRate == speechInputSampleRate &&
+		speechInputStreamConfigChannels == speechInputChannels &&
+		speechInputStreamConfigBufferSize == speechInputBufferSize;
+	if (configMatches && speechInputStream.getSoundStream() != nullptr) {
+		return true;
+	}
+
+	if (speechInputStream.getSoundStream() != nullptr) {
+		speechInputStream.stop();
+		speechInputStream.close();
+	}
+
+	ofSoundStreamSettings settings;
+	settings.setInListener(this);
+	settings.sampleRate = speechInputSampleRate;
+	settings.numInputChannels = speechInputChannels;
+	settings.numOutputChannels = 0;
+	settings.bufferSize = speechInputBufferSize;
+	settings.numBuffers = 4;
+	if (!speechInputStream.setup(settings)) {
+		speechInputStreamConfigured = false;
+		return false;
+	}
+
+	speechInputStreamConfigured = true;
+	speechInputStreamConfigSampleRate = speechInputSampleRate;
+	speechInputStreamConfigChannels = speechInputChannels;
+	speechInputStreamConfigBufferSize = speechInputBufferSize;
+	return true;
+}
+
+bool ofApp::startSpeechRecording() {
+	if (speechRecording) {
+		return true;
+	}
+
+	try {
+		applyLiveSpeechTranscriberSettings();
+		{
+			std::lock_guard<std::mutex> lock(speechRecordMutex);
+			speechRecordedSamples.clear();
+			speechRecordedTempPath.clear();
+		}
+		if (!ensureSpeechInputStreamReady()) {
+			logWithLevel(OF_LOG_ERROR, "Failed to open microphone input stream for speech mode.");
+			return false;
+		}
+		speechRecording = true;
+		speechRecordingStartTime = ofGetElapsedTimef();
+		if (speechLiveTranscriptionEnabled) {
+			speechLiveTranscriber.beginCapture(true);
+		}
+		logWithLevel(OF_LOG_NOTICE, "Started microphone recording for speech mode.");
+		return true;
+	} catch (const std::exception & e) {
+		logWithLevel(OF_LOG_ERROR, std::string("Failed to start microphone recording: ") + e.what());
+		return false;
+	} catch (...) {
+		logWithLevel(OF_LOG_ERROR, "Failed to start microphone recording.");
+		return false;
+	}
+}
+
+void ofApp::stopSpeechRecording(bool keepBufferedAudio) {
+	if (speechRecording) {
+		speechRecording = false;
+		speechRecordingStartTime = 0.0f;
+	}
+	if (!keepBufferedAudio) {
+		std::lock_guard<std::mutex> lock(speechRecordMutex);
+		speechRecordedSamples.clear();
+		speechRecordedTempPath.clear();
+	}
+	applyLiveSpeechTranscriberSettings();
+	speechLiveTranscriber.stopCapture(keepBufferedAudio);
+	if (!speechLiveTranscriptionEnabled) {
+		speechLiveTranscriber.reset(!keepBufferedAudio);
+	}
+}
+
+std::string ofApp::flushSpeechRecordingToTempWav() {
+	std::vector<float> recorded;
+	{
+		std::lock_guard<std::mutex> lock(speechRecordMutex);
+		recorded = speechRecordedSamples;
+	}
+	if (recorded.empty()) {
+		return {};
+	}
+	if (speechRecordedTempPath.empty()) {
+		speechRecordedTempPath = makeTempMicRecordingPath();
+	}
+	if (!writeMonoWavFile(speechRecordedTempPath, recorded, speechInputSampleRate)) {
+		logWithLevel(OF_LOG_ERROR, "Failed to write microphone recording to WAV.");
+		return {};
+	}
+	return speechRecordedTempPath;
+}
+
+bool ofApp::ensureTtsProfilesLoaded() {
+	if (ttsProfiles.empty()) {
+		ttsProfiles = ofxGgmlTtsInference::defaultProfiles();
+		selectedTtsProfileIndex = 0;
+	}
+	if (ttsProfiles.empty()) {
+		selectedTtsProfileIndex = 0;
+		return false;
+	}
+	selectedTtsProfileIndex = std::clamp(
+		selectedTtsProfileIndex,
+		0,
+		std::max(0, static_cast<int>(ttsProfiles.size()) - 1));
+	return true;
+}
+
+ofxGgmlTtsModelProfile ofApp::getSelectedTtsProfile() const {
+	if (ttsProfiles.empty()) {
+		return {};
+	}
+	const int clampedIndex = std::clamp(
+		selectedTtsProfileIndex,
+		0,
+		std::max(0, static_cast<int>(ttsProfiles.size()) - 1));
+	return ttsProfiles[static_cast<size_t>(clampedIndex)];
+}
+
+void ofApp::applyTtsProfileDefaults(
+	const ofxGgmlTtsModelProfile & profile,
+	bool onlyWhenEmpty) {
+	const std::string suggestedPath =
+		suggestedModelPath(profile.modelPath, profile.modelFileHint);
+	if (!suggestedPath.empty() &&
+		(!onlyWhenEmpty || trim(ttsModelPath).empty())) {
+		copyStringToBuffer(ttsModelPath, sizeof(ttsModelPath), suggestedPath);
+	}
+	const std::string suggestedSpeakerPath =
+		suggestedModelPath(profile.speakerPath, profile.speakerFileHint);
+	if (!suggestedSpeakerPath.empty() &&
+		(!onlyWhenEmpty || trim(ttsSpeakerPath).empty())) {
+		copyStringToBuffer(ttsSpeakerPath, sizeof(ttsSpeakerPath), suggestedSpeakerPath);
+	}
+	if (trim(ttsOutputPath).empty()) {
+		copyStringToBuffer(
+			ttsOutputPath,
+			sizeof(ttsOutputPath),
+			ofToDataPath("generated/tts_output.wav", true));
+	}
+}
+
+std::string ofApp::resolveConfiguredTtsExecutable() const {
+	return ofxGgmlChatLlmTtsAdapters::resolveChatLlmExecutable(trim(ttsExecutablePath));
+}
+
+std::shared_ptr<ofxGgmlTtsBackend> ofApp::createConfiguredTtsBackend(
+	const std::string & executableHint) const {
+	ofxGgmlChatLlmTtsAdapters::RuntimeOptions runtimeOptions;
+	runtimeOptions.executablePath =
+		executableHint.empty() ? trim(ttsExecutablePath) : executableHint;
+	return ofxGgmlChatLlmTtsAdapters::createBackend(runtimeOptions, "ChatLLM TTS");
+}
+
+bool ofApp::ensureClipBackendConfigured(
+	const std::string & modelPath,
+	int verbosity,
+	bool normalizeEmbeddings) {
+#if OFXGGML_HAS_CLIPCPP
+	const std::string trimmedModelPath = trim(modelPath);
+	if (trimmedModelPath.empty()) {
+		return false;
+	}
+	const int clampedVerbosity = std::clamp(verbosity, 0, 2);
+	const bool needsReload =
+		!clipInference.getBackend() ||
+		clipInference.getBackend()->backendName() != "clip.cpp" ||
+		configuredClipBackendModelPath != trimmedModelPath ||
+		configuredClipBackendVerbosity != clampedVerbosity ||
+		configuredClipBackendNormalize != normalizeEmbeddings;
+	if (needsReload) {
+		ofxGgmlClipCppAdapters::RuntimeOptions options;
+		options.verbosity = clampedVerbosity;
+		options.normalizeByDefault = normalizeEmbeddings;
+		ofxGgmlClipCppAdapters::attachBackend(
+			clipInference,
+			trimmedModelPath,
+			options,
+			"clip.cpp");
+		configuredClipBackendModelPath = trimmedModelPath;
+		configuredClipBackendVerbosity = clampedVerbosity;
+		configuredClipBackendNormalize = normalizeEmbeddings;
+	}
+	return clipInference.getBackend() != nullptr;
+#else
+	(void)modelPath;
+	(void)verbosity;
+	(void)normalizeEmbeddings;
+	return clipInference.getBackend() != nullptr;
+#endif
+}
+
+bool ofApp::ensureDiffusionBackendConfigured() {
+#if OFXGGML_HAS_OFXSTABLEDIFFUSION
+	if (!stableDiffusionEngine) {
+		stableDiffusionEngine = std::make_shared<ofxStableDiffusion>();
+	}
+	const auto existingBackend = diffusionInference.getBackend();
+	const auto existingBridge =
+		std::dynamic_pointer_cast<ofxGgmlStableDiffusionBridgeBackend>(existingBackend);
+	const bool backendNeedsAttach =
+		!existingBackend ||
+		!existingBridge ||
+		!existingBridge->isConfigured() ||
+		existingBackend->backendName() != "ofxStableDiffusion";
+	if (backendNeedsAttach) {
+		ofxGgmlStableDiffusionAdapters::RuntimeOptions runtimeOptions;
+		runtimeOptions.clipInference =
+			std::shared_ptr<ofxGgmlClipInference>(&clipInference, [](ofxGgmlClipInference *) {});
+		diffusionInference.setBackend(
+			ofxGgmlStableDiffusionAdapters::createImageBackend(
+				stableDiffusionEngine,
+				runtimeOptions));
+	}
+	return diffusionInference.getBackend() != nullptr;
+#else
+	return diffusionInference.getBackend() != nullptr;
+#endif
+}
+
+bool ofApp::ensureDiffusionClipBackendConfigured() {
+	return ensureClipBackendConfigured(trim(clipModelPath), clipVerbosity, clipNormalizeEmbeddings);
+}
+
+std::string ofApp::getPreferredDiffusionReuseImagePath() const {
+	for (const auto & image : diffusionGeneratedImages) {
+		if (image.selected && !trim(image.path).empty()) {
+			return trim(image.path);
+		}
+	}
+	if (!diffusionGeneratedImages.empty()) {
+		return trim(diffusionGeneratedImages.front().path);
+	}
+	return trim(visionImagePath);
+}
+
+void ofApp::setDiffusionInitImagePath(const std::string & path, bool promoteTask) {
+	const std::string trimmedPath = trim(path);
+	if (trimmedPath.empty()) {
+		return;
+	}
+	copyStringToBuffer(diffusionInitImagePath, sizeof(diffusionInitImagePath), trimmedPath);
+	if (promoteTask &&
+		static_cast<ofxGgmlImageGenerationTask>(std::clamp(diffusionTaskIndex, 0, 6)) ==
+			ofxGgmlImageGenerationTask::TextToImage) {
+		diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::ImageToImage);
+	}
+	autoSaveSession();
+}
+
+void ofApp::copyDiffusionOutputsToClipPaths() {
+	std::ostringstream joined;
+	for (size_t i = 0; i < diffusionGeneratedImages.size(); ++i) {
+		if (i > 0) {
+			joined << "\n";
+		}
+		joined << diffusionGeneratedImages[i].path;
+	}
+	copyStringToBuffer(clipImagePaths, sizeof(clipImagePaths), joined.str());
+	autoSaveSession();
+}
+
+std::string ofApp::getSelectedModelPath() const {
+	if (modelPresets.empty()) return "";
+	if (selectedModelIndex < 0 || selectedModelIndex >= static_cast<int>(modelPresets.size())) return "";
+	if (cachedModelPathIndex == selectedModelIndex && !cachedModelPath.empty()) {
+		return cachedModelPath;
+	}
+	const auto & preset = modelPresets[static_cast<size_t>(selectedModelIndex)];
+	cachedModelPath = ofToDataPath(ofFilePath::join("models", preset.filename), true);
+	cachedModelPathIndex = selectedModelIndex;
+	return cachedModelPath;
+}
+
+void ofApp::detectModelLayers() {
+	detectedModelLayers = 0;
+	const std::string modelPath = getSelectedModelPath();
+	if (modelPath.empty()) {
+		return;
+	}
+
+	std::error_code ec;
+	if (!std::filesystem::exists(modelPath, ec) || ec) {
+		return;
+	}
+
+	detectedModelLayers = detectGgufLayerCountMetadata(modelPath);
+	if (detectedModelLayers > 0 && shouldLog(OF_LOG_VERBOSE)) {
+		logWithLevel(
+			OF_LOG_VERBOSE,
+			"Detected " + ofToString(detectedModelLayers) + " layers from GGUF metadata.");
+	}
+}
+
+void ofApp::runHierarchicalReview(const std::string & overrideQuery) {
+	const std::string effectiveReviewQuery = !trim(overrideQuery).empty()
+		? trim(overrideQuery)
+		: (std::strlen(scriptInput) > 0
+			? std::string(scriptInput)
+			: ofxGgmlCodeReview::defaultReviewQuery());
+	runInference(AiMode::Script, effectiveReviewQuery);
+}
+
+void ofApp::drawSpeechPanel() {
+	drawPanelHeader("Speech", "audio transcription and translation via Whisper backends");
+	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
+
+	if (speechProfiles.empty()) {
+		speechProfiles = ofxGgmlSpeechInference::defaultProfiles();
+	}
+	selectedSpeechProfileIndex = std::clamp(
+		selectedSpeechProfileIndex,
+		0,
+		std::max(0, static_cast<int>(speechProfiles.size()) - 1));
+
+	if (!speechProfiles.empty()) {
+		std::vector<const char *> profileNames;
+		profileNames.reserve(speechProfiles.size());
+		for (const auto & profile : speechProfiles) {
+			profileNames.push_back(profile.name.c_str());
+		}
+		ImGui::SetNextItemWidth(260);
+		if (ImGui::Combo(
+			"Speech profile",
+			&selectedSpeechProfileIndex,
+			profileNames.data(),
+			static_cast<int>(profileNames.size()))) {
+			const auto & profile = speechProfiles[static_cast<size_t>(selectedSpeechProfileIndex)];
+			if (!profile.executable.empty()) {
+				copyStringToBuffer(speechExecutable, sizeof(speechExecutable), profile.executable);
+			}
+			const std::string suggestedPath =
+				suggestedModelPath(profile.modelPath, profile.modelFileHint);
+			if (!suggestedPath.empty()) {
+				copyStringToBuffer(speechModelPath, sizeof(speechModelPath), suggestedPath);
+			}
+			if (!profile.supportsTranslate &&
+				speechTaskIndex == static_cast<int>(ofxGgmlSpeechTask::Translate)) {
+				speechTaskIndex = static_cast<int>(ofxGgmlSpeechTask::Transcribe);
+			}
+			autoSaveSession();
+		}
+	}
+
+	if (hasDeferredSpeechAudioPath) {
+		copyStringToBuffer(
+			speechAudioPath,
+			sizeof(speechAudioPath),
+			deferredSpeechAudioPath);
+		hasDeferredSpeechAudioPath = false;
+		deferredSpeechAudioPath.clear();
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Audio path", speechAudioPath, sizeof(speechAudioPath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Browse audio...", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select audio file", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(speechAudioPath, sizeof(speechAudioPath), result.getPath());
+			autoSaveSession();
+		}
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Server URL", speechServerUrl, sizeof(speechServerUrl));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Server model", speechServerModel, sizeof(speechServerModel));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	if (!speechServerStatusMessage.empty()) {
+		ImGui::TextDisabled("%s", speechServerStatusMessage.c_str());
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Executable", speechExecutable, sizeof(speechExecutable));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Model path", speechModelPath, sizeof(speechModelPath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Browse model...", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select Whisper model", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(speechModelPath, sizeof(speechModelPath), result.getPath());
+			autoSaveSession();
+		}
+	}
+
+	static const char * speechTaskLabels[] = {"Transcribe", "Translate"};
+	ImGui::SetNextItemWidth(180);
+	ImGui::Combo("Speech task", &speechTaskIndex, speechTaskLabels, 2);
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Language hint", speechLanguageHint, sizeof(speechLanguageHint));
+	ImGui::Checkbox("Return timestamps", &speechReturnTimestamps);
+	ImGui::InputTextMultiline(
+		"Speech prompt",
+		speechPrompt,
+		sizeof(speechPrompt),
+		ImVec2(-1, 80));
+
+	const bool liveToggleChanged =
+		ImGui::Checkbox("Live mic transcription", &speechLiveTranscriptionEnabled);
+	if (liveToggleChanged) {
+		applyLiveSpeechTranscriberSettings();
+		if (!speechLiveTranscriptionEnabled) {
+			speechLiveTranscriber.reset(false);
+		} else if (speechRecording) {
+			speechLiveTranscriber.beginCapture(false);
+		}
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Live interval", &speechLiveIntervalSeconds, 0.5f, 5.0f, "%.2f s");
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Live window", &speechLiveWindowSeconds, 2.0f, 30.0f, "%.1f s");
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Live overlap", &speechLiveOverlapSeconds, 0.0f, 3.0f, "%.2f s");
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		applyLiveSpeechTranscriberSettings();
+		autoSaveSession();
+	}
+
+	const bool hasBufferedMicAudio = [&]() {
+		std::lock_guard<std::mutex> lock(speechRecordMutex);
+		return !speechRecordedSamples.empty();
+	}();
+	if (!speechRecording) {
+		if (ImGui::Button("Start Mic Recording", ImVec2(160, 0))) {
+			startSpeechRecording();
+		}
+	} else {
+		if (ImGui::Button("Stop Mic", ImVec2(160, 0))) {
+			stopSpeechRecording(true);
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled(
+			"Recording: %.1f s",
+			std::max(0.0f, ofGetElapsedTimef() - speechRecordingStartTime));
+	}
+	if (hasBufferedMicAudio) {
+		ImGui::SameLine();
+		if (ImGui::Button("Use Recording", ImVec2(140, 0))) {
+			const std::string tempPath = flushSpeechRecordingToTempWav();
+			if (!tempPath.empty()) {
+				deferredSpeechAudioPath = tempPath;
+				hasDeferredSpeechAudioPath = true;
+				autoSaveSession();
+			}
+		}
+	}
+
+	const bool canRunSpeech =
+		!generating.load() &&
+		(std::strlen(speechAudioPath) > 0 || hasBufferedMicAudio);
+	ImGui::BeginDisabled(!canRunSpeech);
+	if (ImGui::Button("Run Speech", ImVec2(140, 0))) {
+		if (std::strlen(speechAudioPath) == 0) {
+			const std::string tempPath = flushSpeechRecordingToTempWav();
+			if (!tempPath.empty()) {
+				copyStringToBuffer(speechAudioPath, sizeof(speechAudioPath), tempPath);
+			}
+		}
+		runSpeechInference();
+	}
+	ImGui::EndDisabled();
+
+	const ofxGgmlLiveSpeechSnapshot liveSnapshot = speechLiveTranscriber.getSnapshot();
+	if (speechLiveTranscriptionEnabled) {
+		ImGui::Separator();
+		ImGui::TextDisabled(
+			"Live status: %s | buffered %.1f s%s",
+			liveSnapshot.status.empty() ? "idle" : liveSnapshot.status.c_str(),
+			static_cast<float>(liveSnapshot.bufferedSeconds),
+			liveSnapshot.busy ? " | transcribing" : "");
+		if (!liveSnapshot.detectedLanguage.empty()) {
+			ImGui::TextDisabled("Detected language: %s", liveSnapshot.detectedLanguage.c_str());
+		}
+		ImGui::BeginChild("##SpeechLiveTranscript", ImVec2(0, 120), true);
+		if (liveSnapshot.transcript.empty()) {
+			ImGui::TextDisabled("Live transcript will appear here while recording.");
+		} else {
+			ImGui::TextWrapped("%s", liveSnapshot.transcript.c_str());
+		}
+		ImGui::EndChild();
+	}
+
+	ImGui::Separator();
+	if (!speechDetectedLanguage.empty()) {
+		ImGui::TextDisabled("Detected language: %s", speechDetectedLanguage.c_str());
+	}
+	if (!speechTranscriptPath.empty()) {
+		ImGui::TextDisabled("Transcript file: %s", speechTranscriptPath.c_str());
+	}
+	if (!speechSrtPath.empty()) {
+		ImGui::TextDisabled("SRT file: %s", speechSrtPath.c_str());
+	}
+	if (speechSegmentCount > 0) {
+		ImGui::TextDisabled("Segments: %d", speechSegmentCount);
+	}
+	ImGui::BeginChild("##SpeechOut", ImVec2(0, 0), true);
+	if (generating.load() && activeGenerationMode == AiMode::Speech) {
+		std::string partial;
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			partial = streamingOutput;
+		}
+		if (partial.empty()) {
+			ImGui::TextDisabled("Transcribing...");
+		} else {
+			ImGui::TextWrapped("%s", partial.c_str());
+		}
+	} else if (speechOutput.empty()) {
+		ImGui::TextDisabled("Speech transcription appears here.");
+	} else {
+		ImGui::TextWrapped("%s", speechOutput.c_str());
+	}
+	ImGui::EndChild();
+}
+
+void ofApp::drawTtsPanel() {
+	drawPanelHeader("TTS", "local text-to-speech via chatllm.cpp-backed OuteTTS models");
+	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
+
+	const bool loadedTtsProfiles = ensureTtsProfilesLoaded();
+	if (loadedTtsProfiles && !ttsProfiles.empty()) {
+		applyTtsProfileDefaults(getSelectedTtsProfile(), true);
+	}
+	if (trim(ttsExecutablePath).empty()) {
+		copyStringToBuffer(
+			ttsExecutablePath,
+			sizeof(ttsExecutablePath),
+			ofxGgmlChatLlmTtsAdapters::preferredLocalExecutablePath());
+	}
+
+	const ofxGgmlTtsModelProfile activeProfile = getSelectedTtsProfile();
+	if (!ttsProfiles.empty()) {
+		std::vector<const char *> profileNames;
+		profileNames.reserve(ttsProfiles.size());
+		for (const auto & profile : ttsProfiles) {
+			profileNames.push_back(profile.name.c_str());
+		}
+		ImGui::SetNextItemWidth(280);
+		if (ImGui::Combo(
+			"TTS profile",
+			&selectedTtsProfileIndex,
+			profileNames.data(),
+			static_cast<int>(profileNames.size()))) {
+			applyTtsProfileDefaults(getSelectedTtsProfile(), false);
+			autoSaveSession();
+		}
+		if (!activeProfile.modelRepoHint.empty()) {
+			ImGui::TextDisabled("Recommended repo: %s", activeProfile.modelRepoHint.c_str());
+		}
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Executable", ttsExecutablePath, sizeof(ttsExecutablePath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Browse exe##Tts", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select chatllm executable", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(ttsExecutablePath, sizeof(ttsExecutablePath), result.getPath());
+			autoSaveSession();
+		}
+	}
+	ImGui::TextDisabled("Resolved executable: %s", resolveConfiguredTtsExecutable().c_str());
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Model path", ttsModelPath, sizeof(ttsModelPath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Browse model##Tts", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select TTS model", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(ttsModelPath, sizeof(ttsModelPath), result.getPath());
+			autoSaveSession();
+		}
+	}
+
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Speaker profile", ttsSpeakerPath, sizeof(ttsSpeakerPath));
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Reference audio", ttsSpeakerReferencePath, sizeof(ttsSpeakerReferencePath));
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Prompt audio", ttsPromptAudioPath, sizeof(ttsPromptAudioPath));
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Output path", ttsOutputPath, sizeof(ttsOutputPath));
+	ImGui::SetNextItemWidth(160);
+	ImGui::InputText("Language", ttsLanguage, sizeof(ttsLanguage));
+
+	static const char * ttsTaskLabels[] = {"Synthesize", "Clone Voice", "Continue Speech"};
+	ImGui::SetNextItemWidth(200);
+	ImGui::Combo("TTS task", &ttsTaskIndex, ttsTaskLabels, 3);
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Seed", &ttsSeed, -1, 999999);
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Max tokens", &ttsMaxTokens, 0, 4096);
+	ImGui::SetNextItemWidth(220);
+	ImGui::SliderFloat("Temperature", &ttsTemperature, 0.0f, 2.0f, "%.2f");
+	ImGui::SetNextItemWidth(220);
+	ImGui::SliderFloat("Repetition penalty", &ttsRepetitionPenalty, 1.0f, 3.0f, "%.2f");
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Repetition range", &ttsRepetitionRange, 0, 512);
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Top K", &ttsTopK, 0, 200);
+	ImGui::SetNextItemWidth(220);
+	ImGui::SliderFloat("Top P", &ttsTopP, 0.0f, 1.0f, "%.2f");
+	ImGui::SetNextItemWidth(220);
+	ImGui::SliderFloat("Min P", &ttsMinP, 0.0f, 1.0f, "%.2f");
+	ImGui::Checkbox("Stream audio", &ttsStreamAudio);
+	ImGui::SameLine();
+	ImGui::Checkbox("Normalize text", &ttsNormalizeText);
+
+	ImGui::InputTextMultiline(
+		"TTS text",
+		ttsInput,
+		sizeof(ttsInput),
+		ImVec2(-1, 120));
+
+	const bool canRunTts =
+		!generating.load() &&
+		std::strlen(ttsInput) > 0 &&
+		std::strlen(ttsModelPath) > 0;
+	ImGui::BeginDisabled(!canRunTts);
+	if (ImGui::Button("Run TTS", ImVec2(140, 0))) {
+		runTtsInference();
+	}
+	ImGui::EndDisabled();
+
+	ImGui::Separator();
+	if (!ttsBackendName.empty()) {
+		ImGui::TextDisabled(
+			"Last backend: %s%s",
+			ttsBackendName.c_str(),
+			ttsElapsedMs > 0.0f
+				? (" in " + ofxGgmlHelpers::formatDurationMs(ttsElapsedMs)).c_str()
+				: "");
+	}
+	if (!ttsResolvedSpeakerPath.empty()) {
+		ImGui::TextDisabled("Resolved speaker: %s", ttsResolvedSpeakerPath.c_str());
+	}
+	if (!ttsAudioFiles.empty()) {
+		ImGui::TextDisabled("Generated audio:");
+		for (const auto & artifact : ttsAudioFiles) {
+			ImGui::BulletText("%s", artifact.path.c_str());
+		}
+	}
+	ImGui::BeginChild("##TtsOut", ImVec2(0, 0), true);
+	if (generating.load() && activeGenerationMode == AiMode::Tts) {
+		std::string partial;
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			partial = streamingOutput;
+		}
+		if (partial.empty()) {
+			ImGui::TextDisabled("Synthesizing...");
+		} else {
+			ImGui::TextWrapped("%s", partial.c_str());
+		}
+	} else if (ttsOutput.empty()) {
+		ImGui::TextDisabled("TTS output appears here.");
+	} else {
+		ImGui::TextWrapped("%s", ttsOutput.c_str());
+	}
+	ImGui::EndChild();
+}
+
+std::string ofApp::escapeSessionText(const std::string & text) const {
+	return text;
+}
+
+std::string ofApp::unescapeSessionText(const std::string & text) const {
+	return text;
+}
+
+bool ofApp::saveSession(const std::string & path) {
+	ofJson session;
+	session["format"] = "ofxGgmlGuiSession";
+	session["version"] = 2;
+
+	session["settings"] = {
+		{"activeMode", static_cast<int>(activeMode)},
+		{"selectedModelIndex", selectedModelIndex},
+		{"selectedLanguageIndex", selectedLanguageIndex},
+		{"translateSourceLang", translateSourceLang},
+		{"translateTargetLang", translateTargetLang},
+		{"chatLanguageIndex", chatLanguageIndex},
+		{"maxTokens", maxTokens},
+		{"temperature", temperature},
+		{"topP", topP},
+		{"topK", topK},
+		{"minP", minP},
+		{"repeatPenalty", repeatPenalty},
+		{"contextSize", contextSize},
+		{"batchSize", batchSize},
+		{"gpuLayers", gpuLayers},
+		{"seed", seed},
+		{"numThreads", numThreads},
+		{"selectedBackendIndex", selectedBackendIndex},
+		{"themeIndex", themeIndex},
+		{"mirostatMode", mirostatMode},
+		{"mirostatTau", mirostatTau},
+		{"mirostatEta", mirostatEta},
+		{"textInferenceBackend", static_cast<int>(textInferenceBackend)},
+		{"useModeTokenBudgets", useModeTokenBudgets},
+		{"autoContinueCutoff", autoContinueCutoff},
+		{"usePromptCache", usePromptCache},
+		{"logLevel", static_cast<int>(logLevel)},
+		{"liveContextMode", static_cast<int>(liveContextMode)},
+		{"liveContextAllowPromptUrls", liveContextAllowPromptUrls},
+		{"liveContextAllowDomainProviders", liveContextAllowDomainProviders},
+		{"liveContextAllowGenericSearch", liveContextAllowGenericSearch},
+		{"scriptIncludeRepoContext", scriptIncludeRepoContext},
+		{"selectedVisionProfileIndex", selectedVisionProfileIndex},
+		{"selectedSpeechProfileIndex", selectedSpeechProfileIndex},
+		{"selectedTtsProfileIndex", selectedTtsProfileIndex},
+		{"selectedDiffusionProfileIndex", selectedDiffusionProfileIndex}
+	};
+	session["settings"]["modeMaxTokens"] = ofJson::array();
+	for (int i = 0; i < kModeCount; ++i) {
+		session["settings"]["modeMaxTokens"].push_back(modeMaxTokens[static_cast<size_t>(i)]);
+	}
+	session["settings"]["modeTextBackendIndices"] = ofJson::array();
+	for (int i = 0; i < kModeCount; ++i) {
+		session["settings"]["modeTextBackendIndices"].push_back(modeTextBackendIndices[static_cast<size_t>(i)]);
+	}
+	if (selectedBackendIndex >= 0 &&
+		selectedBackendIndex < static_cast<int>(backendNames.size())) {
+		session["settings"]["selectedBackendName"] =
+			backendNames[static_cast<size_t>(selectedBackendIndex)];
+	}
+
+	const ofxGgmlScriptSourceType savedScriptSourceType =
+		deferredScriptSourceRestorePending ? deferredScriptSourceType : scriptSource.getSourceType();
+	const std::string savedScriptSourcePath =
+		deferredScriptSourceRestorePending ? deferredScriptSourcePath : scriptSource.getLocalFolderPath();
+	std::string savedScriptSourceInternetUrls = deferredScriptSourceRestorePending
+		? deferredScriptSourceInternetUrls
+		: std::string();
+	if (!deferredScriptSourceRestorePending) {
+		const auto internetUrls = scriptSource.getInternetUrls();
+		for (size_t i = 0; i < internetUrls.size(); ++i) {
+			if (i > 0) {
+				savedScriptSourceInternetUrls += "\n";
+			}
+			savedScriptSourceInternetUrls += internetUrls[i];
+		}
+	}
+	session["scriptSource"] = {
+		{"type", static_cast<int>(savedScriptSourceType)},
+		{"path", savedScriptSourcePath},
+		{"github", std::string(scriptSourceGitHub)},
+		{"branch", std::string(scriptSourceBranch)},
+		{"internetUrls", savedScriptSourceInternetUrls},
+		{"projectMemoryEnabled", scriptProjectMemory.isEnabled()},
+		{"projectMemoryText", scriptProjectMemory.getMemoryText()}
+	};
+
+	session["buffers"] = {
+		{"chatInput", std::string(chatInput)},
+		{"scriptInput", std::string(scriptInput)},
+		{"summarizeInput", std::string(summarizeInput)},
+		{"writeInput", std::string(writeInput)},
+		{"translateInput", std::string(translateInput)},
+		{"customInput", std::string(customInput)},
+		{"customSystemPrompt", std::string(customSystemPrompt)},
+		{"sourceUrlsInput", std::string(sourceUrlsInput)},
+		{"textServerUrl", std::string(textServerUrl)},
+		{"textServerModel", std::string(textServerModel)},
+		{"visionPrompt", std::string(visionPrompt)},
+		{"visionImagePath", std::string(visionImagePath)},
+		{"visionVideoPath", std::string(visionVideoPath)},
+		{"visionModelPath", std::string(visionModelPath)},
+		{"visionServerUrl", std::string(visionServerUrl)},
+		{"videoSidecarUrl", std::string(videoSidecarUrl)},
+		{"videoSidecarModel", std::string(videoSidecarModel)},
+		{"visionSystemPrompt", std::string(visionSystemPrompt)},
+		{"videoPlanJson", std::string(videoPlanJson)},
+		{"videoEditPlanJson", std::string(videoEditPlanJson)},
+		{"montageSubtitlePath", std::string(montageSubtitlePath)},
+		{"montageGoal", std::string(montageGoal)},
+		{"montageEdlTitle", std::string(montageEdlTitle)},
+		{"montageReelName", std::string(montageReelName)},
+		{"videoEditGoal", std::string(videoEditGoal)},
+		{"speechAudioPath", std::string(speechAudioPath)},
+		{"speechExecutable", std::string(speechExecutable)},
+		{"speechModelPath", std::string(speechModelPath)},
+		{"speechServerUrl", std::string(speechServerUrl)},
+		{"speechServerModel", std::string(speechServerModel)},
+		{"speechPrompt", std::string(speechPrompt)},
+		{"speechLanguageHint", std::string(speechLanguageHint)},
+		{"ttsInput", std::string(ttsInput)},
+		{"ttsExecutablePath", std::string(ttsExecutablePath)},
+		{"ttsModelPath", std::string(ttsModelPath)},
+		{"ttsSpeakerPath", std::string(ttsSpeakerPath)},
+		{"ttsSpeakerReferencePath", std::string(ttsSpeakerReferencePath)},
+		{"ttsOutputPath", std::string(ttsOutputPath)},
+		{"ttsPromptAudioPath", std::string(ttsPromptAudioPath)},
+		{"ttsLanguage", std::string(ttsLanguage)},
+		{"diffusionPrompt", std::string(diffusionPrompt)},
+		{"diffusionInstruction", std::string(diffusionInstruction)},
+		{"diffusionNegativePrompt", std::string(diffusionNegativePrompt)},
+		{"diffusionRankingPrompt", std::string(diffusionRankingPrompt)},
+		{"diffusionModelPath", std::string(diffusionModelPath)},
+		{"diffusionVaePath", std::string(diffusionVaePath)},
+		{"diffusionInitImagePath", std::string(diffusionInitImagePath)},
+		{"diffusionMaskImagePath", std::string(diffusionMaskImagePath)},
+		{"diffusionOutputDir", std::string(diffusionOutputDir)},
+		{"diffusionOutputPrefix", std::string(diffusionOutputPrefix)},
+		{"diffusionSampler", std::string(diffusionSampler)},
+		{"imageSearchPrompt", std::string(imageSearchPrompt)},
+		{"clipPrompt", std::string(clipPrompt)},
+		{"clipModelPath", std::string(clipModelPath)},
+		{"clipImagePaths", std::string(clipImagePaths)}
+	};
+
+	session["indices"] = {
+		{"visionTaskIndex", visionTaskIndex},
+		{"videoTaskIndex", videoTaskIndex},
+		{"visionVideoMaxFrames", visionVideoMaxFrames},
+		{"videoPlanBeatCount", videoPlanBeatCount},
+		{"videoPlanSceneCount", videoPlanSceneCount},
+		{"videoPlanGenerationMode", videoPlanGenerationMode},
+		{"videoEditClipCount", videoEditClipCount},
+		{"selectedVideoPlanSceneIndex", selectedVideoPlanSceneIndex},
+		{"montageMaxClips", montageMaxClips},
+		{"montageFps", montageFps},
+		{"speechTaskIndex", speechTaskIndex},
+		{"ttsTaskIndex", ttsTaskIndex},
+		{"ttsSeed", ttsSeed},
+		{"ttsMaxTokens", ttsMaxTokens},
+		{"diffusionTaskIndex", diffusionTaskIndex},
+		{"diffusionSelectionModeIndex", diffusionSelectionModeIndex},
+		{"diffusionWidth", diffusionWidth},
+		{"diffusionHeight", diffusionHeight},
+		{"diffusionSteps", diffusionSteps},
+		{"diffusionBatchCount", diffusionBatchCount},
+		{"diffusionSeed", diffusionSeed},
+		{"imageSearchMaxResults", imageSearchMaxResults},
+		{"clipTopK", clipTopK},
+		{"clipVerbosity", clipVerbosity}
+	};
+
+	session["floats"] = {
+		{"videoPlanDurationSeconds", videoPlanDurationSeconds},
+		{"videoEditTargetDurationSeconds", videoEditTargetDurationSeconds},
+		{"montageMinScore", montageMinScore},
+		{"ttsTemperature", ttsTemperature},
+		{"ttsRepetitionPenalty", ttsRepetitionPenalty},
+		{"ttsTopP", ttsTopP},
+		{"ttsMinP", ttsMinP},
+		{"diffusionCfgScale", diffusionCfgScale},
+		{"diffusionStrength", diffusionStrength}
+	};
+
+	session["bools"] = {
+		{"videoPlanMultiScene", videoPlanMultiScene},
+		{"videoPlanUseForGeneration", videoPlanUseForGeneration},
+		{"montagePreserveChronology", montagePreserveChronology},
+		{"montageSubtitlePlaybackEnabled", montageSubtitlePlaybackEnabled},
+		{"videoEditUseCurrentAnalysis", videoEditUseCurrentAnalysis},
+		{"speechReturnTimestamps", speechReturnTimestamps},
+		{"speechLiveTranscriptionEnabled", speechLiveTranscriptionEnabled},
+		{"ttsStreamAudio", ttsStreamAudio},
+		{"ttsNormalizeText", ttsNormalizeText},
+		{"diffusionNormalizeClipEmbeddings", diffusionNormalizeClipEmbeddings},
+		{"diffusionSaveMetadata", diffusionSaveMetadata},
+		{"clipNormalizeEmbeddings", clipNormalizeEmbeddings}
+	};
+
+	session["liveSpeech"] = {
+		{"intervalSeconds", speechLiveIntervalSeconds},
+		{"windowSeconds", speechLiveWindowSeconds},
+		{"overlapSeconds", speechLiveOverlapSeconds}
+	};
+
+	session["outputs"] = {
+		{"scriptOutput", scriptOutput},
+		{"summarizeOutput", summarizeOutput},
+		{"writeOutput", writeOutput},
+		{"translateOutput", translateOutput},
+		{"customOutput", customOutput},
+		{"visionOutput", visionOutput},
+		{"montageSummary", montageSummary},
+		{"montageEditorBrief", montageEditorBrief},
+		{"montageEdlText", montageEdlText},
+		{"montageSrtText", montageSrtText},
+		{"montageVttText", montageVttText},
+		{"videoPlanSummary", videoPlanSummary},
+		{"videoEditPlanSummary", videoEditPlanSummary},
+		{"speechOutput", speechOutput},
+		{"speechDetectedLanguage", speechDetectedLanguage},
+		{"speechTranscriptPath", speechTranscriptPath},
+		{"speechSrtPath", speechSrtPath},
+		{"speechSegmentCount", speechSegmentCount},
+		{"ttsOutput", ttsOutput},
+		{"diffusionOutput", diffusionOutput},
+		{"imageSearchOutput", imageSearchOutput},
+		{"clipOutput", clipOutput}
+	};
+
+	session["chatMessages"] = ofJson::array();
+	for (const auto & msg : chatMessages) {
+		session["chatMessages"].push_back({
+			{"role", msg.role},
+			{"text", msg.text},
+			{"timestamp", msg.timestamp}
+		});
+	}
+
+	std::ofstream out(path);
+	if (!out.is_open()) {
+		return false;
+	}
+	out << session.dump(2);
+	return true;
+}
+
+bool ofApp::loadSession(const std::string & path) {
+	std::ifstream in(path);
+	if (!in.is_open()) {
+		return false;
+	}
+
+	ofJson session;
+	try {
+		in >> session;
+	} catch (...) {
+		logWithLevel(OF_LOG_WARNING, "Failed to parse session file: " + path);
+		return false;
+	}
+	if (!session.is_object()) {
+		return false;
+	}
+
+	auto getString = [](const ofJson & node, const char * key, const std::string & fallback = std::string()) {
+		return node.contains(key) && node[key].is_string()
+			? node[key].get<std::string>()
+			: fallback;
+	};
+	auto getInt = [](const ofJson & node, const char * key, int fallback = 0) {
+		return node.contains(key) && node[key].is_number_integer()
+			? node[key].get<int>()
+			: fallback;
+	};
+	auto getFloat = [](const ofJson & node, const char * key, float fallback = 0.0f) {
+		return node.contains(key) && node[key].is_number()
+			? node[key].get<float>()
+			: fallback;
+	};
+	auto getBool = [](const ofJson & node, const char * key, bool fallback = false) {
+		return node.contains(key) && node[key].is_boolean()
+			? node[key].get<bool>()
+			: fallback;
+	};
+	auto copyJsonString = [this, &getString](char * buffer, size_t bufferSize, const ofJson & node, const char * key) {
+		copyStringToBuffer(buffer, bufferSize, getString(node, key));
+	};
+
+	const ofJson settings = session.value("settings", ofJson::object());
+	const ofJson scriptSourceJson = session.value("scriptSource", ofJson::object());
+	const ofJson buffers = session.value("buffers", ofJson::object());
+	const ofJson indices = session.value("indices", ofJson::object());
+	const ofJson floats = session.value("floats", ofJson::object());
+	const ofJson bools = session.value("bools", ofJson::object());
+	const ofJson liveSpeech = session.value("liveSpeech", ofJson::object());
+	const ofJson outputs = session.value("outputs", ofJson::object());
+
+	activeMode = static_cast<AiMode>(std::clamp(getInt(settings, "activeMode", static_cast<int>(AiMode::Chat)), 0, kModeCount - 1));
+	selectedModelIndex = std::clamp(getInt(settings, "selectedModelIndex", 0), 0, std::max(0, static_cast<int>(modelPresets.size()) - 1));
+	selectedLanguageIndex = std::clamp(getInt(settings, "selectedLanguageIndex", 0), 0, std::max(0, static_cast<int>(scriptLanguages.size()) - 1));
+	translateSourceLang = std::clamp(getInt(settings, "translateSourceLang", 0), 0, std::max(0, static_cast<int>(translateLanguages.size()) - 1));
+	translateTargetLang = std::clamp(getInt(settings, "translateTargetLang", 1), 0, std::max(0, static_cast<int>(translateLanguages.size()) - 1));
+	chatLanguageIndex = std::clamp(getInt(settings, "chatLanguageIndex", 0), 0, std::max(0, static_cast<int>(chatLanguages.size()) - 1));
+	maxTokens = std::clamp(getInt(settings, "maxTokens", maxTokens), 32, 4096);
+	temperature = std::clamp(getFloat(settings, "temperature", temperature), 0.0f, 2.0f);
+	topP = std::clamp(getFloat(settings, "topP", topP), 0.0f, 1.0f);
+	topK = std::clamp(getInt(settings, "topK", topK), 0, 200);
+	minP = std::clamp(getFloat(settings, "minP", minP), 0.0f, 1.0f);
+	repeatPenalty = std::clamp(getFloat(settings, "repeatPenalty", repeatPenalty), 1.0f, 2.0f);
+	contextSize = std::clamp(getInt(settings, "contextSize", contextSize), 256, 16384);
+	batchSize = std::clamp(getInt(settings, "batchSize", batchSize), 32, 4096);
+	gpuLayers = std::clamp(getInt(settings, "gpuLayers", gpuLayers), 0, 999);
+	seed = getInt(settings, "seed", seed);
+	numThreads = std::clamp(getInt(settings, "numThreads", numThreads), 1, 128);
+	selectedBackendIndex = std::clamp(getInt(settings, "selectedBackendIndex", selectedBackendIndex), 0, std::max(0, static_cast<int>(backendNames.size()) - 1));
+	const std::string selectedBackendName = getString(settings, "selectedBackendName");
+	if (!selectedBackendName.empty()) {
+		for (int i = 0; i < static_cast<int>(backendNames.size()); ++i) {
+			if (backendNames[static_cast<size_t>(i)] == selectedBackendName) {
+				selectedBackendIndex = i;
+				break;
+			}
+		}
+	}
+	themeIndex = std::clamp(getInt(settings, "themeIndex", themeIndex), 0, 2);
+	mirostatMode = std::clamp(getInt(settings, "mirostatMode", mirostatMode), 0, 2);
+	mirostatTau = std::clamp(getFloat(settings, "mirostatTau", mirostatTau), 0.0f, 10.0f);
+	mirostatEta = std::clamp(getFloat(settings, "mirostatEta", mirostatEta), 0.0f, 1.0f);
+	textInferenceBackend = clampTextInferenceBackend(getInt(settings, "textInferenceBackend", static_cast<int>(textInferenceBackend)));
+	useModeTokenBudgets = getBool(settings, "useModeTokenBudgets", useModeTokenBudgets);
+	autoContinueCutoff = getBool(settings, "autoContinueCutoff", autoContinueCutoff);
+	usePromptCache = getBool(settings, "usePromptCache", usePromptCache);
+	logLevel = static_cast<ofLogLevel>(std::clamp(getInt(settings, "logLevel", static_cast<int>(logLevel)), static_cast<int>(OF_LOG_VERBOSE), static_cast<int>(OF_LOG_SILENT)));
+	liveContextMode = static_cast<LiveContextMode>(std::clamp(getInt(settings, "liveContextMode", static_cast<int>(liveContextMode)), 0, 3));
+	liveContextAllowPromptUrls = getBool(settings, "liveContextAllowPromptUrls", liveContextAllowPromptUrls);
+	liveContextAllowDomainProviders = getBool(settings, "liveContextAllowDomainProviders", liveContextAllowDomainProviders);
+	liveContextAllowGenericSearch = getBool(settings, "liveContextAllowGenericSearch", liveContextAllowGenericSearch);
+	scriptIncludeRepoContext = getBool(settings, "scriptIncludeRepoContext", scriptIncludeRepoContext);
+	selectedVisionProfileIndex = std::max(0, getInt(settings, "selectedVisionProfileIndex", selectedVisionProfileIndex));
+	selectedSpeechProfileIndex = std::max(0, getInt(settings, "selectedSpeechProfileIndex", selectedSpeechProfileIndex));
+	selectedTtsProfileIndex = std::max(0, getInt(settings, "selectedTtsProfileIndex", selectedTtsProfileIndex));
+	selectedDiffusionProfileIndex = std::max(0, getInt(settings, "selectedDiffusionProfileIndex", selectedDiffusionProfileIndex));
+	if (settings.contains("modeMaxTokens") && settings["modeMaxTokens"].is_array()) {
+		for (size_t i = 0; i < std::min<size_t>(settings["modeMaxTokens"].size(), kModeCount); ++i) {
+			modeMaxTokens[i] = std::clamp(settings["modeMaxTokens"][i].get<int>(), 32, 4096);
+		}
+	}
+	if (settings.contains("modeTextBackendIndices") && settings["modeTextBackendIndices"].is_array()) {
+		for (size_t i = 0; i < std::min<size_t>(settings["modeTextBackendIndices"].size(), kModeCount); ++i) {
+			modeTextBackendIndices[i] = std::clamp(settings["modeTextBackendIndices"][i].get<int>(), 0, 1);
+		}
+	}
+
+	copyJsonString(chatInput, sizeof(chatInput), buffers, "chatInput");
+	copyJsonString(scriptInput, sizeof(scriptInput), buffers, "scriptInput");
+	copyJsonString(summarizeInput, sizeof(summarizeInput), buffers, "summarizeInput");
+	copyJsonString(writeInput, sizeof(writeInput), buffers, "writeInput");
+	copyJsonString(translateInput, sizeof(translateInput), buffers, "translateInput");
+	copyJsonString(customInput, sizeof(customInput), buffers, "customInput");
+	copyJsonString(customSystemPrompt, sizeof(customSystemPrompt), buffers, "customSystemPrompt");
+	copyJsonString(sourceUrlsInput, sizeof(sourceUrlsInput), buffers, "sourceUrlsInput");
+	copyJsonString(textServerUrl, sizeof(textServerUrl), buffers, "textServerUrl");
+	copyJsonString(textServerModel, sizeof(textServerModel), buffers, "textServerModel");
+	copyJsonString(visionPrompt, sizeof(visionPrompt), buffers, "visionPrompt");
+	copyJsonString(visionImagePath, sizeof(visionImagePath), buffers, "visionImagePath");
+	copyJsonString(visionVideoPath, sizeof(visionVideoPath), buffers, "visionVideoPath");
+	copyJsonString(visionModelPath, sizeof(visionModelPath), buffers, "visionModelPath");
+	copyJsonString(visionServerUrl, sizeof(visionServerUrl), buffers, "visionServerUrl");
+	copyJsonString(videoSidecarUrl, sizeof(videoSidecarUrl), buffers, "videoSidecarUrl");
+	copyJsonString(videoSidecarModel, sizeof(videoSidecarModel), buffers, "videoSidecarModel");
+	copyJsonString(visionSystemPrompt, sizeof(visionSystemPrompt), buffers, "visionSystemPrompt");
+	copyJsonString(videoPlanJson, sizeof(videoPlanJson), buffers, "videoPlanJson");
+	copyJsonString(videoEditPlanJson, sizeof(videoEditPlanJson), buffers, "videoEditPlanJson");
+	copyJsonString(montageSubtitlePath, sizeof(montageSubtitlePath), buffers, "montageSubtitlePath");
+	copyJsonString(montageGoal, sizeof(montageGoal), buffers, "montageGoal");
+	copyJsonString(montageEdlTitle, sizeof(montageEdlTitle), buffers, "montageEdlTitle");
+	copyJsonString(montageReelName, sizeof(montageReelName), buffers, "montageReelName");
+	copyJsonString(videoEditGoal, sizeof(videoEditGoal), buffers, "videoEditGoal");
+	copyJsonString(speechAudioPath, sizeof(speechAudioPath), buffers, "speechAudioPath");
+	copyJsonString(speechExecutable, sizeof(speechExecutable), buffers, "speechExecutable");
+	copyJsonString(speechModelPath, sizeof(speechModelPath), buffers, "speechModelPath");
+	copyJsonString(speechServerUrl, sizeof(speechServerUrl), buffers, "speechServerUrl");
+	copyJsonString(speechServerModel, sizeof(speechServerModel), buffers, "speechServerModel");
+	copyJsonString(speechPrompt, sizeof(speechPrompt), buffers, "speechPrompt");
+	copyJsonString(speechLanguageHint, sizeof(speechLanguageHint), buffers, "speechLanguageHint");
+	copyJsonString(ttsInput, sizeof(ttsInput), buffers, "ttsInput");
+	copyJsonString(ttsExecutablePath, sizeof(ttsExecutablePath), buffers, "ttsExecutablePath");
+	copyJsonString(ttsModelPath, sizeof(ttsModelPath), buffers, "ttsModelPath");
+	copyJsonString(ttsSpeakerPath, sizeof(ttsSpeakerPath), buffers, "ttsSpeakerPath");
+	copyJsonString(ttsSpeakerReferencePath, sizeof(ttsSpeakerReferencePath), buffers, "ttsSpeakerReferencePath");
+	copyJsonString(ttsOutputPath, sizeof(ttsOutputPath), buffers, "ttsOutputPath");
+	copyJsonString(ttsPromptAudioPath, sizeof(ttsPromptAudioPath), buffers, "ttsPromptAudioPath");
+	copyJsonString(ttsLanguage, sizeof(ttsLanguage), buffers, "ttsLanguage");
+	copyJsonString(diffusionPrompt, sizeof(diffusionPrompt), buffers, "diffusionPrompt");
+	copyJsonString(diffusionInstruction, sizeof(diffusionInstruction), buffers, "diffusionInstruction");
+	copyJsonString(diffusionNegativePrompt, sizeof(diffusionNegativePrompt), buffers, "diffusionNegativePrompt");
+	copyJsonString(diffusionRankingPrompt, sizeof(diffusionRankingPrompt), buffers, "diffusionRankingPrompt");
+	copyJsonString(diffusionModelPath, sizeof(diffusionModelPath), buffers, "diffusionModelPath");
+	copyJsonString(diffusionVaePath, sizeof(diffusionVaePath), buffers, "diffusionVaePath");
+	copyJsonString(diffusionInitImagePath, sizeof(diffusionInitImagePath), buffers, "diffusionInitImagePath");
+	copyJsonString(diffusionMaskImagePath, sizeof(diffusionMaskImagePath), buffers, "diffusionMaskImagePath");
+	copyJsonString(diffusionOutputDir, sizeof(diffusionOutputDir), buffers, "diffusionOutputDir");
+	copyJsonString(diffusionOutputPrefix, sizeof(diffusionOutputPrefix), buffers, "diffusionOutputPrefix");
+	copyJsonString(diffusionSampler, sizeof(diffusionSampler), buffers, "diffusionSampler");
+	copyJsonString(imageSearchPrompt, sizeof(imageSearchPrompt), buffers, "imageSearchPrompt");
+	copyJsonString(clipPrompt, sizeof(clipPrompt), buffers, "clipPrompt");
+	copyJsonString(clipModelPath, sizeof(clipModelPath), buffers, "clipModelPath");
+	copyJsonString(clipImagePaths, sizeof(clipImagePaths), buffers, "clipImagePaths");
+
+	visionTaskIndex = std::clamp(getInt(indices, "visionTaskIndex", visionTaskIndex), 0, 2);
+	videoTaskIndex = std::clamp(getInt(indices, "videoTaskIndex", videoTaskIndex), 0, 4);
+	visionVideoMaxFrames = std::clamp(getInt(indices, "visionVideoMaxFrames", visionVideoMaxFrames), 1, 12);
+	videoPlanBeatCount = std::clamp(getInt(indices, "videoPlanBeatCount", videoPlanBeatCount), 1, 12);
+	videoPlanSceneCount = std::clamp(getInt(indices, "videoPlanSceneCount", videoPlanSceneCount), 1, 8);
+	videoPlanGenerationMode = std::clamp(getInt(indices, "videoPlanGenerationMode", videoPlanGenerationMode), 0, 1);
+	videoEditClipCount = std::clamp(getInt(indices, "videoEditClipCount", videoEditClipCount), 1, 12);
+	selectedVideoPlanSceneIndex = std::max(0, getInt(indices, "selectedVideoPlanSceneIndex", selectedVideoPlanSceneIndex));
+	montageMaxClips = std::clamp(getInt(indices, "montageMaxClips", montageMaxClips), 1, 24);
+	montageFps = std::clamp(getInt(indices, "montageFps", montageFps), 12, 60);
+	speechTaskIndex = std::clamp(getInt(indices, "speechTaskIndex", speechTaskIndex), 0, 1);
+	ttsTaskIndex = std::clamp(getInt(indices, "ttsTaskIndex", ttsTaskIndex), 0, 2);
+	ttsSeed = getInt(indices, "ttsSeed", ttsSeed);
+	ttsMaxTokens = std::max(0, getInt(indices, "ttsMaxTokens", ttsMaxTokens));
+	diffusionTaskIndex = std::clamp(getInt(indices, "diffusionTaskIndex", diffusionTaskIndex), 0, 6);
+	diffusionSelectionModeIndex = std::clamp(getInt(indices, "diffusionSelectionModeIndex", diffusionSelectionModeIndex), 0, 2);
+	diffusionWidth = clampSupportedDiffusionImageSize(getInt(indices, "diffusionWidth", diffusionWidth));
+	diffusionHeight = clampSupportedDiffusionImageSize(getInt(indices, "diffusionHeight", diffusionHeight));
+	diffusionSteps = std::clamp(getInt(indices, "diffusionSteps", diffusionSteps), 1, 200);
+	diffusionBatchCount = std::clamp(getInt(indices, "diffusionBatchCount", diffusionBatchCount), 1, 16);
+	diffusionSeed = getInt(indices, "diffusionSeed", diffusionSeed);
+	imageSearchMaxResults = std::clamp(getInt(indices, "imageSearchMaxResults", imageSearchMaxResults), 1, 32);
+	clipTopK = std::clamp(getInt(indices, "clipTopK", clipTopK), 0, 16);
+	clipVerbosity = std::clamp(getInt(indices, "clipVerbosity", clipVerbosity), 0, 2);
+
+	videoPlanDurationSeconds = std::clamp(getFloat(floats, "videoPlanDurationSeconds", videoPlanDurationSeconds), 1.0f, 30.0f);
+	videoEditTargetDurationSeconds = std::clamp(getFloat(floats, "videoEditTargetDurationSeconds", videoEditTargetDurationSeconds), 1.0f, 120.0f);
+	montageMinScore = std::clamp(getFloat(floats, "montageMinScore", montageMinScore), 0.0f, 1.0f);
+	ttsTemperature = std::clamp(getFloat(floats, "ttsTemperature", ttsTemperature), 0.0f, 2.0f);
+	ttsRepetitionPenalty = std::clamp(getFloat(floats, "ttsRepetitionPenalty", ttsRepetitionPenalty), 1.0f, 3.0f);
+	ttsTopP = std::clamp(getFloat(floats, "ttsTopP", ttsTopP), 0.0f, 1.0f);
+	ttsMinP = std::clamp(getFloat(floats, "ttsMinP", ttsMinP), 0.0f, 1.0f);
+	diffusionCfgScale = std::clamp(getFloat(floats, "diffusionCfgScale", diffusionCfgScale), 0.0f, 30.0f);
+	diffusionStrength = std::clamp(getFloat(floats, "diffusionStrength", diffusionStrength), 0.0f, 1.0f);
+
+	videoPlanMultiScene = getBool(bools, "videoPlanMultiScene", videoPlanMultiScene);
+	videoPlanUseForGeneration = getBool(bools, "videoPlanUseForGeneration", videoPlanUseForGeneration);
+	montagePreserveChronology = getBool(bools, "montagePreserveChronology", montagePreserveChronology);
+	montageSubtitlePlaybackEnabled = getBool(bools, "montageSubtitlePlaybackEnabled", montageSubtitlePlaybackEnabled);
+	videoEditUseCurrentAnalysis = getBool(bools, "videoEditUseCurrentAnalysis", videoEditUseCurrentAnalysis);
+	speechReturnTimestamps = getBool(bools, "speechReturnTimestamps", speechReturnTimestamps);
+	speechLiveTranscriptionEnabled = getBool(bools, "speechLiveTranscriptionEnabled", speechLiveTranscriptionEnabled);
+	ttsStreamAudio = getBool(bools, "ttsStreamAudio", ttsStreamAudio);
+	ttsNormalizeText = getBool(bools, "ttsNormalizeText", ttsNormalizeText);
+	diffusionNormalizeClipEmbeddings = getBool(bools, "diffusionNormalizeClipEmbeddings", diffusionNormalizeClipEmbeddings);
+	diffusionSaveMetadata = getBool(bools, "diffusionSaveMetadata", diffusionSaveMetadata);
+	clipNormalizeEmbeddings = getBool(bools, "clipNormalizeEmbeddings", clipNormalizeEmbeddings);
+
+	speechLiveIntervalSeconds = std::clamp(getFloat(liveSpeech, "intervalSeconds", speechLiveIntervalSeconds), 0.5f, 5.0f);
+	speechLiveWindowSeconds = std::clamp(getFloat(liveSpeech, "windowSeconds", speechLiveWindowSeconds), 2.0f, 30.0f);
+	speechLiveOverlapSeconds = std::clamp(getFloat(liveSpeech, "overlapSeconds", speechLiveOverlapSeconds), 0.0f, 3.0f);
+
+	scriptOutput = getString(outputs, "scriptOutput");
+	summarizeOutput = getString(outputs, "summarizeOutput");
+	writeOutput = getString(outputs, "writeOutput");
+	translateOutput = getString(outputs, "translateOutput");
+	customOutput = getString(outputs, "customOutput");
+	visionOutput = getString(outputs, "visionOutput");
+	montageSummary = getString(outputs, "montageSummary");
+	montageEditorBrief = getString(outputs, "montageEditorBrief");
+	montageEdlText = getString(outputs, "montageEdlText");
+	montageSrtText = getString(outputs, "montageSrtText");
+	montageVttText = getString(outputs, "montageVttText");
+	videoPlanSummary = getString(outputs, "videoPlanSummary");
+	videoEditPlanSummary = getString(outputs, "videoEditPlanSummary");
+	speechOutput = getString(outputs, "speechOutput");
+	speechDetectedLanguage = getString(outputs, "speechDetectedLanguage");
+	speechTranscriptPath = getString(outputs, "speechTranscriptPath");
+	speechSrtPath = getString(outputs, "speechSrtPath");
+	speechSegmentCount = getInt(outputs, "speechSegmentCount", speechSegmentCount);
+	ttsOutput = getString(outputs, "ttsOutput");
+	diffusionOutput = getString(outputs, "diffusionOutput");
+	imageSearchOutput = getString(outputs, "imageSearchOutput");
+	clipOutput = getString(outputs, "clipOutput");
+
+	chatMessages.clear();
+	if (session.contains("chatMessages") && session["chatMessages"].is_array()) {
+		for (const auto & entry : session["chatMessages"]) {
+			Message msg;
+			msg.role = getString(entry, "role");
+			msg.text = getString(entry, "text");
+			msg.timestamp = getFloat(entry, "timestamp", 0.0f);
+			chatMessages.push_back(std::move(msg));
+		}
+	}
+
+	deferredScriptSourceRestorePending = false;
+	deferredScriptSourceType =
+		static_cast<ofxGgmlScriptSourceType>(std::clamp(getInt(scriptSourceJson, "type", 0), 0, 3));
+	deferredScriptSourcePath = getString(scriptSourceJson, "path");
+	deferredScriptSourceInternetUrls = getString(scriptSourceJson, "internetUrls");
+	copyStringToBuffer(scriptSourceGitHub, sizeof(scriptSourceGitHub), getString(scriptSourceJson, "github"));
+	copyStringToBuffer(scriptSourceBranch, sizeof(scriptSourceBranch), getString(scriptSourceJson, "branch", "main"));
+	scriptProjectMemory.setEnabled(getBool(scriptSourceJson, "projectMemoryEnabled", scriptProjectMemory.isEnabled()));
+	scriptProjectMemory.setMemoryText(getString(scriptSourceJson, "projectMemoryText"));
+	if (deferredScriptSourceType != ofxGgmlScriptSourceType::None) {
+		deferredScriptSourceRestorePending = true;
+	}
+
+	applyTheme(themeIndex);
+	applyLogLevel(logLevel);
+	applyLiveSpeechTranscriberSettings();
+	rebuildMontageSubtitleTrackFromText();
+	return true;
+}
+
+void ofApp::autoSaveSession() {
+	if (!lastSessionPath.empty()) {
+		saveSession(lastSessionPath);
+	}
+}
+
+void ofApp::clearDeferredScriptSourceRestore() {
+	deferredScriptSourceRestorePending = false;
+	deferredScriptSourceType = ofxGgmlScriptSourceType::None;
+	deferredScriptSourcePath.clear();
+	deferredScriptSourceInternetUrls.clear();
+}
+
+bool ofApp::restoreDeferredScriptSourceIfNeeded() {
+	if (!deferredScriptSourceRestorePending) {
+		return true;
+	}
+
+	bool success = true;
+	switch (deferredScriptSourceType) {
+	case ofxGgmlScriptSourceType::LocalFolder:
+		if (!scriptLanguages.empty() &&
+			selectedLanguageIndex >= 0 &&
+			selectedLanguageIndex < static_cast<int>(scriptLanguages.size())) {
+			scriptSource.setPreferredExtension(
+				scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
+		}
+		success = !deferredScriptSourcePath.empty() &&
+			scriptSource.setLocalFolder(deferredScriptSourcePath);
+		break;
+	case ofxGgmlScriptSourceType::GitHubRepo: {
+		scriptSource.setGitHubMode();
+		const std::string ownerRepo = trim(scriptSourceGitHub);
+		const std::string branch = trim(scriptSourceBranch);
+		success = ownerRepo.empty() ||
+			scriptSource.setGitHubRepoFromInput(ownerRepo, branch);
+		break;
+	}
+	case ofxGgmlScriptSourceType::Internet:
+		scriptSource.setInternetUrls(
+			splitStoredScriptSourceUrls(deferredScriptSourceInternetUrls));
+		success = true;
+		break;
+	default:
+		scriptSource.clear();
+		success = true;
+		break;
+	}
+
+	selectedScriptFileIndex = -1;
+	if (success) {
+		clearDeferredScriptSourceRestore();
+	} else {
+		logWithLevel(
+			OF_LOG_WARNING,
+			"Saved script source could not be restored. You can re-select it from the Script panel.");
+	}
+	return success;
+}
+
+void ofApp::autoLoadSession() {
+	std::error_code ec;
+	if (!lastSessionPath.empty() &&
+		std::filesystem::exists(lastSessionPath, ec) &&
+		!ec) {
+		loadSession(lastSessionPath);
+	}
 }
 
 // ---------------------------------------------------------------------------

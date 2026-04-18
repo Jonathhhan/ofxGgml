@@ -467,6 +467,17 @@ static bool parseEmbeddingJson(const ofJson & json, std::vector<float> & out) {
 	return false;
 }
 
+static size_t normalizedConcurrencyLimit(size_t requestedLimit) {
+	return std::max<size_t>(1, requestedLimit);
+}
+
+static size_t recommendedServerEmbeddingConcurrency(size_t requestCount) {
+	if (requestCount <= 1) return requestCount;
+	const unsigned int hardwareThreads =
+		std::max(1u, std::thread::hardware_concurrency());
+	return std::min<size_t>(requestCount, std::min<size_t>(4, hardwareThreads));
+}
+
 /// Helper: Attempts to parse a single string as JSON embedding.
 static bool tryParseJsonString(const std::string & str, std::vector<float> & out) {
 	ofJson parsed = ofJson::parse(str, nullptr, false);
@@ -2028,7 +2039,7 @@ ofxGgmlBatchResult ofxGgmlInference::generateBatch(
 	// Try server-based batch processing first if conditions are met
 	if (batchSettings.preferServerBatch && allUseServer && settingsCompatible &&
 		!sharedSettings.serverUrl.empty()) {
-		batchResult = processBatchViaServer(modelPath, requests, sharedSettings, batchSettings);
+		batchResult = processBatchViaServer(modelPath, requests, batchSettings);
 
 		// If server batch succeeded or we shouldn't fallback, return
 		if (batchResult.success || !batchSettings.fallbackToSequential) {
@@ -2073,21 +2084,32 @@ std::vector<ofxGgmlEmbeddingResult> ofxGgmlInference::embedBatch(
 	const std::vector<std::string> & texts,
 	const ofxGgmlEmbeddingSettings & settings) const {
 
-	std::vector<ofxGgmlEmbeddingResult> results;
-	results.reserve(texts.size());
+	std::vector<ofxGgmlEmbeddingResult> results(texts.size());
+	if (texts.empty()) return results;
 
-	// For embeddings, we can often send multiple texts in one API call
-	// to server backends that support it
 	if (settings.useServerBackend && !settings.serverUrl.empty()) {
-		// Try batch embedding via server
-		// This is a simplified implementation - real server batch would use a single request
-		for (const auto & text : texts) {
-			results.push_back(embed(modelPath, text, settings));
+		const size_t maxConcurrent =
+			recommendedServerEmbeddingConcurrency(texts.size());
+		std::vector<std::thread> workers;
+		workers.reserve(maxConcurrent);
+
+		for (size_t startIdx = 0; startIdx < texts.size(); startIdx += maxConcurrent) {
+			workers.clear();
+			const size_t endIdx = std::min(startIdx + maxConcurrent, texts.size());
+			for (size_t i = startIdx; i < endIdx; ++i) {
+				workers.emplace_back([&, i]() {
+					results[i] = embed(modelPath, texts[i], settings);
+				});
+			}
+			for (auto & worker : workers) {
+				if (worker.joinable()) {
+					worker.join();
+				}
+			}
 		}
 	} else {
-		// Sequential processing for CLI or when server not available
-		for (const auto & text : texts) {
-			results.push_back(embed(modelPath, text, settings));
+		for (size_t i = 0; i < texts.size(); ++i) {
+			results[i] = embed(modelPath, texts[i], settings);
 		}
 	}
 
@@ -2097,25 +2119,27 @@ std::vector<ofxGgmlEmbeddingResult> ofxGgmlInference::embedBatch(
 ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
 	const std::string & modelPath,
 	const std::vector<ofxGgmlBatchRequest> & requests,
-	const ofxGgmlInferenceSettings & sharedSettings,
 	const ofxGgmlBatchSettings & batchSettings) const {
 
 	ofxGgmlBatchResult batchResult;
-	batchResult.results.reserve(requests.size());
+	batchResult.results.resize(requests.size());
 
 	// For now, we'll process requests concurrently rather than as a true
 	// server batch, since not all llama-server implementations support
 	// the /v1/batch endpoint. This still provides parallelism benefits.
 
 	std::vector<std::thread> threads;
-	std::mutex resultsMutex;
 	std::atomic<bool> shouldStop(false);
+	std::atomic<size_t> processedCount(0);
+	std::atomic<size_t> failedCount(0);
+	const size_t maxConcurrent =
+		normalizedConcurrencyLimit(batchSettings.maxConcurrentRequests);
 
 	// Process in chunks based on maxConcurrentRequests
-	for (size_t startIdx = 0; startIdx < requests.size(); startIdx += batchSettings.maxConcurrentRequests) {
+	for (size_t startIdx = 0; startIdx < requests.size(); startIdx += maxConcurrent) {
 		threads.clear();
 
-		const size_t endIdx = std::min(startIdx + batchSettings.maxConcurrentRequests, requests.size());
+		const size_t endIdx = std::min(startIdx + maxConcurrent, requests.size());
 
 		for (size_t i = startIdx; i < endIdx; ++i) {
 			if (shouldStop.load()) break;
@@ -2130,21 +2154,18 @@ ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
 					req.settings,
 					req.onChunk);
 
-				{
-					std::lock_guard<std::mutex> lock(resultsMutex);
-					ofxGgmlBatchItemResult item;
-					item.id = req.id;
-					item.result = result;
-					item.batchIndex = i;
-					batchResult.results.push_back(item);
+				ofxGgmlBatchItemResult item;
+				item.id = req.id;
+				item.result = std::move(result);
+				item.batchIndex = i;
+				batchResult.results[i] = std::move(item);
 
-					if (result.success) {
-						batchResult.processedCount++;
-					} else {
-						batchResult.failedCount++;
-						if (batchSettings.stopOnFirstError) {
-							shouldStop.store(true);
-						}
+				if (batchResult.results[i].result.success) {
+					processedCount.fetch_add(1);
+				} else {
+					failedCount.fetch_add(1);
+					if (batchSettings.stopOnFirstError) {
+						shouldStop.store(true);
 					}
 				}
 			});
@@ -2160,6 +2181,11 @@ ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
 		if (shouldStop.load()) break;
 	}
 
+	batchResult.processedCount = processedCount.load();
+	batchResult.failedCount = failedCount.load();
+	if (batchSettings.stopOnFirstError && batchResult.failedCount > 0) {
+		batchResult.error = "Batch processing stopped due to server request failure.";
+	}
 	batchResult.success = (batchResult.failedCount == 0);
 	return batchResult;
 }

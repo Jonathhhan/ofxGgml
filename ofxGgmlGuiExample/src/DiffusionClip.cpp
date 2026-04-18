@@ -32,6 +32,23 @@ void ofApp::drawDiffusionPanel() {
 	ensureDiffusionPreviewResources();
 	const bool diffusionRuntimeAttached = ensureDiffusionBackendConfigured();
 
+	if (hasDeferredDiffusionPrompt) {
+		copyStringToBuffer(
+			diffusionPrompt,
+			sizeof(diffusionPrompt),
+			deferredDiffusionPrompt);
+		hasDeferredDiffusionPrompt = false;
+		deferredDiffusionPrompt.clear();
+	}
+	if (hasDeferredDiffusionOutputDir) {
+		copyStringToBuffer(
+			diffusionOutputDir,
+			sizeof(diffusionOutputDir),
+			deferredDiffusionOutputDir);
+		hasDeferredDiffusionOutputDir = false;
+		deferredDiffusionOutputDir.clear();
+	}
+
 	ImGui::TextWrapped(
 		"This panel is wired for local image generation through ofxStableDiffusion. "
 		"It keeps prompt state, image handoff, CLIP reranking, and result reuse inside the AI Studio example.");
@@ -317,7 +334,8 @@ void ofApp::drawDiffusionPanel() {
 	ImGui::SameLine();
 	ImGui::BeginDisabled(std::strlen(writeInput) == 0);
 	if (ImGui::Button("Use Write Prompt", ImVec2(140, 0))) {
-		copyStringToBuffer(diffusionPrompt, sizeof(diffusionPrompt), writeInput);
+		deferredDiffusionPrompt = writeInput;
+		hasDeferredDiffusionPrompt = true;
 		autoSaveSession();
 	}
 	ImGui::EndDisabled();
@@ -393,10 +411,8 @@ void ofApp::drawDiffusionPanel() {
 	ImGui::InputText("Output dir", diffusionOutputDir, sizeof(diffusionOutputDir));
 	ImGui::SameLine();
 	if (ImGui::Button("Use data/generated", ImVec2(140, 0))) {
-		copyStringToBuffer(
-			diffusionOutputDir,
-			sizeof(diffusionOutputDir),
-			ofToDataPath("generated", true));
+		deferredDiffusionOutputDir = ofToDataPath("generated", true);
+		hasDeferredDiffusionOutputDir = true;
 	}
 
 	ImGui::SetNextItemWidth(200);

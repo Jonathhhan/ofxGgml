@@ -211,6 +211,10 @@ struct ofxGgmlCodeAssistantContext {
 	size_t maxFocusedFileChars = 2000;
 	size_t maxSymbols = 8;
 	size_t maxSymbolReferences = 4;
+	std::string activeMode;
+	std::string selectedBackend;
+	std::vector<std::string> recentTouchedFiles;
+	std::string lastFailureReason;
 	std::string projectMemoryHeading =
 		"Project memory from previous coding requests:";
 };
@@ -237,6 +241,8 @@ struct ofxGgmlCodeAssistantRequest {
 	bool includeCodeMap = false;
 	bool requestStructuredResult = false;
 	bool requestUnifiedDiff = false;
+	bool preferGroundedEdits = true;
+	bool runSelfCheck = true;
 	ofxGgmlCodeAssistantSymbolQuery symbolQuery;
 };
 
@@ -285,6 +291,7 @@ struct ofxGgmlCodeAssistantPreparedPrompt {
 	bool includedCodeMap = false;
 	bool requestsStructuredResult = false;
 	bool requestedUnifiedDiff = false;
+	bool includedTaskMemory = false;
 	std::vector<ofxGgmlCodeAssistantSymbol> retrievedSymbols;
 	ofxGgmlCodeAssistantSymbolContext retrievedSymbolContext;
 	ofxGgmlCodeAssistantCodeMap codeMap;

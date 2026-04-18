@@ -333,7 +333,6 @@ private:
 	ofxGgmlBatchResult processBatchViaServer(
 		const std::string & modelPath,
 		const std::vector<ofxGgmlBatchRequest> & requests,
-		const ofxGgmlInferenceSettings & sharedSettings,
 		const ofxGgmlBatchSettings & batchSettings) const;
 
 	/// Helper to process batch sequentially (CLI fallback)

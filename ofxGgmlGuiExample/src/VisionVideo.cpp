@@ -35,6 +35,14 @@ void ofApp::drawVisionPanel() {
 	drawPanelHeader("Vision", "image / video-to-text via llama-server multimodal models");
 	const float compactModeFieldWidth = std::min(280.0f, ImGui::GetContentRegionAvail().x);
 	ensureVisionPreviewResources();
+	if (hasDeferredMontageSubtitlePath) {
+		copyStringToBuffer(
+			montageSubtitlePath,
+			sizeof(montageSubtitlePath),
+			deferredMontageSubtitlePath);
+		hasDeferredMontageSubtitlePath = false;
+		deferredMontageSubtitlePath.clear();
+	}
 
 	const auto applyVisionProfileDefaults =
 		[this](const ofxGgmlVisionModelProfile & profile, bool onlyWhenEmpty) {
@@ -513,7 +521,8 @@ void ofApp::drawVisionPanel() {
 	ImGui::SameLine();
 	ImGui::BeginDisabled(trim(speechSrtPath).empty());
 	if (ImGui::Button("Use speech SRT", ImVec2(120, 0))) {
-		copyStringToBuffer(montageSubtitlePath, sizeof(montageSubtitlePath), speechSrtPath);
+		deferredMontageSubtitlePath = speechSrtPath;
+		hasDeferredMontageSubtitlePath = true;
 		autoSaveSession();
 	}
 	ImGui::EndDisabled();
@@ -566,6 +575,13 @@ void ofApp::drawVisionPanel() {
 	if (ImGui::IsItemDeactivatedAfterEdit()) {
 		autoSaveSession();
 	}
+	ImGui::Checkbox("Live subtitle playback with preview video", &montageSubtitlePlaybackEnabled);
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	if (montageSubtitlePlaybackEnabled && trim(visionVideoPath).empty()) {
+		ImGui::TextDisabled("Load a source video above to preview source-timed subtitle cues.");
+	}
 	const bool montageAvailable = !trim(montageEdlText).empty();
 	const bool canPlanMontage =
 		!generating.load() &&
@@ -599,15 +615,41 @@ void ofApp::drawVisionPanel() {
 	ImGui::EndDisabled();
 	ImGui::SameLine();
 	ImGui::BeginDisabled(!montageAvailable);
+	if (ImGui::Button("Copy SRT", ImVec2(110, 0))) {
+		copyToClipboard(montageSrtText);
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!montageAvailable);
+	if (ImGui::Button("Copy VTT", ImVec2(110, 0))) {
+		copyToClipboard(montageVttText);
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!montageAvailable);
 	if (ImGui::Button("Clear montage", ImVec2(130, 0))) {
 		montageSummary.clear();
 		montageEditorBrief.clear();
 		montageEdlText.clear();
+		montageSrtText.clear();
+		montageVttText.clear();
+		montageSubtitleTrack = {};
+		montageSourceSubtitleTrack = {};
+		selectedMontageCueIndex = -1;
 		autoSaveSession();
 	}
 	ImGui::EndDisabled();
 	if (!montageSummary.empty()) {
 		ImGui::TextWrapped("%s", montageSummary.c_str());
+	}
+	if (!montageSourceSubtitleTrack.cues.empty() && montageSubtitlePlaybackEnabled) {
+		const int activeCueIndex = findActiveMontageSourceCueIndex();
+		if (activeCueIndex >= 0 &&
+			activeCueIndex < static_cast<int>(montageSourceSubtitleTrack.cues.size())) {
+			const auto & cue = montageSourceSubtitleTrack.cues[static_cast<size_t>(activeCueIndex)];
+			ImGui::TextDisabled("Current source-timed cue");
+			ImGui::TextWrapped("%s", cue.text.c_str());
+		}
 	}
 	if (!montageEditorBrief.empty()) {
 		if (ImGui::TreeNode("Editor brief")) {
@@ -615,11 +657,52 @@ void ofApp::drawVisionPanel() {
 			ImGui::TreePop();
 		}
 	}
+	if (!montageSubtitleTrack.cues.empty()) {
+		ImGui::TextDisabled("Generated montage subtitles");
+		ImGui::BeginChild("MontageSubtitlePreview", ImVec2(0, 180), true);
+		for (size_t i = 0; i < montageSubtitleTrack.cues.size(); ++i) {
+			const auto & cue = montageSubtitleTrack.cues[i];
+			std::ostringstream label;
+			label << cue.index << ". "
+				<< ofxGgmlVideoInference::formatTimestamp(cue.startSeconds)
+				<< " - "
+				<< ofxGgmlVideoInference::formatTimestamp(cue.endSeconds)
+				<< "  " << cue.text;
+			if (ImGui::Selectable(
+					label.str().c_str(),
+					selectedMontageCueIndex == static_cast<int>(i))) {
+				selectedMontageCueIndex = static_cast<int>(i);
+			}
+		}
+		ImGui::EndChild();
+		if (selectedMontageCueIndex >= 0 &&
+			selectedMontageCueIndex < static_cast<int>(montageSubtitleTrack.cues.size())) {
+			const auto & cue = montageSubtitleTrack.cues[static_cast<size_t>(selectedMontageCueIndex)];
+			ImGui::TextDisabled("Selected cue");
+			ImGui::TextWrapped("%s", cue.text.c_str());
+		}
+	}
 	if (!montageEdlText.empty()) {
 		ImGui::TextDisabled("EDL");
 		ImGui::BeginChild("MontageEdlPreview", ImVec2(0, 180), true);
 		ImGui::TextUnformatted(montageEdlText.c_str());
 		ImGui::EndChild();
+	}
+	if (!montageSrtText.empty()) {
+		if (ImGui::TreeNode("Montage SRT")) {
+			ImGui::BeginChild("MontageSrtPreview", ImVec2(0, 160), true);
+			ImGui::TextUnformatted(montageSrtText.c_str());
+			ImGui::EndChild();
+			ImGui::TreePop();
+		}
+	}
+	if (!montageVttText.empty()) {
+		if (ImGui::TreeNode("Montage VTT")) {
+			ImGui::BeginChild("MontageVttPreview", ImVec2(0, 160), true);
+			ImGui::TextUnformatted(montageVttText.c_str());
+			ImGui::EndChild();
+			ImGui::TreePop();
+		}
 	}
 
 	ImGui::Separator();
@@ -1140,6 +1223,10 @@ void ofApp::runMontagePlanning() {
 			pendingMontageSummary.clear();
 			pendingMontageEditorBrief.clear();
 			pendingMontageEdlText.clear();
+			pendingMontageSrtText.clear();
+			pendingMontageVttText.clear();
+			pendingMontageSubtitleTrack = {};
+			pendingMontageSourceSubtitleTrack = {};
 		};
 
 		try {
@@ -1161,17 +1248,26 @@ void ofApp::runMontagePlanning() {
 					clearPendingMontage();
 					setPending("[Cancelled] Montage planning cancelled.");
 				} else if (result.success) {
+					const std::string safeTitle = edlTitle.empty() ? "MONTAGE" : edlTitle;
+					const ofxGgmlMontageSubtitleTrack montageTrack =
+						ofxGgmlMontagePlanner::buildSubtitleTrack(result.plan, safeTitle);
+					const ofxGgmlMontageSubtitleTrack sourceTrack =
+						ofxGgmlMontagePlanner::buildSourceSubtitleTrack(result.plan, safeTitle);
 					std::lock_guard<std::mutex> lock(outputMutex);
 					pendingMontageSummary = ofxGgmlMontagePlanner::summarizePlan(result.plan);
 					pendingMontageEditorBrief = ofxGgmlMontagePlanner::buildEditorBrief(result.plan);
 					pendingMontageEdlText = ofxGgmlMontagePlanner::buildEdl(
 						result.plan,
-						edlTitle.empty() ? "MONTAGE" : edlTitle,
+						safeTitle,
 						fps);
+					pendingMontageSrtText = ofxGgmlMontagePlanner::buildSrt(montageTrack);
+					pendingMontageVttText = ofxGgmlMontagePlanner::buildVtt(montageTrack);
+					pendingMontageSubtitleTrack = montageTrack;
+					pendingMontageSourceSubtitleTrack = sourceTrack;
 					pendingOutput =
 						"Montage plan ready.\n\n" +
 						pendingMontageSummary +
-						"\n\nA CMX-style EDL is ready below for editor export.";
+						"\n\nCMX EDL, montage-timed SRT, and VTT exports are ready below.";
 					pendingRole = "assistant";
 					pendingMode = AiMode::Vision;
 				} else {

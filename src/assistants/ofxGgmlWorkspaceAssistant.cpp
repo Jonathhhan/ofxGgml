@@ -2128,24 +2128,32 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 			}
 		} else if (workspaceSettings.autoRetryWithAssistant) {
 			ofxGgmlCodeAssistantRequest retryRequest = request;
+			ofxGgmlCodeAssistantContext retryContext = context;
 			retryRequest.action =
 				request.action == ofxGgmlCodeAssistantAction::FixBuild
 				? ofxGgmlCodeAssistantAction::FixBuild
 				: ofxGgmlCodeAssistantAction::Debug;
 			retryRequest.requestStructuredResult = true;
+			retryRequest.requestUnifiedDiff = request.requestUnifiedDiff;
+			retryRequest.preferGroundedEdits = true;
+			retryRequest.runSelfCheck = true;
 			retryRequest.lastTask =
 				result.assistantAttempts.back().prepared.body;
 			retryRequest.lastOutput =
 				result.assistantAttempts.back().inference.text;
+			retryContext.lastFailureReason = result.verificationResult.summary;
+			retryContext.recentTouchedFiles = result.applyResult.touchedFiles;
 			retryRequest.bodyOverride =
 				"Verification failed after applying the planned changes.\n\n"
 				"Original task:\n" + request.userInput + "\n\n"
+				"Keep the retry grounded in the files, symbols, and commands that already failed.\n"
+				"Return a tighter inspect -> patch -> verify remediation plan.\n\n"
 				"Verification summary:\n" + result.verificationResult.summary +
 				"\nReturn an updated structured remediation plan.";
 			result.assistantAttempts.push_back(m_codeAssistant.run(
 				modelPath,
 				retryRequest,
-				context,
+				retryContext,
 				inferenceSettings,
 				sourceSettings,
 				nullptr));

@@ -94,6 +94,24 @@ std::string formatTimecode(double seconds, int fps) {
 	return out.str();
 }
 
+std::string formatSubtitleTimestamp(double seconds, bool webVttStyle) {
+	const int totalMs = static_cast<int>(std::llround(std::max(0.0, seconds) * 1000.0));
+	const int millis = totalMs % 1000;
+	const int totalSeconds = totalMs / 1000;
+	const int secs = totalSeconds % 60;
+	const int totalMinutes = totalSeconds / 60;
+	const int mins = totalMinutes % 60;
+	const int hours = totalMinutes / 60;
+	std::ostringstream out;
+	out << std::setfill('0')
+		<< std::setw(2) << hours << ':'
+		<< std::setw(2) << mins << ':'
+		<< std::setw(2) << secs
+		<< (webVttStyle ? '.' : ',')
+		<< std::setw(3) << millis;
+	return out.str();
+}
+
 bool isStopWord(const std::string & token) {
 	static const std::unordered_set<std::string> stopWords = {
 		"a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "has",
@@ -118,6 +136,16 @@ std::string sanitizeEdlTitle(const std::string & value) {
 		sanitized.push_back(c);
 	}
 	return sanitized.empty() ? "MONTAGE" : sanitized;
+}
+
+std::string sanitizeSubtitleText(const std::string & text) {
+	std::string sanitized = trimMontageCopy(text);
+	for (char & c : sanitized) {
+		if (c == '\r') {
+			c = '\n';
+		}
+	}
+	return sanitized;
 }
 
 ofxGgmlMontageMatch scoreSegmentAgainstGoalTokens(
@@ -419,6 +447,114 @@ std::string ofxGgmlMontagePlanner::buildEditorBrief(const ofxGgmlMontagePlan & p
 			if (!clip.note.empty()) {
 				out << " | " << clip.note;
 			}
+		}
+	}
+	return out.str();
+}
+
+ofxGgmlMontageSubtitleTrack ofxGgmlMontagePlanner::buildSubtitleTrack(
+	const ofxGgmlMontagePlan & plan,
+	const std::string & title) {
+	ofxGgmlMontageSubtitleTrack track;
+	track.title = sanitizeEdlTitle(title);
+
+	double cursorSeconds = 0.0;
+	track.cues.reserve(plan.clips.size());
+	for (size_t i = 0; i < plan.clips.size(); ++i) {
+		const auto & clip = plan.clips[i];
+		const double duration = std::max(0.0, clip.endSeconds - clip.startSeconds);
+		if (duration <= 0.0) {
+			continue;
+		}
+
+		ofxGgmlMontageSubtitleCue cue;
+		cue.index = static_cast<int>(track.cues.size() + 1);
+		cue.sourceId = clip.sourceId;
+		cue.reelName = clip.reelName;
+		cue.startSeconds = cursorSeconds;
+		cue.endSeconds = cursorSeconds + duration;
+		cue.text = sanitizeSubtitleText(clip.note);
+		if (cue.text.empty()) {
+			cue.text = clip.clipName.empty() ? ("Clip " + std::to_string(i + 1)) : clip.clipName;
+		}
+		track.cues.push_back(std::move(cue));
+		cursorSeconds += duration;
+	}
+
+	return track;
+}
+
+ofxGgmlMontageSubtitleTrack ofxGgmlMontagePlanner::buildSourceSubtitleTrack(
+	const ofxGgmlMontagePlan & plan,
+	const std::string & title) {
+	ofxGgmlMontageSubtitleTrack track;
+	track.title = sanitizeEdlTitle(title);
+	track.cues.reserve(plan.clips.size());
+	for (size_t i = 0; i < plan.clips.size(); ++i) {
+		const auto & clip = plan.clips[i];
+		const double duration = std::max(0.0, clip.endSeconds - clip.startSeconds);
+		if (duration <= 0.0) {
+			continue;
+		}
+
+		ofxGgmlMontageSubtitleCue cue;
+		cue.index = static_cast<int>(track.cues.size() + 1);
+		cue.sourceId = clip.sourceId;
+		cue.reelName = clip.reelName;
+		cue.startSeconds = clip.startSeconds;
+		cue.endSeconds = clip.endSeconds;
+		cue.text = sanitizeSubtitleText(clip.note);
+		if (cue.text.empty()) {
+			cue.text = clip.clipName.empty() ? ("Clip " + std::to_string(i + 1)) : clip.clipName;
+		}
+		track.cues.push_back(std::move(cue));
+	}
+
+	std::sort(track.cues.begin(), track.cues.end(), [](const ofxGgmlMontageSubtitleCue & a, const ofxGgmlMontageSubtitleCue & b) {
+		if (a.startSeconds == b.startSeconds) {
+			return a.endSeconds < b.endSeconds;
+		}
+		return a.startSeconds < b.startSeconds;
+	});
+	for (size_t i = 0; i < track.cues.size(); ++i) {
+		track.cues[i].index = static_cast<int>(i + 1);
+	}
+
+	return track;
+}
+
+std::string ofxGgmlMontagePlanner::buildSrt(const ofxGgmlMontageSubtitleTrack & track) {
+	std::ostringstream out;
+	for (size_t i = 0; i < track.cues.size(); ++i) {
+		const auto & cue = track.cues[i];
+		out << (i + 1) << "\n"
+			<< formatSubtitleTimestamp(cue.startSeconds, false)
+			<< " --> "
+			<< formatSubtitleTimestamp(cue.endSeconds, false) << "\n"
+			<< cue.text << "\n";
+		if (i + 1 < track.cues.size()) {
+			out << "\n";
+		}
+	}
+	return out.str();
+}
+
+std::string ofxGgmlMontagePlanner::buildVtt(const ofxGgmlMontageSubtitleTrack & track) {
+	std::ostringstream out;
+	out << "WEBVTT";
+	if (!track.title.empty()) {
+		out << " - " << track.title;
+	}
+	out << "\n\n";
+	for (size_t i = 0; i < track.cues.size(); ++i) {
+		const auto & cue = track.cues[i];
+		out << (i + 1) << "\n"
+			<< formatSubtitleTimestamp(cue.startSeconds, true)
+			<< " --> "
+			<< formatSubtitleTimestamp(cue.endSeconds, true) << "\n"
+			<< cue.text << "\n";
+		if (i + 1 < track.cues.size()) {
+			out << "\n";
 		}
 	}
 	return out.str();

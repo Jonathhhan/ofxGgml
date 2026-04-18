@@ -18,7 +18,7 @@ This addon is released under the [MIT License](LICENSE).
 
 ## Release
 
-- addon release version: `1.0.2`
+- addon release version: `1.0.3`
 - changelog: `CHANGELOG.md`
 
 ## Highlights
@@ -43,9 +43,16 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlDiffusionInference` as a lightweight image-generation bridge layer that can host an `ofxStableDiffusion` adapter without coupling diffusion internals into the core addon, now with structured image modes, CLIP-friendly rerank selection, and richer per-image metadata
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
 - `ofxGgmlVideoInference` for backend-driven video understanding, starting with sampled-frame analysis and room for future specialized video backends
+- `ofxGgmlVideoPlanner` for beat planning, multi-scene sequencing, and AI-assisted edit-plan generation that can feed video, diffusion, or writing workflows
+- `ofxGgmlMontagePlanner` for subtitle-driven montage planning, ranked clip selection, editor briefs, and CMX-style EDL export
+- `ofxGgmlMontagePreviewBridge` as a playback-facing bridge surface that exposes source-timed and montage-timed subtitle tracks, cue lookup, and playlist-oriented preview data for companions such as `ofxVlc4`
+- `ofxGgmlImageSearch` for internet reference-image lookup through pluggable providers, with a working Wikimedia Commons backend
+- `ofxGgmlWebCrawler` as an optional website-ingestion bridge layer, with a `Mojo` CLI adapter for local website-to-Markdown crawling workflows
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
 - `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
 - `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, shadow-workspace safe apply, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
+- coding workflows now carry lightweight task memory such as active mode, selected backend, recent files, and last failure reason so retries and follow-up prompts stay more grounded
+- structured coding prompts now push a clearer inspect -> patch -> verify loop, stronger self-check instructions, and recovery from weak unstructured model replies
 - `ofxGgmlTextAssistant` for translation, summarization, rewriting, and reusable text-task prompts
 - `ofxGgmlCodeReview`, `ofxGgmlProjectMemory`, and `ofxGgmlScriptSource` helpers for local coding and multi-pass review workflows
 - `ofxGgmlScriptSource` now accepts local folders, Visual Studio `.sln` / `.vcxproj` workspaces, GitHub `owner/repo` values, full GitHub URLs, and branch-aware repo URLs
@@ -53,6 +60,8 @@ This addon is released under the [MIT License](LICENSE).
 - async graph submission and explicit synchronization for frame-friendly compute
 - Windows build scripts that refresh Visual Studio linking automatically
 - GUI example for local chat, review, and script-assisted workflows built mostly on addon helpers
+- GUI example Translate mode with auto-detect source language, natural vs. literal translation shortcuts, detect-and-translate flow, and more reliable prompt/input handoff buttons
+- GUI example Montage mode can now preview restructured subtitle cues live, copy generated SRT/VTT exports, and keep a playback-facing subtitle track ready for external preview layers such as `ofxVlc4`
 
 ## Source layout
 
@@ -66,7 +75,8 @@ Core implementation is split by concern:
 - `src/compute/` for tensors and graph building
 - `src/model/` for GGUF model loading
 - `src/inference/` for completion execution, grounded prompt assembly, and speech / vision / video inference helpers
-- `src/inference/` also now includes bridge scaffolds for optional CLIP-style ranking, TTS, and diffusion/image-generation backends such as `clip.cpp`, OuteTTS, and `ofxStableDiffusion`
+- `src/inference/` also now includes bridge scaffolds for optional CLIP-style ranking, TTS, and diffusion/image-generation backends such as `clip.cpp`, OuteTTS, and `ofxStableDiffusion`, plus higher-level planners and preview bridges for video, montage, and image search workflows
+- `src/inference/` also now includes optional web-ingestion helpers such as `ofxGgmlWebCrawler` for local crawler-backed RAG/document pipelines
 - `src/assistants/` for chat, code, workspace, review, and text-task helpers
 - `src/support/` for script sources and project memory
 
@@ -80,6 +90,13 @@ Supporting areas:
 - `ofxGgmlBasicExample/`
 - `ofxGgmlGuiExample/`
 - `ofxGgmlNeuralExample/`
+
+Developer tooling:
+
+- repo-level `.clang-tidy` for addon/example static-analysis defaults
+- `scripts/run-clang-tidy.ps1` for Windows / Visual Studio workflows
+- `scripts/run-clang-tidy.sh` for Linux/macOS compile-database workflows
+- `docs/CLANG_TIDY.md` for usage and recommended scope
 
 ## Compatibility policy
 
@@ -148,7 +165,7 @@ Features:
 - Sequential fallback for CLI backends
 - Per-request settings and streaming callbacks
 - Built-in metrics tracking via `ofxGgmlMetrics`
-- Batch embeddings support
+- Batch embeddings support, now with bounded concurrent server requests instead of a purely sequential loop
 
 See `docs/BATCH_INFERENCE.md` for comprehensive documentation.
 
@@ -207,6 +224,31 @@ std::string prompt = templates.fill("summarize", {
     {"max_length", "3 sentences"}
 });
 ```
+
+## clang-tidy
+
+`ofxGgml` now ships with a repo-level `clang-tidy` configuration and helper scripts.
+
+Windows / Visual Studio:
+
+```powershell
+./scripts/run-clang-tidy.ps1
+./scripts/run-clang-tidy.ps1 -UseMsBuild
+./scripts/run-clang-tidy.ps1 -Files src/core/ofxGgmlCore.cpp,src/inference/ofxGgmlInference.cpp
+```
+
+Linux / macOS:
+
+```bash
+./scripts/run-clang-tidy.sh
+./scripts/run-clang-tidy.sh src/core/ofxGgmlCore.cpp src/inference/ofxGgmlInference.cpp
+```
+
+The scripts prefer a `compile_commands.json` database when available and keep analysis scoped to addon/example code rather than vendored `libs/`.
+
+More detailed guidance lives in:
+
+- `docs/CLANG_TIDY.md`
 
 ## Supported operations
 
@@ -440,6 +482,14 @@ The helper normalizes HTML-heavy pages into cleaner text, clips oversized source
 
 Use it when an app wants a reusable local code-review pipeline instead of wiring `ofxGgmlScriptSource`, embedding calls, and prompt choreography by hand.
 
+The scripting-oriented assistant path has also been tightened so it behaves more like an editing agent than a one-shot prompt wrapper:
+
+- likely edit targets now prefer compiler-reported files, allow-listed files, focused files, and recently touched files
+- symbol retrieval gives extra weight to recently touched files instead of treating all workspace files equally
+- structured prompts ask for inspect -> patch -> verify plans with grounded file paths and symbol names
+- when the model replies in weak freeform prose even though structured output was requested, the assistant now performs one recovery pass to convert that answer into the expected structured tags
+- workspace retries now carry forward the last failure reason and touched files so remediation passes are narrower and more actionable
+
 Repository-specific instructions can now shape review prompts as well. For local workspaces, the addon reads:
 
 - `.github/copilot-instructions.md`
@@ -467,6 +517,7 @@ The `GuiExample` now layers higher-level scripting workflows on top of those ass
 - slash commands such as `/review`, `/reviewfix`, `/nextedit`, `/summary`, `/tests`, `/fix`, `/explain`, and `/docs`
 - one-click `Next Edit`, `Review Fix Plan`, and local `Change Summary` actions
 - server-first code generation with automatic CLI fallback when the server is unavailable
+- clearer Script-mode guidance in the UI, including backend/workspace context, suggested next steps, cached verification commands, and reuse of recent touched files / last failure reason for follow-up prompts
 
 Symbol context is no longer limited to file snippets. Apps can build a semantic index, query relevant definitions of `runInference` and likely callers, and feed that directly into coding or review prompts. When a local workspace exposes `compile_commands.json`, the assistant upgrades retrieval with compile-database-aware file coverage and range-based caller tracking. For planning-heavy flows, `buildCodeMap(...)` exposes a compact semantic code map, while `runSpecToCode(...)` turns a feature specification into a structured implementation plan with tests, review passes, and risk metadata.
 
@@ -635,6 +686,67 @@ The sidecar can respond either with those fields at the top level or under a top
 - optional free-form notes
 
 Use it when an app wants practical local video understanding today, but still wants a clean path to stronger temporal backends later.
+
+## Video Planning Helpers
+
+`ofxGgmlVideoPlanner` adds a higher-level planning layer on top of text, vision, and video analysis. It can build single-scene beat plans, multi-scene generation plans, and AI-assisted editing briefs from a plain-language goal.
+
+The planner currently supports:
+
+- beat-oriented prompt planning for one clip
+- recurring entities and scene continuity across multi-scene plans
+- selected-scene versus full-sequence prompt assembly
+- AI-assisted edit-plan generation with structured actions, durations, and editorial notes
+
+The GUI example exposes that planner directly in the Vision / Video area with:
+
+- `Plan Video` for beat planning
+- `Plan Multi-Scene` for scene scripts and continuity-aware prompts
+- `Plan Edit` for AI-assisted editing briefs
+- handoff actions into Write and Diffusion for scene-level reuse
+
+Use it when an app wants an LLM to structure video generation or editing before handing work off to a diffusion backend, a multimodal model, or a human editor.
+
+## Montage Helpers
+
+`ofxGgmlMontagePlanner` turns subtitle or transcript cues into a ranked montage plan. It can parse SRT-style cues, score them against a montage goal, keep the result in timeline order, and export a CMX-style EDL alongside a human-readable editor brief.
+
+The GUI example includes a `Subtitle montage automat` workflow with:
+
+- local `.srt` selection or reuse of speech-generated subtitle output
+- montage-goal scoring
+- ranked clip suggestions
+- inline editor brief preview
+- `Copy EDL` for timeline handoff
+
+Use it when an app wants transcript-driven rough-cut planning without building a full NLE integration first.
+
+## Image Search Helpers
+
+`ofxGgmlImageSearch` provides a lightweight provider-agnostic interface for internet image search. The addon currently ships with a working Wikimedia Commons backend, and the example uses it for prompt-driven reference gathering in both Vision and Diffusion workflows.
+
+The GUI example can:
+
+- search for internet reference images from a prompt
+- reuse the current Vision or Diffusion prompt as the search query
+- preview a selected result
+- cache a chosen result locally for Vision image analysis or Diffusion init-image reuse
+
+Use it when an app wants lightweight reference gathering without hardwiring a specific commercial image-search API into the rest of the workflow.
+
+## Web Crawler Helpers
+
+`ofxGgmlWebCrawler` provides a lightweight optional bridge for website ingestion. The default backend wraps the external `Mojo` CLI crawler, runs a local crawl, and normalizes discovered Markdown files into structured addon result objects.
+
+The default `Mojo` adapter currently supports:
+
+- start URL
+- crawl depth
+- optional JavaScript rendering
+- explicit output directory or temporary crawl directories
+- normalized command output and discovered Markdown documents
+
+Use it when an app wants to turn a website into local Markdown/documents for later embedding, retrieval, citation scraping, or RAG-style prompt grounding without coupling the addon to one crawler implementation.
 
 ## Versioning
 

@@ -19,6 +19,11 @@ std::string trimCopy(const std::string & s) {
 	return s.substr(start, end - start);
 }
 
+bool isAutoDetectLanguage(const std::string & name) {
+	const std::string trimmed = trimCopy(name);
+	return trimmed.empty() || trimmed == "Auto detect";
+}
+
 } // namespace
 
 void ofxGgmlTextAssistant::setCompletionExecutable(const std::string & path) {
@@ -35,6 +40,7 @@ const ofxGgmlInference & ofxGgmlTextAssistant::getInference() const {
 
 std::vector<ofxGgmlTextLanguageOption> ofxGgmlTextAssistant::defaultTranslateLanguages() {
 	return {
+		{"Auto detect"},
 		{"English"}, {"Spanish"}, {"French"}, {"German"}, {"Italian"},
 		{"Portuguese"}, {"Chinese"}, {"Japanese"}, {"Korean"}, {"Russian"},
 		{"Arabic"}, {"Hindi"}, {"Dutch"}, {"Swedish"}, {"Polish"}
@@ -149,17 +155,25 @@ ofxGgmlTextAssistantPreparedPrompt ofxGgmlTextAssistant::preparePrompt(
 			<< input << "\n\nCorrected text:\n";
 		break;
 	case ofxGgmlTextTask::Translate:
-		prompt << "Translate the following";
-		if (!sourceLanguage.empty()) {
+		prompt << "Translate the following text";
+		if (!isAutoDetectLanguage(sourceLanguage)) {
 			prompt << " from " << sourceLanguage;
 		}
-		if (!targetLanguage.empty()) {
+		if (!isAutoDetectLanguage(targetLanguage)) {
 			prompt << " to " << targetLanguage;
 		}
-		prompt << ":\n" << input << "\n\nTranslation:\n";
+		prompt
+			<< ". Preserve the original meaning, paragraph breaks, list structure, and visible emphasis."
+			<< " Return only the translated text with no explanations, notes, or labels.\n"
+			<< input
+			<< "\n\nTranslation:\n";
 		break;
 	case ofxGgmlTextTask::DetectLanguage:
-		prompt << "Detect the language of the following text and explain briefly:\n"
+		prompt
+			<< "Detect the language of the following text."
+			<< " Answer in two short lines using this format:\n"
+			<< "Language: <language>\n"
+			<< "Reason: <brief evidence>\n\n"
 			<< input << "\n\nAnswer:\n";
 		break;
 	case ofxGgmlTextTask::Custom:

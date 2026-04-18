@@ -168,6 +168,15 @@ void ofApp::drawImageSearchPanel(
 	ImGui::TextWrapped(
 		"Searches Wikimedia Commons from a text prompt, then lets you pull a result straight into Vision or Diffusion.");
 
+	if (hasDeferredImageSearchPrompt) {
+		copyStringToBuffer(
+			imageSearchPrompt,
+			sizeof(imageSearchPrompt),
+			deferredImageSearchPrompt);
+		hasDeferredImageSearchPrompt = false;
+		deferredImageSearchPrompt.clear();
+	}
+
 	ImGui::InputText(
 		"Search prompt",
 		imageSearchPrompt,
@@ -177,10 +186,8 @@ void ofApp::drawImageSearchPanel(
 	}
 	ImGui::SameLine();
 	if (ImGui::Button(copyPromptButtonLabel, ImVec2(140, 0))) {
-		copyStringToBuffer(
-			imageSearchPrompt,
-			sizeof(imageSearchPrompt),
-			suggestedPrompt);
+		deferredImageSearchPrompt = suggestedPrompt;
+		hasDeferredImageSearchPrompt = true;
 		autoSaveSession();
 	}
 

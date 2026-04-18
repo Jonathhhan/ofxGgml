@@ -211,6 +211,8 @@ private:
 	std::string montageSummary;
 	std::string montageEditorBrief;
 	std::string montageEdlText;
+	std::string montageSrtText;
+	std::string montageVttText;
 	std::string videoPlanSummary;
 	std::string videoEditPlanSummary;
 	std::string speechOutput;
@@ -242,6 +244,20 @@ private:
 	std::string imageSearchPreviewError;
 	std::string imageSearchPreviewSourceUrl;
 	int selectedImageSearchResultIndex = -1;
+	std::string deferredImageSearchPrompt;
+	bool hasDeferredImageSearchPrompt = false;
+	std::string deferredSpeechAudioPath;
+	bool hasDeferredSpeechAudioPath = false;
+	std::string deferredTranslateInput;
+	bool hasDeferredTranslateInput = false;
+	std::string deferredDiffusionPrompt;
+	bool hasDeferredDiffusionPrompt = false;
+	std::string deferredDiffusionOutputDir;
+	bool hasDeferredDiffusionOutputDir = false;
+	std::string deferredMontageSubtitlePath;
+	bool hasDeferredMontageSubtitlePath = false;
+	bool montageSubtitlePlaybackEnabled = false;
+	int selectedMontageCueIndex = -1;
 	std::string speechDetectedLanguage;
 	std::string speechTranscriptPath;
 	std::string speechSrtPath;
@@ -310,6 +326,12 @@ private:
 	std::string pendingMontageSummary;
 	std::string pendingMontageEditorBrief;
 	std::string pendingMontageEdlText;
+	std::string pendingMontageSrtText;
+	std::string pendingMontageVttText;
+	ofxGgmlMontageSubtitleTrack montageSubtitleTrack;
+	ofxGgmlMontageSubtitleTrack montageSourceSubtitleTrack;
+	ofxGgmlMontageSubtitleTrack pendingMontageSubtitleTrack;
+	ofxGgmlMontageSubtitleTrack pendingMontageSourceSubtitleTrack;
 	std::string pendingVideoPlanJson;
 	std::string pendingVideoPlanSummary;
 	std::string pendingVideoEditPlanJson;
@@ -441,6 +463,8 @@ private:
 	ofxGgmlVideoPlanner videoPlanner;
 	ofxGgmlProjectMemory scriptProjectMemory;
 	std::string lastScriptRequest;
+	std::vector<std::string> recentScriptTouchedFiles;
+	std::string lastScriptFailureReason;
 	std::vector<ofxGgmlCodeAssistantCommandSuggestion> cachedScriptVerificationCommands;
 	uint64_t cachedScriptVerificationGeneration = 0;
 	std::string cachedScriptVerificationRoot;
@@ -569,6 +593,8 @@ private:
 	void drawVisionImagePreview(const std::string & imagePath);
 	void drawVisionVideoPreview(const std::string & videoPath);
 	void drawMediaTexturePreview(const ofBaseHasTexture & previewTexture, const char * childId);
+	int findActiveMontageSourceCueIndex() const;
+	void rebuildMontageSubtitleTrackFromText();
 	void ensureDiffusionPreviewResources();
 	void drawDiffusionImagePreview(
 		const char * label,

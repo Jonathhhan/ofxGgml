@@ -1232,6 +1232,11 @@ std::vector<PromptFileSnippet> collectLikelyEditTargetSnippets(
 			candidates.push_back({error.filePath, reason});
 		}
 	}
+	for (const auto & recentFile : context.recentTouchedFiles) {
+		if (!trimCopy(recentFile).empty()) {
+			candidates.push_back({recentFile, "recently touched file"});
+		}
+	}
 
 	std::unordered_map<std::string, size_t> seen;
 	const auto files = context.scriptSource->getFiles();
@@ -1437,6 +1442,46 @@ void appendStructuredResponseInstructions(std::ostringstream & prompt) {
 		<< "\n";
 }
 
+void appendTaskMemory(
+	std::ostringstream & prompt,
+	const ofxGgmlCodeAssistantContext & context,
+	bool * includedTaskMemory) {
+	if (includedTaskMemory != nullptr) {
+		*includedTaskMemory = false;
+	}
+	const bool hasActiveMode = !trimCopy(context.activeMode).empty();
+	const bool hasSelectedBackend = !trimCopy(context.selectedBackend).empty();
+	const bool hasRecentFiles = !context.recentTouchedFiles.empty();
+	const bool hasFailureReason = !trimCopy(context.lastFailureReason).empty();
+	if (!hasActiveMode && !hasSelectedBackend &&
+		!hasRecentFiles && !hasFailureReason) {
+		return;
+	}
+
+	if (includedTaskMemory != nullptr) {
+		*includedTaskMemory = true;
+	}
+	prompt << "Current task memory:\n";
+	if (hasActiveMode) {
+		prompt << "- active mode: " << context.activeMode << "\n";
+	}
+	if (hasSelectedBackend) {
+		prompt << "- selected backend: " << context.selectedBackend << "\n";
+	}
+	if (hasRecentFiles) {
+		prompt << "- recently touched files:\n";
+		for (const auto & file : context.recentTouchedFiles) {
+			if (!trimCopy(file).empty()) {
+				prompt << "  - " << normalizeRelativeFilePath(file) << "\n";
+			}
+		}
+	}
+	if (hasFailureReason) {
+		prompt << "- last failure reason: " << context.lastFailureReason << "\n";
+	}
+	prompt << "\n";
+}
+
 void appendAllowedFiles(
 	std::ostringstream & prompt,
 	const std::vector<std::string> & allowedFiles) {
@@ -1533,6 +1578,68 @@ void appendRequestConstraints(
 		prompt << "Simulate review passes for correctness, safety, and maintainability.\n";
 		prompt << "If you emit findings, include explicit priority, confidence, category, and fix direction.\n\n";
 	}
+
+	if (request.preferGroundedEdits) {
+		prompt << "Ground edits in real project context.\n";
+		prompt << "- Cite concrete file paths, symbol names, and exact UI state or workflow state when relevant.\n";
+		prompt << "- Prefer narrow, verifiable changes over generic rewrites.\n";
+		prompt << "- If context is missing, say what is missing instead of inventing files or APIs.\n\n";
+	}
+
+	if (request.runSelfCheck) {
+		prompt << "Before finalizing, perform an internal self-check:\n";
+		prompt << "- Did you answer the actual request?\n";
+		prompt << "- Did you keep changes within the stated constraints and allowed files?\n";
+		prompt << "- Did you include verification commands or explain why they are missing?\n";
+		prompt << "- If the task is weakly grounded, narrow the plan instead of returning generic filler.\n\n";
+	}
+}
+
+void appendModeSpecificInstructions(
+	std::ostringstream & prompt,
+	const ofxGgmlCodeAssistantRequest & request) {
+	switch (request.action) {
+	case ofxGgmlCodeAssistantAction::Review:
+		prompt << "Operate like a professional reviewer.\n";
+		prompt << "- Lead with concrete findings, not summaries.\n";
+		prompt << "- Tie each finding to a file, symbol, or specific behavior.\n\n";
+		break;
+	case ofxGgmlCodeAssistantAction::Edit:
+	case ofxGgmlCodeAssistantAction::Refactor:
+	case ofxGgmlCodeAssistantAction::FixBuild:
+		prompt << "Operate like an editing agent.\n";
+		prompt << "- Inspect likely files first, then propose the patch, then verification.\n";
+		prompt << "- Prefer one coherent patch set over scattered speculative edits.\n\n";
+		break;
+	case ofxGgmlCodeAssistantAction::GroundedDocs:
+		prompt << "Operate like a grounded documentation assistant.\n";
+		prompt << "- Prefer sourced answers and explicit gaps over guesses.\n\n";
+		break;
+	case ofxGgmlCodeAssistantAction::Ask:
+	case ofxGgmlCodeAssistantAction::Generate:
+	case ofxGgmlCodeAssistantAction::Debug:
+	case ofxGgmlCodeAssistantAction::Optimize:
+	case ofxGgmlCodeAssistantAction::ContinueTask:
+		prompt << "Operate like a planning assistant.\n";
+		prompt << "- Make the next step executable, not vague.\n";
+		prompt << "- When code is involved, mention the likely touched files or symbols.\n\n";
+		break;
+	default:
+		break;
+	}
+}
+
+std::string buildStructuredRecoveryPrompt(
+	const ofxGgmlCodeAssistantPreparedPrompt & prepared,
+	const std::string & previousAnswer) {
+	std::ostringstream prompt;
+	prompt << "Convert the following coding response into the exact structured tag format only.\n";
+	prompt << "Do not add commentary outside the tagged lines.\n";
+	prompt << ofxGgmlCodeAssistant::buildStructuredResponseInstructions() << "\n";
+	prompt << "Original request label:\n" << prepared.requestLabel << "\n\n";
+	prompt << "Original request body:\n" << prepared.body << "\n\n";
+	prompt << "Previous response to convert:\n" << previousAnswer << "\n";
+	return prompt.str();
 }
 
 } // namespace
@@ -1910,6 +2017,11 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::retrieveSymbols(
 	if (index.symbols.empty()) {
 		return ranked;
 	}
+	std::unordered_set<std::string> recentTouchedFiles;
+	recentTouchedFiles.reserve(context.recentTouchedFiles.size());
+	for (const auto & file : context.recentTouchedFiles) {
+		recentTouchedFiles.insert(normalizePathForMatch(file));
+	}
 
 	for (auto & symbol : index.symbols) {
 		const std::string lowerName = toLowerCopy(symbol.name);
@@ -1931,6 +2043,10 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::retrieveSymbols(
 					symbol.filePath) {
 				score += 0.75f;
 			}
+		}
+		if (recentTouchedFiles.find(normalizePathForMatch(symbol.filePath)) !=
+			recentTouchedFiles.end()) {
+			score += 0.85f;
 		}
 
 		for (const auto & token : queryTokens) {
@@ -2620,11 +2736,12 @@ std::string ofxGgmlCodeAssistant::buildStructuredResponseInstructions() {
 		"Planning tags:\n"
 		"GOAL: concise summary of the objective (one sentence)\n"
 		"APPROACH: high-level strategy (one sentence)\n"
-		"STEP: concrete actionable step (be specific)\n"
+		"STEP: concrete actionable step (be specific, ideally inspect -> patch -> verify)\n"
 		"ACCEPT: acceptance criterion or invariant (testable condition)\n"
 		"\n"
 		"File context tags:\n"
 		"FILE: relative/path | reason for touching | comma,separated,symbols\n"
+		"Prefer real file paths and real symbol names over placeholders.\n"
 		"\n"
 		"Patch operation tags (prefer DIFF over PATCH when possible):\n"
 		"PATCH: write|replace|append|delete | relative/path | brief summary\n"
@@ -2651,6 +2768,11 @@ std::string ofxGgmlCodeAssistant::buildStructuredResponseInstructions() {
 		"RISK-LEVEL: low|medium|high|critical\n"
 		"RISK: specific possible risk or regression\n"
 		"QUESTION: unresolved question requiring clarification\n"
+		"\n"
+		"Self-check expectations:\n"
+		"- Make sure the plan answers the request directly.\n"
+		"- Stay within the stated constraints and allowed files.\n"
+		"- If verification cannot be run, say so explicitly in RISK or QUESTION.\n"
 		"\n"
 		"Important: Use escaped single-line values for SEARCH, REPLACE, CONTENT, and DIFF.\n"
 		"For DIFF, prefer unified diff format. For multi-line content, use \\n as newline separator.\n"
@@ -3141,6 +3263,7 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 		prompt << context.projectMemory->buildPromptContext(
 			context.projectMemoryHeading);
 	}
+	appendTaskMemory(prompt, context, &prepared.includedTaskMemory);
 	if (context.scriptSource != nullptr) {
 		const std::string instructionContext = buildRepoInstructionContext(
 			context.scriptSource,
@@ -3164,6 +3287,7 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 		prepared.focusedFileName);
 
 	appendRequestConstraints(prompt, request);
+	appendModeSpecificInstructions(prompt, request);
 
 	if (prepared.includedCodeMap) {
 		prompt << "Semantic code map:\n";
@@ -3290,6 +3414,27 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::run(
 	}
 
 	result.structured = parseStructuredResult(result.inference.text);
+	if (request.requestStructuredResult &&
+		!result.structured.detectedStructuredOutput &&
+		result.inference.success &&
+		!trimCopy(result.inference.text).empty()) {
+		const ofxGgmlInferenceResult recovery = m_inference.generate(
+			modelPath,
+			buildStructuredRecoveryPrompt(result.prepared, result.inference.text),
+			inferenceSettings,
+			nullptr);
+		const auto recoveredStructured = parseStructuredResult(recovery.text);
+		if (recoveredStructured.detectedStructuredOutput) {
+			result.structured = recoveredStructured;
+		} else {
+			addUniqueString(
+				&result.structured.questions,
+				"Model returned an unstructured response; verify the proposed changes manually.");
+			addUniqueString(
+				&result.structured.risks,
+				"Structured output recovery failed; the assistant response may need manual review.");
+		}
+	}
 	if (result.structured.unifiedDiff.empty() &&
 		request.requestUnifiedDiff &&
 		!result.structured.patchOperations.empty()) {
