@@ -28,10 +28,11 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlGraph` fluent graph builder for common ggml operations
 - `ofxGgmlModel` GGUF inspection and backend weight upload
 - `ofxGgmlInference` llama.cpp helper for CLI and persistent `llama-server` generation, embeddings, cache reuse, capability probing, cutoff continuation, and source-grounded prompt building
+- **Batched Inference API** for efficient multi-request processing with concurrent execution, automatic fallback, and comprehensive metrics
 - **Quick Wins** for developer experience:
   - `ofxGgmlStreamingContext` - streaming API with backpressure control, pause/resume/cancel
   - `ofxGgmlLogger` - comprehensive logging with multiple levels and file/console output
-  - `ofxGgmlMetrics` - performance tracking for tokens/sec, cache rates, memory usage
+  - `ofxGgmlMetrics` - performance tracking for tokens/sec, cache rates, memory usage, and batch efficiency
   - `ofxGgmlModelRegistry` - model version management and hot-swapping
   - `ofxGgmlPromptTemplates` - 30+ reusable templates for common AI tasks
 - server-streamed text output now uses delta-based chunk handling so Chat and Script mode no longer duplicate partial text while `llama-server` replies are still arriving
@@ -104,7 +105,37 @@ After setup, add `ofxGgml` to your project's `addons.make`, regenerate with the 
 
 ## Quick Wins: Developer Experience Features
 
-ofxGgml includes four high-impact features for improved developer experience. See `docs/QUICK_WINS.md` for detailed documentation.
+ofxGgml includes high-impact features for improved developer experience. See `docs/QUICK_WINS.md` for detailed documentation.
+
+### Batched Inference API
+
+Process multiple inference requests efficiently with automatic parallelization and fallback:
+
+```cpp
+ofxGgmlInference inference;
+std::vector<std::string> prompts = {
+    "Summarize quantum computing",
+    "Explain neural networks",
+    "What is machine learning?"
+};
+
+ofxGgmlInferenceSettings settings;
+settings.maxTokens = 256;
+settings.useServerBackend = true;
+
+auto result = inference.generateBatchSimple("model.gguf", prompts, settings);
+std::cout << "Processed: " << result.processedCount << " requests in "
+          << result.totalElapsedMs << "ms" << std::endl;
+```
+
+Features:
+- Concurrent processing for server backends (configurable parallelism)
+- Sequential fallback for CLI backends
+- Per-request settings and streaming callbacks
+- Built-in metrics tracking via `ofxGgmlMetrics`
+- Batch embeddings support
+
+See `docs/BATCH_INFERENCE.md` for comprehensive documentation.
 
 ### Streaming API with Backpressure Control
 
