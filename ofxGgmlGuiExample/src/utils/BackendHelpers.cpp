@@ -1,6 +1,8 @@
 #include "BackendHelpers.h"
 #include "ImGuiHelpers.h"
 #include "ServerHelpers.h"
+#include "../config/ModelPresets.h"
+#include "../ofApp.h"
 
 #include <algorithm>
 #include <regex>

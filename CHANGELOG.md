@@ -21,6 +21,7 @@ All notable changes to `ofxGgml` are documented in this file.
 - Generated-image metadata now keeps selection/ranking fields such as `sourceIndex`, selected-best state, score, scorer, and score-summary text so CLIP-aware callers can reason about best-of-N runs directly from addon result objects.
 - `ofxGgmlTtsInference` as a new bridge scaffold for optional text-to-speech backends, now with a `chatllm.cpp` adapter path for OuteTTS-style models, task-oriented request/result types, and speaker-profile handling.
 - The GUI example TTS mode now defaults its executable field to the addon-local `libs/chatllm/bin` runtime path and uses a cleaner one-backend-per-request flow.
+- The GUI example Diffusion mode now adds `ofxStableDiffusion` through `addons.make`, auto-attaches a local `ofxStableDiffusion` engine when present, and includes quicker cross-panel handoff actions for Vision, Diffusion, and CLIP workflows.
 - Script mode now supports higher-level slash commands and quick actions such as `/review`, `/reviewfix`, `/nextedit`, `/summary`, and `Change Summary`.
 - Text-focused GUI modes now expose additional professional one-click actions, including executive briefs, action items, meeting notes, email replies, release notes, commit messages, and structured JSON replies.
 - The Speech panel now supports temporary microphone capture, including `Start Mic Recording`, `Stop + Run`, and `Use Last Recording` for direct transcribe / translate workflows from the default input device.

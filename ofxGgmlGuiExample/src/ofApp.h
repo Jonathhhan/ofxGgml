@@ -116,6 +116,13 @@ private:
 	int visionTaskIndex = 0;
 	int videoTaskIndex = 0;
 	int visionVideoMaxFrames = 6;
+	char videoPlanJson[16384] = {};
+	int videoPlanBeatCount = 4;
+	int videoPlanSceneCount = 3;
+	int selectedVideoPlanSceneIndex = 0;
+	bool videoPlanMultiScene = false;
+	float videoPlanDurationSeconds = 5.0f;
+	bool videoPlanUseForGeneration = true;
 	char speechAudioPath[1024] = {};
 	char speechExecutable[256] = "whisper-cli";
 	char speechModelPath[1024] = {};
@@ -185,6 +192,7 @@ private:
 	std::string translateOutput;
 	std::string customOutput;
 	std::string visionOutput;
+	std::string videoPlanSummary;
 	std::string speechOutput;
 	std::string ttsOutput;
 	std::string diffusionOutput;
@@ -196,6 +204,9 @@ private:
 	std::string visionPreviewVideoLoadedPath;
 	std::string visionPreviewVideoError;
 	bool visionPreviewVideoReady = false;
+	ofImage visionOutputPreviewImage;
+	std::string visionOutputPreviewLoadedPath;
+	std::string visionOutputPreviewError;
 	ofImage diffusionInitPreviewImage;
 	std::string diffusionInitPreviewLoadedPath;
 	std::string diffusionInitPreviewError;
@@ -224,6 +235,7 @@ private:
 	std::vector<ofxGgmlClipSimilarityHit> clipHits;
 	std::string speechRecordedTempPath;
 	bool speechRecording = false;
+	float speechRecordingStartTime = 0.0f;
 	bool speechLiveTranscriptionEnabled = false;
 	int speechInputSampleRate = 16000;
 	int speechInputChannels = 1;
@@ -233,6 +245,10 @@ private:
 	float speechLiveOverlapSeconds = 0.75f;
 	ofxGgmlLiveSpeechTranscriber speechLiveTranscriber;
 	ofSoundStream speechInputStream;
+	bool speechInputStreamConfigured = false;
+	int speechInputStreamConfigSampleRate = 0;
+	int speechInputStreamConfigChannels = 0;
+	int speechInputStreamConfigBufferSize = 0;
 	std::vector<float> speechRecordedSamples;
 	std::mutex speechRecordMutex;
 
@@ -258,6 +274,10 @@ private:
 	float pendingDiffusionElapsedMs = 0.0f;
 	std::vector<ofxGgmlGeneratedImage> pendingDiffusionImages;
 	std::vector<std::pair<std::string, std::string>> pendingDiffusionMetadata;
+	std::vector<ofxGgmlSampledVideoFrame> visionSampledVideoFrames;
+	std::vector<ofxGgmlSampledVideoFrame> pendingVisionSampledVideoFrames;
+	std::string pendingVideoPlanJson;
+	std::string pendingVideoPlanSummary;
 	std::string pendingClipBackendName;
 	float pendingClipElapsedMs = 0.0f;
 	int pendingClipEmbeddingDimension = 0;
@@ -348,6 +368,9 @@ private:
 	int selectedTtsProfileIndex = 0;
 	std::vector<ofxGgmlImageGenerationModelProfile> diffusionProfiles;
 	int selectedDiffusionProfileIndex = 0;
+	std::string configuredClipBackendModelPath;
+	int configuredClipBackendVerbosity = -1;
+	bool configuredClipBackendNormalize = true;
 
 	// -- script source (local folder / GitHub) --
 	ofxGgmlScriptSource scriptSource;
@@ -370,8 +393,12 @@ private:
 	ofxGgmlTtsInference ttsInference;
 	ofxGgmlDiffusionInference diffusionInference;
 	ofxGgmlClipInference clipInference;
+#if OFXGGML_HAS_OFXSTABLEDIFFUSION
+	std::shared_ptr<ofxStableDiffusion> stableDiffusionEngine;
+#endif
 	ofxGgmlInference llmInference;
 	ofxGgmlCodeReview scriptCodeReview;
+	ofxGgmlVideoPlanner videoPlanner;
 	ofxGgmlProjectMemory scriptProjectMemory;
 	std::string lastScriptRequest;
 	std::vector<ofxGgmlCodeAssistantCommandSuggestion> cachedScriptVerificationCommands;
@@ -407,12 +434,25 @@ private:
 	void runHierarchicalReview(const std::string & overrideQuery = std::string());
 	void runVisionInference();
 	void runVideoInference();
+	void runVideoPlanning();
 	void runSpeechInference();
 	void runTtsInference();
 	void runDiffusionInference();
 	void runClipInference();
+	bool ensureClipBackendConfigured(
+		const std::string & modelPath,
+		int verbosity,
+		bool normalizeEmbeddings);
+	bool ensureDiffusionBackendConfigured();
+	bool ensureDiffusionClipBackendConfigured();
+	static int clampSupportedDiffusionImageSize(int value);
+	ofxGgmlInferenceSettings buildCurrentTextInferenceSettings(AiMode mode) const;
+	std::string getPreferredDiffusionReuseImagePath() const;
+	void setDiffusionInitImagePath(const std::string & path, bool promoteTask = true);
+	void copyDiffusionOutputsToClipPaths();
 	ofxGgmlLiveSpeechSettings makeLiveSpeechSettings() const;
 	void applyLiveSpeechTranscriberSettings();
+	bool ensureSpeechInputStreamReady();
 	bool startSpeechRecording();
 	void stopSpeechRecording(bool keepBufferedAudio = true);
 	std::string flushSpeechRecordingToTempWav();

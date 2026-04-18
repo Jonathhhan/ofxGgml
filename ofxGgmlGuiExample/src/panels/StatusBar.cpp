@@ -1,4 +1,6 @@
 #include "StatusBar.h"
+#include "ofxGgmlChatAssistant.h"
+#include "ofxGgmlCodeAssistant.h"
 
 // Enums from ofApp.h
 enum class LiveContextMode {

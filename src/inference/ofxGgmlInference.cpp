@@ -1,4 +1,5 @@
 #include "ofxGgmlInference.h"
+#include "ofxGgmlInferenceServerInternals.h"
 #include "core/ofxGgmlWindowsUtf8.h"
 #include "core/ofxGgmlMetrics.h"
 #include "support/ofxGgmlProcessSecurity.h"
@@ -93,363 +94,6 @@ static std::string trim(const std::string & s) {
 	while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
 		--e;
 	return s.substr(b, e - b);
-}
-
-static std::string normalizeServerUrl(const std::string & serverUrl) {
-	std::string normalized = trim(serverUrl);
-	if (normalized.empty()) {
-		return "http://127.0.0.1:8080/v1/chat/completions";
-	}
-	if (normalized.find("/v1/chat/completions") != std::string::npos) {
-		return normalized;
-	}
-	if (!normalized.empty() && normalized.back() == '/') {
-		normalized.pop_back();
-	}
-	if (normalized.find("/v1") == std::string::npos) {
-		normalized += "/v1/chat/completions";
-	} else {
-		normalized += "/chat/completions";
-	}
-	return normalized;
-}
-
-static std::string normalizeServerEmbeddingsUrl(const std::string & serverUrl) {
-	std::string normalized = trim(serverUrl);
-	if (normalized.empty()) {
-		return "http://127.0.0.1:8080/v1/embeddings";
-	}
-	if (normalized.find("/v1/embeddings") != std::string::npos) {
-		return normalized;
-	}
-	if (normalized.find("/v1/chat/completions") != std::string::npos) {
-		normalized.replace(
-			normalized.find("/v1/chat/completions"),
-			std::string("/v1/chat/completions").size(),
-			"/v1/embeddings");
-		return normalized;
-	}
-	if (normalized.find("/chat/completions") != std::string::npos) {
-		normalized.replace(
-			normalized.find("/chat/completions"),
-			std::string("/chat/completions").size(),
-			"/v1/embeddings");
-		return normalized;
-	}
-	if (normalized.find("/embeddings") != std::string::npos) {
-		return normalized;
-	}
-	if (!normalized.empty() && normalized.back() == '/') {
-		normalized.pop_back();
-	}
-	if (normalized.find("/v1") == std::string::npos) {
-		normalized += "/v1/embeddings";
-	} else {
-		normalized += "/embeddings";
-	}
-	return normalized;
-}
-
-static std::string serverBaseUrlFromConfiguredUrl(const std::string & configuredUrl) {
-	std::string value = trim(configuredUrl);
-	if (value.empty()) {
-		return "http://127.0.0.1:8080";
-	}
-	auto stripSuffix = [&](const std::string & suffix) {
-		if (value.size() >= suffix.size() &&
-			value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0) {
-			value.erase(value.size() - suffix.size());
-		}
-	};
-	stripSuffix("/v1/chat/completions");
-	stripSuffix("/chat/completions");
-	stripSuffix("/v1/embeddings");
-	stripSuffix("/embeddings");
-	stripSuffix("/v1/models");
-	stripSuffix("/models");
-	if (!value.empty() && value.back() == '/') {
-		value.pop_back();
-	}
-	return value.empty() ? std::string("http://127.0.0.1:8080") : value;
-}
-
-static std::string normalizeServerModelsUrl(const std::string & serverUrl) {
-	std::string baseUrl = serverBaseUrlFromConfiguredUrl(serverUrl);
-	if (!baseUrl.empty() && baseUrl.back() == '/') {
-		baseUrl.pop_back();
-	}
-	return baseUrl + "/v1/models";
-}
-
-static std::vector<std::string> extractModelIdsFromServerResponse(const std::string & responseJson) {
-	std::vector<std::string> ids;
-	if (trim(responseJson).empty()) {
-		return ids;
-	}
-#ifdef OFXGGML_HEADLESS_STUBS
-	return ids;
-#else
-	try {
-		const ofJson parsed = ofJson::parse(responseJson);
-		if (!parsed.contains("data") || !parsed["data"].is_array()) {
-			return ids;
-		}
-		for (const auto & item : parsed["data"]) {
-			if (!item.is_object()) {
-				continue;
-			}
-			const std::string id = trim(item.value("id", std::string()));
-			if (!id.empty()) {
-				ids.push_back(id);
-			}
-		}
-	} catch (...) {
-	}
-	return ids;
-#endif
-}
-
-static bool detectVisionCapabilityFromServerResponse(const std::string & responseJson) {
-	if (trim(responseJson).empty()) {
-		return false;
-	}
-#ifdef OFXGGML_HEADLESS_STUBS
-	return false;
-#else
-	try {
-		const ofJson parsed = ofJson::parse(responseJson);
-		auto itemHasVisionCapability = [](const ofJson & item) {
-			if (!item.is_object()) {
-				return false;
-			}
-			if (item.contains("modalities") && item["modalities"].is_object()) {
-				const auto & modalities = item["modalities"];
-				if (modalities.value("vision", false) ||
-					modalities.value("image", false) ||
-					modalities.value("multimodal", false)) {
-					return true;
-				}
-			}
-			if (item.value("multimodal", false)) {
-				return true;
-			}
-			if (item.contains("capabilities") && item["capabilities"].is_array()) {
-				for (const auto & capability : item["capabilities"]) {
-					if (!capability.is_string()) {
-						continue;
-					}
-					const std::string name = capability.get<std::string>();
-					if (name == "vision" || name == "image" || name == "multimodal") {
-						return true;
-					}
-				}
-			}
-			return false;
-		};
-
-		if (parsed.contains("data") && parsed["data"].is_array()) {
-			for (const auto & item : parsed["data"]) {
-				if (itemHasVisionCapability(item)) {
-					return true;
-				}
-			}
-		}
-		if (parsed.contains("models") && parsed["models"].is_array()) {
-			for (const auto & item : parsed["models"]) {
-				if (itemHasVisionCapability(item)) {
-					return true;
-				}
-			}
-		}
-	} catch (...) {
-	}
-	return false;
-#endif
-}
-
-static std::string buildServerCapabilitySummary(const ofxGgmlServerProbeResult & probe) {
-	if (!probe.reachable) {
-		return {};
-	}
-	std::vector<std::string> parts;
-	parts.emplace_back("text");
-	if (probe.embeddingsRouteLikely) {
-		parts.emplace_back("embeddings route");
-	}
-	if (probe.visionCapable) {
-		parts.emplace_back("vision");
-	}
-	if (probe.routerLikely) {
-		parts.emplace_back(
-			"router (" + std::to_string(std::max<size_t>(probe.modelIds.size(), 1)) + " models)");
-	} else if (probe.modelsOk) {
-		parts.emplace_back("single-model");
-	}
-
-	std::ostringstream joined;
-	for (size_t i = 0; i < parts.size(); ++i) {
-		if (i > 0) {
-			joined << " + ";
-		}
-		joined << parts[i];
-	}
-	return joined.str();
-}
-
-struct ServerModelCacheEntry {
-	std::chrono::steady_clock::time_point checkedAt;
-	std::string activeModel;
-	bool reachable = false;
-};
-
-static std::string resolveCachedActiveServerModel(const std::string & serverUrl) {
-#ifdef OFXGGML_HEADLESS_STUBS
-	(void) serverUrl;
-	return {};
-#else
-	static std::mutex cacheMutex;
-	static std::unordered_map<std::string, ServerModelCacheEntry> cache;
-	const std::string baseUrl = serverBaseUrlFromConfiguredUrl(serverUrl);
-	const auto now = std::chrono::steady_clock::now();
-	{
-		std::lock_guard<std::mutex> lock(cacheMutex);
-		auto it = cache.find(baseUrl);
-		if (it != cache.end() &&
-			std::chrono::duration_cast<std::chrono::seconds>(now - it->second.checkedAt).count() < 10) {
-			return it->second.reachable ? it->second.activeModel : std::string();
-		}
-	}
-
-	const ofxGgmlServerProbeResult probe = ofxGgmlInference::probeServer(serverUrl, true);
-	{
-		std::lock_guard<std::mutex> lock(cacheMutex);
-		cache[baseUrl] = { now, probe.activeModel, probe.reachable };
-	}
-	return probe.reachable ? probe.activeModel : std::string();
-#endif
-}
-
-static std::string extractTextContentValue(const ofJson & value) {
-	if (value.is_string()) {
-		return value.get<std::string>();
-	}
-	if (!value.is_array()) {
-		return {};
-	}
-
-	std::ostringstream joined;
-	for (const auto & item : value) {
-		if (item.is_string()) {
-			if (joined.tellp() > 0) {
-				joined << "\n";
-			}
-			joined << item.get<std::string>();
-		} else if (item.is_object()) {
-			const std::string type = item.value("type", std::string());
-			const std::string text = item.value("text", std::string());
-			if (!text.empty() &&
-				(type.empty() || type == "text" || type == "output_text" || type == "content")) {
-				if (joined.tellp() > 0) {
-					joined << "\n";
-				}
-				joined << text;
-			}
-		}
-	}
-	return joined.str();
-}
-
-static std::string extractTextFromOpenAiResponse(const std::string & responseJson) {
-	if (trim(responseJson).empty()) {
-		return {};
-	}
-
-#ifdef OFXGGML_HEADLESS_STUBS
-	return responseJson;
-#else
-	try {
-		const ofJson parsed = ofJson::parse(responseJson);
-		if (!parsed.contains("choices") || !parsed["choices"].is_array() ||
-			parsed["choices"].empty()) {
-			return {};
-		}
-		const auto & choice = parsed["choices"][0];
-		if (choice.contains("message")) {
-			const auto & message = choice["message"];
-			if (message.contains("content")) {
-				const std::string content = extractTextContentValue(message["content"]);
-				if (!content.empty()) {
-					return content;
-				}
-			}
-		}
-		if (choice.contains("text")) {
-			const std::string text = extractTextContentValue(choice["text"]);
-			if (!text.empty()) {
-				return text;
-			}
-		}
-		if (choice.contains("content")) {
-			const std::string content = extractTextContentValue(choice["content"]);
-			if (!content.empty()) {
-				return content;
-			}
-		}
-		if (parsed.contains("content")) {
-			const std::string content = extractTextContentValue(parsed["content"]);
-			if (!content.empty()) {
-				return content;
-			}
-		}
-	} catch (...) {
-	}
-	return {};
-#endif
-}
-
-static std::string extractDeltaTextFromOpenAiStreamEvent(const std::string & eventJson) {
-	if (trim(eventJson).empty()) {
-		return {};
-	}
-
-#ifdef OFXGGML_HEADLESS_STUBS
-	return eventJson;
-#else
-	try {
-		const ofJson parsed = ofJson::parse(eventJson);
-		if (!parsed.contains("choices") || !parsed["choices"].is_array() ||
-			parsed["choices"].empty()) {
-			return {};
-		}
-		const auto & choice = parsed["choices"][0];
-		if (choice.contains("delta")) {
-			const auto & delta = choice["delta"];
-			if (delta.contains("content")) {
-				const std::string content = extractTextContentValue(delta["content"]);
-				if (!content.empty()) {
-					return content;
-				}
-			}
-		}
-		if (choice.contains("text") && choice["text"].is_string()) {
-			return choice["text"].get<std::string>();
-		}
-		if (choice.contains("content")) {
-			const std::string content = extractTextContentValue(choice["content"]);
-			if (!content.empty()) {
-				return content;
-			}
-		}
-		if (parsed.contains("content")) {
-			const std::string content = extractTextContentValue(parsed["content"]);
-			if (!content.empty()) {
-				return content;
-			}
-		}
-	} catch (...) {
-	}
-	return {};
-#endif
 }
 
 static std::string_view trimView(const std::string & s) {
@@ -1917,9 +1561,11 @@ ofxGgmlServerProbeResult ofxGgmlInference::probeServer(
 	const std::string & serverUrl,
 	bool fetchModels) {
 	ofxGgmlServerProbeResult result;
-	result.baseUrl = serverBaseUrlFromConfiguredUrl(serverUrl);
-	result.chatCompletionsUrl = normalizeServerUrl(serverUrl);
-	result.embeddingsUrl = normalizeServerEmbeddingsUrl(serverUrl);
+	result.baseUrl = ofxGgmlInferenceServerInternals::serverBaseUrlFromConfiguredUrl(serverUrl);
+	result.chatCompletionsUrl =
+		ofxGgmlInferenceServerInternals::normalizeServerUrl(serverUrl);
+	result.embeddingsUrl =
+		ofxGgmlInferenceServerInternals::normalizeServerEmbeddingsUrl(serverUrl);
 
 #ifdef OFXGGML_HEADLESS_STUBS
 	result.error = "server probing requires openFrameworks HTTP runtime";
@@ -1933,13 +1579,18 @@ ofxGgmlServerProbeResult ofxGgmlInference::probeServer(
 	}
 
 	if (fetchModels) {
-		const ofHttpResponse modelsResponse = ofLoadURL(normalizeServerModelsUrl(serverUrl));
+		const ofHttpResponse modelsResponse =
+			ofLoadURL(ofxGgmlInferenceServerInternals::normalizeServerModelsUrl(serverUrl));
 		if (modelsResponse.status >= 200 && modelsResponse.status < 300) {
 			result.reachable = true;
 			result.modelsOk = true;
 			result.embeddingsRouteLikely = true;
-			result.modelIds = extractModelIdsFromServerResponse(modelsResponse.data.getText());
-			result.visionCapable = detectVisionCapabilityFromServerResponse(modelsResponse.data.getText());
+			result.modelIds =
+				ofxGgmlInferenceServerInternals::extractModelIdsFromServerResponse(
+					modelsResponse.data.getText());
+			result.visionCapable =
+				ofxGgmlInferenceServerInternals::detectVisionCapabilityFromServerResponse(
+					modelsResponse.data.getText());
 			result.routerLikely = result.modelIds.size() > 1;
 			if (!result.modelIds.empty()) {
 				result.activeModel = result.modelIds.front();
@@ -1961,7 +1612,8 @@ ofxGgmlServerProbeResult ofxGgmlInference::probeServer(
 			result.error = "server probe failed";
 		}
 	}
-	result.capabilitySummary = buildServerCapabilitySummary(result);
+	result.capabilitySummary =
+		ofxGgmlInferenceServerInternals::buildServerCapabilitySummary(result);
 
 	return result;
 #endif
@@ -2267,7 +1919,8 @@ std::function<bool(const std::string&)> onChunk) const {
 		return result;
 #else
 		const auto t0 = std::chrono::steady_clock::now();
-		const std::string requestUrl = normalizeServerUrl(settings.serverUrl);
+	const std::string requestUrl =
+		ofxGgmlInferenceServerInternals::normalizeServerUrl(settings.serverUrl);
 		try {
 			ofJson payload;
 			const bool requestStreaming = (onChunk != nullptr);
@@ -2295,7 +1948,9 @@ std::function<bool(const std::string&)> onChunk) const {
 			}
 			std::string serverModel = trim(settings.serverModel);
 			if (serverModel.empty()) {
-				serverModel = resolveCachedActiveServerModel(settings.serverUrl);
+			serverModel =
+				ofxGgmlInferenceServerInternals::resolveCachedActiveServerModel(
+					settings.serverUrl);
 			}
 			if (!serverModel.empty()) {
 				payload["model"] = serverModel;
@@ -2314,7 +1969,9 @@ std::function<bool(const std::string&)> onChunk) const {
 				const ofHttpResponse response = loader.handleRequest(request);
 				const std::string responseText = response.data.getText();
 				if (response.status < 200 || response.status >= 300) {
-					std::string detail = trim(extractTextFromOpenAiResponse(responseText));
+				std::string detail = trim(
+					ofxGgmlInferenceServerInternals::extractTextFromOpenAiResponse(
+						responseText));
 					if (detail.empty()) {
 						detail = trim(responseText);
 					}
@@ -2326,7 +1983,9 @@ std::function<bool(const std::string&)> onChunk) const {
 					return serverResult;
 				}
 
-				serverResult.text = trim(extractTextFromOpenAiResponse(responseText));
+			serverResult.text = trim(
+				ofxGgmlInferenceServerInternals::extractTextFromOpenAiResponse(
+					responseText));
 				serverResult.success = !serverResult.text.empty();
 				if (!serverResult.success) {
 					serverResult.error = "server-backed inference returned empty output";
@@ -2462,7 +2121,8 @@ std::function<bool(const std::string&)> onChunk) const {
 					closeHandle(request);
 					closeHandle(connect);
 					closeHandle(session);
-					std::string detail = trim(extractTextFromOpenAiResponse(body));
+			std::string detail = trim(
+				ofxGgmlInferenceServerInternals::extractTextFromOpenAiResponse(body));
 					if (detail.empty()) {
 						detail = trim(body);
 					}
@@ -2512,7 +2172,9 @@ std::function<bool(const std::string&)> onChunk) const {
 							break;
 						}
 
-						const std::string delta = extractDeltaTextFromOpenAiStreamEvent(eventPayload);
+					const std::string delta =
+						ofxGgmlInferenceServerInternals::extractDeltaTextFromOpenAiStreamEvent(
+							eventPayload);
 						if (delta.empty()) {
 							continue;
 						}
@@ -2982,7 +2644,9 @@ ofxGgmlEmbeddingResult ofxGgmlInference::embed(
 			return result;
 		}
 
-		const std::string requestUrl = normalizeServerEmbeddingsUrl(settings.serverUrl);
+	const std::string requestUrl =
+		ofxGgmlInferenceServerInternals::normalizeServerEmbeddingsUrl(
+			settings.serverUrl);
 		try {
 			ofJson payload;
 			payload["input"] = sanitizedText;
@@ -2995,7 +2659,9 @@ ofxGgmlEmbeddingResult ofxGgmlInference::embed(
 			}
 			std::string serverModel = trim(settings.serverModel);
 			if (serverModel.empty()) {
-				serverModel = resolveCachedActiveServerModel(settings.serverUrl);
+			serverModel =
+				ofxGgmlInferenceServerInternals::resolveCachedActiveServerModel(
+					settings.serverUrl);
 			}
 			if (!serverModel.empty()) {
 				payload["model"] = serverModel;

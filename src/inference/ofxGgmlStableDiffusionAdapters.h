@@ -454,13 +454,13 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 				result.success = true;
 				result.elapsedMs = std::chrono::duration<float, std::milli>(
 					std::chrono::steady_clock::now() - started).count();
-				result.images.push_back({
-					outputPath,
-					static_cast<int>(upscaled.width),
-					static_cast<int>(upscaled.height),
-					request.seed,
-					0
-				});
+				ofxGgmlGeneratedImage generated;
+				generated.path = outputPath;
+				generated.width = static_cast<int>(upscaled.width);
+				generated.height = static_cast<int>(upscaled.height);
+				generated.seed = request.seed;
+				generated.index = 0;
+				result.images.push_back(std::move(generated));
 				result.metadata.push_back({"task", "Upscale"});
 				result.metadata.push_back({"backend", result.backendName});
 				return result;
@@ -472,24 +472,32 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 			}
 
 			if (needsContextReload(*engine, request, options)) {
-				engine->newSdCtx(
-					request.modelPath,
-					request.vaePath,
-					options.taesdPath,
-					options.controlNetPath,
-					options.loraModelDir,
-					options.embedDir,
-					options.stackedIdEmbedDir,
-					options.vaeDecodeOnly,
-					options.vaeTiling,
-					options.freeParamsImmediately,
-					options.threads,
-					options.weightType,
-					options.rngType,
-					options.schedule,
-					options.keepClipOnCpu,
-					options.keepControlNetCpu,
-					options.keepVaeOnCpu);
+				ofxStableDiffusionContextSettings contextSettings;
+				contextSettings.modelPath = request.modelPath;
+				contextSettings.diffusionModelPath = request.modelPath;
+				contextSettings.clipLPath = request.clipLPath;
+				contextSettings.clipGPath = request.clipGPath;
+				contextSettings.t5xxlPath = request.t5xxlPath;
+				contextSettings.vaePath = request.vaePath;
+				contextSettings.taesdPath = options.taesdPath;
+				contextSettings.controlNetPath = options.controlNetPath;
+				contextSettings.loraModelDir = options.loraModelDir;
+				contextSettings.embedDir = options.embedDir;
+				contextSettings.stackedIdEmbedDir = options.stackedIdEmbedDir;
+				contextSettings.vaeDecodeOnly = options.vaeDecodeOnly;
+				contextSettings.vaeTiling = options.vaeTiling;
+				contextSettings.freeParamsImmediately = options.freeParamsImmediately;
+				contextSettings.nThreads = options.threads;
+				contextSettings.weightType = options.weightType;
+				contextSettings.rngType = options.rngType;
+				contextSettings.schedule = options.schedule;
+				contextSettings.keepClipOnCpu = options.keepClipOnCpu;
+				contextSettings.keepControlNetCpu = options.keepControlNetCpu;
+				contextSettings.keepVaeOnCpu = options.keepVaeOnCpu;
+				contextSettings.offloadParamsToCpu = engine->offloadParamsToCpu;
+				contextSettings.flashAttn = engine->flashAttn;
+				contextSettings.enableMmap = engine->enableMmap;
+				engine->newSdCtx(contextSettings);
 				if (!waitForIdle(*engine, options, &waitError)) {
 					result.error = "model setup failed: " + waitError;
 					return result;
@@ -615,18 +623,18 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 					engine->setDiffused(false);
 					return result;
 				}
-				result.images.push_back({
-					outputPath,
-					frame.width(),
-					frame.height(),
-					frame.seed,
-					static_cast<int>(i),
-					frame.sourceIndex,
-					frame.isSelected,
-					frame.score.score,
-					frame.score.scorer,
-					frame.score.summary
-				});
+				ofxGgmlGeneratedImage generated;
+				generated.path = outputPath;
+				generated.width = frame.width();
+				generated.height = frame.height();
+				generated.seed = static_cast<int>(frame.seed);
+				generated.index = static_cast<int>(i);
+				generated.sourceIndex = frame.sourceIndex;
+				generated.selected = frame.isSelected;
+				generated.score = frame.score.score;
+				generated.scorer = frame.score.scorer;
+				generated.scoreSummary = frame.score.summary;
+				result.images.push_back(std::move(generated));
 				if (frame.score.valid) {
 					result.metadata.push_back({
 						"image[" + std::to_string(i) + "].score",

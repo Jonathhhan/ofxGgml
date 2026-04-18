@@ -539,6 +539,8 @@ The current bridge surface supports:
 
 That design keeps `ofxStableDiffusion` standalone while giving `ofxGgmlClipInference` a clean seam for prompt-image reranking. When a runtime attaches both a diffusion backend and a CLIP backend, apps can generate batches, score them semantically, and keep either the original order or the best-scoring result without pulling low-level `ggml` or diffusion internals across addon boundaries.
 
+The GUI example now goes one step further for local workflows: `ofxGgmlGuiExample/addons.make` includes `ofxStableDiffusion`, and the Diffusion panel auto-attaches a local `ofxStableDiffusion` engine when that addon is available in the same openFrameworks `addons` folder. It also exposes quicker handoff actions such as reusing the current Vision image as an init image, sending generated outputs back into Vision, and copying generated image paths straight into the CLIP panel for reranking.
+
 ## Vision Helpers
 
 `ofxGgmlVisionInference` adds multimodal image-to-text support for `llama-server`-compatible endpoints. It prepares task-specific prompts for `Describe`, `OCR`, and `Ask`, handles local image encoding as data URLs, and includes curated profile hints for families such as `LFM2.5-VL`, `Qwen VL`, `GLM OCR`, and `Llama 3.2 Vision`.

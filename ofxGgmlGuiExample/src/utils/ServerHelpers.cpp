@@ -1,4 +1,5 @@
 #include "ServerHelpers.h"
+#include "ImGuiHelpers.h"
 
 // Default server URLs (matching ofApp.cpp constants)
 static const char * const kDefaultTextServerUrl = "http://127.0.0.1:8080";

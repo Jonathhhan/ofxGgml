@@ -1,5 +1,6 @@
 #include "VisionHelpers.h"
 #include "ImGuiHelpers.h"
+#include "ofxGgmlVisionInference.h"
 
 #include <algorithm>
 #include <filesystem>

@@ -7,6 +7,8 @@
 #include <unordered_set>
 #include <vector>
 
+enum class AiMode;
+
 // Check if path exists
 bool pathExists(const std::string & path);
 

@@ -5,6 +5,8 @@
 
 #include <string>
 
+struct ofxGgmlVisionModelProfile;
+
 // Find matching mmproj file in same directory as model
 std::string findMatchingMmprojPath(const std::string & modelPath);
 

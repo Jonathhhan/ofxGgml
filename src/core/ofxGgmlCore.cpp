@@ -363,20 +363,20 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 
 	m_impl->settings = sanitizeSettings(settings, m_impl.get());
 	registerLogCallbackOwner(m_impl.get());
-
-	// With static linking, GPU backends compiled into the library are
-	// registered automatically via the ggml_backend_registry constructor
-	// (triggered by #ifdef GGML_USE_CUDA / GGML_USE_VULKAN / etc. in
-	// ggml-backend-reg.cpp).  We still call ggml_backend_load_all()
-	// to pick up any additional runtime-loadable backends, but this is
-	// safe - there is only one copy of libggml-base so no duplicate
-	// static initializer assertions.
+#ifndef _WIN32
+	// Unix builds may still rely on runtime-loadable backends in addition to
+	// the compiled-in registry, so keep backend auto-loading there.
 	static std::once_flag backendLoadOnce;
 	std::call_once(backendLoadOnce, [&]() {
 		guardedGgmlCall([&]() {
 			ggml_backend_load_all();
 		}, "backend loading");
 	});
+#else
+	// Windows examples already link the ggml backends they use. Avoid loading
+	// extra ggml*.dll files from the executable directory, because stale or
+	// foreign runtime copies can collide with the in-process ggml registry.
+#endif
 
 	// Log discovered devices so the user can see what is available.
 	{

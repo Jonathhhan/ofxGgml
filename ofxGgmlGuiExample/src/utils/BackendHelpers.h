@@ -5,6 +5,9 @@
 #include <string>
 #include <utility>
 
+enum class AiMode;
+enum class TextInferenceBackend;
+
 // Parse server host and port from configured URL
 std::pair<std::string, int> parseServerHostPort(const std::string & configuredUrl);
 

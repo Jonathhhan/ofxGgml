@@ -1,4 +1,6 @@
 #include "SpeechHelpers.h"
+#include "ImGuiHelpers.h"
+#include "ofxGgmlSpeechInference.h"
 #include <cmath>
 #include <cstdio>
 #include <filesystem>

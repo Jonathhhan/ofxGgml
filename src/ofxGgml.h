@@ -25,6 +25,7 @@
 #include "inference/ofxGgmlTtsInference.h"
 #include "inference/ofxGgmlVisionInference.h"
 #include "inference/ofxGgmlVideoInference.h"
+#include "inference/ofxGgmlVideoPlanner.h"
 #include "assistants/ofxGgmlChatAssistant.h"
 #include "assistants/ofxGgmlCodeAssistant.h"
 #include "assistants/ofxGgmlWorkspaceAssistant.h"
