@@ -120,6 +120,10 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/assistants/ofxGgmlChatAssistant.cpp
         ../src/inference/ofxGgmlDiffusionInference.cpp
         ../src/inference/ofxGgmlInference.cpp
+        ../src/inference/ofxGgmlInferenceSourceInternals.cpp
+        ../src/inference/ofxGgmlInferenceTextCleanup.cpp
+        ../src/inference/ofxGgmlMontagePlanner.cpp
+        ../src/inference/ofxGgmlMontagePreviewBridge.cpp
         ../src/inference/ofxGgmlSpeechInference.cpp
         ../src/inference/ofxGgmlVisionInference.cpp
         ../src/inference/ofxGgmlVideoInference.cpp
@@ -155,6 +159,7 @@ set(TEST_SOURCES
 if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND TEST_SOURCES
         test_inference.cpp
+        test_montage_preview_bridge.cpp
         test_speech_inference.cpp
         test_vision_inference.cpp
         test_video_inference.cpp

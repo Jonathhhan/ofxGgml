@@ -8,6 +8,9 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
 #include <mutex>
 #include <queue>
 #include <sstream>
@@ -44,6 +47,30 @@ template <typename T>
 inline std::string ofToString(const T & v) {
 	std::ostringstream oss;
 	oss << v;
+	return oss.str();
+}
+
+inline uint64_t ofGetElapsedTimeMillis() {
+	static const auto start = std::chrono::steady_clock::now();
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - start).count());
+}
+
+inline std::string ofGetTimestampString(const std::string & format = "%Y-%m-%d-%H-%M-%S-%i") {
+	const auto now = std::chrono::system_clock::now();
+	const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+	std::tm timeInfo{};
+#ifdef _WIN32
+	localtime_s(&timeInfo, &nowTime);
+#else
+	localtime_r(&nowTime, &timeInfo);
+#endif
+	std::ostringstream oss;
+	if (format == "%Y-%m-%d %H:%M:%S") {
+		oss << std::put_time(&timeInfo, "%Y-%m-%d %H:%M:%S");
+	} else {
+		oss << std::put_time(&timeInfo, "%Y-%m-%d-%H-%M-%S");
+	}
 	return oss.str();
 }
 

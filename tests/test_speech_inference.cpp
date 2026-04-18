@@ -1,6 +1,7 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
 
+#include <filesystem>
 #include <memory>
 
 namespace {
@@ -50,7 +51,8 @@ TEST_CASE("Whisper backend builds transcription command arguments", "[speech_inf
 
 	const auto args = backend.buildCommandArguments(request, "tmp/out");
 	REQUIRE(args.size() >= 10);
-	REQUIRE(args[0] == "whisper-cli");
+	const auto executableName = std::filesystem::path(args[0]).filename().string();
+	REQUIRE((executableName == "whisper-cli" || executableName == "whisper-cli.exe"));
 	REQUIRE(args[1] == "-m");
 	REQUIRE(args[2] == "models/ggml-base.en.bin");
 	REQUIRE(args[3] == "-f");

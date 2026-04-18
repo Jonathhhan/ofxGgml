@@ -9,13 +9,19 @@ All notable changes to `ofxGgml` are documented in this file.
 - `scripts/run-clang-tidy.ps1` for Windows / Visual Studio analysis runs, with compile-database preference and an optional MSBuild Clang-Tidy fallback.
 - `scripts/run-clang-tidy.sh` for Linux/macOS compile-database workflows.
 - `docs/CLANG_TIDY.md` to document supported workflows, compile-database discovery, and recommended scope.
+- Headless test coverage for the montage preview/export bridge, including bundle assembly, cue lookup, SRT/VTT text generation, and file export.
 - `ofxGgmlMontagePreviewBridge` as a new playback-facing bridge API for source-timed versus montage-timed subtitle tracks, cue lookup by time, and playlist-oriented montage preview bundles that can be consumed by companions such as `ofxVlc4`.
 - GUI-example montage subtitle preview/export updates, including generated montage-timed and source-timed subtitle tracks, inline cue preview, live preview playback text, and one-click SRT/VTT copying.
+- The GUI example montage workflow now exposes an optional direct `ofxVlc4` preview path when regenerated with `ofxVlc4` in `addons.make`, including subtitle-slave loading plus subtitle delay / scale controls for the active preview track.
 - `ofxGgmlWebCrawler` as a new optional website-ingestion bridge, with a default `Mojo` CLI adapter for local website-to-Markdown crawling and normalized crawled-document results.
+- `ofxGgmlCitationSearch` as a new source-grounded citation helper that can extract structured quote lists and cited summaries from either loaded URLs or crawler-ingested website documents.
 
 ### Changed
 - `.gitignore` now ignores generated `compile_commands.json` files so local clang-tidy workflows do not pollute the worktree.
+- Prompt-echo cleanup in `ofxGgmlInference` is more conservative now, so legitimate greeting-style replies such as `hello! ...` are preserved instead of being clipped as false positive prompt echoes.
 - Translate mode in the GUI example is more usable: source language can be set to `Auto detect`, prompt-copy buttons now update reliably through deferred ImGui buffer writes, and the panel exposes clearer `Detect Language`, `Natural`, `Literal`, and `Detect + Translate` actions.
+- Summarize mode in the GUI example now includes a dedicated citation-research workflow with topic input, optional crawler seed URL, structured quote preview, and direct handoff into Write mode.
+- The headless test harness now tracks newer split inference sources and includes the OF-style time helpers needed by logging and cleanup code, so local test runs stay aligned with the current addon structure.
 
 ## [1.0.3] - 2026-04-18
 

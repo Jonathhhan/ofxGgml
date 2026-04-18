@@ -10,6 +10,11 @@ enum class ofxGgmlMontagePreviewTimingMode {
 	Source
 };
 
+enum class ofxGgmlMontagePreviewTextFormat {
+	Srt = 0,
+	Vtt
+};
+
 struct ofxGgmlMontagePreviewTrack {
 	std::string title;
 	ofxGgmlMontagePreviewTimingMode timingMode =
@@ -36,9 +41,27 @@ public:
 		const ofxGgmlMontagePlan & plan,
 		const std::string & title = "MONTAGE",
 		const std::string & sourceVideoPath = "");
+	static const ofxGgmlMontagePreviewTrack & selectTrack(
+		const ofxGgmlMontagePreviewBundle & bundle,
+		ofxGgmlMontagePreviewTimingMode timingMode);
 	static int findCueAtTime(
 		const ofxGgmlMontagePreviewTrack & track,
 		double seconds);
+	static double getTrackDuration(
+		const ofxGgmlMontagePreviewTrack & track);
+	static std::string buildTrackText(
+		const ofxGgmlMontagePreviewTrack & track,
+		ofxGgmlMontagePreviewTextFormat format = ofxGgmlMontagePreviewTextFormat::Srt);
+	static std::string suggestSubtitleFileName(
+		const ofxGgmlMontagePreviewTrack & track,
+		ofxGgmlMontagePreviewTextFormat format = ofxGgmlMontagePreviewTextFormat::Srt);
+	static bool exportTrack(
+		const ofxGgmlMontagePreviewTrack & track,
+		const std::string & outputPath,
+		ofxGgmlMontagePreviewTextFormat format = ofxGgmlMontagePreviewTextFormat::Srt,
+		std::string * error = nullptr);
+	static std::string summarizeBundle(
+		const ofxGgmlMontagePreviewBundle & bundle);
 	static std::string summarizeTrack(
 		const ofxGgmlMontagePreviewTrack & track);
 };

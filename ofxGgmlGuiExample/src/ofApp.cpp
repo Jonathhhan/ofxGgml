@@ -825,6 +825,31 @@ void ofApp::update() {
   if (!visionPreviewVideoLoadedPath.empty()) {
     visionPreviewVideo.update();
   }
+#if OFXGGML_HAS_OFXVLC4
+  if (montageVlcPreviewInitialized) {
+		montageVlcPreviewPlayer.update();
+  }
+#endif
+  if (montagePreviewTimelinePlaying) {
+		const ofxGgmlMontagePreviewTrack * previewTrack = getSelectedMontagePreviewTrack();
+		if (previewTrack != nullptr &&
+			getSelectedMontagePreviewTimingMode() == ofxGgmlMontagePreviewTimingMode::Montage) {
+			const double durationSeconds = ofxGgmlMontagePreviewBridge::getTrackDuration(*previewTrack);
+			const float now = ofGetElapsedTimef();
+			if (montagePreviewTimelineLastTickTime > 0.0f && durationSeconds > 0.0) {
+				montagePreviewTimelineSeconds = std::min(
+					durationSeconds,
+					montagePreviewTimelineSeconds + static_cast<double>(now - montagePreviewTimelineLastTickTime));
+			}
+			if (montagePreviewTimelineSeconds >= durationSeconds) {
+				montagePreviewTimelineSeconds = durationSeconds;
+				montagePreviewTimelinePlaying = false;
+			}
+			montagePreviewTimelineLastTickTime = now;
+		} else {
+			montagePreviewTimelinePlaying = false;
+		}
+  }
   applyLiveSpeechTranscriberSettings();
   speechLiveTranscriber.update();
   if (deferredEngineInitPending) {
@@ -914,6 +939,9 @@ void ofApp::exit() {
     visionPreviewVideo.stop();
     visionPreviewVideo.close();
   }
+#if OFXGGML_HAS_OFXVLC4
+  closeMontageVlcPreview();
+#endif
 	stopSpeechRecording(false);
 	if (speechInputStream.getSoundStream() != nullptr) {
 		speechInputStream.stop();
@@ -961,17 +989,19 @@ if (ImGui::MenuItem("Clear All Output")) {
 chatMessages.clear();
 scriptMessages.clear();
 scriptOutput.clear();
-summarizeOutput.clear();
-writeOutput.clear();
-translateOutput.clear();
-customOutput.clear();
-visionOutput.clear();
+  summarizeOutput.clear();
+  writeOutput.clear();
+  translateOutput.clear();
+  customOutput.clear();
+	citationOutput.clear();
+  visionOutput.clear();
 visionSampledVideoFrames.clear();
 	speechOutput.clear();
 	ttsOutput.clear();
-	diffusionOutput.clear();
-	clipOutput.clear();
-	speechDetectedLanguage.clear();
+  diffusionOutput.clear();
+  clipOutput.clear();
+	citationResults.clear();
+  speechDetectedLanguage.clear();
 	speechTranscriptPath.clear();
 	speechSrtPath.clear();
 	speechSegmentCount = 0;
@@ -1569,14 +1599,25 @@ if (liveContextMode == LiveContextMode::Offline) {
 	ImGui::TextDisabled("(loaded sources only)");
 }
 
-ImGui::InputTextMultiline(
-	"Loaded Sources (URLs)",
-	sourceUrlsInput,
-	sizeof(sourceUrlsInput),
-	ImVec2(-1, 48));
-if (ImGui::IsItemHovered()) {
-	showWrappedTooltip("Optional source URLs for grounded answers in Chat, Summarize, and Custom.");
-}
+	ImGui::InputTextMultiline(
+		"Loaded Sources (URLs)",
+		sourceUrlsInput,
+		sizeof(sourceUrlsInput),
+		ImVec2(-1, 48));
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Optional source URLs for grounded answers in Chat, Summarize, and Custom.");
+	}
+
+	std::string citationSuggestedTopic = trim(chatInput);
+	if (citationSuggestedTopic.empty()) {
+		for (auto it = chatMessages.rbegin(); it != chatMessages.rend(); ++it) {
+			if (it->role == "user" && !trim(it->text).empty()) {
+				citationSuggestedTopic = it->text;
+				break;
+			}
+		}
+	}
+	drawCitationSearchSection("Use Chat Input", citationSuggestedTopic);
 
 	if ((submitted || sendClicked || sendWithSourcesClicked) && std::strlen(chatInput) > 0 && !generating.load()) {
 std::string userText(chatInput);
@@ -3054,8 +3095,8 @@ if (ImGui::SmallButton("Clear##SumClear")) summarizeOutput.clear();
 ImGui::SameLine();
 ImGui::TextDisabled("(%d chars)", static_cast<int>(summarizeOutput.size()));
 }
-if (generating.load() && activeGenerationMode == AiMode::Summarize) {
-ImGui::BeginChild("##SumOut", ImVec2(0, 0), true);
+	if (generating.load() && activeGenerationMode == AiMode::Summarize) {
+	ImGui::BeginChild("##SumOut", ImVec2(0, 0), true);
 std::string partial;
 {
 std::lock_guard<std::mutex> lock(streamMutex);
@@ -3068,11 +3109,13 @@ ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", kWaitingLabels[dots]);
 ImGui::TextWrapped("%s", partial.c_str());
 }
 ImGui::EndChild();
-} else {
-ImGui::BeginChild("##SumOut", ImVec2(0, 0), true);
-ImGui::TextWrapped("%s", summarizeOutput.c_str());
-ImGui::EndChild();
-}
+	} else {
+	ImGui::BeginChild("##SumOut", ImVec2(0, 0), true);
+	ImGui::TextWrapped("%s", summarizeOutput.c_str());
+	ImGui::EndChild();
+	}
+
+	drawCitationSearchSection("Use Summarize Text", summarizeInput);
 }
 
 // ---------------------------------------------------------------------------
@@ -3538,8 +3581,10 @@ ImVec2(-1, 100));
 	}
 	ImGui::EndDisabled();
 
-ImGui::Separator();
-ImGui::Text("Output:");
+	drawCitationSearchSection("Use Custom Input", customInput);
+
+  ImGui::Separator();
+  ImGui::Text("Output:");
 if (!customOutput.empty()) {
 ImGui::SameLine();
 if (ImGui::SmallButton("Copy##CustCopy")) copyToClipboard(customOutput);
@@ -3775,9 +3820,251 @@ int ofApp::findActiveMontageSourceCueIndex() const {
 	return -1;
 }
 
+ofxGgmlMontagePreviewTimingMode ofApp::getSelectedMontagePreviewTimingMode() const {
+	return montagePreviewTimingModeIndex == 1
+		? ofxGgmlMontagePreviewTimingMode::Montage
+		: ofxGgmlMontagePreviewTimingMode::Source;
+}
+
+const ofxGgmlMontagePreviewTrack * ofApp::getSelectedMontagePreviewTrack() const {
+	if (montagePreviewBundle.montageTrack.cues.empty() &&
+		montagePreviewBundle.sourceTrack.cues.empty()) {
+		return nullptr;
+	}
+	return &ofxGgmlMontagePreviewBridge::selectTrack(
+		montagePreviewBundle,
+		getSelectedMontagePreviewTimingMode());
+}
+
+double ofApp::getSelectedMontagePreviewTimeSeconds() const {
+	if (getSelectedMontagePreviewTimingMode() == ofxGgmlMontagePreviewTimingMode::Source) {
+		if (!visionPreviewVideoReady || !visionPreviewVideo.isLoaded()) {
+			return 0.0;
+		}
+		const double durationSeconds = std::max(0.0, static_cast<double>(visionPreviewVideo.getDuration()));
+		return std::max(
+			0.0,
+			std::min(
+				durationSeconds,
+				static_cast<double>(visionPreviewVideo.getPosition()) * durationSeconds));
+	}
+	return std::max(0.0, montagePreviewTimelineSeconds);
+}
+
+int ofApp::findActiveMontagePreviewCueIndex() const {
+	const ofxGgmlMontagePreviewTrack * track = getSelectedMontagePreviewTrack();
+	if (!montageSubtitlePlaybackEnabled || track == nullptr) {
+		return -1;
+	}
+	if (getSelectedMontagePreviewTimingMode() == ofxGgmlMontagePreviewTimingMode::Source &&
+		(!visionPreviewVideoReady || !visionPreviewVideo.isLoaded())) {
+		return -1;
+	}
+	return ofxGgmlMontagePreviewBridge::findCueAtTime(
+		*track,
+		getSelectedMontagePreviewTimeSeconds());
+}
+
+std::string ofApp::exportSelectedMontagePreviewTrack(
+	ofxGgmlMontagePreviewTextFormat format,
+	std::string * errorOut) const {
+	const ofxGgmlMontagePreviewTrack * track = getSelectedMontagePreviewTrack();
+	if (track == nullptr) {
+		if (errorOut) {
+			*errorOut = "No montage preview track is available yet.";
+		}
+		return {};
+	}
+	const std::filesystem::path exportDir =
+		std::filesystem::path(ofToDataPath("cache/montage_preview", true));
+	const std::filesystem::path outputPath =
+		exportDir / ofxGgmlMontagePreviewBridge::suggestSubtitleFileName(*track, format);
+	std::string error;
+	if (!ofxGgmlMontagePreviewBridge::exportTrack(*track, outputPath.string(), format, &error)) {
+		if (errorOut) {
+			*errorOut = error;
+		}
+		return {};
+	}
+	return outputPath.string();
+}
+
+#if OFXGGML_HAS_OFXVLC4
+bool ofApp::ensureMontageVlcPreviewInitialized(std::string * errorOut) {
+	if (montageVlcPreviewInitialized) {
+		return true;
+	}
+
+	try {
+		montageVlcPreviewPlayer.init(0, nullptr);
+		montageVlcPreviewPlayer.setVolume(0);
+		montageVlcPreviewPlayer.setSubtitleDelayMs(0);
+		montageVlcPreviewPlayer.setSubtitleTextScale(1.0f);
+		montageVlcPreviewInitialized = true;
+		montageVlcPreviewError.clear();
+		return true;
+	} catch (const std::exception & e) {
+		montageVlcPreviewError = std::string("Failed to initialize ofxVlc4 preview: ") + e.what();
+		if (errorOut) {
+			*errorOut = montageVlcPreviewError;
+		}
+		return false;
+	}
+}
+
+bool ofApp::loadMontageVlcPreview(std::string * errorOut) {
+	if (!ensureMontageVlcPreviewInitialized(errorOut)) {
+		return false;
+	}
+
+	const std::string videoPath = trim(visionVideoPath);
+	if (videoPath.empty()) {
+		montageVlcPreviewError = "Select a source video before loading the ofxVlc4 preview.";
+		if (errorOut) {
+			*errorOut = montageVlcPreviewError;
+		}
+		return false;
+	}
+
+	std::string subtitleError;
+	const std::string subtitlePath =
+		exportSelectedMontagePreviewTrack(ofxGgmlMontagePreviewTextFormat::Srt, &subtitleError);
+	if (subtitlePath.empty()) {
+		montageVlcPreviewError =
+			subtitleError.empty() ? std::string("Failed to prepare the active subtitle track for ofxVlc4.")
+								  : subtitleError;
+		if (errorOut) {
+			*errorOut = montageVlcPreviewError;
+		}
+		return false;
+	}
+
+	montagePreviewSubtitleSlavePath = subtitlePath;
+
+	const bool reloadVideo = montageVlcPreviewLoadedVideoPath != videoPath;
+	if (reloadVideo) {
+		montageVlcPreviewPlayer.stop();
+		montageVlcPreviewPlayer.clearMediaSlaves();
+		montageVlcPreviewPlayer.clearPlaylist();
+		if (montageVlcPreviewPlayer.addPathToPlaylist(videoPath) <= 0) {
+			montageVlcPreviewError = "ofxVlc4 could not load the selected source video.";
+			if (errorOut) {
+				*errorOut = montageVlcPreviewError;
+			}
+			return false;
+		}
+		montageVlcPreviewPlayer.playIndex(0);
+		montageVlcPreviewPlayer.setVolume(0);
+		montageVlcPreviewLoadedVideoPath = videoPath;
+		montageVlcPreviewLoadedSubtitlePath.clear();
+	}
+
+	if (reloadVideo || montageVlcPreviewLoadedSubtitlePath != subtitlePath) {
+		montageVlcPreviewPlayer.clearMediaSlaves();
+		if (!montageVlcPreviewPlayer.addSubtitleSlave(subtitlePath)) {
+			montageVlcPreviewError = "ofxVlc4 could not attach the exported subtitle slave.";
+			if (errorOut) {
+				*errorOut = montageVlcPreviewError;
+			}
+			return false;
+		}
+		const auto subtitleTracks = montageVlcPreviewPlayer.getSubtitleTracks();
+		if (!subtitleTracks.empty()) {
+			montageVlcPreviewPlayer.selectSubtitleTrackById(subtitleTracks.back().id);
+		}
+		montageVlcPreviewLoadedSubtitlePath = subtitlePath;
+	}
+
+	montageVlcPreviewError.clear();
+	if (errorOut) {
+		errorOut->clear();
+	}
+	return true;
+}
+
+void ofApp::closeMontageVlcPreview() {
+	if (!montageVlcPreviewInitialized) {
+		return;
+	}
+	montageVlcPreviewPlayer.close();
+	montageVlcPreviewInitialized = false;
+	montageVlcPreviewLoadedVideoPath.clear();
+	montageVlcPreviewLoadedSubtitlePath.clear();
+}
+
+void ofApp::drawMontageVlcPreview() {
+	if (!montageVlcPreviewInitialized) {
+		return;
+	}
+
+	if (!montageVlcPreviewError.empty()) {
+		ImGui::TextDisabled("%s", montageVlcPreviewError.c_str());
+	}
+
+	const ofTexture & previewTexture = montageVlcPreviewPlayer.getTexture();
+	if (previewTexture.isAllocated()) {
+		const float availWidth = std::max(160.0f, ImGui::GetContentRegionAvail().x);
+		const float maxWidth = std::min(availWidth, 420.0f);
+		const float texWidth = std::max(1.0f, static_cast<float>(previewTexture.getWidth()));
+		const float texHeight = std::max(1.0f, static_cast<float>(previewTexture.getHeight()));
+		const float scale = std::min(maxWidth / texWidth, 240.0f / texHeight);
+		const glm::vec2 drawSize(
+			std::max(1.0f, texWidth * scale),
+			std::max(1.0f, texHeight * scale));
+		ImGui::BeginChild("##MontageVlcPreview", ImVec2(0, drawSize.y + 12.0f), true);
+		ofxImGui::AddImage(previewTexture, drawSize);
+		ImGui::EndChild();
+	} else {
+		ImGui::TextDisabled("ofxVlc4 preview will appear here after the media attaches.");
+	}
+
+	const float durationSeconds = std::max(0.0f, montageVlcPreviewPlayer.getLength() / 1000.0f);
+	float previewPosition = std::clamp(montageVlcPreviewPlayer.getPosition(), 0.0f, 1.0f);
+	const float currentSeconds = previewPosition * durationSeconds;
+	if (ImGui::Button(montageVlcPreviewPlayer.isPlaying() ? "Pause VLC preview" : "Play VLC preview", ImVec2(150, 0))) {
+		montageVlcPreviewPlayer.togglePlayPause();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Restart VLC preview", ImVec2(150, 0))) {
+		montageVlcPreviewPlayer.play();
+		montageVlcPreviewPlayer.setPosition(0.0f);
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("%.2fs / %.2fs", currentSeconds, durationSeconds);
+
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderFloat("VLC preview position", &previewPosition, 0.0f, 1.0f, "%.3f")) {
+		montageVlcPreviewPlayer.setPosition(previewPosition);
+	}
+
+	int subtitleDelayMs = montageVlcPreviewPlayer.getSubtitleDelayMs();
+	ImGui::SetNextItemWidth(180);
+	if (ImGui::SliderInt("VLC subtitle delay", &subtitleDelayMs, -5000, 5000, "%d ms")) {
+		montageVlcPreviewPlayer.setSubtitleDelayMs(subtitleDelayMs);
+	}
+	ImGui::SameLine();
+	float subtitleTextScale = montageVlcPreviewPlayer.getSubtitleTextScale();
+	ImGui::SetNextItemWidth(180);
+	if (ImGui::SliderFloat("VLC subtitle scale", &subtitleTextScale, 0.5f, 3.0f, "%.2fx")) {
+		montageVlcPreviewPlayer.setSubtitleTextScale(subtitleTextScale);
+	}
+
+	const auto subtitleState = montageVlcPreviewPlayer.getSubtitleStateInfo();
+	if (subtitleState.trackSelected && !subtitleState.selectedTrackLabel.empty()) {
+		ImGui::TextDisabled("Active VLC subtitle track: %s", subtitleState.selectedTrackLabel.c_str());
+	} else {
+		ImGui::TextDisabled("No VLC subtitle track selected yet.");
+	}
+	if (!montageVlcPreviewLoadedSubtitlePath.empty()) {
+		ImGui::TextDisabled("%s", montageVlcPreviewLoadedSubtitlePath.c_str());
+	}
+}
+#endif
+
 void ofApp::rebuildMontageSubtitleTrackFromText() {
 	montageSubtitleTrack = {};
 	if (trim(montageSrtText).empty()) {
+		montagePreviewBundle.montageTrack = {};
 		selectedMontageCueIndex = -1;
 		return;
 	}
@@ -3785,6 +4072,7 @@ void ofApp::rebuildMontageSubtitleTrackFromText() {
 	std::vector<ofxGgmlSimpleSrtCue> cues;
 	std::string error;
 	if (!ofxGgmlSimpleSrtSubtitleParser::parseText(montageSrtText, cues, error)) {
+		montagePreviewBundle.montageTrack = {};
 		selectedMontageCueIndex = -1;
 		return;
 	}
@@ -3804,6 +4092,10 @@ void ofApp::rebuildMontageSubtitleTrackFromText() {
 	selectedMontageCueIndex = montageSubtitleTrack.cues.empty()
 		? -1
 		: std::clamp(selectedMontageCueIndex, 0, static_cast<int>(montageSubtitleTrack.cues.size()) - 1);
+	montagePreviewBundle.sourceVideoPath = trim(visionVideoPath);
+	montagePreviewBundle.montageTrack.title = montageSubtitleTrack.title;
+	montagePreviewBundle.montageTrack.timingMode = ofxGgmlMontagePreviewTimingMode::Montage;
+	montagePreviewBundle.montageTrack.cues = montageSubtitleTrack.cues;
 }
 
 void ofApp::drawVisionVideoPreview(const std::string & videoPath) {
@@ -3851,13 +4143,15 @@ void ofApp::drawVisionVideoPreview(const std::string & videoPath) {
 		visionPreviewVideo.update();
 	}
 
-	if (montageSubtitlePlaybackEnabled && !montageSourceSubtitleTrack.cues.empty()) {
-		const int activeCueIndex = findActiveMontageSourceCueIndex();
+	if (montageSubtitlePlaybackEnabled &&
+		getSelectedMontagePreviewTimingMode() == ofxGgmlMontagePreviewTimingMode::Source &&
+		!montageSourceSubtitleTrack.cues.empty()) {
+		const int activeCueIndex = findActiveMontagePreviewCueIndex();
 		if (activeCueIndex >= 0 &&
 			activeCueIndex < static_cast<int>(montageSourceSubtitleTrack.cues.size())) {
 			const auto & cue = montageSourceSubtitleTrack.cues[static_cast<size_t>(activeCueIndex)];
 			ImGui::Separator();
-			ImGui::TextDisabled("Live montage subtitle");
+			ImGui::TextDisabled("Live source-timed subtitle");
 			ImGui::TextWrapped("%s", cue.text.c_str());
 		}
 	}
@@ -5258,8 +5552,22 @@ void ofApp::applyPendingOutput() {
 			montageEdlText = pendingMontageEdlText;
 			montageSrtText = pendingMontageSrtText;
 			montageVttText = pendingMontageVttText;
+			montagePreviewBundle = pendingMontagePreviewBundle;
 			montageSubtitleTrack = pendingMontageSubtitleTrack;
 			montageSourceSubtitleTrack = pendingMontageSourceSubtitleTrack;
+			montagePreviewTimelineSeconds = 0.0;
+			montagePreviewTimelinePlaying = false;
+			montagePreviewTimelineLastTickTime = 0.0f;
+			montagePreviewSubtitleSlavePath.clear();
+#if OFXGGML_HAS_OFXVLC4
+			montageVlcPreviewLoadedSubtitlePath.clear();
+			montageVlcPreviewError.clear();
+#endif
+			montagePreviewStatusMessage =
+				montagePreviewBundle.montageTrack.cues.empty() &&
+				montagePreviewBundle.sourceTrack.cues.empty()
+					? std::string()
+					: ofxGgmlMontagePreviewBridge::summarizeBundle(montagePreviewBundle);
 			selectedMontageCueIndex = montageSubtitleTrack.cues.empty()
 				? -1
 				: std::clamp(selectedMontageCueIndex, 0, static_cast<int>(montageSubtitleTrack.cues.size()) - 1);
@@ -5328,6 +5636,13 @@ void ofApp::applyPendingOutput() {
 		}
 		fprintf(stderr, "%s\n", formatConsoleLogLine("Image Search", "AI", imageSearchOutput, true).c_str());
 	}
+	if (pendingCitationDirty) {
+		citationOutput = pendingCitationOutput;
+		citationBackendName = pendingCitationBackendName;
+		citationElapsedMs = pendingCitationElapsedMs;
+		citationResults = pendingCitationResults;
+		fprintf(stderr, "%s\n", formatConsoleLogLine("Citations", "AI", citationOutput, true).c_str());
+	}
 
 	pendingOutput.clear();
 	pendingSpeechDetectedLanguage.clear();
@@ -5344,6 +5659,7 @@ void ofApp::applyPendingOutput() {
 	pendingMontageEdlText.clear();
 	pendingMontageSrtText.clear();
 	pendingMontageVttText.clear();
+	pendingMontagePreviewBundle = {};
 	pendingMontageSubtitleTrack = {};
 	pendingMontageSourceSubtitleTrack = {};
 	pendingVideoPlanJson.clear();
@@ -5355,12 +5671,17 @@ void ofApp::applyPendingOutput() {
 	pendingDiffusionElapsedMs = 0.0f;
   pendingDiffusionImages.clear();
   pendingDiffusionMetadata.clear();
-  pendingImageSearchOutput.clear();
-  pendingImageSearchBackendName.clear();
-  pendingImageSearchElapsedMs = 0.0f;
-  pendingImageSearchResults.clear();
+    pendingImageSearchOutput.clear();
+    pendingImageSearchBackendName.clear();
+    pendingImageSearchElapsedMs = 0.0f;
+    pendingImageSearchResults.clear();
   pendingImageSearchDirty = false;
-  pendingClipBackendName.clear();
+	pendingCitationOutput.clear();
+	pendingCitationBackendName.clear();
+	pendingCitationElapsedMs = 0.0f;
+	pendingCitationResults.clear();
+	pendingCitationDirty = false;
+    pendingClipBackendName.clear();
   pendingClipElapsedMs = 0.0f;
   pendingClipEmbeddingDimension = 0;
   pendingClipHits.clear();
@@ -6262,7 +6583,9 @@ bool ofApp::saveSession(const std::string & path) {
 		{"selectedVisionProfileIndex", selectedVisionProfileIndex},
 		{"selectedSpeechProfileIndex", selectedSpeechProfileIndex},
 		{"selectedTtsProfileIndex", selectedTtsProfileIndex},
-		{"selectedDiffusionProfileIndex", selectedDiffusionProfileIndex}
+		{"selectedDiffusionProfileIndex", selectedDiffusionProfileIndex},
+		{"citationUseCrawler", citationUseCrawler},
+		{"citationMaxResults", citationMaxResults}
 	};
 	session["settings"]["modeMaxTokens"] = ofJson::array();
 	for (int i = 0; i < kModeCount; ++i) {
@@ -6313,6 +6636,8 @@ bool ofApp::saveSession(const std::string & path) {
 		{"customInput", std::string(customInput)},
 		{"customSystemPrompt", std::string(customSystemPrompt)},
 		{"sourceUrlsInput", std::string(sourceUrlsInput)},
+		{"citationTopic", std::string(citationTopic)},
+		{"citationSeedUrl", std::string(citationSeedUrl)},
 		{"textServerUrl", std::string(textServerUrl)},
 		{"textServerModel", std::string(textServerModel)},
 		{"visionPrompt", std::string(visionPrompt)},
@@ -6416,6 +6741,11 @@ bool ofApp::saveSession(const std::string & path) {
 		{"clipNormalizeEmbeddings", clipNormalizeEmbeddings}
 	};
 
+	session["montagePreview"] = {
+		{"timingModeIndex", montagePreviewTimingModeIndex},
+		{"subtitleSlavePath", montagePreviewSubtitleSlavePath}
+	};
+
 	session["liveSpeech"] = {
 		{"intervalSeconds", speechLiveIntervalSeconds},
 		{"windowSeconds", speechLiveWindowSeconds},
@@ -6428,6 +6758,7 @@ bool ofApp::saveSession(const std::string & path) {
 		{"writeOutput", writeOutput},
 		{"translateOutput", translateOutput},
 		{"customOutput", customOutput},
+		{"citationOutput", citationOutput},
 		{"visionOutput", visionOutput},
 		{"montageSummary", montageSummary},
 		{"montageEditorBrief", montageEditorBrief},
@@ -6511,6 +6842,7 @@ bool ofApp::loadSession(const std::string & path) {
 	const ofJson indices = session.value("indices", ofJson::object());
 	const ofJson floats = session.value("floats", ofJson::object());
 	const ofJson bools = session.value("bools", ofJson::object());
+	const ofJson montagePreview = session.value("montagePreview", ofJson::object());
 	const ofJson liveSpeech = session.value("liveSpeech", ofJson::object());
 	const ofJson outputs = session.value("outputs", ofJson::object());
 
@@ -6578,6 +6910,8 @@ bool ofApp::loadSession(const std::string & path) {
 	copyJsonString(customInput, sizeof(customInput), buffers, "customInput");
 	copyJsonString(customSystemPrompt, sizeof(customSystemPrompt), buffers, "customSystemPrompt");
 	copyJsonString(sourceUrlsInput, sizeof(sourceUrlsInput), buffers, "sourceUrlsInput");
+	copyJsonString(citationTopic, sizeof(citationTopic), buffers, "citationTopic");
+	copyJsonString(citationSeedUrl, sizeof(citationSeedUrl), buffers, "citationSeedUrl");
 	copyJsonString(textServerUrl, sizeof(textServerUrl), buffers, "textServerUrl");
 	copyJsonString(textServerModel, sizeof(textServerModel), buffers, "textServerModel");
 	copyJsonString(visionPrompt, sizeof(visionPrompt), buffers, "visionPrompt");
@@ -6650,6 +6984,7 @@ bool ofApp::loadSession(const std::string & path) {
 	imageSearchMaxResults = std::clamp(getInt(indices, "imageSearchMaxResults", imageSearchMaxResults), 1, 32);
 	clipTopK = std::clamp(getInt(indices, "clipTopK", clipTopK), 0, 16);
 	clipVerbosity = std::clamp(getInt(indices, "clipVerbosity", clipVerbosity), 0, 2);
+	citationMaxResults = std::clamp(getInt(settings, "citationMaxResults", citationMaxResults), 1, 12);
 
 	videoPlanDurationSeconds = std::clamp(getFloat(floats, "videoPlanDurationSeconds", videoPlanDurationSeconds), 1.0f, 30.0f);
 	videoEditTargetDurationSeconds = std::clamp(getFloat(floats, "videoEditTargetDurationSeconds", videoEditTargetDurationSeconds), 1.0f, 120.0f);
@@ -6665,6 +7000,14 @@ bool ofApp::loadSession(const std::string & path) {
 	videoPlanUseForGeneration = getBool(bools, "videoPlanUseForGeneration", videoPlanUseForGeneration);
 	montagePreserveChronology = getBool(bools, "montagePreserveChronology", montagePreserveChronology);
 	montageSubtitlePlaybackEnabled = getBool(bools, "montageSubtitlePlaybackEnabled", montageSubtitlePlaybackEnabled);
+	montagePreviewTimingModeIndex = std::clamp(
+		getInt(montagePreview, "timingModeIndex", montagePreviewTimingModeIndex),
+		0,
+		1);
+	montagePreviewSubtitleSlavePath = getString(montagePreview, "subtitleSlavePath");
+	montagePreviewTimelineSeconds = 0.0;
+	montagePreviewTimelinePlaying = false;
+	montagePreviewTimelineLastTickTime = 0.0f;
 	videoEditUseCurrentAnalysis = getBool(bools, "videoEditUseCurrentAnalysis", videoEditUseCurrentAnalysis);
 	speechReturnTimestamps = getBool(bools, "speechReturnTimestamps", speechReturnTimestamps);
 	speechLiveTranscriptionEnabled = getBool(bools, "speechLiveTranscriptionEnabled", speechLiveTranscriptionEnabled);
@@ -6673,6 +7016,7 @@ bool ofApp::loadSession(const std::string & path) {
 	diffusionNormalizeClipEmbeddings = getBool(bools, "diffusionNormalizeClipEmbeddings", diffusionNormalizeClipEmbeddings);
 	diffusionSaveMetadata = getBool(bools, "diffusionSaveMetadata", diffusionSaveMetadata);
 	clipNormalizeEmbeddings = getBool(bools, "clipNormalizeEmbeddings", clipNormalizeEmbeddings);
+	citationUseCrawler = getBool(settings, "citationUseCrawler", citationUseCrawler);
 
 	speechLiveIntervalSeconds = std::clamp(getFloat(liveSpeech, "intervalSeconds", speechLiveIntervalSeconds), 0.5f, 5.0f);
 	speechLiveWindowSeconds = std::clamp(getFloat(liveSpeech, "windowSeconds", speechLiveWindowSeconds), 2.0f, 30.0f);
@@ -6683,6 +7027,7 @@ bool ofApp::loadSession(const std::string & path) {
 	writeOutput = getString(outputs, "writeOutput");
 	translateOutput = getString(outputs, "translateOutput");
 	customOutput = getString(outputs, "customOutput");
+	citationOutput = getString(outputs, "citationOutput");
 	visionOutput = getString(outputs, "visionOutput");
 	montageSummary = getString(outputs, "montageSummary");
 	montageEditorBrief = getString(outputs, "montageEditorBrief");

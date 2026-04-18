@@ -207,6 +207,19 @@ std::string stripPromptEcho(const std::string & text, const std::string & prompt
 		return trimmedText;
 	}
 	if (trimmedText.rfind(trimmedPrompt, 0) == 0) {
+		if (trimmedText.size() == trimmedPrompt.size()) {
+			return {};
+		}
+		const char next = trimmedText[trimmedPrompt.size()];
+		const bool looksLikeEchoBoundary =
+			std::isspace(static_cast<unsigned char>(next)) ||
+			next == ':' ||
+			next == '-' ||
+			next == '>' ||
+			next == '|';
+		if (!looksLikeEchoBoundary) {
+			return trimmedText;
+		}
 		return trimCopy(trimmedText.substr(trimmedPrompt.size()));
 	}
 	return trimmedText;

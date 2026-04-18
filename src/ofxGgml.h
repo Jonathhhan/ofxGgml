@@ -25,6 +25,7 @@
 #include "inference/ofxGgmlStableDiffusionAdapters.h"
 #include "inference/ofxGgmlSpeechInference.h"
 #include "inference/ofxGgmlChatLlmTtsAdapters.h"
+#include "inference/ofxGgmlCitationSearch.h"
 #include "inference/ofxGgmlTtsInference.h"
 #include "inference/ofxGgmlVisionInference.h"
 #include "inference/ofxGgmlVideoInference.h"

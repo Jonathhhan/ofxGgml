@@ -22,6 +22,17 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(__has_include)
+#if __has_include("ofxVlc4.h")
+#define OFXGGML_HAS_OFXVLC4 1
+#include "ofxVlc4.h"
+#else
+#define OFXGGML_HAS_OFXVLC4 0
+#endif
+#else
+#define OFXGGML_HAS_OFXVLC4 0
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -103,6 +114,8 @@ private:
 	char customInput[4096] = {};
 	char customSystemPrompt[2048] = {};
 	char sourceUrlsInput[2048] = {};
+	char citationTopic[1024] = {};
+	char citationSeedUrl[1024] = {};
 	char textServerUrl[256] = "http://127.0.0.1:8080";
 	char textServerModel[256] = {};
 	char visionPrompt[4096] = {};
@@ -207,6 +220,7 @@ private:
 	std::string writeOutput;
 	std::string translateOutput;
 	std::string customOutput;
+	std::string citationOutput;
 	std::string visionOutput;
 	std::string montageSummary;
 	std::string montageEditorBrief;
@@ -246,6 +260,10 @@ private:
 	int selectedImageSearchResultIndex = -1;
 	std::string deferredImageSearchPrompt;
 	bool hasDeferredImageSearchPrompt = false;
+	std::string deferredCitationTopic;
+	bool hasDeferredCitationTopic = false;
+	std::string deferredCitationSeedUrl;
+	bool hasDeferredCitationSeedUrl = false;
 	std::string deferredSpeechAudioPath;
 	bool hasDeferredSpeechAudioPath = false;
 	std::string deferredTranslateInput;
@@ -257,6 +275,19 @@ private:
 	std::string deferredMontageSubtitlePath;
 	bool hasDeferredMontageSubtitlePath = false;
 	bool montageSubtitlePlaybackEnabled = false;
+	int montagePreviewTimingModeIndex = 0;
+	bool montagePreviewTimelinePlaying = false;
+	double montagePreviewTimelineSeconds = 0.0;
+	float montagePreviewTimelineLastTickTime = 0.0f;
+	std::string montagePreviewSubtitleSlavePath;
+	std::string montagePreviewStatusMessage;
+#if OFXGGML_HAS_OFXVLC4
+	ofxVlc4 montageVlcPreviewPlayer;
+	bool montageVlcPreviewInitialized = false;
+	std::string montageVlcPreviewLoadedVideoPath;
+	std::string montageVlcPreviewLoadedSubtitlePath;
+	std::string montageVlcPreviewError;
+#endif
 	int selectedMontageCueIndex = -1;
 	std::string speechDetectedLanguage;
 	std::string speechTranscriptPath;
@@ -321,6 +352,11 @@ private:
 	float pendingImageSearchElapsedMs = 0.0f;
 	std::vector<ofxGgmlImageSearchItem> pendingImageSearchResults;
 	bool pendingImageSearchDirty = false;
+	std::string pendingCitationOutput;
+	std::string pendingCitationBackendName;
+	float pendingCitationElapsedMs = 0.0f;
+	std::vector<ofxGgmlCitationItem> pendingCitationResults;
+	bool pendingCitationDirty = false;
 	std::vector<ofxGgmlSampledVideoFrame> visionSampledVideoFrames;
 	std::vector<ofxGgmlSampledVideoFrame> pendingVisionSampledVideoFrames;
 	std::string pendingMontageSummary;
@@ -328,8 +364,10 @@ private:
 	std::string pendingMontageEdlText;
 	std::string pendingMontageSrtText;
 	std::string pendingMontageVttText;
+	ofxGgmlMontagePreviewBundle montagePreviewBundle;
 	ofxGgmlMontageSubtitleTrack montageSubtitleTrack;
 	ofxGgmlMontageSubtitleTrack montageSourceSubtitleTrack;
+	ofxGgmlMontagePreviewBundle pendingMontagePreviewBundle;
 	ofxGgmlMontageSubtitleTrack pendingMontageSubtitleTrack;
 	ofxGgmlMontageSubtitleTrack pendingMontageSourceSubtitleTrack;
 	std::string pendingVideoPlanJson;
@@ -432,6 +470,11 @@ private:
 	std::string imageSearchBackendName;
 	float imageSearchElapsedMs = 0.0f;
 	std::vector<ofxGgmlImageSearchItem> imageSearchResults;
+	std::string citationBackendName;
+	float citationElapsedMs = 0.0f;
+	std::vector<ofxGgmlCitationItem> citationResults;
+	bool citationUseCrawler = false;
+	int citationMaxResults = 5;
 
 	// -- script source (local folder / GitHub) --
 	ofxGgmlScriptSource scriptSource;
@@ -454,6 +497,7 @@ private:
 	ofxGgmlTtsInference ttsInference;
 	ofxGgmlDiffusionInference diffusionInference;
 	ofxGgmlImageSearch imageSearch;
+	ofxGgmlCitationSearch citationSearch;
 	ofxGgmlClipInference clipInference;
 #if OFXGGML_HAS_OFXSTABLEDIFFUSION
 	std::shared_ptr<ofxStableDiffusion> stableDiffusionEngine;
@@ -505,6 +549,7 @@ private:
 	void runTtsInference();
 	void runDiffusionInference();
 	void runImageSearch();
+	void runCitationSearch();
 	void runClipInference();
 	bool ensureClipBackendConfigured(
 		const std::string & modelPath,
@@ -571,6 +616,9 @@ private:
 	void drawScriptPanel();
 	void drawScriptSourcePanel();
 	void drawSummarizePanel();
+	void drawCitationSearchSection(
+		const char * useInputButtonLabel,
+		const std::string & suggestedTopic);
 	void drawWritePanel();
 	void drawTranslatePanel();
 	void drawCustomPanel();
@@ -594,6 +642,19 @@ private:
 	void drawVisionVideoPreview(const std::string & videoPath);
 	void drawMediaTexturePreview(const ofBaseHasTexture & previewTexture, const char * childId);
 	int findActiveMontageSourceCueIndex() const;
+	ofxGgmlMontagePreviewTimingMode getSelectedMontagePreviewTimingMode() const;
+	const ofxGgmlMontagePreviewTrack * getSelectedMontagePreviewTrack() const;
+	double getSelectedMontagePreviewTimeSeconds() const;
+	int findActiveMontagePreviewCueIndex() const;
+	std::string exportSelectedMontagePreviewTrack(
+		ofxGgmlMontagePreviewTextFormat format,
+		std::string * errorOut = nullptr) const;
+#if OFXGGML_HAS_OFXVLC4
+	bool ensureMontageVlcPreviewInitialized(std::string * errorOut = nullptr);
+	bool loadMontageVlcPreview(std::string * errorOut = nullptr);
+	void closeMontageVlcPreview();
+	void drawMontageVlcPreview();
+#endif
 	void rebuildMontageSubtitleTrackFromText();
 	void ensureDiffusionPreviewResources();
 	void drawDiffusionImagePreview(

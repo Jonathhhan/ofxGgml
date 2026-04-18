@@ -48,6 +48,7 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlMontagePreviewBridge` as a playback-facing bridge surface that exposes source-timed and montage-timed subtitle tracks, cue lookup, and playlist-oriented preview data for companions such as `ofxVlc4`
 - `ofxGgmlImageSearch` for internet reference-image lookup through pluggable providers, with a working Wikimedia Commons backend
 - `ofxGgmlWebCrawler` as an optional website-ingestion bridge layer, with a `Mojo` CLI adapter for local website-to-Markdown crawling workflows
+- `ofxGgmlCitationSearch` for topic-oriented source-grounded quote extraction, with structured citation items built from loaded URLs or crawler-ingested website content
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
 - `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
 - `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, shadow-workspace safe apply, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
@@ -62,6 +63,8 @@ This addon is released under the [MIT License](LICENSE).
 - GUI example for local chat, review, and script-assisted workflows built mostly on addon helpers
 - GUI example Translate mode with auto-detect source language, natural vs. literal translation shortcuts, detect-and-translate flow, and more reliable prompt/input handoff buttons
 - GUI example Montage mode can now preview restructured subtitle cues live, copy generated SRT/VTT exports, and keep a playback-facing subtitle track ready for external preview layers such as `ofxVlc4`
+- when the GUI example is regenerated with `ofxVlc4` enabled in `addons.make`, Montage mode can also load the active subtitle track directly into an optional `ofxVlc4` preview with subtitle delay / scale controls
+- GUI example Summarize mode now includes a dedicated citation-research section that can extract quoted evidence from loaded URLs or crawl a seed website before building a cited summary
 
 ## Source layout
 
@@ -76,7 +79,7 @@ Core implementation is split by concern:
 - `src/model/` for GGUF model loading
 - `src/inference/` for completion execution, grounded prompt assembly, and speech / vision / video inference helpers
 - `src/inference/` also now includes bridge scaffolds for optional CLIP-style ranking, TTS, and diffusion/image-generation backends such as `clip.cpp`, OuteTTS, and `ofxStableDiffusion`, plus higher-level planners and preview bridges for video, montage, and image search workflows
-- `src/inference/` also now includes optional web-ingestion helpers such as `ofxGgmlWebCrawler` for local crawler-backed RAG/document pipelines
+- `src/inference/` also now includes optional web-ingestion helpers such as `ofxGgmlWebCrawler` plus topic-oriented quote extraction via `ofxGgmlCitationSearch` for local crawler-backed RAG/document pipelines
 - `src/assistants/` for chat, code, workspace, review, and text-task helpers
 - `src/support/` for script sources and project memory
 
@@ -404,6 +407,16 @@ Both lightweight examples are now keyboard-driven so you can rerun compute and b
 
 The test suite lives in `tests/` and covers core runtime behavior, model loading, inference helpers, chat/code/text assistants, and project memory support. When you change backend setup, Windows linking, or inference command assembly, it is worth rerunning the tests or at least rebuilding one example project.
 
+Windows quick check:
+
+```powershell
+cmake -S tests -B tests/build
+cmake --build tests/build --config Release
+./tests/build/Release/ofxGgml-tests.exe
+```
+
+Recent coverage additions include the montage preview/export bridge, newer split inference text-cleanup paths, and the updated speech / translate assistant flows.
+
 ## Persistent Server Backend
 
 `ofxGgmlInference` can now target a warm `llama-server` process for both text generation and embeddings. When `serverModel` is left empty, the addon probes `/v1/models`, caches the active model briefly, and reuses that information across nearby requests. Review and retrieval flows can also use the same server, which keeps hierarchical review fast while preserving semantic ranking.
@@ -718,6 +731,8 @@ The GUI example includes a `Subtitle montage automat` workflow with:
 - ranked clip suggestions
 - inline editor brief preview
 - `Copy EDL` for timeline handoff
+- `Export active SRT` / `Export active VTT` for subtitle-slave handoff into `ofxVlc4`
+- optional direct `ofxVlc4` preview when the example is regenerated with the companion addon available
 
 Use it when an app wants transcript-driven rough-cut planning without building a full NLE integration first.
 

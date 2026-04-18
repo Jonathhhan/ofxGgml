@@ -56,7 +56,8 @@ TEST_CASE("Text assistant prepares task-specific prompts", "[text_assistant]") {
 		request.targetLanguage = "English";
 
 		const auto prepared = assistant.preparePrompt(request);
-		REQUIRE(prepared.prompt.find("Translate the following from German to English:") != std::string::npos);
+		REQUIRE(prepared.prompt.find("Translate the following text from German to English.") != std::string::npos);
+		REQUIRE(prepared.prompt.find("Return only the translated text with no explanations, notes, or labels.") != std::string::npos);
 		REQUIRE(prepared.prompt.find("Translation:") != std::string::npos);
 	}
 
@@ -74,7 +75,8 @@ TEST_CASE("Text assistant prepares task-specific prompts", "[text_assistant]") {
 	SECTION("default language list is available") {
 		const auto languages = ofxGgmlTextAssistant::defaultTranslateLanguages();
 		REQUIRE(languages.size() >= 10);
-		REQUIRE(languages.front().name == "English");
+		REQUIRE(languages.front().name == "Auto detect");
+		REQUIRE(languages[1].name == "English");
 	}
 }
 
