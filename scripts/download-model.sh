@@ -13,7 +13,7 @@
 #   --task   NAME  Select the preferred model for a task: chat, script,
 #                  summarize, write, translate, custom  (matches the GUI
 #                  example modes)
-#   --output DIR   Directory to save the model (default: bin/data/models/)
+#   --output DIR   Directory to save the model (default: addon-root models/)
 #   --name   FILE  Output file name (default: derived from URL)
 #   --both         Download both recommended presets (1 and 2)
 #   --checksum HEX SHA256 checksum for --model URL downloads
@@ -259,13 +259,7 @@ if [[ "$DOWNLOAD_BOTH" == true ]]; then
 fi
 
 if [[ -z "$OUTPUT_DIR" ]]; then
-	# Try to find the example's bin/data directory.
-	GUI_EXAMPLE="$ADDON_ROOT/ofxGgmlGuiExample/bin/data"
-	if [[ -d "$(dirname "$GUI_EXAMPLE")" ]]; then
-		OUTPUT_DIR="$GUI_EXAMPLE/models"
-	else
-		OUTPUT_DIR="$(pwd)/models"
-	fi
+	OUTPUT_DIR="$ADDON_ROOT/models"
 fi
 
 # ---------------------------------------------------------------------------

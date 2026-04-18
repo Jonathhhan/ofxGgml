@@ -1,7 +1,10 @@
 #include "ofMain.h"
 #include "ofApp.h"
+#include "utils/PathHelpers.h"
 
 int main() {
+	configureCentralRuntimeSearchPaths();
+
 	ofGLFWWindowSettings settings;
 	settings.setGLVersion(3, 3);
 	settings.setSize(1280, 800);

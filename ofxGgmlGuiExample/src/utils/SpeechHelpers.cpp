@@ -1,5 +1,6 @@
 #include "SpeechHelpers.h"
 #include "ImGuiHelpers.h"
+#include "PathHelpers.h"
 #include "ofxGgmlSpeechInference.h"
 #include <cmath>
 #include <cstdio>
@@ -78,13 +79,7 @@ bool buildSpeechExecutionPlan(
 		? trim(profileBase.modelPath)
 		: modelPath;
 	if (effectiveModelPath.empty() && !trim(profileBase.modelFileHint).empty()) {
-		const std::filesystem::path suggested =
-			std::filesystem::path(ofToDataPath("models", true)) /
-			trim(profileBase.modelFileHint);
-		std::error_code ec;
-		if (std::filesystem::exists(suggested, ec) && !ec) {
-			effectiveModelPath = suggested.string();
-		}
+		effectiveModelPath = resolveModelPathHint(trim(profileBase.modelFileHint));
 	}
 
 	plan.request.task = static_cast<ofxGgmlSpeechTask>(taskIndex);

@@ -49,6 +49,9 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlImageSearch` for internet reference-image lookup through pluggable providers, with a working Wikimedia Commons backend
 - `ofxGgmlWebCrawler` as an optional website-ingestion bridge layer, with a `Mojo` CLI adapter for local website-to-Markdown crawling workflows
 - `ofxGgmlCitationSearch` for topic-oriented source-grounded quote extraction, with structured citation items built from loaded URLs or crawler-ingested website content
+- `ofxGgmlMilkDropGenerator` for MilkDrop / projectM preset generation and editing through the existing text-inference backend, with prompt preparation, preset sanitization, and `.milk` file saving helpers
+- `ofxGgmlEasy` as a small high-level facade for common text, chat, translation, vision, and speech tasks without wiring the lower-level assistants by hand
+- `ofxGgmlEasy` now also covers crawler-backed citation research, subtitle-montage planning/export, AI-assisted video-edit planning, and MilkDrop preset generation/editing so apps can reuse the higher-level workflow helpers without depending on the full GUI example
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
 - `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
 - `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, shadow-workspace safe apply, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
@@ -65,6 +68,7 @@ This addon is released under the [MIT License](LICENSE).
 - GUI example Montage mode can now preview restructured subtitle cues live, copy generated SRT/VTT exports, and keep a playback-facing subtitle track ready for external preview layers such as `ofxVlc4`
 - when the GUI example is regenerated with `ofxVlc4` enabled in `addons.make`, Montage mode can also load the active subtitle track directly into an optional `ofxVlc4` preview with subtitle delay / scale controls
 - GUI example Summarize mode now includes a dedicated citation-research section that can extract quoted evidence from loaded URLs or crawl a seed website before building a cited summary
+- GUI example MilkDrop mode can generate `.milk` preset text from prompts, save presets, and optionally preview the result live through `ofxProjectM` when the example is regenerated with that addon enabled
 
 ## Source layout
 
@@ -81,7 +85,7 @@ Core implementation is split by concern:
 - `src/inference/` also now includes bridge scaffolds for optional CLIP-style ranking, TTS, and diffusion/image-generation backends such as `clip.cpp`, OuteTTS, and `ofxStableDiffusion`, plus higher-level planners and preview bridges for video, montage, and image search workflows
 - `src/inference/` also now includes optional web-ingestion helpers such as `ofxGgmlWebCrawler` plus topic-oriented quote extraction via `ofxGgmlCitationSearch` for local crawler-backed RAG/document pipelines
 - `src/assistants/` for chat, code, workspace, review, and text-task helpers
-- `src/support/` for script sources and project memory
+- `src/support/` for script sources, project memory, and the high-level `ofxGgmlEasy` facade
 
 Supporting areas:
 
@@ -137,6 +141,118 @@ scripts\setup_windows.bat
 ```
 
 After setup, add `ofxGgml` to your project's `addons.make`, regenerate with the openFrameworks Project Generator when needed, and build normally.
+
+By default, helper scripts now prefer a shared addon-level model folder:
+
+- `models/`
+
+That keeps large GGUF / Whisper model files out of per-example `bin/data/models` copies during development. The GUI example still falls back to bundled `bin/data/models` when you package a standalone app.
+
+On Windows, the GUI example also adds central runtime folders such as:
+
+- `libs/llama/bin`
+- `libs/whisper/bin`
+- `libs/chatllm/bin`
+- `libs/ggml/build/src/Release`
+
+to the process DLL search path at startup, so development builds do not need duplicate runtime DLL copies in `bin/` unless you are distributing a standalone bundle.
+
+## Easy API
+
+If you want a shorter setup path than wiring `ofxGgmlInference`, `ofxGgmlTextAssistant`, `ofxGgmlVisionInference`, and `ofxGgmlSpeechInference` manually, use `ofxGgmlEasy`.
+
+Minimal text setup:
+
+```cpp
+#include "ofxGgml.h"
+
+ofxGgmlEasy ai;
+
+ofxGgmlEasyTextConfig text;
+text.modelPath = "data/models/qwen2.5-1.5b-instruct-q4_k_m.gguf";
+text.completionExecutable = "llama-completion";
+ai.configureText(text);
+
+auto summary = ai.summarize("Summarize this paragraph in one sentence.");
+if (summary.inference.success) {
+    ofLogNotice() << summary.inference.text;
+}
+```
+
+Chat and translation:
+
+```cpp
+auto chat = ai.chat("Explain ggml in simple terms.", "English");
+auto translated = ai.translate("Guten Morgen", "English", "German");
+```
+
+Vision:
+
+```cpp
+ofxGgmlEasyVisionConfig vision;
+vision.modelPath = "data/models/LFM2.5-VL-1.6B-Q8_0.gguf";
+vision.mmprojPath = "data/models/mmproj-LFM2.5-VL-1.6b-Q8_0.gguf";
+vision.serverUrl = "http://127.0.0.1:8080";
+ai.configureVision(vision);
+
+auto imageResult = ai.describeImage("data/images/test.png");
+```
+
+Speech:
+
+```cpp
+ofxGgmlEasySpeechConfig speech;
+speech.modelPath = "data/models/ggml-base.en.bin";
+speech.cliExecutable = "whisper-cli";
+ai.configureSpeech(speech);
+
+auto transcript = ai.transcribeAudio("data/audio/test.wav");
+```
+
+Research, montage, and edit workflows:
+
+```cpp
+ofxGgmlEasyCrawlerConfig crawler;
+crawler.executablePath = "mojo";
+ai.configureWebCrawler(crawler);
+
+auto citations = ai.findCitations(
+    "Berlin airport winter disruption",
+    {},
+    "https://example.com/weather",
+    4);
+
+auto montage = ai.planMontageFromSrt(
+    "data/subtitles/scene.srt",
+    "Build a concise recap montage.");
+
+auto editPlan = ai.planVideoEdit(
+    "Berlin city footage",
+    "Turn this into a fast social recap.",
+    "Opening skyline, transit, crowd reaction.");
+
+auto milkdrop = ai.generateMilkDropPreset(
+    "neon kaleidoscope tunnel with bass-reactive zoom pulses",
+    "Geometric",
+    0.65f);
+if (milkdrop.success) {
+    ai.getMilkDropGenerator().savePreset(
+        milkdrop.presetText,
+        "data/generated/milkdrop/neon-tunnel.milk");
+}
+```
+
+`ofxGgmlEasy` is intentionally small. If you need deeper control, it still exposes the owned lower-level helpers:
+
+- `getInference()`
+- `getChatAssistant()`
+- `getTextAssistant()`
+- `getVisionInference()`
+- `getSpeechInference()`
+- `getWebCrawler()`
+- `getCitationSearch()`
+- `getVideoPlanner()`
+- `getMilkDropGenerator()`
 
 ## Quick Wins: Developer Experience Features
 
@@ -710,6 +826,9 @@ The planner currently supports:
 - recurring entities and scene continuity across multi-scene plans
 - selected-scene versus full-sequence prompt assembly
 - AI-assisted edit-plan generation with structured actions, durations, and editorial notes
+- editor-workflow generation that turns edit plans into actionable next steps and direct handoff prompts for Vision, Write, Diffusion, Custom, and Montage flows
+- lightweight workflow-state support in the GUI example, including active-step focus, done/undone tracking, and session restore for longer editing passes
+- editor presets in the GUI example for `Trailer`, `Montage`, `Recap`, `Music Video`, `Social Short`, and `Product Teaser`, so common edit goals can prefill clip count, target duration, and grounding strategy in one click
 
 The GUI example exposes that planner directly in the Vision / Video area with:
 

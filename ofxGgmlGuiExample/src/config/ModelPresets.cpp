@@ -45,7 +45,7 @@ void loadModelPresets(
 			}
 		};
 		// Match the CLI defaults for most modes, but prefer a stronger coder model for Script.
-		taskDefaultModelIndices = {0, 2, 0, 0, 0, 0, 0, 0, 0};
+		taskDefaultModelIndices = {0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2};
 	};
 
 	// Try to load presets from scripts/model-catalog.json first.
@@ -112,6 +112,7 @@ void loadModelPresets(
 				setDefault("vision", AiMode::Vision);
 				setDefault("speech", AiMode::Speech);
 				setDefault("diffusion", AiMode::Diffusion);
+				setDefault("milkdrop", AiMode::MilkDrop);
 			}
 			loaded = !modelPresets.empty();
 		} catch (const std::exception & e) {

@@ -28,7 +28,7 @@ REM ---------------------------------------------------------------------------
 
 set "SCRIPT_DIR=%~dp0"
 set "ADDON_ROOT=%SCRIPT_DIR%.."
-set "MODEL_OUTPUT_DIR=%ADDON_ROOT%\ofxGgmlGuiExample\bin\data\models"
+set "MODEL_OUTPUT_DIR=%ADDON_ROOT%\models"
 set "MODEL_DOWNLOADER=%SCRIPT_DIR%download-model.ps1"
 set "LLAMA_RUNTIME_BUILDER=%SCRIPT_DIR%build-llama-server.ps1"
 set "SKIP_GGML=0"

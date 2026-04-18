@@ -1,0 +1,254 @@
+#include "catch2.hpp"
+#include "../src/ofxGgml.h"
+
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
+namespace {
+
+std::filesystem::path makeEasyApiTestDir(const std::string & name) {
+	const auto base = std::filesystem::temp_directory_path() / "ofxggml_easy_api_tests";
+	std::filesystem::create_directories(base);
+	const auto dir = base / (name + "_" + std::to_string(std::rand()));
+	std::filesystem::create_directories(dir);
+	return dir;
+}
+
+std::string createEasyApiDummyModel() {
+	const auto dir = makeEasyApiTestDir("model");
+	const auto model = dir / "dummy.gguf";
+	std::ofstream out(model);
+	out << "dummy-model";
+	return model.string();
+}
+
+std::string createEasyApiExecutable(const std::string & outputLine) {
+	const auto dir = makeEasyApiTestDir("exec");
+#ifdef _WIN32
+	const auto exe = dir / "fake_easy_api.bat";
+	const auto outputFile = dir / "fake_easy_api_output.txt";
+	{
+		std::ofstream output(outputFile, std::ios::binary);
+		output << outputLine;
+	}
+	std::ofstream out(exe);
+	out
+		<< "@echo off\r\n"
+		<< "type \"%~dp0fake_easy_api_output.txt\"\r\n";
+#else
+	const auto exe = dir / "fake_easy_api.sh";
+	std::ofstream out(exe);
+	out << "#!/usr/bin/env bash\nset -euo pipefail\necho " << outputLine << "\n";
+	out.close();
+	chmod(exe.c_str(), 0755);
+#endif
+	return exe.string();
+}
+
+class FakeEasySpeechBackend final : public ofxGgmlSpeechBackend {
+public:
+	std::string backendName() const override {
+		return "FakeEasySpeech";
+	}
+
+	ofxGgmlSpeechResult transcribe(const ofxGgmlSpeechRequest & request) const override {
+		ofxGgmlSpeechResult result;
+		result.success = true;
+		result.backendName = backendName();
+		result.text = request.task == ofxGgmlSpeechTask::Translate
+			? "translated speech"
+			: "transcribed speech";
+		return result;
+	}
+};
+
+class FakeEasyWebCrawlerBackend final : public ofxGgmlWebCrawlerBackend {
+public:
+	std::string backendName() const override {
+		return "FakeEasyCrawler";
+	}
+
+	ofxGgmlWebCrawlerResult crawl(const ofxGgmlWebCrawlerRequest & request) const override {
+		ofxGgmlWebCrawlerResult result;
+		result.success = true;
+		result.backendName = backendName();
+		result.startUrl = request.startUrl;
+		result.outputDir = request.outputDir;
+		result.documents.push_back({
+			"Crawled Source",
+			request.startUrl,
+			{},
+			"Example markdown about Berlin weather and icy conditions.",
+			0,
+			52
+		});
+		return result;
+	}
+};
+
+} // namespace
+
+TEST_CASE("Easy API reports missing configuration cleanly", "[easy_api]") {
+	ofxGgmlEasy easy;
+
+	const auto textResult = easy.complete("Hello");
+	REQUIRE_FALSE(textResult.success);
+	REQUIRE(textResult.error.find("configureText") != std::string::npos);
+
+	const auto visionResult = easy.describeImage("image.png");
+	REQUIRE_FALSE(visionResult.success);
+	REQUIRE(visionResult.error.find("configureVision") != std::string::npos);
+
+	const auto speechResult = easy.transcribeAudio("clip.wav");
+	REQUIRE_FALSE(speechResult.success);
+	REQUIRE(speechResult.error.find("configureSpeech") != std::string::npos);
+}
+
+TEST_CASE("Easy API wraps common text workflows", "[easy_api]") {
+	const std::string modelPath = createEasyApiDummyModel();
+	const std::string exePath = createEasyApiExecutable("easy-api-ok");
+
+	ofxGgmlEasy easy;
+	ofxGgmlEasyTextConfig textConfig;
+	textConfig.modelPath = modelPath;
+	textConfig.completionExecutable = exePath;
+	easy.configureText(textConfig);
+
+	const auto completion = easy.complete("Say hello.");
+	REQUIRE(completion.success);
+	REQUIRE(completion.text.find("easy-api-ok") != std::string::npos);
+
+	const auto summary = easy.summarize("This is a longer paragraph that needs a summary.");
+	REQUIRE(summary.inference.success);
+	REQUIRE(summary.prepared.label == "Summarize text.");
+
+	const auto translation = easy.translate("Guten Morgen", "English", "German");
+	REQUIRE(translation.inference.success);
+	REQUIRE(translation.prepared.prompt.find("Translate the following text from German to English.") != std::string::npos);
+
+	const auto chat = easy.chat("How are you?", "German");
+	REQUIRE(chat.inference.success);
+	REQUIRE(chat.prepared.prompt.find("How are you?") != std::string::npos);
+
+	const std::string milkExePath = createEasyApiExecutable("[preset00]\nzoom=1.02\nfRating=3.0");
+	textConfig.completionExecutable = milkExePath;
+	easy.configureText(textConfig);
+	const auto preset = easy.generateMilkDropPreset(
+		"Neon tunnel with pulsing geometry.",
+		"Geometric",
+		0.5f);
+	REQUIRE(preset.success);
+	REQUIRE(preset.presetText.find("[preset00]") == 0);
+}
+
+TEST_CASE("Easy API can reuse a custom speech backend", "[easy_api]") {
+	ofxGgmlEasy easy;
+	ofxGgmlEasySpeechConfig speechConfig;
+	speechConfig.modelPath = "dummy.bin";
+	easy.configureSpeech(speechConfig);
+	easy.getSpeechInference().setBackend(std::make_shared<FakeEasySpeechBackend>());
+
+	const auto transcript = easy.transcribeAudio("clip.wav");
+	REQUIRE(transcript.success);
+	REQUIRE(transcript.backendName == "FakeEasySpeech");
+	REQUIRE(transcript.text == "transcribed speech");
+
+	const auto translation = easy.translateAudio("clip.wav");
+	REQUIRE(translation.success);
+	REQUIRE(translation.text == "translated speech");
+}
+
+TEST_CASE("Easy API wraps crawler and montage helpers", "[easy_api]") {
+	ofxGgmlEasy easy;
+	ofxGgmlEasyCrawlerConfig crawlerConfig;
+	crawlerConfig.outputDir = makeEasyApiTestDir("crawl").string();
+	easy.configureWebCrawler(crawlerConfig);
+	easy.getWebCrawler().setBackend(std::make_shared<FakeEasyWebCrawlerBackend>());
+
+	const auto crawlResult = easy.crawlWebsite("https://example.com/docs", 1);
+	REQUIRE(crawlResult.success);
+	REQUIRE(crawlResult.backendName == "FakeEasyCrawler");
+	REQUIRE(crawlResult.documents.size() == 1);
+
+	const auto srtDir = makeEasyApiTestDir("srt");
+	const auto srtPath = srtDir / "sample.srt";
+	{
+		std::ofstream out(srtPath);
+		out
+			<< "1\n00:00:00,000 --> 00:00:02,000\nBerlin wakes up.\n\n"
+			<< "2\n00:00:02,000 --> 00:00:04,000\nTrains move through the city.\n";
+	}
+
+	const auto montageResult = easy.planMontageFromSrt(
+		srtPath.string(),
+		"Build a concise city montage.",
+		4,
+		0.0,
+		true,
+		"AX",
+		"BERLIN_MONTAGE",
+		25);
+	REQUIRE(montageResult.success);
+	REQUIRE(montageResult.planning.success);
+	REQUIRE_FALSE(montageResult.edlText.empty());
+	REQUIRE_FALSE(montageResult.srtText.empty());
+	REQUIRE(montageResult.previewBundle.montageTrack.cues.size() == montageResult.montageTrack.cues.size());
+}
+
+TEST_CASE("Easy API exposes citation and video edit helpers", "[easy_api]") {
+	const std::string modelPath = createEasyApiDummyModel();
+	const std::string editExePath = createEasyApiExecutable(
+		"{\"originalGoal\":\"Make it punchy\",\"sourceSummary\":\"Two city beats.\",\"overallDirection\":\"Energetic recap\",\"pacingStrategy\":\"Fast start\",\"visualStyle\":\"Clean contrast\",\"audioStrategy\":\"Rhythmic\",\"targetDurationSeconds\":12,\"globalNotes\":[\"Keep the opening short.\"],\"assetSuggestions\":[\"Title card\"],\"clips\":[{\"index\":1,\"startSeconds\":0,\"endSeconds\":3,\"purpose\":\"Hook\",\"sourceDescription\":\"Opening shot\",\"treatment\":\"Punch in\",\"transition\":\"Cut\",\"textOverlay\":\"Berlin\"}],\"actions\":[{\"index\":1,\"type\":\"trim\",\"startSeconds\":0,\"endSeconds\":3,\"instruction\":\"Trim to the best opening beat.\",\"rationale\":\"Start strong.\",\"assetHint\":\"\"}]}");
+	const std::string citationExePath = createEasyApiExecutable(
+		"{\"summary\":\"Cited weather notes.\",\"citations\":[{\"quote\":\"Icy weather halted flights.\",\"sourceIndex\":1,\"note\":\"Airport disruption\"}]}");
+
+	ofxGgmlEasy easy;
+	ofxGgmlEasyTextConfig textConfig;
+	textConfig.modelPath = modelPath;
+	textConfig.completionExecutable = editExePath;
+	easy.configureText(textConfig);
+
+	const auto editResult = easy.planVideoEdit(
+		"Berlin city footage",
+		"Turn this into a short recap.",
+		"Opening skyline, then transit, then crowd reaction.",
+		12.0,
+		4,
+		true);
+	if (editResult.success) {
+		REQUIRE(editResult.planning.success);
+		REQUIRE_FALSE(editResult.workflow.steps.empty());
+		REQUIRE_FALSE(editResult.editorBrief.empty());
+	} else {
+		const bool hasExpectedHeadlessError =
+			editResult.error.find("JSON parsing is unavailable") != std::string::npos ||
+			editResult.error.find("non-JSON output") != std::string::npos ||
+			editResult.error.find("did not contain a JSON object") != std::string::npos;
+		REQUIRE(hasExpectedHeadlessError);
+	}
+
+	textConfig.completionExecutable = citationExePath;
+	easy.configureText(textConfig);
+	easy.getWebCrawler().setBackend(std::make_shared<FakeEasyWebCrawlerBackend>());
+	const auto citationResult = easy.findCitations(
+		"Berlin weather",
+		{},
+		"https://example.com/weather",
+		3);
+	if (citationResult.success) {
+		REQUIRE(citationResult.citations.size() == 1);
+		REQUIRE(citationResult.citations.front().quote == "Icy weather halted flights.");
+	} else {
+		const bool hasExpectedCitationError =
+			citationResult.error.find("non-JSON output") != std::string::npos ||
+			citationResult.error.find("Inference failed while extracting citations.") != std::string::npos ||
+			citationResult.error.find("Crawler did not return any usable markdown documents.") != std::string::npos;
+		REQUIRE(hasExpectedCitationError);
+	}
+}

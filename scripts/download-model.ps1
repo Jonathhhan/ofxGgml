@@ -14,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $addonRoot = Resolve-Path (Join-Path $scriptRoot '..')
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
-    $OutputDir = Join-Path $addonRoot 'ofxGgmlGuiExample\bin\data\models'
+    $OutputDir = Join-Path $addonRoot 'models'
 }
 
 $models = @(

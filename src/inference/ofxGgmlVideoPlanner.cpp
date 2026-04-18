@@ -25,15 +25,12 @@ std::string trimCopy(const std::string & text) {
 
 template <typename T>
 T jsonValueOr(const ofJson & json, const char * key, const T & fallback) {
-	if (!json.is_object()) {
+	if (!json.is_object() || key == nullptr || !json.contains(key)) {
 		return fallback;
 	}
-	const auto it = json.find(key);
-	if (it == json.end() || it->is_null()) {
-		return fallback;
-	}
+	const auto & item = json[key];
 	try {
-		return it->get<T>();
+		return item.get<T>();
 	} catch (...) {
 		return fallback;
 	}
@@ -41,14 +38,14 @@ T jsonValueOr(const ofJson & json, const char * key, const T & fallback) {
 
 std::vector<std::string> jsonStringArray(const ofJson & json, const char * key) {
 	std::vector<std::string> values;
-	if (!json.is_object()) {
+	if (!json.is_object() || key == nullptr || !json.contains(key)) {
 		return values;
 	}
-	const auto it = json.find(key);
-	if (it == json.end() || !it->is_array()) {
+	const auto & items = json[key];
+	if (!items.is_array()) {
 		return values;
 	}
-	for (const auto & item : *it) {
+	for (const auto & item : items) {
 		if (item.is_string()) {
 			values.push_back(item.get<std::string>());
 		}
@@ -60,6 +57,118 @@ std::string formatSeconds(double seconds) {
 	std::ostringstream out;
 	out << std::fixed << std::setprecision(1) << std::max(0.0, seconds) << "s";
 	return out.str();
+}
+
+std::string toLowerCopy(const std::string & text) {
+	std::string lowered = text;
+	std::transform(
+		lowered.begin(),
+		lowered.end(),
+		lowered.begin(),
+		[](unsigned char ch) {
+			return static_cast<char>(std::tolower(ch));
+		});
+	return lowered;
+}
+
+bool containsAnyToken(const std::string & text, const std::vector<std::string> & tokens) {
+	const std::string lowered = toLowerCopy(text);
+	return std::any_of(
+		tokens.begin(),
+		tokens.end(),
+		[&](const std::string & token) {
+			return !token.empty() && lowered.find(token) != std::string::npos;
+		});
+}
+
+std::string describeTimeRange(double startSeconds, double endSeconds) {
+	if (endSeconds > startSeconds) {
+		return formatSeconds(startSeconds) + " - " + formatSeconds(endSeconds);
+	}
+	if (startSeconds > 0.0) {
+		return "around " + formatSeconds(startSeconds);
+	}
+	return {};
+}
+
+std::string appendSentence(const std::string & base, const std::string & addition) {
+	const std::string trimmedBase = trimCopy(base);
+	const std::string trimmedAddition = trimCopy(addition);
+	if (trimmedAddition.empty()) {
+		return trimmedBase;
+	}
+	if (trimmedBase.empty()) {
+		return trimmedAddition;
+	}
+	return trimmedBase + " " + trimmedAddition;
+}
+
+std::string buildClipWorkflowText(const ofxGgmlVideoEditClip & clip) {
+	std::ostringstream text;
+	text << "Prepare an editor-facing rough-cut note for clip " << clip.index << ".";
+	const std::string timeRange = describeTimeRange(clip.startSeconds, clip.endSeconds);
+	if (!timeRange.empty()) {
+		text << " Focus on " << timeRange << ".";
+	}
+	if (!trimCopy(clip.purpose).empty()) {
+		text << " Purpose: " << clip.purpose << ".";
+	}
+	if (!trimCopy(clip.sourceDescription).empty()) {
+		text << " Source moment: " << clip.sourceDescription << ".";
+	}
+	if (!trimCopy(clip.treatment).empty()) {
+		text << " Treatment: " << clip.treatment << ".";
+	}
+	if (!trimCopy(clip.transition).empty()) {
+		text << " Transition: " << clip.transition << ".";
+	}
+	if (!trimCopy(clip.textOverlay).empty()) {
+		text << " Suggested on-screen text: " << clip.textOverlay << ".";
+	}
+	return text.str();
+}
+
+std::string buildActionWorkflowText(const ofxGgmlVideoEditAction & action) {
+	std::ostringstream text;
+	text << "Help execute edit action " << action.index << ".";
+	const std::string timeRange = describeTimeRange(action.startSeconds, action.endSeconds);
+	if (!timeRange.empty()) {
+		text << " Focus on " << timeRange << ".";
+	}
+	if (!trimCopy(action.type).empty()) {
+		text << " Action type: " << action.type << ".";
+	}
+	if (!trimCopy(action.instruction).empty()) {
+		text << " Instruction: " << action.instruction << ".";
+	}
+	if (!trimCopy(action.rationale).empty()) {
+		text << " Why: " << action.rationale << ".";
+	}
+	if (!trimCopy(action.assetHint).empty()) {
+		text << " Asset direction: " << action.assetHint << ".";
+	}
+	return text.str();
+}
+
+std::string chooseActionHandoffMode(const ofxGgmlVideoEditAction & action) {
+	const std::string actionContext =
+		trimCopy(action.type) + " " + trimCopy(action.instruction) + " " + trimCopy(action.assetHint);
+	if (containsAnyToken(
+			actionContext,
+			{"asset", "b-roll", "b roll", "cutaway", "insert", "plate", "graphic", "still", "replace", "background"})) {
+		return "Diffusion";
+	}
+	if (containsAnyToken(
+			actionContext,
+			{"title", "caption", "subtitle", "lower third", "lower-third", "overlay text", "text"})) {
+		return "Write";
+	}
+	if (containsAnyToken(
+			actionContext,
+			{"review", "check", "continuity", "verify", "match", "compare"})) {
+		return "Vision";
+	}
+	return "Custom";
 }
 
 const ofxGgmlVideoPlanEntity * findEntityByIdOrLabel(
@@ -272,9 +381,8 @@ Result<ofxGgmlVideoPlan> ofxGgmlVideoPlanner::parsePlanJson(const std::string & 
 	plan.negativePrompt = jsonValueOr<std::string>(json, "negativePrompt", "");
 	plan.constraints = jsonStringArray(json, "constraints");
 
-	const auto entitiesIt = json.find("entities");
-	if (entitiesIt != json.end() && entitiesIt->is_array()) {
-		for (const auto & item : *entitiesIt) {
+	if (json.contains("entities") && json["entities"].is_array()) {
+		for (const auto & item : json["entities"]) {
 			if (!item.is_object()) {
 				continue;
 			}
@@ -290,9 +398,8 @@ Result<ofxGgmlVideoPlan> ofxGgmlVideoPlanner::parsePlanJson(const std::string & 
 		}
 	}
 
-	const auto subjectsIt = json.find("subjects");
-	if (subjectsIt != json.end() && subjectsIt->is_array()) {
-		for (const auto & item : *subjectsIt) {
+	if (json.contains("subjects") && json["subjects"].is_array()) {
+		for (const auto & item : json["subjects"]) {
 			if (!item.is_object()) {
 				continue;
 			}
@@ -306,9 +413,8 @@ Result<ofxGgmlVideoPlan> ofxGgmlVideoPlanner::parsePlanJson(const std::string & 
 		}
 	}
 
-	const auto beatsIt = json.find("beats");
-	if (beatsIt != json.end() && beatsIt->is_array()) {
-		for (const auto & item : *beatsIt) {
+	if (json.contains("beats") && json["beats"].is_array()) {
+		for (const auto & item : json["beats"]) {
 			if (!item.is_object()) {
 				continue;
 			}
@@ -328,9 +434,8 @@ Result<ofxGgmlVideoPlan> ofxGgmlVideoPlanner::parsePlanJson(const std::string & 
 		}
 	}
 
-	const auto scenesIt = json.find("scenes");
-	if (scenesIt != json.end() && scenesIt->is_array()) {
-		for (const auto & item : *scenesIt) {
+	if (json.contains("scenes") && json["scenes"].is_array()) {
+		for (const auto & item : json["scenes"]) {
 			if (!item.is_object()) {
 				continue;
 			}
@@ -388,9 +493,8 @@ Result<ofxGgmlVideoEditPlan> ofxGgmlVideoPlanner::parseEditPlanJson(const std::s
 	plan.globalNotes = jsonStringArray(json, "globalNotes");
 	plan.assetSuggestions = jsonStringArray(json, "assetSuggestions");
 
-	const auto clipsIt = json.find("clips");
-	if (clipsIt != json.end() && clipsIt->is_array()) {
-		for (const auto & item : *clipsIt) {
+	if (json.contains("clips") && json["clips"].is_array()) {
+		for (const auto & item : json["clips"]) {
 			if (!item.is_object()) {
 				continue;
 			}
@@ -412,9 +516,8 @@ Result<ofxGgmlVideoEditPlan> ofxGgmlVideoPlanner::parseEditPlanJson(const std::s
 		}
 	}
 
-	const auto actionsIt = json.find("actions");
-	if (actionsIt != json.end() && actionsIt->is_array()) {
-		for (const auto & item : *actionsIt) {
+	if (json.contains("actions") && json["actions"].is_array()) {
+		for (const auto & item : json["actions"]) {
 			if (!item.is_object()) {
 				continue;
 			}
@@ -829,6 +932,120 @@ std::string ofxGgmlVideoPlanner::buildEditorBrief(const ofxGgmlVideoEditPlan & p
 	return brief.str();
 }
 
+ofxGgmlVideoEditWorkflow ofxGgmlVideoPlanner::buildEditWorkflow(
+	const ofxGgmlVideoEditPlan & plan,
+	const ofxGgmlVideoEditWorkflowContext & context) {
+	ofxGgmlVideoEditWorkflow workflow;
+	workflow.headline = !trimCopy(plan.overallDirection).empty()
+		? plan.overallDirection
+		: !trimCopy(plan.originalGoal).empty()
+			? "Editing goal: " + trimCopy(plan.originalGoal)
+			: "AI-assisted video editing workflow";
+
+	if (context.hasSourceVideo) {
+		ofxGgmlVideoEditWorkflowStep reviewStep;
+		reviewStep.index = 1;
+		reviewStep.title = "Review source material";
+		reviewStep.detail =
+			"Open the source clip in Vision mode, confirm the strongest emotional/action beats, and check whether the current analysis still matches the intended edit direction.";
+		reviewStep.handoffMode = "Vision";
+		reviewStep.handoffText = appendSentence(
+			"Review this source clip like an editor before cutting.",
+			!trimCopy(plan.originalGoal).empty()
+				? "Editing goal: " + trimCopy(plan.originalGoal)
+				: trimCopy(plan.sourceSummary));
+		workflow.steps.push_back(reviewStep);
+	}
+
+	for (const auto & clip : plan.clips) {
+		ofxGgmlVideoEditWorkflowStep clipStep;
+		clipStep.index = static_cast<int>(workflow.steps.size() + 1);
+		clipStep.title = "Rough cut clip " + std::to_string(clip.index);
+		const std::string clipTimeRange = describeTimeRange(clip.startSeconds, clip.endSeconds);
+		const std::string clipPurpose = trimCopy(clip.purpose);
+		clipStep.detail =
+			!clipTimeRange.empty() && !clipPurpose.empty()
+				? clipTimeRange + " | " + clipPurpose
+				: !clipTimeRange.empty()
+					? clipTimeRange
+					: clipPurpose;
+		clipStep.handoffMode = "Write";
+		clipStep.handoffText = buildClipWorkflowText(clip);
+		clipStep.startSeconds = clip.startSeconds;
+		clipStep.endSeconds = clip.endSeconds;
+		workflow.steps.push_back(clipStep);
+	}
+
+	for (const auto & action : plan.actions) {
+		ofxGgmlVideoEditWorkflowStep actionStep;
+		actionStep.index = static_cast<int>(workflow.steps.size() + 1);
+		actionStep.title =
+			trimCopy(action.type).empty()
+				? "Apply edit action " + std::to_string(action.index)
+				: trimCopy(action.type);
+		actionStep.detail =
+			trimCopy(action.instruction).empty()
+				? trimCopy(action.rationale)
+				: trimCopy(action.instruction);
+		actionStep.handoffMode = chooseActionHandoffMode(action);
+		actionStep.handoffText = buildActionWorkflowText(action);
+		actionStep.startSeconds = action.startSeconds;
+		actionStep.endSeconds = action.endSeconds;
+		workflow.steps.push_back(actionStep);
+	}
+
+	if (context.hasSubtitlePreview || context.hasSourceTimedPreview || context.hasMontageTimedPreview) {
+		ofxGgmlVideoEditWorkflowStep previewStep;
+		previewStep.index = static_cast<int>(workflow.steps.size() + 1);
+		previewStep.title = "Quality-check subtitle timing";
+		previewStep.detail =
+			context.hasMontageTimedPreview
+				? "Preview the montage-timed subtitle track and verify cue rhythm against the intended pacing."
+				: "Preview the source-timed subtitle track and verify cue alignment against the source clip.";
+		previewStep.handoffMode = "Montage";
+		previewStep.handoffText = !trimCopy(plan.originalGoal).empty()
+			? plan.originalGoal
+			: "Review subtitle timing and montage continuity for this edit.";
+		workflow.steps.push_back(previewStep);
+	}
+
+	if (!plan.globalNotes.empty()) {
+		workflow.checklist.insert(
+			workflow.checklist.end(),
+			plan.globalNotes.begin(),
+			plan.globalNotes.end());
+	}
+	for (const auto & asset : plan.assetSuggestions) {
+		if (!trimCopy(asset).empty()) {
+			workflow.checklist.push_back("Prepare asset: " + trimCopy(asset));
+		}
+	}
+
+	if (!workflow.steps.empty()) {
+		const auto & firstActionableStep = workflow.steps.front();
+		workflow.nextAction =
+			"Start with \"" + firstActionableStep.title + "\""
+			+ (firstActionableStep.handoffMode.empty()
+				? std::string()
+				: " in " + firstActionableStep.handoffMode + " mode");
+	} else {
+		workflow.nextAction = "Refine the edit goal or add more source analysis to generate an actionable workflow.";
+	}
+
+	if (context.hasMontageTimedPreview) {
+		workflow.previewHint =
+			"Montage-timed subtitle preview is ready, so you can quality-check pacing after each major edit step.";
+	} else if (context.hasSourceTimedPreview) {
+		workflow.previewHint =
+			"Source-timed subtitle preview is ready for continuity review against the original clip.";
+	} else if (context.hasSourceVideo) {
+		workflow.previewHint =
+			"A source video is loaded, so Vision mode can be used as the live review surface while applying the plan.";
+	}
+
+	return workflow;
+}
+
 std::string ofxGgmlVideoPlanner::summarizeEditPlan(const ofxGgmlVideoEditPlan & plan) {
 	std::ostringstream summary;
 	summary << "Video edit plan with " << plan.clips.size() << " clip(s) and " << plan.actions.size() << " action(s)";
@@ -863,6 +1080,40 @@ std::string ofxGgmlVideoPlanner::summarizeEditPlan(const ofxGgmlVideoEditPlan & 
 				summary << ": " << action.instruction;
 			} else if (!trimCopy(action.rationale).empty()) {
 				summary << ": " << action.rationale;
+			}
+		}
+	}
+	return summary.str();
+}
+
+std::string ofxGgmlVideoPlanner::summarizeEditWorkflow(const ofxGgmlVideoEditWorkflow & workflow) {
+	std::ostringstream summary;
+	if (!trimCopy(workflow.headline).empty()) {
+		summary << workflow.headline;
+	} else {
+		summary << "Video editing workflow";
+	}
+	if (!trimCopy(workflow.nextAction).empty()) {
+		summary << "\nNext action: " << workflow.nextAction;
+	}
+	if (!trimCopy(workflow.previewHint).empty()) {
+		summary << "\nPreview: " << workflow.previewHint;
+	}
+	if (!workflow.checklist.empty()) {
+		summary << "\nChecklist:";
+		for (const auto & item : workflow.checklist) {
+			summary << "\n- " << item;
+		}
+	}
+	if (!workflow.steps.empty()) {
+		summary << "\nSteps:";
+		for (const auto & step : workflow.steps) {
+			summary << "\n" << step.index << ". " << step.title;
+			if (!trimCopy(step.detail).empty()) {
+				summary << " | " << step.detail;
+			}
+			if (!trimCopy(step.handoffMode).empty()) {
+				summary << " | handoff: " << step.handoffMode;
 			}
 		}
 	}

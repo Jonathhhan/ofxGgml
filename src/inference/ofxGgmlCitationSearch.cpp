@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cctype>
 #include <sstream>
+#include <unordered_set>
 #include <utility>
 
 namespace {
@@ -92,19 +93,65 @@ std::vector<ofxGgmlPromptSource> convertCrawlerDocsToSources(
 	const ofxGgmlWebCrawlerResult & crawlerResult) {
 	std::vector<ofxGgmlPromptSource> sources;
 	sources.reserve(crawlerResult.documents.size());
+	std::unordered_set<std::string> seen;
 	for (const auto & document : crawlerResult.documents) {
+		const std::string markdown = trimCopy(document.markdown);
+		if (markdown.empty()) {
+			continue;
+		}
+		const std::string uri = !document.sourceUrl.empty()
+			? trimCopy(document.sourceUrl)
+			: trimCopy(document.localPath);
+		const std::string dedupeKey = uri + "\n---\n" + markdown;
+		if (!seen.insert(dedupeKey).second) {
+			continue;
+		}
 		ofxGgmlPromptSource source;
 		source.label = document.title.empty()
 			? std::string("Crawled page")
 			: document.title;
-		source.uri = !document.sourceUrl.empty()
-			? document.sourceUrl
-			: document.localPath;
-		source.content = document.markdown;
+		source.uri = uri;
+		source.content = markdown;
 		source.isWebSource = true;
 		sources.push_back(std::move(source));
 	}
 	return sources;
+}
+
+std::vector<std::string> normalizeSourceUrls(
+	const std::vector<std::string> & urls) {
+	std::vector<std::string> normalized;
+	normalized.reserve(urls.size());
+	std::unordered_set<std::string> seen;
+	for (const auto & rawUrl : urls) {
+		const std::string url = trimCopy(rawUrl);
+		if (url.empty()) {
+			continue;
+		}
+		if (!seen.insert(url).second) {
+			continue;
+		}
+		normalized.push_back(url);
+	}
+	return normalized;
+}
+
+std::vector<ofxGgmlCitationItem> dedupeCitationItems(
+	std::vector<ofxGgmlCitationItem> items) {
+	std::vector<ofxGgmlCitationItem> deduped;
+	deduped.reserve(items.size());
+	std::unordered_set<std::string> seen;
+	for (auto & item : items) {
+		const std::string key = trimCopy(item.quote) + "\n---\n" + item.sourceUri;
+		if (key == "\n---\n") {
+			continue;
+		}
+		if (!seen.insert(key).second) {
+			continue;
+		}
+		deduped.push_back(std::move(item));
+	}
+	return deduped;
 }
 
 std::string resolveSourceLabel(
@@ -180,6 +227,11 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		}
 
 		auto sources = convertCrawlerDocsToSources(result.crawlerResult);
+		if (sources.empty()) {
+			result.error = "Crawler did not return any usable markdown documents.";
+			result.elapsedMs = elapsedMsSince(start);
+			return result;
+		}
 		inferenceResult = m_inference.generateWithSources(
 			request.modelPath,
 			prompt,
@@ -187,7 +239,8 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 			request.inferenceSettings,
 			request.sourceSettings);
 	} else {
-		if (request.sourceUrls.empty()) {
+		const auto normalizedUrls = normalizeSourceUrls(request.sourceUrls);
+		if (normalizedUrls.empty()) {
 			result.error =
 				"Citation search needs either source URLs or a crawler request.";
 			result.elapsedMs = elapsedMsSince(start);
@@ -196,7 +249,7 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		inferenceResult = m_inference.generateWithUrls(
 			request.modelPath,
 			prompt,
-			request.sourceUrls,
+			normalizedUrls,
 			request.inferenceSettings,
 			request.sourceSettings);
 	}
@@ -212,7 +265,7 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 	}
 
 	const ofJson parsed = parseLooseJson(inferenceResult.text);
-	if (parsed.is_null() || !parsed.is_object()) {
+	if (!parsed.is_object()) {
 		result.error =
 			"Citation extraction returned non-JSON output. Raw response is available.";
 		result.elapsedMs = elapsedMsSince(start);
@@ -221,6 +274,7 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 
 	result.summary = parsed.value("summary", std::string());
 	if (parsed.contains("citations") && parsed["citations"].is_array()) {
+		std::vector<ofxGgmlCitationItem> parsedItems;
 		for (const auto & entry : parsed["citations"]) {
 			if (!entry.is_object()) {
 				continue;
@@ -232,9 +286,10 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 			item.sourceLabel = resolveSourceLabel(result.sourcesUsed, item.sourceIndex);
 			item.sourceUri = resolveSourceUri(result.sourcesUsed, item.sourceIndex);
 			if (!item.quote.empty()) {
-				result.citations.push_back(std::move(item));
+				parsedItems.push_back(std::move(item));
 			}
 		}
+		result.citations = dedupeCitationItems(std::move(parsedItems));
 	}
 
 	result.success = true;

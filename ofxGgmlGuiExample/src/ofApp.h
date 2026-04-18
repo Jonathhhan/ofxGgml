@@ -33,6 +33,17 @@
 #define OFXGGML_HAS_OFXVLC4 0
 #endif
 
+#if defined(__has_include)
+#if __has_include("ofxProjectM.h")
+#define OFXGGML_HAS_OFXPROJECTM 1
+#include "ofxProjectM.h"
+#else
+#define OFXGGML_HAS_OFXPROJECTM 0
+#endif
+#else
+#define OFXGGML_HAS_OFXPROJECTM 0
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -100,7 +111,7 @@ private:
 
 	// -- mode --
 	AiMode activeMode = AiMode::Chat;
-	static constexpr int kModeCount = 11;
+	static constexpr int kModeCount = ::kModeCount;
 	static const char * modeLabels[kModeCount];
 
 	// -- input buffers --
@@ -142,6 +153,7 @@ private:
 	int videoPlanBeatCount = 4;
 	int videoPlanSceneCount = 3;
 	int videoPlanGenerationMode = 0;
+	int videoEditPresetIndex = 0;
 	int videoEditClipCount = 5;
 	int selectedVideoPlanSceneIndex = 0;
 	float montageMinScore = 0.18f;
@@ -151,6 +163,8 @@ private:
 	float videoPlanDurationSeconds = 5.0f;
 	float videoEditTargetDurationSeconds = 15.0f;
 	bool videoPlanUseForGeneration = true;
+	int videoEditWorkflowActiveStepIndex = -1;
+	std::vector<int> videoEditWorkflowCompletedStepIndices;
 	char speechAudioPath[1024] = {};
 	char speechExecutable[256] = "whisper-cli";
 	char speechModelPath[1024] = {};
@@ -208,6 +222,11 @@ private:
 	int clipTopK = 3;
 	bool clipNormalizeEmbeddings = true;
 	int clipVerbosity = 1;
+	char milkdropPrompt[4096] = {};
+	char milkdropPresetPath[1024] = {};
+	int milkdropCategoryIndex = 0;
+	float milkdropRandomness = 0.55f;
+	bool milkdropAutoPreview = true;
 	bool speechServerManagedByApp = false;
 	ServerStatusState speechServerStatus = ServerStatusState::Unknown;
 	std::string speechServerStatusMessage;
@@ -234,6 +253,9 @@ private:
 	std::string diffusionOutput;
 	std::string imageSearchOutput;
 	std::string clipOutput;
+	std::string milkdropOutput;
+	std::string milkdropSavedPresetPath;
+	std::string milkdropPreviewStatus;
 	ofImage visionPreviewImage;
 	std::string visionPreviewImageLoadedPath;
 	std::string visionPreviewImageError;
@@ -306,6 +328,11 @@ private:
 	float clipElapsedMs = 0.0f;
 	int clipEmbeddingDimension = 0;
 	std::vector<ofxGgmlClipSimilarityHit> clipHits;
+#if OFXGGML_HAS_OFXPROJECTM
+	ofxProjectM milkdropPreviewPlayer;
+	bool milkdropPreviewInitialized = false;
+	std::string milkdropPreviewError;
+#endif
 	std::string speechRecordedTempPath;
 	bool speechRecording = false;
 	float speechRecordingStartTime = 0.0f;
@@ -405,8 +432,8 @@ private:
 	float mirostatTau = 5.0f;
 	float mirostatEta = 0.1f;
 	int chatLanguageIndex = 0;                       // 0=Auto, otherwise force response language
-	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 384, 512, 512, 512, 384};
-	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0};
+	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 384, 512, 512, 512, 384, 640};
+	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1};
 	TextInferenceBackend textInferenceBackend = TextInferenceBackend::LlamaServer;
 	ServerStatusState textServerStatus = ServerStatusState::Unknown;
 	std::string textServerStatusMessage;
@@ -464,6 +491,7 @@ private:
 	int selectedTtsProfileIndex = 0;
 	std::vector<ofxGgmlImageGenerationModelProfile> diffusionProfiles;
 	int selectedDiffusionProfileIndex = 0;
+	std::vector<ofxGgmlMilkDropCategoryOption> milkdropCategories;
 	std::string configuredClipBackendModelPath;
 	int configuredClipBackendVerbosity = -1;
 	bool configuredClipBackendNormalize = true;
@@ -499,6 +527,7 @@ private:
 	ofxGgmlImageSearch imageSearch;
 	ofxGgmlCitationSearch citationSearch;
 	ofxGgmlClipInference clipInference;
+	ofxGgmlMilkDropGenerator milkdropGenerator;
 #if OFXGGML_HAS_OFXSTABLEDIFFUSION
 	std::shared_ptr<ofxStableDiffusion> stableDiffusionEngine;
 #endif
@@ -545,12 +574,16 @@ private:
 	void runVideoPlanning();
 	void runMontagePlanning();
 	void runVideoEditPlanning();
+	void resetVideoEditWorkflowState();
+	bool isVideoEditWorkflowStepCompleted(int stepIndex) const;
+	void setVideoEditWorkflowStepCompleted(int stepIndex, bool completed);
 	void runSpeechInference();
 	void runTtsInference();
 	void runDiffusionInference();
 	void runImageSearch();
 	void runCitationSearch();
 	void runClipInference();
+	void runMilkDropGeneration(bool editExisting = false);
 	bool ensureClipBackendConfigured(
 		const std::string & modelPath,
 		int verbosity,
@@ -623,6 +656,7 @@ private:
 	void drawTranslatePanel();
 	void drawCustomPanel();
 	void drawVisionPanel();
+	void drawMilkDropPanel();
 	void drawImageSearchPanel(
 		const char * copyPromptButtonLabel,
 		const std::string & suggestedPrompt);
@@ -675,6 +709,12 @@ private:
 	void drawTtsPanel();
 	void drawDiffusionPanel();
 	void drawClipPanel();
+	bool saveMilkDropPresetToConfiguredPath();
+	std::string defaultMilkDropPresetDir() const;
+#if OFXGGML_HAS_OFXPROJECTM
+	bool ensureMilkDropPreviewReady();
+	bool loadMilkDropPresetIntoPreview(const std::string & presetText);
+#endif
 	bool ensureTtsProfilesLoaded();
 	ofxGgmlTtsModelProfile getSelectedTtsProfile() const;
 	void applyTtsProfileDefaults(

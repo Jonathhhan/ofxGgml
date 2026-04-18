@@ -112,6 +112,7 @@ set(ADDON_SOURCES
     ../src/compute/ofxGgmlGraph.cpp
     ../src/compute/ofxGgmlTensor.cpp
     ../src/model/ofxGgmlModel.cpp
+    ../src/support/ofxGgmlEasy.cpp
     ../src/support/ofxGgmlProjectMemory.cpp
 )
 
@@ -119,14 +120,18 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND ADDON_SOURCES
         ../src/assistants/ofxGgmlChatAssistant.cpp
         ../src/inference/ofxGgmlDiffusionInference.cpp
+        ../src/inference/ofxGgmlCitationSearch.cpp
         ../src/inference/ofxGgmlInference.cpp
+        ../src/inference/ofxGgmlMilkDropGenerator.cpp
         ../src/inference/ofxGgmlInferenceSourceInternals.cpp
         ../src/inference/ofxGgmlInferenceTextCleanup.cpp
         ../src/inference/ofxGgmlMontagePlanner.cpp
         ../src/inference/ofxGgmlMontagePreviewBridge.cpp
         ../src/inference/ofxGgmlSpeechInference.cpp
+        ../src/inference/ofxGgmlVideoPlanner.cpp
         ../src/inference/ofxGgmlVisionInference.cpp
         ../src/inference/ofxGgmlVideoInference.cpp
+        ../src/inference/ofxGgmlWebCrawler.cpp
         ../src/inference/ofxGgmlTtsInference.cpp
         ../src/inference/ofxGgmlClipInference.cpp
         ../src/support/ofxGgmlScriptSource.cpp
@@ -160,10 +165,13 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND TEST_SOURCES
         test_inference.cpp
         test_montage_preview_bridge.cpp
+        test_video_planner_workflow.cpp
         test_speech_inference.cpp
         test_vision_inference.cpp
         test_video_inference.cpp
         test_assistant_eval.cpp
+        test_easy_api.cpp
+        test_milkdrop_generator.cpp
         test_chat_assistant.cpp
         test_code_assistant.cpp
         test_text_assistant.cpp

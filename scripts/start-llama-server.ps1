@@ -45,6 +45,9 @@ if ([string]::IsNullOrWhiteSpace($ServerExe)) {
 
 if ([string]::IsNullOrWhiteSpace($ModelPath)) {
     $ModelPath = Resolve-FirstExistingPath @(
+        (Join-Path $addonRoot 'models\qwen2.5-coder-7b-instruct-q4_k_m.gguf'),
+        (Join-Path $addonRoot 'models\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf'),
+        (Join-Path $addonRoot 'models\qwen2.5-1.5b-instruct-q4_k_m.gguf'),
         (Join-Path $addonRoot 'ofxGgmlGuiExample\bin\data\models\qwen2.5-coder-7b-instruct-q4_k_m.gguf'),
         (Join-Path $addonRoot 'ofxGgmlGuiExample\bin\data\models\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf'),
         (Join-Path $addonRoot 'ofxGgmlGuiExample\bin\data\models\qwen2.5-1.5b-instruct-q4_k_m.gguf')

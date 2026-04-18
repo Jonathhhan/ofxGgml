@@ -48,6 +48,10 @@ if ([string]::IsNullOrWhiteSpace($ServerExe)) {
 
 if ([string]::IsNullOrWhiteSpace($ModelPath)) {
     $ModelPath = Resolve-FirstExistingPath @(
+        (Join-Path $addonRoot 'models\ggml-large-v3-turbo.bin'),
+        (Join-Path $addonRoot 'models\ggml-small.bin'),
+        (Join-Path $addonRoot 'models\ggml-base.en.bin'),
+        (Join-Path $addonRoot 'models\ggml-base.bin'),
         (Join-Path $addonRoot 'ofxGgmlGuiExample\bin\data\models\ggml-large-v3-turbo.bin'),
         (Join-Path $addonRoot 'ofxGgmlGuiExample\bin\data\models\ggml-small.bin'),
         (Join-Path $addonRoot 'ofxGgmlGuiExample\bin\data\models\ggml-base.en.bin'),
@@ -57,7 +61,7 @@ if ([string]::IsNullOrWhiteSpace($ModelPath)) {
 
 if ([string]::IsNullOrWhiteSpace($ModelPath)) {
     if ($DryRun) {
-        $ModelPath = Join-Path $addonRoot 'ofxGgmlGuiExample\bin\data\models\ggml-base.en.bin'
+        $ModelPath = Join-Path $addonRoot 'models\ggml-base.en.bin'
     } else {
         throw "Could not find a default Whisper model. Pass -ModelPath explicitly."
     }

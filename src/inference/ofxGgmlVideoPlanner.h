@@ -92,6 +92,31 @@ struct ofxGgmlVideoEditPlan {
 	std::vector<ofxGgmlVideoEditAction> actions;
 };
 
+struct ofxGgmlVideoEditWorkflowContext {
+	bool hasSourceVideo = false;
+	bool hasSourceTimedPreview = false;
+	bool hasMontageTimedPreview = false;
+	bool hasSubtitlePreview = false;
+};
+
+struct ofxGgmlVideoEditWorkflowStep {
+	int index = 0;
+	std::string title;
+	std::string detail;
+	std::string handoffMode;
+	std::string handoffText;
+	double startSeconds = 0.0;
+	double endSeconds = 0.0;
+};
+
+struct ofxGgmlVideoEditWorkflow {
+	std::string headline;
+	std::string nextAction;
+	std::string previewHint;
+	std::vector<std::string> checklist;
+	std::vector<ofxGgmlVideoEditWorkflowStep> steps;
+};
+
 struct ofxGgmlVideoPlannerRequest {
 	std::string prompt;
 	double durationSeconds = 5.0;
@@ -140,8 +165,12 @@ public:
 	static std::string buildScenePrompt(const ofxGgmlVideoPlan & plan, size_t sceneIndex);
 	static std::string buildSceneSequencePrompt(const ofxGgmlVideoPlan & plan);
 	static std::string buildEditorBrief(const ofxGgmlVideoEditPlan & plan);
+	static ofxGgmlVideoEditWorkflow buildEditWorkflow(
+		const ofxGgmlVideoEditPlan & plan,
+		const ofxGgmlVideoEditWorkflowContext & context = {});
 	static std::string summarizePlan(const ofxGgmlVideoPlan & plan);
 	static std::string summarizeEditPlan(const ofxGgmlVideoEditPlan & plan);
+	static std::string summarizeEditWorkflow(const ofxGgmlVideoEditWorkflow & workflow);
 
 	ofxGgmlVideoPlannerResult plan(
 		const std::string & modelPath,

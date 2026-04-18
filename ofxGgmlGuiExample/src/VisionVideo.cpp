@@ -29,7 +29,95 @@ const char * const kVisionWaitingLabels[] = {
 
 constexpr const char * kDefaultManagedTextServerUrl = "http://127.0.0.1:8080";
 
+struct VideoEditPresetDefinition {
+	const char * name;
+	const char * goal;
+	int clipCount;
+	float targetDurationSeconds;
+	bool useCurrentAnalysis;
+};
+
+constexpr VideoEditPresetDefinition kVideoEditPresets[] = {
+	{
+		"Trailer",
+		"Turn this source clip into a punchy trailer with a strong hook, fast escalation, and a clean payoff. Favor dramatic pacing, bold transitions, and one memorable closing beat.",
+		6,
+		20.0f,
+		true
+	},
+	{
+		"Montage",
+		"Turn this source clip into a rhythmic montage that prioritizes emotional callbacks, visual variety, and smooth continuity between the strongest moments.",
+		7,
+		30.0f,
+		true
+	},
+	{
+		"Recap",
+		"Turn this source clip into a concise recap edit that preserves the important beats, clarifies the story progression, and trims repetition.",
+		5,
+		25.0f,
+		true
+	},
+	{
+		"Music Video",
+		"Turn this source clip into a music-video style edit with rhythm-aware pacing, visual texture, stylized inserts, and strong transitions.",
+		8,
+		35.0f,
+		true
+	},
+	{
+		"Social Short",
+		"Turn this source clip into a short-form social edit with an immediate hook, aggressive trimming, readable text moments, and a clear ending beat.",
+		4,
+		12.0f,
+		true
+	},
+	{
+		"Product Teaser",
+		"Turn this source clip into a compact product teaser that spotlights the clearest features, keeps momentum high, and ends on a memorable value moment.",
+		5,
+		18.0f,
+		true
+	}
+};
+
+constexpr int kVideoEditPresetCount =
+	static_cast<int>(sizeof(kVideoEditPresets) / sizeof(kVideoEditPresets[0]));
+
 } // namespace
+
+void ofApp::resetVideoEditWorkflowState() {
+	videoEditWorkflowActiveStepIndex = -1;
+	videoEditWorkflowCompletedStepIndices.clear();
+}
+
+bool ofApp::isVideoEditWorkflowStepCompleted(int stepIndex) const {
+	return std::find(
+		videoEditWorkflowCompletedStepIndices.begin(),
+		videoEditWorkflowCompletedStepIndices.end(),
+		stepIndex) != videoEditWorkflowCompletedStepIndices.end();
+}
+
+void ofApp::setVideoEditWorkflowStepCompleted(int stepIndex, bool completed) {
+	if (stepIndex < 0) {
+		return;
+	}
+	auto it = std::find(
+		videoEditWorkflowCompletedStepIndices.begin(),
+		videoEditWorkflowCompletedStepIndices.end(),
+		stepIndex);
+	if (completed) {
+		if (it == videoEditWorkflowCompletedStepIndices.end()) {
+			videoEditWorkflowCompletedStepIndices.push_back(stepIndex);
+			std::sort(
+				videoEditWorkflowCompletedStepIndices.begin(),
+				videoEditWorkflowCompletedStepIndices.end());
+		}
+	} else if (it != videoEditWorkflowCompletedStepIndices.end()) {
+		videoEditWorkflowCompletedStepIndices.erase(it);
+	}
+}
 
 void ofApp::drawVisionPanel() {
 	drawPanelHeader("Vision", "image / video-to-text via llama-server multimodal models");
@@ -138,7 +226,7 @@ void ofApp::drawVisionPanel() {
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
-				showWrappedTooltip("Sets the model path to the profile's recommended file under bin/data/models/.");
+				showWrappedTooltip("Sets the model path to the profile's recommended file under the shared addon models/ folder.");
 			}
 			ImGui::SameLine();
 			ImGui::BeginDisabled(recommendedDownloadUrl.empty());
@@ -588,6 +676,17 @@ void ofApp::drawVisionPanel() {
 		montagePreviewTimingModeIndex = std::clamp(montagePreviewTimingModeIndex, 0, 1);
 		montagePreviewTimelinePlaying = false;
 		montagePreviewTimelineLastTickTime = 0.0f;
+#if OFXGGML_HAS_OFXVLC4
+		if (montageVlcPreviewInitialized) {
+			std::string error;
+			if (loadMontageVlcPreview(&error)) {
+				montagePreviewStatusMessage =
+					"Reloaded the ofxVlc4 preview for the selected subtitle timing.";
+			} else if (!error.empty()) {
+				montagePreviewStatusMessage = error;
+			}
+		}
+#endif
 		autoSaveSession();
 	}
 	ImGui::Checkbox("Live subtitle playback with preview video", &montageSubtitlePlaybackEnabled);
@@ -809,11 +908,23 @@ void ofApp::drawVisionPanel() {
 			"Regenerate this example with ofxVlc4 in addons.make to enable direct subtitle-slave preview here.");
 #endif
 	}
-	if (!montageSubtitleTrack.cues.empty()) {
-		ImGui::TextDisabled("Generated montage subtitles");
+	const ofxGgmlMontagePreviewTrack * subtitlePreviewTrack =
+		hasActivePreviewTrack ? activePreviewTrack : nullptr;
+	static ofxGgmlMontagePreviewTrack fallbackMontageTrack;
+	if (subtitlePreviewTrack == nullptr && !montageSubtitleTrack.cues.empty()) {
+		fallbackMontageTrack.title = montageSubtitleTrack.title;
+		fallbackMontageTrack.timingMode = ofxGgmlMontagePreviewTimingMode::Montage;
+		fallbackMontageTrack.cues = montageSubtitleTrack.cues;
+		subtitlePreviewTrack = &fallbackMontageTrack;
+	}
+	if (subtitlePreviewTrack != nullptr && !subtitlePreviewTrack->cues.empty()) {
+		ImGui::TextDisabled(
+			subtitlePreviewTrack->timingMode == ofxGgmlMontagePreviewTimingMode::Source
+				? "Source-timed subtitle preview"
+				: "Montage-timed subtitle preview");
 		ImGui::BeginChild("MontageSubtitlePreview", ImVec2(0, 180), true);
-		for (size_t i = 0; i < montageSubtitleTrack.cues.size(); ++i) {
-			const auto & cue = montageSubtitleTrack.cues[i];
+		for (size_t i = 0; i < subtitlePreviewTrack->cues.size(); ++i) {
+			const auto & cue = subtitlePreviewTrack->cues[i];
 			std::ostringstream label;
 			label << cue.index << ". "
 				<< ofxGgmlVideoInference::formatTimestamp(cue.startSeconds)
@@ -824,12 +935,20 @@ void ofApp::drawVisionPanel() {
 					label.str().c_str(),
 					selectedMontageCueIndex == static_cast<int>(i))) {
 				selectedMontageCueIndex = static_cast<int>(i);
+#if OFXGGML_HAS_OFXVLC4
+				if (montageVlcPreviewInitialized) {
+					montageVlcPreviewPlayer.setTime(
+						static_cast<int>(std::max(0.0, cue.startSeconds) * 1000.0));
+					montagePreviewStatusMessage =
+						"Synced the ofxVlc4 preview to the selected subtitle cue.";
+				}
+#endif
 			}
 		}
 		ImGui::EndChild();
 		if (selectedMontageCueIndex >= 0 &&
-			selectedMontageCueIndex < static_cast<int>(montageSubtitleTrack.cues.size())) {
-			const auto & cue = montageSubtitleTrack.cues[static_cast<size_t>(selectedMontageCueIndex)];
+			selectedMontageCueIndex < static_cast<int>(subtitlePreviewTrack->cues.size())) {
+			const auto & cue = subtitlePreviewTrack->cues[static_cast<size_t>(selectedMontageCueIndex)];
 			ImGui::TextDisabled("Selected cue");
 			ImGui::TextWrapped("%s", cue.text.c_str());
 		}
@@ -861,6 +980,52 @@ void ofApp::drawVisionPanel() {
 	ImGui::TextDisabled("AI-assisted video editing");
 	ImGui::TextWrapped(
 		"Turn the current clip plus your editing goal into a structured edit plan with timeline clips, edit actions, and asset suggestions.");
+	std::vector<const char *> videoEditPresetNames;
+	videoEditPresetNames.reserve(kVideoEditPresetCount);
+	for (const auto & preset : kVideoEditPresets) {
+		videoEditPresetNames.push_back(preset.name);
+	}
+	videoEditPresetIndex = std::clamp(videoEditPresetIndex, 0, kVideoEditPresetCount - 1);
+	const auto applyVideoEditPreset =
+		[this](int presetIndex) {
+			const int clampedIndex = std::clamp(presetIndex, 0, kVideoEditPresetCount - 1);
+			const auto & preset = kVideoEditPresets[clampedIndex];
+			videoEditPresetIndex = clampedIndex;
+			copyStringToBuffer(videoEditGoal, sizeof(videoEditGoal), preset.goal);
+			videoEditClipCount = std::clamp(preset.clipCount, 1, 12);
+			videoEditTargetDurationSeconds = std::clamp(preset.targetDurationSeconds, 1.0f, 120.0f);
+			videoEditUseCurrentAnalysis = preset.useCurrentAnalysis;
+			resetVideoEditWorkflowState();
+			autoSaveSession();
+		};
+	ImGui::SetNextItemWidth(220);
+	ImGui::Combo(
+		"Edit preset",
+		&videoEditPresetIndex,
+		videoEditPresetNames.data(),
+		static_cast<int>(videoEditPresetNames.size()));
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Use preset")) {
+		applyVideoEditPreset(videoEditPresetIndex);
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Trailer")) {
+		applyVideoEditPreset(0);
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Montage")) {
+		applyVideoEditPreset(1);
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Recap")) {
+		applyVideoEditPreset(2);
+	}
+	const auto & selectedEditPreset = kVideoEditPresets[videoEditPresetIndex];
+	ImGui::TextDisabled(
+		"Preset defaults: %d clips | %.1f s | %s grounding",
+		selectedEditPreset.clipCount,
+		selectedEditPreset.targetDurationSeconds,
+		selectedEditPreset.useCurrentAnalysis ? "analysis-aware" : "prompt-only");
 	ImGui::InputTextMultiline(
 		"Edit goal",
 		videoEditGoal,
@@ -878,6 +1043,8 @@ void ofApp::drawVisionPanel() {
 	const std::string storedEditPlanJson = trim(videoEditPlanJson);
 	bool editPlanAvailable = !storedEditPlanJson.empty();
 	ofxGgmlVideoEditPlan parsedEditPlan;
+	ofxGgmlVideoEditWorkflow editWorkflow;
+	bool editWorkflowAvailable = false;
 	if (editPlanAvailable) {
 		const auto parsedResult = ofxGgmlVideoPlanner::parseEditPlanJson(storedEditPlanJson);
 		if (parsedResult.isOk()) {
@@ -885,8 +1052,64 @@ void ofApp::drawVisionPanel() {
 			if (videoEditPlanSummary.empty()) {
 				videoEditPlanSummary = ofxGgmlVideoPlanner::summarizeEditPlan(parsedEditPlan);
 			}
+			ofxGgmlVideoEditWorkflowContext workflowContext;
+			workflowContext.hasSourceVideo = !trim(visionVideoPath).empty();
+			workflowContext.hasSourceTimedPreview = !montageSourceSubtitleTrack.cues.empty();
+			workflowContext.hasMontageTimedPreview = !montageSubtitleTrack.cues.empty();
+			workflowContext.hasSubtitlePreview =
+				workflowContext.hasSourceTimedPreview ||
+				workflowContext.hasMontageTimedPreview;
+			editWorkflow =
+				ofxGgmlVideoPlanner::buildEditWorkflow(parsedEditPlan, workflowContext);
+			editWorkflowAvailable =
+				!editWorkflow.steps.empty() ||
+				!trim(editWorkflow.nextAction).empty() ||
+				!trim(editWorkflow.previewHint).empty();
 		}
 	}
+	if (editWorkflowAvailable &&
+		videoEditWorkflowActiveStepIndex < 0 &&
+		!editWorkflow.steps.empty()) {
+		videoEditWorkflowActiveStepIndex = editWorkflow.steps.front().index;
+	}
+	const auto applyEditWorkflowStep =
+		[this](const ofxGgmlVideoEditWorkflowStep & step) {
+			const std::string handoffText = trim(step.handoffText);
+			if (handoffText.empty()) {
+				return;
+			}
+			videoEditWorkflowActiveStepIndex = step.index;
+			if (step.handoffMode == "Write") {
+				copyStringToBuffer(writeInput, sizeof(writeInput), handoffText);
+				activeMode = AiMode::Write;
+			} else if (step.handoffMode == "Diffusion") {
+				copyStringToBuffer(diffusionPrompt, sizeof(diffusionPrompt), handoffText);
+				activeMode = AiMode::Diffusion;
+			} else if (step.handoffMode == "Vision") {
+				copyStringToBuffer(visionPrompt, sizeof(visionPrompt), handoffText);
+				activeMode = AiMode::Vision;
+			} else if (step.handoffMode == "Montage") {
+				copyStringToBuffer(montageGoal, sizeof(montageGoal), handoffText);
+				activeMode = AiMode::Vision;
+#if OFXGGML_HAS_OFXVLC4
+				if (montageVlcPreviewInitialized || !trim(visionVideoPath).empty()) {
+					std::string error;
+					if (loadMontageVlcPreview(&error) && step.startSeconds >= 0.0) {
+						montageVlcPreviewPlayer.setTime(
+							static_cast<int>(std::max(0.0, step.startSeconds) * 1000.0));
+						montagePreviewStatusMessage =
+							"Opened the montage handoff and synced the ofxVlc4 preview.";
+					} else if (!error.empty()) {
+						montagePreviewStatusMessage = error;
+					}
+				}
+#endif
+			} else {
+				copyStringToBuffer(customInput, sizeof(customInput), handoffText);
+				activeMode = AiMode::Custom;
+			}
+			autoSaveSession();
+		};
 	const bool canPlanEdit =
 		!generating.load() &&
 		std::strlen(visionVideoPath) > 0 &&
@@ -922,11 +1145,148 @@ void ofApp::drawVisionPanel() {
 	if (ImGui::Button("Clear edit plan", ImVec2(140, 0))) {
 		videoEditPlanJson[0] = '\0';
 		videoEditPlanSummary.clear();
+		resetVideoEditWorkflowState();
 		autoSaveSession();
 	}
 	ImGui::EndDisabled();
 	if (!videoEditPlanSummary.empty()) {
 		ImGui::TextWrapped("%s", videoEditPlanSummary.c_str());
+	}
+	if (editWorkflowAvailable) {
+		ImGui::Separator();
+		ImGui::TextDisabled("Editor workflow");
+		if (!trim(editWorkflow.headline).empty()) {
+			ImGui::TextWrapped("%s", editWorkflow.headline.c_str());
+		}
+		if (!trim(editWorkflow.nextAction).empty()) {
+			ImGui::TextDisabled("Next action: %s", editWorkflow.nextAction.c_str());
+		}
+		if (!trim(editWorkflow.previewHint).empty()) {
+			ImGui::TextDisabled("Preview: %s", editWorkflow.previewHint.c_str());
+		}
+		int completedSteps = 0;
+		for (const auto & step : editWorkflow.steps) {
+			if (isVideoEditWorkflowStepCompleted(step.index)) {
+				++completedSteps;
+			}
+		}
+		ImGui::TextDisabled(
+			"Progress: %d / %d steps complete",
+			completedSteps,
+			static_cast<int>(editWorkflow.steps.size()));
+		int nextPendingStepIndex = -1;
+		for (const auto & step : editWorkflow.steps) {
+			if (!isVideoEditWorkflowStepCompleted(step.index)) {
+				nextPendingStepIndex = step.index;
+				break;
+			}
+		}
+		ImGui::BeginDisabled(nextPendingStepIndex < 0);
+		if (ImGui::SmallButton("Open next step")) {
+			const auto it = std::find_if(
+				editWorkflow.steps.begin(),
+				editWorkflow.steps.end(),
+				[nextPendingStepIndex](const ofxGgmlVideoEditWorkflowStep & step) {
+					return step.index == nextPendingStepIndex;
+				});
+			if (it != editWorkflow.steps.end()) {
+				applyEditWorkflowStep(*it);
+			}
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Reset workflow")) {
+			resetVideoEditWorkflowState();
+			if (!editWorkflow.steps.empty()) {
+				videoEditWorkflowActiveStepIndex = editWorkflow.steps.front().index;
+			}
+			autoSaveSession();
+		}
+		if (!editWorkflow.checklist.empty()) {
+			ImGui::TextDisabled("Checklist");
+			for (const auto & item : editWorkflow.checklist) {
+				ImGui::BulletText("%s", item.c_str());
+			}
+		}
+		if (!editWorkflow.steps.empty()) {
+			ImGui::TextDisabled("Actionable steps");
+			for (const auto & step : editWorkflow.steps) {
+				const bool isCompleted = isVideoEditWorkflowStepCompleted(step.index);
+				const bool isActive = videoEditWorkflowActiveStepIndex == step.index;
+				ImGui::PushID(step.index);
+				std::ostringstream stepLabel;
+				stepLabel << step.index << ". ";
+				if (isCompleted) {
+					stepLabel << "[Done] ";
+				} else if (isActive) {
+					stepLabel << "[Active] ";
+				}
+				stepLabel << step.title;
+				if (step.endSeconds > step.startSeconds) {
+					stepLabel << " (" << ofxGgmlVideoInference::formatTimestamp(step.startSeconds)
+						<< " - " << ofxGgmlVideoInference::formatTimestamp(step.endSeconds) << ")";
+				}
+				ImGui::TextWrapped("%s", stepLabel.str().c_str());
+				if (!trim(step.detail).empty()) {
+					ImGui::TextWrapped("%s", step.detail.c_str());
+				}
+				ImGui::BeginDisabled(trim(step.handoffText).empty());
+				std::string openLabel =
+					"Open in " +
+					(trim(step.handoffMode).empty() ? std::string("Custom") : step.handoffMode);
+				if (ImGui::SmallButton(openLabel.c_str())) {
+					applyEditWorkflowStep(step);
+				}
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+#if OFXGGML_HAS_OFXVLC4
+				const bool canPreviewStepInVlc =
+					step.startSeconds >= 0.0 &&
+					!trim(visionVideoPath).empty();
+				ImGui::BeginDisabled(!canPreviewStepInVlc);
+				if (ImGui::SmallButton("Preview in VLC")) {
+					std::string error;
+					if (loadMontageVlcPreview(&error)) {
+						montageVlcPreviewPlayer.setTime(
+							static_cast<int>(std::max(0.0, step.startSeconds) * 1000.0));
+						montagePreviewStatusMessage =
+							"Synced the ofxVlc4 preview to workflow step " +
+							std::to_string(step.index) + ".";
+					} else if (!error.empty()) {
+						montagePreviewStatusMessage = error;
+					}
+				}
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+#endif
+				if (ImGui::SmallButton(isActive ? "Focused" : "Focus")) {
+					videoEditWorkflowActiveStepIndex = step.index;
+					autoSaveSession();
+				}
+				ImGui::SameLine();
+				if (ImGui::SmallButton(isCompleted ? "Undo done" : "Mark done")) {
+					setVideoEditWorkflowStepCompleted(step.index, !isCompleted);
+					if (!isCompleted && nextPendingStepIndex == step.index) {
+						for (const auto & candidate : editWorkflow.steps) {
+							if (!isVideoEditWorkflowStepCompleted(candidate.index)) {
+								videoEditWorkflowActiveStepIndex = candidate.index;
+								break;
+							}
+						}
+					} else if (isCompleted) {
+						videoEditWorkflowActiveStepIndex = step.index;
+					}
+					autoSaveSession();
+				}
+				ImGui::SameLine();
+				ImGui::BeginDisabled(trim(step.handoffText).empty());
+				if (ImGui::SmallButton("Copy step")) {
+					copyToClipboard(step.handoffText);
+				}
+				ImGui::EndDisabled();
+				ImGui::PopID();
+			}
+		}
 	}
 	if (!parsedEditPlan.clips.empty()) {
 		ImGui::TextDisabled("Suggested timeline");
@@ -961,6 +1321,7 @@ void ofApp::drawVisionPanel() {
 		videoEditPlanSummary = parsedResult.isOk()
 			? ofxGgmlVideoPlanner::summarizeEditPlan(parsedResult.value())
 			: std::string();
+		resetVideoEditWorkflowState();
 		autoSaveSession();
 	}
 
@@ -1129,13 +1490,7 @@ void ofApp::runVisionInference() {
 				profile.modelPath = modelPath;
 			} else if (trim(profile.modelPath).empty() &&
 				!trim(profile.modelFileHint).empty()) {
-				const std::filesystem::path suggested =
-					std::filesystem::path(ofToDataPath("models", true)) /
-					trim(profile.modelFileHint);
-				std::error_code ec;
-				if (std::filesystem::exists(suggested, ec) && !ec) {
-					profile.modelPath = suggested.string();
-				}
+				profile.modelPath = resolveModelPathHint(trim(profile.modelFileHint));
 			}
 			const std::string effectiveServerUrl = trim(profile.serverUrl).empty()
 				? std::string(kDefaultManagedTextServerUrl)
@@ -1711,13 +2066,7 @@ void ofApp::runVideoInference() {
 				profile.modelPath = modelPath;
 			} else if (trim(profile.modelPath).empty() &&
 				!trim(profile.modelFileHint).empty()) {
-				const std::filesystem::path suggested =
-					std::filesystem::path(ofToDataPath("models", true)) /
-					trim(profile.modelFileHint);
-				std::error_code ec;
-				if (std::filesystem::exists(suggested, ec) && !ec) {
-					profile.modelPath = suggested.string();
-				}
+				profile.modelPath = resolveModelPathHint(trim(profile.modelFileHint));
 			}
 			const std::string effectiveServerUrl = trim(profile.serverUrl).empty()
 				? std::string(kDefaultManagedTextServerUrl)

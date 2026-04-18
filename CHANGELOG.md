@@ -9,19 +9,37 @@ All notable changes to `ofxGgml` are documented in this file.
 - `scripts/run-clang-tidy.ps1` for Windows / Visual Studio analysis runs, with compile-database preference and an optional MSBuild Clang-Tidy fallback.
 - `scripts/run-clang-tidy.sh` for Linux/macOS compile-database workflows.
 - `docs/CLANG_TIDY.md` to document supported workflows, compile-database discovery, and recommended scope.
+- `ofxGgmlEasy` as a new high-level facade for common text, chat, translation, vision, and speech tasks, with short `configure...()` entry points and convenience methods such as `summarize()`, `chat()`, `describeImage()`, and `transcribeAudio()`.
+- `ofxGgmlEasy` now also exposes higher-level helpers for website crawling, citation extraction, subtitle montage planning/export, and AI-assisted video-edit planning/workflow generation.
+- `ofxGgmlEasy` now initializes its default crawler / speech backends more predictably, documents the newer workflow helpers directly in the README, and avoids mutating internal citation-search state through a `const_cast` during `findCitations()`.
+- `ofxGgmlMilkDropGenerator` as a new text-backend-driven helper for generating, editing, sanitizing, and saving MilkDrop / projectM preset files.
+- `ofxGgmlEasy` now also exposes MilkDrop helpers so apps can generate and edit presets without wiring the lower-level generator directly.
 - Headless test coverage for the montage preview/export bridge, including bundle assembly, cue lookup, SRT/VTT text generation, and file export.
 - `ofxGgmlMontagePreviewBridge` as a new playback-facing bridge API for source-timed versus montage-timed subtitle tracks, cue lookup by time, and playlist-oriented montage preview bundles that can be consumed by companions such as `ofxVlc4`.
 - GUI-example montage subtitle preview/export updates, including generated montage-timed and source-timed subtitle tracks, inline cue preview, live preview playback text, and one-click SRT/VTT copying.
 - The GUI example montage workflow now exposes an optional direct `ofxVlc4` preview path when regenerated with `ofxVlc4` in `addons.make`, including subtitle-slave loading plus subtitle delay / scale controls for the active preview track.
+- The GUI example `ofxVlc4` montage preview now reloads when preview timing changes, can jump directly to selected subtitle cues, and can sync individual video-edit workflow steps into the live preview.
 - `ofxGgmlWebCrawler` as a new optional website-ingestion bridge, with a default `Mojo` CLI adapter for local website-to-Markdown crawling and normalized crawled-document results.
 - `ofxGgmlCitationSearch` as a new source-grounded citation helper that can extract structured quote lists and cited summaries from either loaded URLs or crawler-ingested website documents.
+- `ofxGgmlVideoPlanner` now also emits a lightweight editor-workflow layer with actionable next steps, preview hints, and direct handoff targets for existing modes such as Vision, Write, Diffusion, Custom, and Montage.
 
 ### Changed
 - `.gitignore` now ignores generated `compile_commands.json` files so local clang-tidy workflows do not pollute the worktree.
+- Citation-search source collection now normalizes and deduplicates explicit URLs plus crawler-returned markdown documents before extraction, reducing repeated citations and empty-source noise.
+- The GUI example and helper scripts now prefer a shared addon-level `models/` folder instead of per-example `bin/data/models` copies, with `bin/data/models` kept as a standalone-app fallback.
+- On Windows, the GUI example now registers central runtime directories such as `libs/llama/bin`, `libs/whisper/bin`, `libs/chatllm/bin`, and the built `ggml` output folders as DLL search paths at startup, reducing duplicate development-time DLL copies in `bin/`.
 - Prompt-echo cleanup in `ofxGgmlInference` is more conservative now, so legitimate greeting-style replies such as `hello! ...` are preserved instead of being clipped as false positive prompt echoes.
 - Translate mode in the GUI example is more usable: source language can be set to `Auto detect`, prompt-copy buttons now update reliably through deferred ImGui buffer writes, and the panel exposes clearer `Detect Language`, `Natural`, `Literal`, and `Detect + Translate` actions.
 - Summarize mode in the GUI example now includes a dedicated citation-research workflow with topic input, optional crawler seed URL, structured quote preview, and direct handoff into Write mode.
+- The GUI example video-editing section now turns structured edit plans into clickable workflow steps, so Frame-style `analyze -> plan -> handoff` flows can jump directly into the already available Vision, Write, Diffusion, Custom, and Montage tools.
+- The GUI example video-editing workflow now keeps an active step, done/undone state, quick `Open next step` actions, and session persistence so longer editing passes can be resumed instead of re-triaged.
+- The GUI example video-editing workflow now also includes reusable editor presets such as `Trailer`, `Montage`, `Recap`, `Music Video`, `Social Short`, and `Product Teaser`, with one-click defaults for edit goal, clip count, target duration, and grounding.
+- The GUI example now includes a dedicated MilkDrop mode for prompt-driven `.milk` preset generation, save/open actions, and optional live preview through `ofxProjectM` when that addon is available.
+- The GUI example text-heavy modes are now split into a dedicated `TextModes.cpp` translation unit, reducing `ofApp.cpp` concentration and making mode-level maintenance easier.
+- The GUI example speech and TTS flow now lives in a dedicated `SpeechTts.cpp` translation unit, further reducing `ofApp.cpp` concentration and keeping microphone, Whisper, and `chatllm.cpp` UI/runtime glue in one place.
+- GUI-example session persistence now lives in its own `SessionPersistence.cpp` translation unit, and stale disabled text-mode copies have been removed from `ofApp.cpp` so the remaining example shell is easier to navigate.
 - The headless test harness now tracks newer split inference sources and includes the OF-style time helpers needed by logging and cleanup code, so local test runs stay aligned with the current addon structure.
+- The GUI example now derives its local mode-count constant from the shared model-preset configuration, preventing future mode-array drift when new modes are added.
 
 ## [1.0.3] - 2026-04-18
 

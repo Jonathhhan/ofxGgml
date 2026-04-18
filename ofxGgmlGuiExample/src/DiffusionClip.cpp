@@ -206,7 +206,7 @@ void ofApp::drawDiffusionPanel() {
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
-				showWrappedTooltip("Sets the diffusion model path to the profile's recommended file under bin/data/models/.");
+				showWrappedTooltip("Sets the diffusion model path to the profile's recommended file under the shared addon models/ folder.");
 			}
 			ImGui::SameLine();
 			ImGui::BeginDisabled(recommendedDownloadUrl.empty());

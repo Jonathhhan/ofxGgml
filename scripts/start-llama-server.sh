@@ -101,6 +101,9 @@ fi
 
 if [[ -z "$MODEL_PATH" ]]; then
 	MODEL_PATH="$(resolve_first_existing_path \
+		"$ADDON_ROOT/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf" \
+		"$ADDON_ROOT/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf" \
+		"$ADDON_ROOT/models/qwen2.5-1.5b-instruct-q4_k_m.gguf" \
 		"$ADDON_ROOT/ofxGgmlGuiExample/bin/data/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf" \
 		"$ADDON_ROOT/ofxGgmlGuiExample/bin/data/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf" \
 		"$ADDON_ROOT/ofxGgmlGuiExample/bin/data/models/qwen2.5-1.5b-instruct-q4_k_m.gguf" \

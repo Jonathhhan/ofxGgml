@@ -7,12 +7,157 @@
 #include <string>
 #include <unordered_set>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
+namespace {
+
+std::filesystem::path normalizeExistingPath(const std::filesystem::path & path) {
+	std::error_code ec;
+	if (path.empty()) {
+		return {};
+	}
+	if (std::filesystem::exists(path, ec) && !ec) {
+		return std::filesystem::weakly_canonical(path, ec);
+	}
+	ec.clear();
+	return path.lexically_normal();
+}
+
+std::filesystem::path currentExecutableDir() {
+	return std::filesystem::path(ofFilePath::getCurrentExeDir()).lexically_normal();
+}
+
+#ifdef _WIN32
+std::wstring toWidePath(const std::filesystem::path & path) {
+	return path.wstring();
+}
+#endif
+
+} // namespace
+
 bool pathExists(const std::string & path) {
 	if (path.empty()) {
 		return false;
 	}
 	std::error_code ec;
 	return std::filesystem::exists(path, ec) && !ec;
+}
+
+std::filesystem::path addonRootPath() {
+	std::error_code ec;
+
+	// Preferred workspace layout:
+	// add-ons/ofxGgml/ofxGgmlGuiExample/bin -> add-ons/ofxGgml
+	const std::filesystem::path exeDir = currentExecutableDir();
+	const std::vector<std::filesystem::path> candidates = {
+		exeDir / ".." / "..",
+		exeDir / "..",
+		std::filesystem::path(__FILE__).parent_path() / ".." / "..",
+		std::filesystem::current_path(ec)
+	};
+
+	for (const auto & candidate : candidates) {
+		ec.clear();
+		const std::filesystem::path normalized = normalizeExistingPath(candidate);
+		if (normalized.empty()) {
+			continue;
+		}
+		const auto marker = normalized / "src" / "ofxGgml.h";
+		if (std::filesystem::exists(marker, ec) && !ec) {
+			return normalized;
+		}
+	}
+
+	return {};
+}
+
+std::string sharedModelsDir() {
+	const auto root = addonRootPath();
+	if (root.empty()) {
+		return {};
+	}
+	return (root / "models").lexically_normal().string();
+}
+
+std::string bundledModelsDir() {
+	return ofToDataPath("models", true);
+}
+
+std::string resolveModelPathHint(const std::string & modelFileHint) {
+	const std::string trimmedFileHint = trim(modelFileHint);
+	if (trimmedFileHint.empty()) {
+		return {};
+	}
+
+	const std::vector<std::filesystem::path> candidates = {
+		std::filesystem::path(sharedModelsDir()) / trimmedFileHint,
+		std::filesystem::path(bundledModelsDir()) / trimmedFileHint
+	};
+
+	for (const auto & candidate : candidates) {
+		if (candidate.empty()) {
+			continue;
+		}
+		std::error_code ec;
+		if (std::filesystem::exists(candidate, ec) && !ec) {
+			return candidate.lexically_normal().string();
+		}
+	}
+
+	// Return the shared path as the default suggestion for development setups.
+	if (!sharedModelsDir().empty()) {
+		return (std::filesystem::path(sharedModelsDir()) / trimmedFileHint)
+			.lexically_normal()
+			.string();
+	}
+	return (std::filesystem::path(bundledModelsDir()) / trimmedFileHint)
+		.lexically_normal()
+		.string();
+}
+
+void configureCentralRuntimeSearchPaths() {
+#ifdef _WIN32
+	static bool configured = false;
+	if (configured) {
+		return;
+	}
+	configured = true;
+
+	SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
+
+	const std::filesystem::path addonRoot = addonRootPath();
+	if (addonRoot.empty()) {
+		return;
+	}
+
+	const std::vector<std::filesystem::path> searchDirs = {
+		addonRoot / "libs" / "llama" / "bin",
+		addonRoot / "libs" / "whisper" / "bin",
+		addonRoot / "libs" / "chatllm" / "bin",
+		addonRoot / "libs" / "ggml" / "build" / "src" / "Release",
+		addonRoot / "libs" / "ggml" / "build" / "src" / "ggml-cuda" / "Release",
+		addonRoot / "libs" / "ggml" / "build" / "src" / "ggml-vulkan" / "Release",
+		addonRoot.parent_path() / "ofxStableDiffusion" / "libs" / "stable-diffusion" / "build" / "bin" / "Release",
+		addonRoot.parent_path() / "ofxStableDiffusion" / "libs" / "stable-diffusion" / "build" / "Release",
+		addonRoot.parent_path() / "ofxStableDiffusion" / "libs" / "stable-diffusion" / "lib" / "vs"
+	};
+
+	for (const auto & dir : searchDirs) {
+		std::error_code ec;
+		if (!std::filesystem::exists(dir, ec) || ec) {
+			continue;
+		}
+		AddDllDirectory(toWidePath(dir).c_str());
+	}
+#endif
 }
 
 std::string suggestedModelPath(
@@ -26,7 +171,7 @@ std::string suggestedModelPath(
 	if (trimmedFileHint.empty()) {
 		return "";
 	}
-	return ofToDataPath(ofFilePath::join("models", trimmedFileHint), true);
+	return resolveModelPathHint(trimmedFileHint);
 }
 
 std::string suggestedModelDownloadUrl(
