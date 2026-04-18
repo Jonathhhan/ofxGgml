@@ -81,6 +81,21 @@ Supporting areas:
 - `ofxGgmlGuiExample/`
 - `ofxGgmlNeuralExample/`
 
+## Compatibility policy
+
+`ofxGgml` can work alongside optional companion addons such as `ofxStableDiffusion`, but the recommended policy is:
+
+- pin tested upstream revisions instead of following `main`
+- keep `ofxGgml` and `ofxStableDiffusion` as separate integrations
+- avoid manual copying of stale `ggml*.dll` files into example `bin` folders
+- treat "tested together" as an explicit release note, not an assumption
+
+The full versioning and runtime-packaging guidance lives in:
+
+- `docs/COMPATIBILITY.md`
+
+Short version: prefer a compatibility matrix over "latest everywhere", and only consider one shared `ggml` build when both upstreams are verified against the same revision and you are ready to maintain that coupling.
+
 ## Clone / install quick start
 
 Clone the addon into your openFrameworks `addons` folder:

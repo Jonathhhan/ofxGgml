@@ -1,5 +1,7 @@
 #include "ofxGgmlInference.h"
+#include "ofxGgmlInferenceSourceInternals.h"
 #include "ofxGgmlInferenceServerInternals.h"
+#include "ofxGgmlInferenceTextCleanup.h"
 #include "core/ofxGgmlWindowsUtf8.h"
 #include "core/ofxGgmlMetrics.h"
 #include "support/ofxGgmlProcessSecurity.h"
@@ -48,44 +50,6 @@
 
 namespace {
 
-struct TokenLiteral {
-	const char * text;
-	size_t len;
-};
-
-static constexpr TokenLiteral kRoleLabels[] = {
-	{ "user", 4 },
-	{ "assistant", 9 },
-	{ "system", 6 },
-	{ "User", 4 },
-	{ "Assistant", 9 },
-	{ "System", 6 },
-	{ "A:", 2 },
-	{ "> ", 2 },
-};
-
-static constexpr TokenLiteral kTrailingArtifacts[] = {
-	{ "> EOF by user", 13 },
-	{ "> EOF", 5 },
-	{ "EOF", 3 },
-	{ "Interrupted by user", 19 },
-	{ "[end of text]", 13 },
-	{ "<|endoftext|>", 13 },
-};
-
-static constexpr TokenLiteral kInteractivePreambleMarkers[] = {
-	{ "Running in interactive mode", 27 },
-	{ "Press Ctrl+C to interject", 24 },
-	{ "Press Return to return control to the AI", 39 },
-	{ "To return control without starting a new line", 43 },
-	{ "If you want to submit another line", 34 },
-	{ "Not using system message", 24 },
-	{ "Using system message", 20 },
-	{ "Reverse prompt", 14 },
-};
-
-static constexpr size_t kMaxSourceLabelChars = 96;
-
 static std::string trim(const std::string & s) {
 	size_t b = 0;
 	while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b])))
@@ -94,793 +58,6 @@ static std::string trim(const std::string & s) {
 	while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
 		--e;
 	return s.substr(b, e - b);
-}
-
-static std::string_view trimView(const std::string & s) {
-	size_t b = 0;
-	while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b])))
-		++b;
-	size_t e = s.size();
-	while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
-		--e;
-	return std::string_view(s).substr(b, e - b);
-}
-
-static std::string stripLiteralAnsiMarkers(const std::string & text) {
-	static const std::regex markerRegex(R"(\[(?:\d{1,3})(?:;\d{1,3})*m)");
-	return std::regex_replace(text, markerRegex, "");
-}
-
-static std::string stripInteractivePreamble(const std::string & text) {
-	bool skipping = true;
-	size_t pos = 0;
-	while (pos <= text.size()) {
-		const size_t end = text.find('\n', pos);
-		const std::string line = (end == std::string::npos)
-			? text.substr(pos)
-			: text.substr(pos, end - pos);
-		const std::string_view trimmed = trimView(line);
-
-		if (skipping && !trimmed.empty()) {
-			bool isPreamble = false;
-			for (const auto & marker : kInteractivePreambleMarkers) {
-				if (trimmed.find(marker.text) != std::string_view::npos) {
-					isPreamble = true;
-					break;
-				}
-			}
-			if (!isPreamble) {
-				return trim(text.substr(pos));
-			}
-		}
-
-		if (end == std::string::npos) break;
-		pos = end + 1;
-	}
-
-	return {};
-}
-
-static std::string getEnvVarString(const char * name) {
-	if (!name || *name == '\0') {
-		return "";
-	}
-#ifdef _WIN32
-	char * value = nullptr;
-	size_t len = 0;
-	const errno_t err = _dupenv_s(&value, &len, name);
-	if (err != 0 || value == nullptr || len == 0) {
-		free(value);
-		return "";
-	}
-	std::string result(value);
-	free(value);
-	return result;
-#else
-	const char * value = std::getenv(name);
-	return value ? std::string(value) : std::string();
-#endif
-}
-
-static std::string clipTextWithMarker(
-	const std::string & text,
-	size_t maxChars,
-	bool * wasTruncated = nullptr) {
-	if (wasTruncated) {
-		*wasTruncated = false;
-	}
-	if (maxChars == 0) {
-		if (wasTruncated) {
-			*wasTruncated = !text.empty();
-		}
-		return {};
-	}
-	if (text.size() <= maxChars) {
-		return text;
-	}
-	if (wasTruncated) {
-		*wasTruncated = true;
-	}
-	static constexpr const char * kMarker = "\n...[truncated]";
-	const size_t markerLen = std::char_traits<char>::length(kMarker);
-	if (maxChars <= markerLen) {
-		return std::string(kMarker, kMarker + maxChars);
-	}
-	return text.substr(0, maxChars - markerLen) + kMarker;
-}
-
-static std::string stripHtmlComments(const std::string & html) {
-	std::string out;
-	out.reserve(html.size());
-	size_t pos = 0;
-	while (pos < html.size()) {
-		const size_t commentStart = html.find("<!--", pos);
-		if (commentStart == std::string::npos) {
-			out.append(html, pos, std::string::npos);
-			break;
-		}
-		out.append(html, pos, commentStart - pos);
-		const size_t commentEnd = html.find("-->", commentStart + 4);
-		if (commentEnd == std::string::npos) {
-			break;
-		}
-		pos = commentEnd + 3;
-	}
-	return out;
-}
-
-static std::string stripHtmlBlocks(
-	const std::string & html,
-	const std::string & tagName) {
-	if (html.empty() || tagName.empty()) {
-		return html;
-	}
-	std::string lowerHtml = html;
-	std::transform(lowerHtml.begin(), lowerHtml.end(), lowerHtml.begin(),
-		[](unsigned char c) {
-			return static_cast<char>(std::tolower(c));
-		});
-
-	std::string out;
-	out.reserve(html.size());
-	const std::string openTag = "<" + tagName;
-	const std::string closeTag = "</" + tagName;
-	size_t pos = 0;
-	while (pos < html.size()) {
-		const size_t start = lowerHtml.find(openTag, pos);
-		if (start == std::string::npos) {
-			out.append(html, pos, std::string::npos);
-			break;
-		}
-		out.append(html, pos, start - pos);
-		const size_t close = lowerHtml.find(closeTag, start + openTag.size());
-		if (close == std::string::npos) {
-			break;
-		}
-		const size_t closeEnd = lowerHtml.find('>', close + closeTag.size());
-		if (closeEnd == std::string::npos) {
-			break;
-		}
-		pos = closeEnd + 1;
-	}
-	return out;
-}
-
-static std::string decodeBasicHtmlEntities(const std::string & text) {
-	std::string out;
-	out.reserve(text.size());
-	for (size_t i = 0; i < text.size(); ++i) {
-		if (text[i] != '&') {
-			out.push_back(text[i]);
-			continue;
-		}
-		if (text.compare(i, 5, "&amp;") == 0) {
-			out.push_back('&');
-			i += 4;
-		} else if (text.compare(i, 4, "&lt;") == 0) {
-			out.push_back('<');
-			i += 3;
-		} else if (text.compare(i, 4, "&gt;") == 0) {
-			out.push_back('>');
-			i += 3;
-		} else if (text.compare(i, 6, "&quot;") == 0) {
-			out.push_back('"');
-			i += 5;
-		} else if (text.compare(i, 5, "&#39;") == 0) {
-			out.push_back('\'');
-			i += 4;
-		} else if (text.compare(i, 6, "&nbsp;") == 0) {
-			out.push_back(' ');
-			i += 5;
-		} else {
-			out.push_back(text[i]);
-		}
-	}
-	return out;
-}
-
-static bool looksLikeHtmlDocument(const std::string & text) {
-	if (text.empty()) {
-		return false;
-	}
-	std::string sample = text.substr(0, std::min<size_t>(text.size(), 2048));
-	std::transform(sample.begin(), sample.end(), sample.begin(),
-		[](unsigned char c) {
-			return static_cast<char>(std::tolower(c));
-		});
-	return sample.find("<html") != std::string::npos ||
-		sample.find("<body") != std::string::npos ||
-		sample.find("<article") != std::string::npos ||
-		sample.find("<main") != std::string::npos ||
-		sample.find("<p") != std::string::npos ||
-		sample.find("<div") != std::string::npos ||
-		sample.find("<!doctype html") != std::string::npos;
-}
-
-static std::string extractPlainTextFromHtml(const std::string & html) {
-	std::string cleaned = stripHtmlComments(html);
-	for (const char * tag : { "script", "style", "svg", "noscript", "head" }) {
-		cleaned = stripHtmlBlocks(cleaned, tag);
-	}
-
-	std::string text;
-	text.reserve(cleaned.size());
-	bool inTag = false;
-	for (size_t i = 0; i < cleaned.size(); ++i) {
-		const char c = cleaned[i];
-		if (c == '<') {
-			inTag = true;
-			size_t j = i + 1;
-			while (j < cleaned.size() &&
-				std::isspace(static_cast<unsigned char>(cleaned[j]))) {
-				++j;
-			}
-			if (j < cleaned.size()) {
-				const char tagLead = static_cast<char>(
-					std::tolower(static_cast<unsigned char>(cleaned[j])));
-				if (tagLead == 'p' || tagLead == 'b' || tagLead == 'd' ||
-					tagLead == 'h' || tagLead == 'l' || tagLead == 'u' ||
-					tagLead == 't') {
-					text.append("\n\n");
-				} else if (tagLead == 's') {
-					text.push_back('\n');
-				}
-			}
-			continue;
-		}
-		if (c == '>') {
-			inTag = false;
-			continue;
-		}
-		if (!inTag) {
-			text.push_back(c);
-		}
-	}
-
-	text = decodeBasicHtmlEntities(text);
-
-	std::string collapsed;
-	collapsed.reserve(text.size());
-	bool lastWasSpace = false;
-	int newlineRun = 0;
-	for (char c : text) {
-		if (c == '\r') {
-			continue;
-		}
-		if (c == '\n') {
-			if (newlineRun < 2) {
-				collapsed.push_back('\n');
-				++newlineRun;
-			}
-			lastWasSpace = false;
-			continue;
-		}
-		if (std::isspace(static_cast<unsigned char>(c))) {
-			if (!lastWasSpace && newlineRun == 0) {
-				collapsed.push_back(' ');
-				lastWasSpace = true;
-			}
-			continue;
-		}
-		newlineRun = 0;
-		lastWasSpace = false;
-		collapsed.push_back(c);
-	}
-
-	return trim(collapsed);
-}
-
-static std::string normalizeSourceContent(
-	const ofxGgmlPromptSource & source,
-	const ofxGgmlPromptSourceSettings & settings) {
-	std::string content = trim(source.content);
-	if (content.empty()) {
-		return {};
-	}
-	if (settings.normalizeWebText && source.isWebSource && looksLikeHtmlDocument(content)) {
-		content = extractPlainTextFromHtml(content);
-	}
-	return trim(content);
-}
-
-static std::string formatSourceLabel(const ofxGgmlPromptSource & source) {
-	std::string label = trim(source.label);
-	if (label.empty()) {
-		label = trim(source.uri);
-	}
-	if (label.empty()) {
-		label = "Source";
-	}
-	if (label.size() > kMaxSourceLabelChars) {
-		label.resize(kMaxSourceLabelChars - 3);
-		label += "...";
-	}
-	return label;
-}
-
-static bool isLikelyWebUri(const std::string & uri) {
-	return uri.rfind("http://", 0) == 0 || uri.rfind("https://", 0) == 0;
-}
-
-static std::vector<std::string> extractHttpUrls(const std::string & text) {
-	static const std::regex urlRegex(R"(https?://[^\s<>\"]+)", std::regex::icase);
-	std::vector<std::string> urls;
-	std::unordered_set<std::string> seen;
-	for (std::sregex_iterator it(text.begin(), text.end(), urlRegex), end;
-		it != end;
-		++it) {
-		const std::string url = trim(it->str());
-		if (!url.empty() && seen.insert(url).second) {
-			urls.push_back(url);
-		}
-	}
-	return urls;
-}
-
-static std::string urlEncode(const std::string & value) {
-	std::ostringstream escaped;
-	escaped.fill('0');
-	escaped << std::hex;
-	for (unsigned char c : value) {
-		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-			escaped << c;
-		} else {
-			escaped << '%' << std::setw(2) << std::uppercase << int(c);
-		}
-	}
-	return escaped.str();
-}
-
-static bool looksLikeWeatherQuery(const std::string & text) {
-	std::string lowered = text;
-	std::transform(lowered.begin(), lowered.end(), lowered.begin(),
-		[](unsigned char c) {
-			return static_cast<char>(std::tolower(c));
-		});
-	return lowered.find("weather") != std::string::npos ||
-		lowered.find("temperature") != std::string::npos ||
-		lowered.find("forecast") != std::string::npos ||
-		lowered.find("rain") != std::string::npos;
-}
-
-static bool looksLikeNewsQuery(const std::string & text) {
-	std::string lowered = text;
-	std::transform(lowered.begin(), lowered.end(), lowered.begin(),
-		[](unsigned char c) {
-			return static_cast<char>(std::tolower(c));
-		});
-	return lowered.find("news") != std::string::npos ||
-		lowered.find("headline") != std::string::npos ||
-		lowered.find("headlines") != std::string::npos ||
-		lowered.find("breaking") != std::string::npos ||
-		lowered.find("current events") != std::string::npos ||
-		lowered.find("latest") != std::string::npos ||
-		lowered.find("today") != std::string::npos;
-}
-
-static std::string detectWeatherLocation(const std::string & text) {
-	static const std::regex weatherLocRegex(
-		R"(weather\s+(?:in|for)\s+([A-Za-z0-9 ,._-]+))",
-		std::regex::icase);
-	std::smatch match;
-	if (std::regex_search(text, match, weatherLocRegex) && match.size() >= 2) {
-		std::string location = trim(match[1].str());
-		if (location.size() > 64) {
-			location.resize(64);
-		}
-		return location;
-	}
-	return "home";
-}
-
-static ofxGgmlPromptSourceSettings toPromptSourceSettings(
-	const ofxGgmlRealtimeInfoSettings & realtimeSettings) {
-	ofxGgmlPromptSourceSettings sourceSettings;
-	sourceSettings.maxSources = realtimeSettings.maxSources;
-	sourceSettings.maxCharsPerSource = realtimeSettings.maxCharsPerSource;
-	sourceSettings.maxTotalChars = realtimeSettings.maxTotalChars;
-	sourceSettings.requestCitations = realtimeSettings.requestCitations;
-	sourceSettings.heading = realtimeSettings.heading;
-	return sourceSettings;
-}
-
-static void appendUniqueUrls(
-	std::vector<std::string> & urls,
-	const std::vector<std::string> & candidates) {
-	std::unordered_set<std::string> seen(urls.begin(), urls.end());
-	for (const auto & candidate : candidates) {
-		const std::string url = trim(candidate);
-		if (!url.empty() && seen.insert(url).second) {
-			urls.push_back(url);
-		}
-	}
-}
-
-static ofxGgmlPromptSource fetchWeatherSource(
-	const std::string & query,
-	const ofxGgmlPromptSourceSettings & sourceSettings) {
-	ofxGgmlPromptSource source;
-	const std::string location = detectWeatherLocation(query);
-	const std::string url = "https://wttr.in/" + urlEncode(location) + "?format=3";
-	const ofHttpResponse response = ofLoadURL(url);
-	if (response.status < 200 || response.status >= 300) {
-		return {};
-	}
-
-	source.label = "Live weather";
-	source.uri = url;
-	source.isWebSource = true;
-	source.content = clipTextWithMarker(
-		trim(response.data.getText()),
-		sourceSettings.maxCharsPerSource,
-		&source.wasTruncated);
-	return source;
-}
-
-static ofxGgmlPromptSource fetchSearchSnippetSource(
-	const std::string & query,
-	const ofxGgmlPromptSourceSettings & sourceSettings) {
-	ofxGgmlPromptSource source;
-	if (trim(query).empty()) {
-		return source;
-	}
-
-	const std::string url = "https://lite.duckduckgo.com/lite/?q=" + urlEncode(query);
-	const ofHttpResponse response = ofLoadURL(url);
-	if (response.status < 200 || response.status >= 300) {
-		return source;
-	}
-
-	static const std::regex snippetRe(
-		R"(<td[^>]*class=\"result-snippet\"[^>]*>([\s\S]*?)</td>)",
-		std::regex::icase);
-	std::smatch match;
-	const std::string body = response.data.getText();
-	if (!std::regex_search(body, match, snippetRe) || match.size() < 2) {
-		return source;
-	}
-
-	source.label = "Web search snippet";
-	source.uri = url;
-	source.isWebSource = true;
-	source.content = trim(match[1].str());
-	source.content = normalizeSourceContent(source, sourceSettings);
-	source.content = clipTextWithMarker(
-		source.content,
-		sourceSettings.maxCharsPerSource,
-		&source.wasTruncated);
-	return source;
-}
-
-static std::string cleanRssText(const std::string & text) {
-	std::string cleaned = trim(text);
-	if (cleaned.rfind("<![CDATA[", 0) == 0) {
-		const size_t end = cleaned.rfind("]]>");
-		if (end != std::string::npos && end > 9) {
-			cleaned = cleaned.substr(9, end - 9);
-		}
-	}
-	cleaned = std::regex_replace(cleaned, std::regex(R"(<[^>]+>)"), "");
-	return trim(decodeBasicHtmlEntities(cleaned));
-}
-
-static ofxGgmlPromptSource fetchNewsSource(
-	const std::string & query,
-	const ofxGgmlPromptSourceSettings & sourceSettings) {
-	ofxGgmlPromptSource source;
-	const std::string trimmedQuery = trim(query);
-	if (trimmedQuery.empty()) {
-		return source;
-	}
-
-	const std::string url =
-		"https://news.google.com/rss/search?q=" + urlEncode(trimmedQuery) +
-		"&hl=en-US&gl=US&ceid=US:en";
-	const ofHttpResponse response = ofLoadURL(url);
-	if (response.status < 200 || response.status >= 300) {
-		return source;
-	}
-
-	static const std::regex itemRe(R"(<item\b[^>]*>([\s\S]*?)</item>)", std::regex::icase);
-	static const std::regex titleRe(R"(<title\b[^>]*>([\s\S]*?)</title>)", std::regex::icase);
-	static const std::regex sourceRe(R"(<source\b[^>]*>([\s\S]*?)</source>)", std::regex::icase);
-	static const std::regex pubDateRe(R"(<pubDate\b[^>]*>([\s\S]*?)</pubDate>)", std::regex::icase);
-
-	std::ostringstream content;
-	content << "Latest news results for \"" << trimmedQuery << "\":\n";
-
-	size_t itemCount = 0;
-	const std::string body = response.data.getText();
-	for (std::sregex_iterator it(body.begin(), body.end(), itemRe), end; it != end; ++it) {
-		if (itemCount >= 4) {
-			break;
-		}
-		const std::string item = (*it)[1].str();
-		std::smatch titleMatch;
-		if (!std::regex_search(item, titleMatch, titleRe) || titleMatch.size() < 2) {
-			continue;
-		}
-
-		const std::string title = cleanRssText(titleMatch[1].str());
-		if (title.empty()) {
-			continue;
-		}
-
-		std::string publisher;
-		std::smatch sourceMatch;
-		if (std::regex_search(item, sourceMatch, sourceRe) && sourceMatch.size() >= 2) {
-			publisher = cleanRssText(sourceMatch[1].str());
-		}
-
-		std::string pubDate;
-		std::smatch pubDateMatch;
-		if (std::regex_search(item, pubDateMatch, pubDateRe) && pubDateMatch.size() >= 2) {
-			pubDate = cleanRssText(pubDateMatch[1].str());
-		}
-
-		content << "- " << title;
-		if (!publisher.empty()) {
-			content << " (" << publisher;
-			if (!pubDate.empty()) {
-				content << ", " << pubDate;
-			}
-			content << ")";
-		} else if (!pubDate.empty()) {
-			content << " (" << pubDate << ")";
-		}
-		content << "\n";
-		++itemCount;
-	}
-
-	if (itemCount == 0) {
-		return source;
-	}
-
-	source.label = "Latest news";
-	source.uri = url;
-	source.isWebSource = true;
-	source.content = clipTextWithMarker(
-		trim(content.str()),
-		sourceSettings.maxCharsPerSource,
-		&source.wasTruncated);
-	return source;
-}
-
-static bool isRuntimeNoiseLine(std::string_view trimmedLine);
-
-/// Strip common llama.cpp warning messages from output.
-/// Even with --log-disable, some warnings may still appear in stderr
-/// which gets captured alongside stdout by runCommandCapture.
-static std::string stripLlamaWarnings(const std::string & text) {
-	if (text.empty()) return text;
-
-	std::ostringstream filtered;
-	std::istringstream lines(text);
-	std::string line;
-
-	while (std::getline(lines, line)) {
-		const std::string_view trimmedLine = trimView(line);
-		if (isRuntimeNoiseLine(trimmedLine)) {
-			continue;
-		}
-
-		filtered << line << '\n';
-	}
-
-	std::string result = filtered.str();
-	// Remove trailing newline if original didn't have one
-	if (!result.empty() && result.back() == '\n' && (text.empty() || text.back() != '\n')) {
-		result.pop_back();
-	}
-	return result;
-}
-
-static bool isRuntimeNoiseLine(std::string_view trimmedLine) {
-	if (trimmedLine.empty()) return true;
-	if (trimmedLine.rfind("ofxGgml [", 0) == 0) return true;
-	if (trimmedLine.find("saving final output to session file") != std::string::npos) return true;
-	if (trimmedLine.rfind("main:", 0) == 0 &&
-		(trimmedLine.find("session file") != std::string::npos ||
-		 trimmedLine.find("prompt_cache_") != std::string::npos)) return true;
-	if (trimmedLine.find("warning: no usable GPU found") != std::string::npos) return true;
-	if (trimmedLine.find("warning: one possible reason is that llama.cpp was compiled without GPU support") != std::string::npos) return true;
-	if (trimmedLine.find("warning: consult docs/build.md for compilation instructions") != std::string::npos) return true;
-	if (trimmedLine.find("ggml_cuda_init") != std::string::npos) return true;
-	if (trimmedLine.find("ggml_vulkan_init") != std::string::npos) return true;
-	if (trimmedLine.find("ggml_metal_init") != std::string::npos) return true;
-	if (trimmedLine.find("--gpu-layers option will be ignored") != std::string::npos) return true;
-	if (trimmedLine.find("Total VRAM:") != std::string::npos) return true;
-	if (trimmedLine.find("compute capability") != std::string::npos) return true;
-	if (trimmedLine.find("backend = ") != std::string::npos) return true;
-	if (trimmedLine.find("VMM:") != std::string::npos) return true;
-	if (trimmedLine.rfind("Device ", 0) == 0) {
-		const size_t colon = trimmedLine.find(':');
-		if (colon != std::string::npos && colon > 7) {
-			bool digitsOnly = true;
-			for (size_t i = 7; i < colon; ++i) {
-				if (!std::isdigit(static_cast<unsigned char>(trimmedLine[i]))) {
-					digitsOnly = false;
-					break;
-				}
-			}
-			if (digitsOnly) return true;
-		}
-	}
-	return false;
-}
-
-static std::string stripLeadingRuntimeNoise(const std::string & text) {
-	std::ostringstream filtered;
-	std::istringstream lines(text);
-	std::string line;
-	bool skipping = true;
-
-	while (std::getline(lines, line)) {
-		const std::string_view trimmedLine = trimView(line);
-		if (skipping) {
-			if (isRuntimeNoiseLine(trimmedLine)) {
-				continue;
-			}
-			skipping = false;
-		}
-
-		filtered << line;
-		if (!lines.eof()) {
-			filtered << '\n';
-		}
-	}
-
-	return trim(filtered.str());
-}
-
-static std::string stripChatTemplateMarkers(const std::string & text) {
-	std::string out;
-	out.reserve(text.size());
-	size_t i = 0;
-	while (i < text.size()) {
-		if (i + 1 < text.size() && text[i] == '<' && text[i + 1] == '<') {
-			out.push_back(text[i]);
-			++i;
-			continue;
-		}
-		if (i + 1 < text.size() && text[i] == '<' && text[i + 1] == '|') {
-			const size_t end = text.find("|>", i + 2);
-			if (end != std::string::npos) {
-				i = end + 2;
-				continue;
-			}
-		}
-		out.push_back(text[i]);
-		++i;
-	}
-	return out;
-}
-
-static std::string stripPromptEcho(const std::string & text, const std::string & prompt) {
-	const std::string trimmedText = trim(text);
-	const std::string trimmedPrompt = trim(prompt);
-	if (trimmedText.empty() || trimmedPrompt.empty()) {
-		return trimmedText;
-	}
-
-	auto hasPromptPrefix = [&](const std::string & candidate) {
-		if (candidate.size() < trimmedPrompt.size()) {
-			return false;
-		}
-		if (candidate.compare(0, trimmedPrompt.size(), trimmedPrompt) != 0) {
-			return false;
-		}
-		if (candidate.size() == trimmedPrompt.size()) {
-			return true;
-		}
-		const char next = candidate[trimmedPrompt.size()];
-		return next == '\n' || next == '\r' || next == ':' ||
-			std::isspace(static_cast<unsigned char>(next)) != 0;
-	};
-
-	if (hasPromptPrefix(trimmedText)) {
-		return trim(trimmedText.substr(trimmedPrompt.size()));
-	}
-
-	const size_t firstLineEnd = trimmedText.find('\n');
-	if (firstLineEnd != std::string::npos) {
-		const std::string firstLine = trim(trimmedText.substr(0, firstLineEnd));
-		if (firstLine == trimmedPrompt) {
-			return trim(trimmedText.substr(firstLineEnd + 1));
-		}
-	}
-
-	return trimmedText;
-}
-
-static std::string stripLeadingRoleLabels(const std::string & text) {
-	std::string out = trim(text);
-	bool changed = true;
-	while (changed) {
-		changed = false;
-		for (const auto & label : kRoleLabels) {
-			if (out.size() >= label.len && out.compare(0, label.len, label.text) == 0 &&
-				(out.size() == label.len || out[label.len] == '\n' || out[label.len] == '\r' || out[label.len] == ':' || out[label.len] == ' ')) {
-				out = trim(out.substr(label.len));
-				if (!out.empty() && out.front() == ':') {
-					out = trim(out.substr(1));
-				}
-				changed = true;
-				break;
-			}
-		}
-		if (!out.empty() && out.front() == '>') {
-			out = trim(out.substr(1));
-			changed = true;
-		}
-	}
-	return out;
-}
-
-static std::string stripTrailingArtifacts(const std::string & text) {
-	std::string out = trim(text);
-	bool stripped = true;
-	while (stripped) {
-		stripped = false;
-		for (const auto & artifact : kTrailingArtifacts) {
-			if (out.size() >= artifact.len &&
-				out.compare(out.size() - artifact.len, artifact.len, artifact.text) == 0) {
-				out = trim(out.substr(0, out.size() - artifact.len));
-				stripped = true;
-				break;
-			}
-		}
-	}
-	return out;
-}
-
-static std::string stripInlineArtifacts(const std::string & text) {
-	std::string out = text;
-	for (const auto & artifact : kTrailingArtifacts) {
-		size_t pos = 0;
-		while ((pos = out.find(artifact.text, pos)) != std::string::npos) {
-			out.erase(pos, artifact.len);
-		}
-	}
-	return trim(out);
-}
-
-static std::string cleanCompletionOutput(const std::string & raw, const std::string & prompt) {
-	std::string cleaned = stripLlamaWarnings(raw);
-	cleaned = stripLeadingRuntimeNoise(cleaned);
-	cleaned = stripInteractivePreamble(cleaned);
-	cleaned = stripLiteralAnsiMarkers(cleaned);
-	cleaned = stripChatTemplateMarkers(cleaned);
-	cleaned = stripPromptEcho(cleaned, prompt);
-	cleaned = stripLeadingRoleLabels(cleaned);
-	cleaned = stripTrailingArtifacts(cleaned);
-	cleaned = stripInlineArtifacts(cleaned);
-	for (const char * marker : {"[1m", "[32m", "[0m", "> "}) {
-		size_t pos = 0;
-		const size_t len = std::strlen(marker);
-		while ((pos = cleaned.find(marker, pos)) != std::string::npos) {
-			cleaned.erase(pos, len);
-		}
-	}
-	cleaned = stripLeadingRuntimeNoise(cleaned);
-	return trim(cleaned);
-}
-
-static std::string cleanCompletionOutputConservative(const std::string & raw) {
-	std::string cleaned = stripLlamaWarnings(raw);
-	cleaned = stripLeadingRuntimeNoise(cleaned);
-	cleaned = stripInteractivePreamble(cleaned);
-	cleaned = stripLiteralAnsiMarkers(cleaned);
-	cleaned = stripChatTemplateMarkers(cleaned);
-	cleaned = stripLeadingRoleLabels(cleaned);
-	cleaned = stripTrailingArtifacts(cleaned);
-	cleaned = stripInlineArtifacts(cleaned);
-	cleaned = stripLeadingRuntimeNoise(cleaned);
-	return trim(cleaned);
-}
-
-static std::string cleanStructuredOutput(const std::string & raw) {
-	return trim(stripLeadingRuntimeNoise(stripLlamaWarnings(raw)));
 }
 
 static std::string defaultPromptCachePathForModel(const std::string & modelPath) {
@@ -932,25 +109,16 @@ static std::string trimToNaturalBoundary(const std::string & text) {
 	return out;
 }
 
-/// Validate that a file path exists and is a regular file.
-/// Returns true if the path is valid and safe to use.
 static bool isValidFilePath(const std::string & path) {
 	if (path.empty()) return false;
-
-	// Check for null bytes (security: path injection)
 	if (path.find('\0') != std::string::npos) return false;
 
 	std::error_code ec;
 	std::filesystem::path fsPath(path);
-
-	// Check if file exists
 	if (!std::filesystem::exists(fsPath, ec)) return false;
 	if (ec) return false;
-
-	// Ensure it's a regular file, not a device or special file
 	if (!std::filesystem::is_regular_file(fsPath, ec)) return false;
 	if (ec) return false;
-
 	return true;
 }
 
@@ -969,14 +137,11 @@ static bool shouldTreatNonZeroExitAsSuccess(
 	return false;
 }
 
-/// Sanitize a string for safe use in command arguments.
-/// Removes or escapes potentially dangerous characters.
 static std::string sanitizeArgument(const std::string & arg) {
 	std::string result;
 	result.reserve(arg.size());
 
 	for (char c : arg) {
-		// Remove null bytes and control characters (except common whitespace)
 		if (c == '\0' || (std::iscntrl(static_cast<unsigned char>(c)) && c != '\t' && c != '\n' && c != '\r')) {
 			continue;
 		}
@@ -987,14 +152,14 @@ static std::string sanitizeArgument(const std::string & arg) {
 }
 
 static bool runCommandCapture(
-const std::vector<std::string> & args,
-std::string & output,
-int & exitCode,
-bool mergeStderr = true,
-std::function<bool(const std::string&)> onChunk = nullptr) {
-output.clear();
-exitCode = -1;
-if (args.empty() || args.front().empty()) return false;
+	const std::vector<std::string> & args,
+	std::string & output,
+	int & exitCode,
+	bool mergeStderr = true,
+	std::function<bool(const std::string &)> onChunk = nullptr) {
+	output.clear();
+	exitCode = -1;
+	if (args.empty() || args.front().empty()) return false;
 	std::string pendingChunk;
 	auto dispatchChunk = [&](const std::string & chunk) -> bool {
 		if (!onChunk || chunk.empty()) {
@@ -1097,7 +262,6 @@ if (args.empty() || args.front().empty()) return false;
 		std::string chunk(buf.data(), bytesRead);
 		output.append(chunk);
 		if (!dispatchChunk(chunk)) {
-			// Terminate process if callback requested early exit
 			TerminateProcess(pi.hProcess, 1);
 			break;
 		}
@@ -1157,7 +321,6 @@ if (args.empty() || args.front().empty()) return false;
 		std::string chunk(buf.data(), static_cast<size_t>(bytesRead));
 		output.append(chunk);
 		if (!dispatchChunk(chunk)) {
-			// Terminate process if callback requested early exit
 			kill(pid, SIGTERM);
 			break;
 		}
@@ -1182,12 +345,10 @@ static std::string makeTempPath(const char * prefix, const char * ext) {
 	std::filesystem::path base = std::filesystem::temp_directory_path(ec);
 	if (ec) base = std::filesystem::current_path();
 
-	// Generate a cryptographically random filename component
 	std::random_device rd;
 	std::mt19937_64 rng(rd());
 	std::uniform_int_distribution<uint64_t> dist;
 
-	// Try up to 1000 times to create a unique file (prevents race conditions)
 	for (int attempts = 0; attempts < 1000; ++attempts) {
 		const uint64_t random1 = dist(rng);
 		const uint64_t random2 = dist(rng);
@@ -1196,16 +357,13 @@ static std::string makeTempPath(const char * prefix, const char * ext) {
 
 		std::filesystem::path candidate = base / oss.str();
 
-		// Try to create the file exclusively (atomic check-and-create)
-		// Use platform-specific approach since std::ios::excl is not standard
 #ifdef _WIN32
-		// On Windows, use CreateFile with CREATE_NEW for atomic exclusive creation
 		HANDLE hFile = CreateFileW(
 			candidate.c_str(),
 			GENERIC_WRITE,
-			0, // No sharing
+			0,
 			NULL,
-			CREATE_NEW, // Fails if file exists (atomic check-and-create)
+			CREATE_NEW,
 			FILE_ATTRIBUTE_NORMAL,
 			NULL);
 		if (hFile != INVALID_HANDLE_VALUE) {
@@ -1213,7 +371,6 @@ static std::string makeTempPath(const char * prefix, const char * ext) {
 			return candidate.string();
 		}
 #else
-		// On POSIX systems, create atomically with O_EXCL.
 		const int fd = open(candidate.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0600);
 		if (fd >= 0) {
 			close(fd);
@@ -1222,7 +379,6 @@ static std::string makeTempPath(const char * prefix, const char * ext) {
 #endif
 	}
 
-	// Fallback: use time-based name with random component
 	const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
 	const uint64_t nonce = dist(rng);
 	return (base / (std::string(prefix) + std::to_string(now) + "_" + std::to_string(nonce) + ext)).string();
@@ -1513,48 +669,7 @@ ofxGgmlInferenceCapabilities ofxGgmlInference::getCompletionCapabilities() const
 std::vector<ofxGgmlPromptSource> ofxGgmlInference::fetchUrlSources(
 	const std::vector<std::string> & urls,
 	const ofxGgmlPromptSourceSettings & sourceSettings) {
-	std::vector<ofxGgmlPromptSource> sources;
-	if (urls.empty() || sourceSettings.maxSources == 0 ||
-		sourceSettings.maxCharsPerSource == 0 ||
-		sourceSettings.maxTotalChars == 0) {
-		return sources;
-	}
-
-	sources.reserve(std::min(urls.size(), sourceSettings.maxSources));
-	size_t usedChars = 0;
-	for (const std::string & url : urls) {
-		if (sources.size() >= sourceSettings.maxSources ||
-			usedChars >= sourceSettings.maxTotalChars) {
-			break;
-		}
-
-		ofHttpResponse response = ofLoadURL(url);
-		if (response.status < 200 || response.status >= 300) {
-			continue;
-		}
-
-		ofxGgmlPromptSource source;
-		source.uri = url;
-		source.label = url;
-		source.isWebSource = true;
-		source.content = response.data.getText();
-		source.content = normalizeSourceContent(source, sourceSettings);
-		if (source.content.empty()) {
-			continue;
-		}
-
-		size_t remainingChars = sourceSettings.maxTotalChars - usedChars;
-		const size_t sourceLimit = std::min(sourceSettings.maxCharsPerSource, remainingChars);
-		source.content = clipTextWithMarker(source.content, sourceLimit, &source.wasTruncated);
-		if (source.content.empty()) {
-			continue;
-		}
-
-		usedChars += source.content.size();
-		sources.push_back(std::move(source));
-	}
-
-	return sources;
+	return ofxGgmlInferenceSourceInternals::fetchUrlSources(urls, sourceSettings);
 }
 
 ofxGgmlServerProbeResult ofxGgmlInference::probeServer(
@@ -1622,58 +737,9 @@ ofxGgmlServerProbeResult ofxGgmlInference::probeServer(
 std::vector<ofxGgmlPromptSource> ofxGgmlInference::collectScriptSourceDocuments(
 	ofxGgmlScriptSource & scriptSource,
 	const ofxGgmlPromptSourceSettings & sourceSettings) {
-	std::vector<ofxGgmlPromptSource> sources;
-	if (sourceSettings.maxSources == 0 ||
-		sourceSettings.maxCharsPerSource == 0 ||
-		sourceSettings.maxTotalChars == 0) {
-		return sources;
-	}
-
-	const auto entries = scriptSource.getFiles();
-	if (entries.empty()) {
-		return sources;
-	}
-
-	sources.reserve(std::min(entries.size(), sourceSettings.maxSources));
-	size_t usedChars = 0;
-	for (size_t i = 0; i < entries.size(); ++i) {
-		if (sources.size() >= sourceSettings.maxSources ||
-			usedChars >= sourceSettings.maxTotalChars) {
-			break;
-		}
-
-		const auto & entry = entries[i];
-		if (entry.isDirectory) {
-			continue;
-		}
-
-		std::string content;
-		if (!scriptSource.loadFileContent(static_cast<int>(i), content)) {
-			continue;
-		}
-
-		ofxGgmlPromptSource source;
-		source.label = entry.name;
-		source.uri = entry.fullPath;
-		source.isWebSource = isLikelyWebUri(entry.fullPath);
-		source.content = std::move(content);
-		source.content = normalizeSourceContent(source, sourceSettings);
-		if (source.content.empty()) {
-			continue;
-		}
-
-		const size_t remainingChars = sourceSettings.maxTotalChars - usedChars;
-		const size_t sourceLimit = std::min(sourceSettings.maxCharsPerSource, remainingChars);
-		source.content = clipTextWithMarker(source.content, sourceLimit, &source.wasTruncated);
-		if (source.content.empty()) {
-			continue;
-		}
-
-		usedChars += source.content.size();
-		sources.push_back(std::move(source));
-	}
-
-	return sources;
+	return ofxGgmlInferenceSourceInternals::collectScriptSourceDocuments(
+		scriptSource,
+		sourceSettings);
 }
 
 std::string ofxGgmlInference::buildPromptWithSources(
@@ -1681,125 +747,19 @@ std::string ofxGgmlInference::buildPromptWithSources(
 	const std::vector<ofxGgmlPromptSource> & sources,
 	const ofxGgmlPromptSourceSettings & sourceSettings,
 	std::vector<ofxGgmlPromptSource> * usedSources) {
-	if (usedSources) {
-		usedSources->clear();
-	}
-
-	if (sources.empty() || sourceSettings.maxSources == 0 ||
-		sourceSettings.maxCharsPerSource == 0 ||
-		sourceSettings.maxTotalChars == 0) {
-		return prompt;
-	}
-
-	std::ostringstream ctx;
-	std::vector<ofxGgmlPromptSource> normalizedSources;
-	normalizedSources.reserve(std::min(sources.size(), sourceSettings.maxSources));
-	size_t usedChars = 0;
-
-	for (const auto & inputSource : sources) {
-		if (normalizedSources.size() >= sourceSettings.maxSources ||
-			usedChars >= sourceSettings.maxTotalChars) {
-			break;
-		}
-
-		ofxGgmlPromptSource source = inputSource;
-		source.content = normalizeSourceContent(source, sourceSettings);
-		if (source.content.empty()) {
-			continue;
-		}
-
-		const size_t remainingChars = sourceSettings.maxTotalChars - usedChars;
-		const size_t sourceLimit = std::min(sourceSettings.maxCharsPerSource, remainingChars);
-		source.content = clipTextWithMarker(source.content, sourceLimit, &source.wasTruncated);
-		if (source.content.empty()) {
-			continue;
-		}
-
-		usedChars += source.content.size();
-		normalizedSources.push_back(std::move(source));
-	}
-
-	if (normalizedSources.empty()) {
-		return prompt;
-	}
-
-	ctx << prompt << "\n\n";
-	ctx << sourceSettings.heading << ":\n";
-	ctx << "Use these sources as supporting context. Prefer the sources over guesses.\n";
-	if (sourceSettings.requestCitations) {
-		ctx << sourceSettings.citationHint << "\n";
-	}
-
-	for (size_t i = 0; i < normalizedSources.size(); ++i) {
-		const auto & source = normalizedSources[i];
-		ctx << "\n[Source " << (i + 1) << "]";
-		if (sourceSettings.includeSourceHeaders) {
-			ctx << " " << formatSourceLabel(source);
-			if (!trim(source.uri).empty() && trim(source.uri) != formatSourceLabel(source)) {
-				ctx << "\nURI: " << trim(source.uri);
-			}
-		}
-		ctx << "\n" << source.content << "\n";
-	}
-
-	if (usedSources) {
-		*usedSources = std::move(normalizedSources);
-	}
-	return ctx.str();
+	return ofxGgmlInferenceSourceInternals::buildPromptWithSources(
+		prompt,
+		sources,
+		sourceSettings,
+		usedSources);
 }
 
 std::vector<ofxGgmlPromptSource> ofxGgmlInference::fetchRealtimeSources(
 	const std::string & queryOrPrompt,
 	const ofxGgmlRealtimeInfoSettings & realtimeSettings) {
-	std::vector<ofxGgmlPromptSource> sources;
-	if ((!realtimeSettings.enabled && realtimeSettings.explicitUrls.empty()) ||
-		realtimeSettings.maxSources == 0 ||
-		realtimeSettings.maxCharsPerSource == 0 ||
-		realtimeSettings.maxTotalChars == 0) {
-		return sources;
-	}
-
-	const std::string query = trim(
-		realtimeSettings.queryOverride.empty()
-			? queryOrPrompt
-			: realtimeSettings.queryOverride);
-	const ofxGgmlPromptSourceSettings sourceSettings =
-		toPromptSourceSettings(realtimeSettings);
-
-	std::vector<std::string> urls = realtimeSettings.explicitUrls;
-	if (realtimeSettings.allowPromptUrlFetch) {
-		appendUniqueUrls(urls, extractHttpUrls(queryOrPrompt));
-	}
-
-	sources = fetchUrlSources(urls, sourceSettings);
-	if (!sources.empty() || !realtimeSettings.enabled) {
-		return sources;
-	}
-
-	if (realtimeSettings.allowDomainProviders && looksLikeWeatherQuery(query)) {
-		ofxGgmlPromptSource weather = fetchWeatherSource(query, sourceSettings);
-		if (!trim(weather.content).empty()) {
-			sources.push_back(std::move(weather));
-			return sources;
-		}
-	}
-
-	if (realtimeSettings.allowDomainProviders && looksLikeNewsQuery(query)) {
-		ofxGgmlPromptSource news = fetchNewsSource(query, sourceSettings);
-		if (!trim(news.content).empty()) {
-			sources.push_back(std::move(news));
-			return sources;
-		}
-	}
-
-	if (realtimeSettings.allowGenericSearch) {
-		ofxGgmlPromptSource snippet = fetchSearchSnippetSource(query, sourceSettings);
-		if (!trim(snippet.content).empty()) {
-			sources.push_back(std::move(snippet));
-		}
-	}
-
-	return sources;
+	return ofxGgmlInferenceSourceInternals::fetchRealtimeSources(
+		queryOrPrompt,
+		realtimeSettings);
 }
 
 std::string ofxGgmlInference::buildPromptWithRealtimeInfo(
@@ -1807,17 +767,10 @@ std::string ofxGgmlInference::buildPromptWithRealtimeInfo(
 	const std::string & queryOrPrompt,
 	const ofxGgmlRealtimeInfoSettings & realtimeSettings,
 	std::vector<ofxGgmlPromptSource> * usedSources) {
-	const auto sources = fetchRealtimeSources(queryOrPrompt, realtimeSettings);
-	if (sources.empty()) {
-		if (usedSources) {
-			usedSources->clear();
-		}
-		return prompt;
-	}
-	return buildPromptWithSources(
+	return ofxGgmlInferenceSourceInternals::buildPromptWithRealtimeInfo(
 		prompt,
-		sources,
-		toPromptSourceSettings(realtimeSettings),
+		queryOrPrompt,
+		realtimeSettings,
 		usedSources);
 }
 
@@ -1886,12 +839,12 @@ std::string ofxGgmlInference::buildCutoffContinuationRequest(
 std::string ofxGgmlInference::sanitizeGeneratedText(
 	const std::string & raw,
 	const std::string & prompt) {
-	return cleanCompletionOutput(raw, prompt);
+	return ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(raw, prompt);
 }
 
 std::string ofxGgmlInference::sanitizeStructuredText(
 	const std::string & raw) {
-	return cleanStructuredOutput(raw);
+	return ofxGgmlInferenceTextCleanup::sanitizeStructuredText(raw);
 }
 
 ofxGgmlInferenceResult ofxGgmlInference::generate(
@@ -2391,21 +1344,29 @@ std::function<bool(const std::string&)> onChunk) const {
 		if (!started) {
 			return false;
 		}
-		passCleaned = cleanCompletionOutput(passRaw, sanitizedPrompt);
+		passCleaned =
+			ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(
+				passRaw,
+				sanitizedPrompt);
 		if (passCleaned.empty() && !trim(passRaw).empty()) {
-			passCleaned = cleanCompletionOutputConservative(passRaw);
+			passCleaned =
+				ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(passRaw);
 		}
 		if (passExitCode != 0 && passCleaned.empty()) {
 			std::string diagRaw;
 			int diagExitCode = -1;
 			if (runCommandCapture(args, diagRaw, diagExitCode, true)) {
-				const std::string diagCleaned = cleanCompletionOutput(diagRaw, sanitizedPrompt);
+				const std::string diagCleaned =
+					ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(
+						diagRaw,
+						sanitizedPrompt);
 				if (!diagCleaned.empty()) {
 					passCleaned = diagCleaned;
 				} else {
-					passRaw = cleanStructuredOutput(diagRaw);
+					passRaw = ofxGgmlInferenceTextCleanup::sanitizeStructuredText(diagRaw);
 					if (passCleaned.empty() && !trim(passRaw).empty()) {
-						passCleaned = cleanCompletionOutputConservative(passRaw);
+						passCleaned =
+							ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(passRaw);
 					}
 				}
 			}
@@ -2772,12 +1733,12 @@ ofxGgmlEmbeddingResult ofxGgmlInference::embed(
 		return result;
 	}
 
-	raw = cleanStructuredOutput(raw);
+	raw = ofxGgmlInferenceTextCleanup::sanitizeStructuredText(raw);
 	if (exitCode != 0 && raw.empty()) {
 		std::string diagRaw;
 		int diagExitCode = -1;
 		if (runCommandCapture(args, diagRaw, diagExitCode, true)) {
-			raw = cleanStructuredOutput(diagRaw);
+			raw = ofxGgmlInferenceTextCleanup::sanitizeStructuredText(diagRaw);
 		}
 	}
 
@@ -2876,7 +1837,7 @@ int ofxGgmlInference::countPromptTokens(
 		return -1;
 	}
 
-	raw = cleanStructuredOutput(raw);
+	raw = ofxGgmlInferenceTextCleanup::sanitizeStructuredText(raw);
 	const int tokenCount = parseVerbosePromptTokenCount(raw);
 	if (tokenCount >= 0) {
 		std::lock_guard<std::mutex> lock(m_tokenCountCacheMutex);

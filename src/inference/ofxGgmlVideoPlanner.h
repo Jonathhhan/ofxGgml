@@ -57,6 +57,41 @@ struct ofxGgmlVideoPlan {
 	std::vector<ofxGgmlVideoPlanScene> scenes;
 };
 
+struct ofxGgmlVideoEditClip {
+	int index = 0;
+	double startSeconds = 0.0;
+	double endSeconds = 0.0;
+	std::string purpose;
+	std::string sourceDescription;
+	std::string treatment;
+	std::string transition;
+	std::string textOverlay;
+};
+
+struct ofxGgmlVideoEditAction {
+	int index = 0;
+	std::string type;
+	double startSeconds = 0.0;
+	double endSeconds = 0.0;
+	std::string instruction;
+	std::string rationale;
+	std::string assetHint;
+};
+
+struct ofxGgmlVideoEditPlan {
+	std::string originalGoal;
+	std::string sourceSummary;
+	std::string overallDirection;
+	std::string pacingStrategy;
+	std::string visualStyle;
+	std::string audioStrategy;
+	double targetDurationSeconds = 0.0;
+	std::vector<std::string> globalNotes;
+	std::vector<std::string> assetSuggestions;
+	std::vector<ofxGgmlVideoEditClip> clips;
+	std::vector<ofxGgmlVideoEditAction> actions;
+};
+
 struct ofxGgmlVideoPlannerRequest {
 	std::string prompt;
 	double durationSeconds = 5.0;
@@ -65,6 +100,15 @@ struct ofxGgmlVideoPlannerRequest {
 	bool multiScene = false;
 	std::string preferredStyle;
 	std::string negativePrompt;
+};
+
+struct ofxGgmlVideoEditPlannerRequest {
+	std::string sourcePrompt;
+	std::string editGoal;
+	std::string sourceAnalysis;
+	double targetDurationSeconds = 15.0;
+	int clipCount = 5;
+	bool preserveChronology = true;
 };
 
 struct ofxGgmlVideoPlannerResult {
@@ -76,18 +120,37 @@ struct ofxGgmlVideoPlannerResult {
 	ofxGgmlVideoPlan plan;
 };
 
+struct ofxGgmlVideoEditPlannerResult {
+	bool success = false;
+	float elapsedMs = 0.0f;
+	std::string planningPrompt;
+	std::string rawText;
+	std::string error;
+	ofxGgmlVideoEditPlan plan;
+};
+
 class ofxGgmlVideoPlanner {
 public:
 	static std::string buildPlanningPrompt(const ofxGgmlVideoPlannerRequest & request);
+	static std::string buildEditingPrompt(const ofxGgmlVideoEditPlannerRequest & request);
 	static std::string extractJsonObject(const std::string & text);
 	static Result<ofxGgmlVideoPlan> parsePlanJson(const std::string & jsonText);
+	static Result<ofxGgmlVideoEditPlan> parseEditPlanJson(const std::string & jsonText);
 	static std::string buildGenerationPrompt(const ofxGgmlVideoPlan & plan);
 	static std::string buildScenePrompt(const ofxGgmlVideoPlan & plan, size_t sceneIndex);
+	static std::string buildSceneSequencePrompt(const ofxGgmlVideoPlan & plan);
+	static std::string buildEditorBrief(const ofxGgmlVideoEditPlan & plan);
 	static std::string summarizePlan(const ofxGgmlVideoPlan & plan);
+	static std::string summarizeEditPlan(const ofxGgmlVideoEditPlan & plan);
 
 	ofxGgmlVideoPlannerResult plan(
 		const std::string & modelPath,
 		const ofxGgmlVideoPlannerRequest & request,
+		const ofxGgmlInferenceSettings & settings,
+		const ofxGgmlInference & inference) const;
+	ofxGgmlVideoEditPlannerResult planEdits(
+		const std::string & modelPath,
+		const ofxGgmlVideoEditPlannerRequest & request,
 		const ofxGgmlInferenceSettings & settings,
 		const ofxGgmlInference & inference) const;
 };

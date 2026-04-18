@@ -387,6 +387,8 @@ void ofApp::drawDiffusionPanel() {
 			"##DiffusionMaskPreview");
 	}
 
+	drawImageSearchPanel("Use Diffusion prompt", trim(diffusionPrompt));
+
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Output dir", diffusionOutputDir, sizeof(diffusionOutputDir));
 	ImGui::SameLine();

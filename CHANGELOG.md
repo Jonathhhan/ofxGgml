@@ -50,6 +50,7 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ### Documentation
 - `README.md` now documents the `Live context` policies, server-first mode actions, script slash commands, repository instruction-file support, the new optional CLI build behavior, the microphone-driven speech workflow, the optional speech-server backend, the shared local `whisper.cpp` runtime helper path, the upgraded vision / sampled-video workflows, and the optional temporal sidecar contract for video action / emotion analysis.
+- Added `docs/COMPATIBILITY.md` to document the recommended `ggml` / `stable-diffusion.cpp` versioning policy, companion-addon runtime packaging rules, and the tested-matrix workflow for `ofxGgml` plus `ofxStableDiffusion`.
 
 ## [1.0.2] - 2026-04-16
 

@@ -108,20 +108,35 @@ private:
 	char visionPrompt[4096] = {};
 	char visionImagePath[1024] = {};
 	char visionVideoPath[1024] = {};
+	char imageSearchPrompt[1024] = {};
 	char visionModelPath[1024] = {};
 	char visionServerUrl[256] = "http://127.0.0.1:8080";
 	char videoSidecarUrl[256] = {};
 	char videoSidecarModel[256] = {};
 	char visionSystemPrompt[1024] = {};
+	char montageSubtitlePath[1024] = {};
+	char montageGoal[4096] = {};
+	char montageEdlTitle[128] = "MONTAGE";
+	char montageReelName[32] = "AX";
+	char videoEditGoal[4096] = {};
 	int visionTaskIndex = 0;
 	int videoTaskIndex = 0;
 	int visionVideoMaxFrames = 6;
 	char videoPlanJson[16384] = {};
+	char videoEditPlanJson[16384] = {};
+	int montageMaxClips = 8;
+	int montageFps = 25;
 	int videoPlanBeatCount = 4;
 	int videoPlanSceneCount = 3;
+	int videoPlanGenerationMode = 0;
+	int videoEditClipCount = 5;
 	int selectedVideoPlanSceneIndex = 0;
+	float montageMinScore = 0.18f;
 	bool videoPlanMultiScene = false;
+	bool montagePreserveChronology = true;
+	bool videoEditUseCurrentAnalysis = true;
 	float videoPlanDurationSeconds = 5.0f;
+	float videoEditTargetDurationSeconds = 15.0f;
 	bool videoPlanUseForGeneration = true;
 	char speechAudioPath[1024] = {};
 	char speechExecutable[256] = "whisper-cli";
@@ -173,6 +188,7 @@ private:
 	float diffusionStrength = 0.75f;
 	bool diffusionNormalizeClipEmbeddings = true;
 	bool diffusionSaveMetadata = true;
+	int imageSearchMaxResults = 8;
 	char clipPrompt[4096] = {};
 	char clipModelPath[1024] = {};
 	char clipImagePaths[8192] = {};
@@ -192,10 +208,15 @@ private:
 	std::string translateOutput;
 	std::string customOutput;
 	std::string visionOutput;
+	std::string montageSummary;
+	std::string montageEditorBrief;
+	std::string montageEdlText;
 	std::string videoPlanSummary;
+	std::string videoEditPlanSummary;
 	std::string speechOutput;
 	std::string ttsOutput;
 	std::string diffusionOutput;
+	std::string imageSearchOutput;
 	std::string clipOutput;
 	ofImage visionPreviewImage;
 	std::string visionPreviewImageLoadedPath;
@@ -216,6 +237,11 @@ private:
 	ofImage diffusionOutputPreviewImage;
 	std::string diffusionOutputPreviewLoadedPath;
 	std::string diffusionOutputPreviewError;
+	ofImage imageSearchPreviewImage;
+	std::string imageSearchPreviewLoadedPath;
+	std::string imageSearchPreviewError;
+	std::string imageSearchPreviewSourceUrl;
+	int selectedImageSearchResultIndex = -1;
 	std::string speechDetectedLanguage;
 	std::string speechTranscriptPath;
 	std::string speechSrtPath;
@@ -274,10 +300,20 @@ private:
 	float pendingDiffusionElapsedMs = 0.0f;
 	std::vector<ofxGgmlGeneratedImage> pendingDiffusionImages;
 	std::vector<std::pair<std::string, std::string>> pendingDiffusionMetadata;
+	std::string pendingImageSearchOutput;
+	std::string pendingImageSearchBackendName;
+	float pendingImageSearchElapsedMs = 0.0f;
+	std::vector<ofxGgmlImageSearchItem> pendingImageSearchResults;
+	bool pendingImageSearchDirty = false;
 	std::vector<ofxGgmlSampledVideoFrame> visionSampledVideoFrames;
 	std::vector<ofxGgmlSampledVideoFrame> pendingVisionSampledVideoFrames;
+	std::string pendingMontageSummary;
+	std::string pendingMontageEditorBrief;
+	std::string pendingMontageEdlText;
 	std::string pendingVideoPlanJson;
 	std::string pendingVideoPlanSummary;
+	std::string pendingVideoEditPlanJson;
+	std::string pendingVideoEditPlanSummary;
 	std::string pendingClipBackendName;
 	float pendingClipElapsedMs = 0.0f;
 	int pendingClipEmbeddingDimension = 0;
@@ -371,6 +407,9 @@ private:
 	std::string configuredClipBackendModelPath;
 	int configuredClipBackendVerbosity = -1;
 	bool configuredClipBackendNormalize = true;
+	std::string imageSearchBackendName;
+	float imageSearchElapsedMs = 0.0f;
+	std::vector<ofxGgmlImageSearchItem> imageSearchResults;
 
 	// -- script source (local folder / GitHub) --
 	ofxGgmlScriptSource scriptSource;
@@ -392,6 +431,7 @@ private:
 	ofxGgmlSpeechInference speechInference;
 	ofxGgmlTtsInference ttsInference;
 	ofxGgmlDiffusionInference diffusionInference;
+	ofxGgmlImageSearch imageSearch;
 	ofxGgmlClipInference clipInference;
 #if OFXGGML_HAS_OFXSTABLEDIFFUSION
 	std::shared_ptr<ofxStableDiffusion> stableDiffusionEngine;
@@ -435,9 +475,12 @@ private:
 	void runVisionInference();
 	void runVideoInference();
 	void runVideoPlanning();
+	void runMontagePlanning();
+	void runVideoEditPlanning();
 	void runSpeechInference();
 	void runTtsInference();
 	void runDiffusionInference();
+	void runImageSearch();
 	void runClipInference();
 	bool ensureClipBackendConfigured(
 		const std::string & modelPath,
@@ -508,6 +551,9 @@ private:
 	void drawTranslatePanel();
 	void drawCustomPanel();
 	void drawVisionPanel();
+	void drawImageSearchPanel(
+		const char * copyPromptButtonLabel,
+		const std::string & suggestedPrompt);
 	void ensureVisionPreviewResources();
 	void ensureLocalImagePreview(
 		const std::string & imagePath,
@@ -530,6 +576,14 @@ private:
 		ofImage & previewImage,
 		const std::string & errorMessage,
 		const char * childId);
+	void ensureImageSearchPreviewResources();
+	bool cacheImageSearchResultAsset(
+		const ofxGgmlImageSearchItem & item,
+		bool preferThumbnail,
+		std::string & localPath,
+		std::string & errorMessage) const;
+	void useImageSearchResultForVision(size_t index);
+	void useImageSearchResultForDiffusion(size_t index);
 	void drawSpeechPanel();
 	void drawTtsPanel();
 	void drawDiffusionPanel();
