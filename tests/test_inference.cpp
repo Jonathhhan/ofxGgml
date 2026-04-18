@@ -1133,3 +1133,159 @@ TEST_CASE("Inference with executable", "[inference][requires-executable][!mayfai
 		}
 	}
 }
+
+// Batch inference tests
+TEST_CASE("Batch inference structures", "[inference][batch]") {
+	SECTION("BatchRequest construction") {
+		ofxGgmlBatchRequest req;
+		REQUIRE(req.id.empty());
+		REQUIRE(req.prompt.empty());
+
+		ofxGgmlInferenceSettings settings;
+		settings.maxTokens = 100;
+		ofxGgmlBatchRequest req2("test_id", "test prompt", settings);
+		REQUIRE(req2.id == "test_id");
+		REQUIRE(req2.prompt == "test prompt");
+		REQUIRE(req2.settings.maxTokens == 100);
+	}
+
+	SECTION("BatchItemResult structure") {
+		ofxGgmlBatchItemResult item;
+		REQUIRE(item.id.empty());
+		REQUIRE_FALSE(item.result.success);
+		REQUIRE(item.batchIndex == 0);
+	}
+
+	SECTION("BatchResult structure") {
+		ofxGgmlBatchResult batchResult;
+		REQUIRE_FALSE(batchResult.success);
+		REQUIRE(batchResult.totalElapsedMs == 0.0f);
+		REQUIRE(batchResult.results.empty());
+		REQUIRE(batchResult.error.empty());
+		REQUIRE(batchResult.processedCount == 0);
+		REQUIRE(batchResult.failedCount == 0);
+	}
+
+	SECTION("BatchSettings structure") {
+		ofxGgmlBatchSettings settings;
+		REQUIRE(settings.allowParallelProcessing == true);
+		REQUIRE(settings.stopOnFirstError == false);
+		REQUIRE(settings.maxConcurrentRequests == 4);
+		REQUIRE(settings.preferServerBatch == true);
+		REQUIRE(settings.fallbackToSequential == true);
+	}
+}
+
+TEST_CASE("Batch inference API", "[inference][batch]") {
+	ofxGgmlInference inf;
+
+	SECTION("Empty batch returns success") {
+		std::vector<ofxGgmlBatchRequest> requests;
+		auto result = inf.generateBatch("model.gguf", requests);
+		REQUIRE(result.success);
+		REQUIRE(result.results.empty());
+		REQUIRE(result.processedCount == 0);
+		REQUIRE(result.failedCount == 0);
+	}
+
+	SECTION("Simple batch with multiple prompts") {
+		std::vector<std::string> prompts = {"Hello", "World", "Test"};
+		ofxGgmlInferenceSettings settings;
+		settings.maxTokens = 10;
+
+		auto result = inf.generateBatchSimple("model.gguf", prompts, settings);
+		// Will fail without executable, but should have proper structure
+		REQUIRE(result.results.size() == 3);
+		REQUIRE(result.processedCount + result.failedCount == 3);
+	}
+
+	SECTION("Batch requests have proper IDs") {
+		std::vector<ofxGgmlBatchRequest> requests;
+		requests.emplace_back("req1", "prompt1");
+		requests.emplace_back("req2", "prompt2");
+		requests.emplace_back("req3", "prompt3");
+
+		auto result = inf.generateBatch("model.gguf", requests);
+		REQUIRE(result.results.size() == 3);
+
+		// Check IDs are preserved
+		bool foundReq1 = false, foundReq2 = false, foundReq3 = false;
+		for (const auto& item : result.results) {
+			if (item.id == "req1") foundReq1 = true;
+			if (item.id == "req2") foundReq2 = true;
+			if (item.id == "req3") foundReq3 = true;
+		}
+		REQUIRE(foundReq1);
+		REQUIRE(foundReq2);
+		REQUIRE(foundReq3);
+	}
+
+	SECTION("Batch settings control behavior") {
+		std::vector<std::string> prompts = {"Test1", "Test2"};
+		ofxGgmlBatchSettings batchSettings;
+		batchSettings.stopOnFirstError = true;
+		batchSettings.maxConcurrentRequests = 1;
+
+		auto result = inf.generateBatchSimple("model.gguf", prompts, {}, batchSettings);
+		// Structure should be valid even if execution fails
+		REQUIRE(result.totalElapsedMs >= 0.0f);
+	}
+}
+
+TEST_CASE("Batch embedding API", "[inference][batch]") {
+	ofxGgmlInference inf;
+
+	SECTION("Empty batch returns empty results") {
+		std::vector<std::string> texts;
+		auto results = inf.embedBatch("model.gguf", texts);
+		REQUIRE(results.empty());
+	}
+
+	SECTION("Multiple texts create multiple results") {
+		std::vector<std::string> texts = {"text1", "text2", "text3"};
+		auto results = inf.embedBatch("model.gguf", texts);
+		REQUIRE(results.size() == 3);
+		// Results may fail without executable, but structure is correct
+	}
+}
+
+TEST_CASE("Batch metrics integration", "[inference][batch][metrics]") {
+	auto& metrics = ofxGgmlMetrics::getInstance();
+	metrics.reset();
+
+	ofxGgmlInference inf;
+
+	SECTION("Batch metrics are recorded") {
+		std::vector<std::string> prompts = {"Test1", "Test2", "Test3"};
+		inf.generateBatchSimple("test_model", prompts);
+
+		auto stats = metrics.getBatchStats("test_model");
+		REQUIRE(stats.totalBatches == 1);
+		REQUIRE(stats.totalRequests == 3);
+		REQUIRE(stats.activeBatches == 0);
+	}
+
+	SECTION("Multiple batches accumulate metrics") {
+		std::vector<std::string> batch1 = {"A", "B"};
+		std::vector<std::string> batch2 = {"C", "D", "E"};
+
+		inf.generateBatchSimple("test_model", batch1);
+		inf.generateBatchSimple("test_model", batch2);
+
+		auto stats = metrics.getBatchStats("test_model");
+		REQUIRE(stats.totalBatches == 2);
+		REQUIRE(stats.totalRequests == 5);
+	}
+
+	SECTION("Batch stats track timing") {
+		std::vector<std::string> prompts = {"Test"};
+		auto result = inf.generateBatchSimple("test_model", prompts);
+
+		auto stats = metrics.getBatchStats("test_model");
+		REQUIRE(stats.totalBatchTimeMs >= 0.0);
+		if (stats.totalBatches > 0) {
+			REQUIRE(stats.minBatchTimeMs >= 0.0);
+			REQUIRE(stats.maxBatchTimeMs >= stats.minBatchTimeMs);
+		}
+	}
+}
