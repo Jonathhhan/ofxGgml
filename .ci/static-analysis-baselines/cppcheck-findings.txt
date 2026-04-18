@@ -51,8 +51,6 @@ src/inference/ofxGgmlInference.cpp:2966:45: style: Variable 'shouldTryLocalEmbed
 src/inference/ofxGgmlInference.cpp:298:14: style: struct member 'ServerModelCacheEntry::activeModel' is never used. [unusedStructMember]
 src/inference/ofxGgmlInference.cpp:477:7: style: Condition 'skipping' is always true [knownConditionTrueFalse]
 src/inference/ofxGgmlInference.cpp:480:62: style: Consider using std::any_of algorithm instead of a raw loop. [useStlAlgorithm]
-src/inference/ofxGgmlInference.cpp:748:11: performance: Ineffective call of function 'substr' because a prefix of the string is assigned to itself. Use replace() instead. [uselessCallsSubstr]
-src/inference/ofxGgmlInference.cpp:821:15: performance: Ineffective call of function 'substr' because a prefix of the string is assigned to itself. Use resize() or pop_back() instead. [uselessCallsSubstr]
 src/inference/ofxGgmlInference.cpp:899:17: style: Variable 'source.content' is reassigned a value before the old one has been used. [redundantAssignment]
 src/inference/ofxGgmlLiveSpeechTranscriber.cpp:514:28: performance: Function parameter 'settings' should be passed by const reference. However it seems that 'runChunkTask' is a callback function. [passedByValueCallback]
 src/inference/ofxGgmlLiveSpeechTranscriber.cpp:57:50: performance: Function parameter 'word' should be passed by const reference. [passedByValue]
