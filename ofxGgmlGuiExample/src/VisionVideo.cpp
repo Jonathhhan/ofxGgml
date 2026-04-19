@@ -109,6 +109,167 @@ constexpr int kVideoEditPresetCount =
 
 } // namespace
 
+void ofApp::setupHoloscanBridge() {
+	if (visionProfiles.empty()) {
+		visionProfiles = ofxGgmlVisionInference::defaultProfiles();
+	}
+	selectedVisionProfileIndex = std::clamp(
+		selectedVisionProfileIndex,
+		0,
+		std::max(0, static_cast<int>(visionProfiles.size()) - 1));
+
+	copyStringToBuffer(holoscanVisionPrompt, sizeof(holoscanVisionPrompt), visionPrompt);
+	copyStringToBuffer(
+		holoscanVisionSystemPrompt,
+		sizeof(holoscanVisionSystemPrompt),
+		visionSystemPrompt);
+
+	ofxGgmlHoloscanSettings settings;
+	settings.enabled = true;
+	settings.useEventScheduler = true;
+	settings.workerThreads = 2;
+	holoscanBridge.setup(&visionInference, settings);
+	if (!visionProfiles.empty()) {
+		holoscanBridge.submitProfile(
+			visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)]);
+	}
+	holoscanBridge.submitRequestTemplate(makeHoloscanVisionRequestTemplate());
+	holoscanBridgeEnabled = true;
+#if defined(TARGET_LINUX)
+	holoscanVisionStatus = holoscanBridge.isHoloscanAvailable()
+		? "Holoscan bridge ready. Native runtime will activate when the SDK is available."
+		: "Holoscan bridge configured. Install the NVIDIA Holoscan SDK to enable the native runtime.";
+#else
+	holoscanVisionStatus =
+		"Holoscan is Linux-only for now. The bridge stays in addon fallback mode on this platform.";
+#endif
+}
+
+ofxGgmlHoloscanVisionRequestTemplate ofApp::makeHoloscanVisionRequestTemplate() const {
+	ofxGgmlHoloscanVisionRequestTemplate requestTemplate;
+	requestTemplate.task = static_cast<ofxGgmlVisionTask>(visionTaskIndex);
+	requestTemplate.prompt = trim(
+		holoscanUseCurrentVisionRequest ? visionPrompt : holoscanVisionPrompt);
+	requestTemplate.systemPrompt = trim(
+		holoscanUseCurrentVisionRequest ? visionSystemPrompt : holoscanVisionSystemPrompt);
+	requestTemplate.maxTokens = std::max(32, maxTokens);
+	requestTemplate.temperature = std::max(0.0f, temperature);
+	return requestTemplate;
+}
+
+void ofApp::drawHoloscanBridgeSection() {
+	ImGui::Separator();
+	if (!ImGui::CollapsingHeader("Holoscan Bridge", ImGuiTreeNodeFlags_DefaultOpen)) {
+		return;
+	}
+
+	ImGui::Checkbox("Enable Holoscan lane", &holoscanBridgeEnabled);
+#if defined(TARGET_LINUX)
+	if (holoscanBridge.isHoloscanAvailable()) {
+		ImGui::TextDisabled("Native Holoscan runtime is available on this machine.");
+	} else {
+		ImGui::TextDisabled("Native Holoscan runtime is not installed. The bridge will use the addon fallback path.");
+	}
+#else
+	ImGui::TextDisabled("Holoscan is Linux-only for now. This panel stays in addon fallback mode on this platform.");
+#endif
+	if (!holoscanVisionStatus.empty()) {
+		ImGui::TextWrapped("%s", holoscanVisionStatus.c_str());
+	}
+
+	ImGui::Checkbox("Use current Vision request", &holoscanUseCurrentVisionRequest);
+	if (!holoscanUseCurrentVisionRequest) {
+		ImGui::SetNextItemWidth(-1.0f);
+		ImGui::InputTextMultiline(
+			"Holoscan Prompt",
+			holoscanVisionPrompt,
+			sizeof(holoscanVisionPrompt),
+			ImVec2(-1.0f, 90.0f));
+		ImGui::SetNextItemWidth(-1.0f);
+		ImGui::InputTextMultiline(
+			"Holoscan System",
+			holoscanVisionSystemPrompt,
+			sizeof(holoscanVisionSystemPrompt),
+			ImVec2(-1.0f, 70.0f));
+	}
+
+	ImGui::BeginDisabled(!holoscanBridgeEnabled);
+	if (!holoscanBridgeRunning) {
+		if (ImGui::Button("Start Bridge", ImVec2(140, 0))) {
+			if (!visionProfiles.empty()) {
+				holoscanBridge.submitProfile(
+					visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)]);
+			}
+			holoscanBridge.submitRequestTemplate(makeHoloscanVisionRequestTemplate());
+			if (holoscanBridge.startVisionPipeline()) {
+				holoscanBridgeRunning = true;
+				holoscanVisionStatus = holoscanBridge.isHoloscanAvailable()
+					? "Holoscan bridge started."
+					: "Holoscan bridge started in addon fallback mode.";
+			} else {
+				holoscanVisionStatus = trim(holoscanBridge.getLastError());
+			}
+		}
+	} else if (ImGui::Button("Stop Bridge", ImVec2(140, 0))) {
+		holoscanBridge.stop();
+		holoscanBridgeRunning = false;
+		holoscanVisionStatus = "Holoscan bridge stopped.";
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(std::strlen(visionImagePath) == 0);
+	if (ImGui::Button("Submit Loaded Image", ImVec2(170, 0))) {
+		if (!holoscanBridgeRunning) {
+			if (!visionProfiles.empty()) {
+				holoscanBridge.submitProfile(
+					visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)]);
+			}
+			holoscanBridge.submitRequestTemplate(makeHoloscanVisionRequestTemplate());
+			if (!holoscanBridge.startVisionPipeline()) {
+				holoscanVisionStatus = trim(holoscanBridge.getLastError());
+				ImGui::EndDisabled();
+				ImGui::EndDisabled();
+				return;
+			}
+			holoscanBridgeRunning = true;
+		}
+
+		ofPixels pixels;
+		if (!ofLoadImage(pixels, trim(visionImagePath))) {
+			holoscanVisionStatus = "Failed to load the selected vision image for Holoscan bridge submission.";
+		} else {
+			if (!visionProfiles.empty()) {
+				holoscanBridge.submitProfile(
+					visionProfiles[static_cast<size_t>(selectedVisionProfileIndex)]);
+			}
+			holoscanBridge.submitRequestTemplate(makeHoloscanVisionRequestTemplate());
+			holoscanBridge.submitFrame(pixels, ofGetElapsedTimef(), "vision-image");
+			holoscanVisionStatus = "Submitted the loaded image to the Holoscan bridge.";
+		}
+	}
+	ImGui::EndDisabled();
+	ImGui::EndDisabled();
+
+	ImGui::TextDisabled("Completed frames: %d", holoscanVisionCompletedFrames);
+	if (holoscanBridge.hasPreviewFrame()) {
+		const ofTexture & previewTexture = holoscanBridge.getPreviewTexture();
+		const float availWidth = std::max(160.0f, ImGui::GetContentRegionAvail().x);
+		const float maxWidth = std::min(availWidth, 420.0f);
+		const float texWidth = std::max(1.0f, previewTexture.getWidth());
+		const float texHeight = std::max(1.0f, previewTexture.getHeight());
+		const float scale = std::min(maxWidth / texWidth, 240.0f / texHeight);
+		const ImVec2 drawSize(
+			std::max(1.0f, texWidth * scale),
+			std::max(1.0f, texHeight * scale));
+
+		ImGui::BeginChild("##HoloscanVisionPreview", ImVec2(0, drawSize.y + 12.0f), true);
+		ofxImGui::AddImage(previewTexture, glm::vec2(drawSize.x, drawSize.y));
+		ImGui::EndChild();
+	}
+	if (!holoscanVisionLatestOutput.empty()) {
+		ImGui::TextWrapped("%s", holoscanVisionLatestOutput.c_str());
+	}
+}
+
 void ofApp::resetVideoEditWorkflowState() {
 	videoEditWorkflowActiveStepIndex = -1;
 	videoEditWorkflowCompletedStepIndices.clear();
@@ -1620,6 +1781,7 @@ void ofApp::drawVisionPanel() {
 		runVideoInference();
 	}
 	ImGui::EndDisabled();
+	drawHoloscanBridgeSection();
 
 	ImGui::Separator();
 	ImGui::Text("Output:");

@@ -1038,11 +1038,29 @@ if (customSystemPrompt[0] == '\0') {
 		sizeof(customSystemPrompt),
 		"You are a helpful assistant. Respond concisely.");
 }
+setupHoloscanBridge();
 // Apply default theme.
 applyTheme(themeIndex);
 }
 
 void ofApp::update() {
+  if (holoscanBridgeRunning) {
+		holoscanBridge.update();
+		const auto finishedResults = holoscanBridge.consumeFinishedResults();
+		if (!finishedResults.empty()) {
+			holoscanVisionCompletedFrames += static_cast<int>(finishedResults.size());
+			const auto & latest = finishedResults.back();
+			holoscanVisionLatestOutput = latest.result.success ? latest.result.text : latest.result.error;
+			holoscanVisionStatus =
+				(latest.result.success ? "Holoscan vision result ready" : "Holoscan vision request failed") +
+				std::string(" for ") +
+				(latest.sourceLabel.empty() ? std::string("frame") : latest.sourceLabel) + ".";
+		}
+		const std::string holoscanError = trim(holoscanBridge.getLastError());
+		if (!holoscanError.empty()) {
+			holoscanVisionStatus = holoscanError;
+		}
+  }
   if (!visionPreviewVideoLoadedPath.empty()) {
     visionPreviewVideo.update();
   }
@@ -1198,6 +1216,7 @@ gui.end();
 
 void ofApp::exit() {
   autoSaveSession();
+  holoscanBridge.shutdown();
   if (!visionPreviewVideoLoadedPath.empty()) {
     visionPreviewVideo.stop();
     visionPreviewVideo.close();

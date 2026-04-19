@@ -44,13 +44,16 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
 - `ofxGgmlVideoInference` for backend-driven video understanding, starting with sampled-frame analysis and room for future specialized video backends
 - `ofxGgmlVideoPlanner` for beat planning, multi-scene sequencing, and AI-assisted edit-plan generation that can feed video, diffusion, or writing workflows
+  - the planner remains generation-agnostic so apps can pair those plans with `ofxStableDiffusion`, `ofxVlc4`, or external renderers while keeping one shared planning/export manifest
 - `ofxGgmlMontagePlanner` for subtitle-driven montage planning, ranked clip selection, editor briefs, and CMX-style EDL export
 - `ofxGgmlMontagePreviewBridge` as a playback-facing bridge surface that exposes source-timed and montage-timed subtitle tracks, cue lookup, and playlist-oriented preview data for companions such as `ofxVlc4`
+- `ofxGgmlHoloscanBridge` as an optional live `frame -> vision -> preview/result` bridge for Holoscan-style media pipelines, with a native Holoscan runtime path on Linux and the addon fallback lane kept for other platforms for now
 - `ofxGgmlImageSearch` for internet reference-image lookup through pluggable providers, with a working Wikimedia Commons backend
 - `ofxGgmlWebCrawler` as an optional website-ingestion bridge layer, with a `Mojo` CLI adapter for local website-to-Markdown crawling workflows
 - `ofxGgmlCitationSearch` for topic-oriented source-grounded quote extraction, with structured citation items built from loaded URLs or crawler-ingested website content
 - `ofxGgmlVideoEssayWorkflow` for local-first `topic -> cited outline -> narrated script -> voice cues -> SRT -> visual concept -> scene/edit planning` orchestration on top of citation search, the text assistant, and the shared video planner
 - `ofxGgmlVideoEssayWorkflow` stays intentionally staged: research, outline, script, voice cues, and SRT/cue-sheet generation remain the core path, while scene/edit planning is layered on as a handoff-friendly Phase 3 instead of forcing one renderer or export path
+  - the workflow now also exposes request validation plus a reusable JSON manifest that captures topic, sources, cues, planning summaries, and warnings for downstream render/export tools
 - `ofxGgmlMediaPromptGenerator` for local-first cross-media prompt translation, starting with `Music -> Image` prompt generation that can reuse transcripts, lyrics, and existing text backends before handing the result to diffusion workflows
 - `ofxGgmlMusicGenerator` for general music-prompt generation, local-first ABC notation sketch generation, prompt sanitization/validation, and future pluggable rendered-audio backend bridges
 - `ofxGgmlMilkDropGenerator` for MilkDrop / projectM preset generation and editing through the existing text-inference backend, with prompt preparation, preset sanitization, and `.milk` file saving helpers
@@ -77,6 +80,8 @@ This addon is released under the [MIT License](LICENSE).
 - Windows build scripts that refresh Visual Studio linking automatically
 - GUI example for local chat, review, and script-assisted workflows built mostly on addon helpers
   - GUI example `Easy` mode now demonstrates the high-level `ofxGgmlEasy` facade directly, including one-click chat, summarize, translate, citation search, `Video Essay`, and coding-agent `Plan` flows using the currently selected backend/model
+  - GUI example Vision mode now also includes a small `Holoscan Bridge` section for live frame submission and inline preview.
+    - The native Holoscan runtime path is Linux-only for now; Windows and other platforms stay on the addon fallback lane until that runtime is validated there.
   - GUI example Translate mode with auto-detect source language, natural vs. literal translation shortcuts, detect-and-translate flow, and more reliable prompt/input handoff buttons
   - GUI example Chat and Translate modes now each keep a dedicated lightweight TTS preview lane, so spoken replies and translated voice output can be played, restarted, and stopped inline without bouncing through the main TTS panel
   - GUI example `Video Essay` mode now also supports optional `ofxVlc4` preview/render handoff, so a source video plus the generated essay SRT can be previewed live and texture-recorded into a muxed narration render without leaving the example
@@ -107,6 +112,7 @@ Core implementation is split by concern:
 - `src/inference/` for completion execution, grounded prompt assembly, and speech / vision / video inference helpers
 - `src/inference/` also now includes bridge scaffolds for optional CLIP-style ranking, TTS, diffusion/image-generation, and music-generation backends such as `clip.cpp`, OuteTTS, `ofxStableDiffusion`, and future rendered-audio generators, plus higher-level planners and preview bridges for video, montage, media-prompt translation, and image search workflows
 - `src/inference/` also now includes optional web-ingestion helpers such as `ofxGgmlWebCrawler` plus topic-oriented quote extraction via `ofxGgmlCitationSearch` for local crawler-backed RAG/document pipelines
+- `src/bridges/` for optional companion runtime bridges such as the Holoscan-backed live vision lane
 - `src/assistants/` for chat, code, workspace, review, and text-task helpers
 - `src/support/` for script sources, project memory, and the high-level `ofxGgmlEasy` facade
 

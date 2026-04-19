@@ -39,11 +39,18 @@ struct ofxGgmlVideoEssayVoiceCue {
 	double endSeconds = 0.0;
 };
 
+struct ofxGgmlVideoEssayValidation {
+	bool ok = true;
+	std::vector<std::string> errors;
+	std::vector<std::string> warnings;
+};
+
 struct ofxGgmlVideoEssayResult {
 	bool success = false;
 	float elapsedMs = 0.0f;
 	std::string backendName;
 	std::string error;
+	ofxGgmlVideoEssayValidation validation;
 	ofxGgmlCitationSearchResult citationResult;
 	ofxGgmlTextAssistantResult outlineResult;
 	ofxGgmlTextAssistantResult scriptResult;
@@ -58,6 +65,7 @@ struct ofxGgmlVideoEssayResult {
 	std::string editPlanJson;
 	std::string editPlanSummary;
 	std::string editorBrief;
+	std::string workflowManifestJson;
 	std::string scenePlanningError;
 	std::string editPlanningError;
 	ofxGgmlVideoPlan scenePlan;
@@ -96,6 +104,11 @@ public:
 		const std::vector<ofxGgmlVideoEssayVoiceCue> & cues);
 	static std::string buildEditSourceSummary(
 		const std::vector<ofxGgmlVideoEssaySection> & sections);
+	static ofxGgmlVideoEssayValidation validateRequest(
+		const ofxGgmlVideoEssayRequest & request);
+	static std::string buildWorkflowManifest(
+		const ofxGgmlVideoEssayRequest & request,
+		const ofxGgmlVideoEssayResult & result);
 
 private:
 	ofxGgmlCitationSearch m_citationSearch;

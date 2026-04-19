@@ -11,7 +11,10 @@ All notable changes to `ofxGgml` are documented in this file.
 - `ofxGgmlMusicGenerator` as a new local-first music helper for reusable music-prompt generation, ABC notation sketch generation, notation sanitization/validation, file saving, and future pluggable rendered-audio backends.
 - `ofxGgmlEasy` now also exposes music-prompt generation, `Image -> Music` prompt generation, and ABC notation helpers through the same high-level facade used by text, speech, citation, montage, and MilkDrop workflows.
 - `ofxGgmlVideoEssayWorkflow` as a new citation-grounded wrapper for `topic -> outline -> narrated script -> voice cues -> SRT`, built from the existing citation-search and text-assistant layers instead of a separate backend stack.
+- `ofxGgmlHoloscanBridge` as an optional live `frame -> vision -> preview/result` bridge, plus a small Vision-panel example lane for feeding frames into the current vision stack.
+  - The native Holoscan runtime path is Linux-only for now; other platforms stay on the addon fallback lane until that runtime is validated there.
 - The GUI example now includes a dedicated `Easy` mode that exercises the high-level `ofxGgmlEasy` facade directly for chat, summarize, translate, citation search, `Video Essay`, and coding-agent planning flows against the current backend/model selection.
+- `ofxGgmlVideoEssayWorkflow` now also exposes request validation plus a reusable JSON manifest for downstream render/export tools, so source-backed essay planning can travel more cleanly into `ofxVlc4`, diffusion, or external clip renderers.
 
 ### Changed
 - `ofxGgmlCodeAssistant` now derives a first-pass tool plan from structured results, emits prompt/chunk/tool/approval/completion events during runs, and can seed/update task memory directly from a reusable session object.

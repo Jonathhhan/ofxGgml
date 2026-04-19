@@ -183,6 +183,8 @@ private:
 	char visionPrompt[4096] = {};
 	char visionImagePath[1024] = {};
 	char visionVideoPath[1024] = {};
+	char holoscanVisionPrompt[2048] = {};
+	char holoscanVisionSystemPrompt[2048] = {};
 	char imageSearchPrompt[1024] = {};
 	char visionModelPath[1024] = {};
 	char visionServerUrl[256] = "http://127.0.0.1:8080";
@@ -198,6 +200,10 @@ private:
 	char videoEditGoal[4096] = {};
 	int visionTaskIndex = 0;
 	int videoTaskIndex = 0;
+	bool holoscanBridgeEnabled = false;
+	bool holoscanBridgeRunning = false;
+	bool holoscanUseCurrentVisionRequest = true;
+	int holoscanVisionCompletedFrames = 0;
 	int visionVideoMaxFrames = 6;
 	char videoPlanJson[16384] = {};
 	char videoEditPlanJson[16384] = {};
@@ -341,6 +347,8 @@ private:
 	std::string customOutput;
 	std::string citationOutput;
 	std::string visionOutput;
+	std::string holoscanVisionStatus;
+	std::string holoscanVisionLatestOutput;
 	std::string montageSummary;
 	std::string montageEditorBrief;
 	std::string montageEdlText;
@@ -716,6 +724,7 @@ private:
 	ofxGgmlCodingAgent scriptCodingAgent;
 	ofxGgmlWorkspaceAssistant scriptWorkspaceAssistant;
 	ofxGgmlTextAssistant textAssistant;
+	ofxGgmlHoloscanBridge holoscanBridge;
 	ofxGgmlVisionInference visionInference;
 	ofxGgmlVideoInference videoInference;
 	ofxGgmlSpeechInference speechInference;
@@ -812,6 +821,8 @@ private:
 		AiMode mode,
 		const ofxGgmlTextAssistantRequest & request,
 		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {});
+	void setupHoloscanBridge();
+	void drawHoloscanBridgeSection();
 	void runEasyModeExample();
 	void runVoiceTranslatorWorkflow(bool useAudioInput);
 	void runScriptAssistantRequest(
@@ -835,6 +846,7 @@ private:
 		const std::string & heading,
 		bool enableAutoLiveContext = false) const;
 	void runHierarchicalReview(const std::string & overrideQuery = std::string());
+	ofxGgmlHoloscanVisionRequestTemplate makeHoloscanVisionRequestTemplate() const;
 	void runVisionInference();
 	void runVideoInference();
 	void runVideoPlanning();

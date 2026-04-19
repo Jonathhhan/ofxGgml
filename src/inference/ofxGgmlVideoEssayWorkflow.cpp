@@ -447,25 +447,106 @@ std::string ofxGgmlVideoEssayWorkflow::buildEditSourceSummary(
 	return summary.str();
 }
 
+ofxGgmlVideoEssayValidation ofxGgmlVideoEssayWorkflow::validateRequest(
+	const ofxGgmlVideoEssayRequest & request) {
+	ofxGgmlVideoEssayValidation validation;
+	if (trimCopy(request.modelPath).empty()) {
+		validation.ok = false;
+		validation.errors.push_back("Video essay workflow requires a configured text model path.");
+	}
+	if (trimCopy(request.topic).empty()) {
+		validation.ok = false;
+		validation.errors.push_back("Video essay workflow topic is empty.");
+	}
+	if (!request.useCrawler && request.sourceUrls.empty()) {
+		validation.ok = false;
+		validation.errors.push_back("Video essay workflow needs loaded source URLs or a crawler URL.");
+	}
+	if (request.useCrawler && trimCopy(request.crawlerRequest.startUrl).empty()) {
+		validation.ok = false;
+		validation.errors.push_back("Video essay workflow crawler URL is empty.");
+	}
+	if (request.targetDurationSeconds < 20.0) {
+		validation.warnings.push_back(
+			"Very short target durations can collapse the outline and make narration pacing abrupt.");
+	}
+	if (request.maxCitations < 3) {
+		validation.warnings.push_back(
+			"Fewer than three citations can make the essay feel thin or under-sourced.");
+	}
+	if (trimCopy(request.tone).empty()) {
+		validation.warnings.push_back(
+			"Tone is empty. The generated narration may sound more generic than intended.");
+	}
+	if (trimCopy(request.audience).empty()) {
+		validation.warnings.push_back(
+			"Audience is empty. Consider naming the intended viewer level for better pacing and explanation depth.");
+	}
+	return validation;
+}
+
+std::string ofxGgmlVideoEssayWorkflow::buildWorkflowManifest(
+	const ofxGgmlVideoEssayRequest & request,
+	const ofxGgmlVideoEssayResult & result) {
+	ofJson manifest;
+	manifest["topic"] = request.topic;
+	manifest["target_duration_seconds"] = request.targetDurationSeconds;
+	manifest["tone"] = request.tone;
+	manifest["audience"] = request.audience;
+	manifest["include_counterpoints"] = request.includeCounterpoints;
+	manifest["use_crawler"] = request.useCrawler;
+	manifest["source_urls"] = request.sourceUrls;
+	manifest["crawler_start_url"] = request.crawlerRequest.startUrl;
+	manifest["max_citations"] = static_cast<int>(request.maxCitations);
+	manifest["success"] = result.success;
+	manifest["backend"] = result.backendName;
+	manifest["error"] = result.error;
+	manifest["visual_concept"] = result.visualConcept;
+	manifest["scene_plan_summary"] = result.scenePlanSummary;
+	manifest["edit_plan_summary"] = result.editPlanSummary;
+	manifest["editor_brief"] = result.editorBrief;
+	manifest["scene_planning_error"] = result.scenePlanningError;
+	manifest["edit_planning_error"] = result.editPlanningError;
+	manifest["validation"]["ok"] = result.validation.ok;
+	manifest["validation"]["errors"] = result.validation.errors;
+	manifest["validation"]["warnings"] = result.validation.warnings;
+
+	ofJson sections = ofJson::array();
+	for (const auto & section : result.sections) {
+		sections.push_back({
+			{"index", section.index},
+			{"title", section.title},
+			{"summary", section.summary},
+			{"estimated_duration_seconds", section.estimatedDurationSeconds},
+			{"source_indices", section.sourceIndices}
+		});
+	}
+	manifest["sections"] = std::move(sections);
+
+	ofJson cues = ofJson::array();
+	for (const auto & cue : result.voiceCues) {
+		cues.push_back({
+			{"index", cue.index},
+			{"section_index", cue.sectionIndex},
+			{"text", cue.text},
+			{"start_seconds", cue.startSeconds},
+			{"end_seconds", cue.endSeconds}
+		});
+	}
+	manifest["voice_cues"] = std::move(cues);
+	return manifest.dump(2);
+}
+
 ofxGgmlVideoEssayResult ofxGgmlVideoEssayWorkflow::run(
 	const ofxGgmlVideoEssayRequest & request) const {
 	ofxGgmlVideoEssayResult result;
 	const uint64_t startTimeMs = ofGetElapsedTimeMillis();
-
-	if (trimCopy(request.modelPath).empty()) {
-		result.error = "Video essay workflow requires a configured text model path.";
-		return result;
-	}
-	if (trimCopy(request.topic).empty()) {
-		result.error = "Video essay workflow topic is empty.";
-		return result;
-	}
-	if (!request.useCrawler && request.sourceUrls.empty()) {
-		result.error = "Video essay workflow needs loaded source URLs or a crawler URL.";
-		return result;
-	}
-	if (request.useCrawler && trimCopy(request.crawlerRequest.startUrl).empty()) {
-		result.error = "Video essay workflow crawler URL is empty.";
+	result.validation = validateRequest(request);
+	if (!result.validation.ok) {
+		result.error = result.validation.errors.empty()
+			? "Video essay workflow request is invalid."
+			: result.validation.errors.front();
+		result.workflowManifestJson = buildWorkflowManifest(request, result);
 		return result;
 	}
 
@@ -612,6 +693,15 @@ ofxGgmlVideoEssayResult ofxGgmlVideoEssayWorkflow::run(
 	result.backendName = !result.citationResult.backendName.empty()
 		? result.citationResult.backendName
 		: "VideoEssayWorkflow";
+	if (result.sections.empty()) {
+		result.validation.warnings.push_back(
+			"Script parsing did not yield named sections. Downstream scene and edit handoff may be less structured.");
+	}
+	if (trimCopy(result.visualConcept).empty()) {
+		result.validation.warnings.push_back(
+			"Visual concept generation returned empty output. Scene/edit planning will be limited to narration structure.");
+	}
+	result.workflowManifestJson = buildWorkflowManifest(request, result);
 	result.elapsedMs = static_cast<float>(ofGetElapsedTimeMillis() - startTimeMs);
 	return result;
 }
