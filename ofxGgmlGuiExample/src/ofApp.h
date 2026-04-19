@@ -340,6 +340,7 @@ private:
 	std::string montageClipPlaylistManifestPath;
 	std::string montageClipPlaylistStatusMessage;
 	std::string montageClipRenderOutputPath;
+	bool montageClipAutoRecordPending = false;
 	std::string videoPlanSummary;
 	std::string videoEditPlanSummary;
 	std::string speechOutput;
@@ -963,6 +964,8 @@ private:
 		ofxGgmlMontagePreviewTextFormat format,
 		std::string * errorOut = nullptr) const;
 	std::string exportMontageClipPlaylistManifest(std::string * errorOut = nullptr) const;
+	std::vector<std::string> collectGeneratedMontageClipPaths(std::string * statusOut = nullptr) const;
+	bool populateMontageClipPlaylistFromGeneratedOutputs(std::string * statusOut = nullptr);
 #if OFXGGML_HAS_OFXVLC4
 	bool ensureVideoEssayVlcPreviewInitialized(std::string * errorOut = nullptr);
 	bool loadVideoEssayVlcPreview(std::string * errorOut = nullptr);
@@ -980,6 +983,7 @@ private:
 	void drawMontageClipVlcPreview();
 	bool startMontageClipVlcRecording(std::string * errorOut = nullptr);
 	bool stopMontageClipVlcRecording(std::string * errorOut = nullptr);
+	bool startMontageGeneratedClipPreviewAndRecording(std::string * errorOut = nullptr);
 #endif
 	void rebuildMontageSubtitleTrackFromText();
 	void ensureDiffusionPreviewResources();

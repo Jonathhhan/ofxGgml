@@ -1011,6 +1011,17 @@ void ofApp::drawVisionPanel() {
 	}
 	ImGui::EndDisabled();
 	ImGui::SameLine();
+	if (ImGui::Button("Use generated outputs", ImVec2(180, 0))) {
+		std::string status;
+		if (populateMontageClipPlaylistFromGeneratedOutputs(&status)) {
+			montageClipPlaylistStatusMessage = status;
+		} else {
+			montageClipPlaylistStatusMessage =
+				status.empty() ? std::string("No generated video outputs are ready yet.") : status;
+		}
+		autoSaveSession();
+	}
+	ImGui::SameLine();
 	if (ImGui::Button("Browse clip...", ImVec2(130, 0))) {
 		ofFileDialogResult result = ofSystemLoadDialog("Select clip", false);
 		if (result.bSuccess) {
@@ -1065,6 +1076,17 @@ void ofApp::drawVisionPanel() {
 	}
 
 #if OFXGGML_HAS_OFXVLC4
+	if (ImGui::Button("Auto-fill + Preview/Record", ImVec2(220, 0))) {
+		std::string error;
+		if (startMontageGeneratedClipPreviewAndRecording(&error)) {
+			// status set by the helper
+		} else {
+			montageClipPlaylistStatusMessage =
+				error.empty() ? std::string("Failed to start the generated clip playlist export.") : error;
+		}
+		autoSaveSession();
+	}
+	ImGui::SameLine();
 	if (ImGui::Button("Load clip playlist in ofxVlc4", ImVec2(220, 0))) {
 		std::string error;
 		if (loadMontageClipVlcPreview(&error)) {

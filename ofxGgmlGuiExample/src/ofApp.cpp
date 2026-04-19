@@ -942,6 +942,24 @@ void ofApp::update() {
   if (montageVlcPreviewInitialized) {
 		montageVlcPreviewPlayer.update();
   }
+  if (montageClipVlcInitialized) {
+		montageClipVlcPlayer.update();
+		if (montageClipAutoRecordPending &&
+			!montageClipVlcPlayer.isVideoRecording() &&
+			montageClipVlcPlayer.getTexture().isAllocated()) {
+			std::string error;
+			if (startMontageClipVlcRecording(&error)) {
+				montageClipPlaylistStatusMessage =
+					"Loaded the generated playlist preview and started recording automatically.";
+			} else {
+				montageClipPlaylistStatusMessage =
+					error.empty() ? std::string("Failed to start automatic playlist recording.") : error;
+			}
+		}
+  }
+  if (videoEssayVlcPreviewInitialized) {
+		videoEssayVlcPreviewPlayer.update();
+  }
 #endif
   if (montagePreviewTimelinePlaying) {
 		const ofxGgmlMontagePreviewTrack * previewTrack = getSelectedMontagePreviewTrack();
@@ -4645,6 +4663,127 @@ void ofApp::drawMontageVlcPreview() {
 	}
 }
 
+std::vector<std::string> ofApp::collectGeneratedMontageClipPaths(std::string * statusOut) const {
+	struct CandidatePath {
+		std::string path;
+		std::string label;
+	};
+
+	const std::vector<CandidatePath> candidates = {
+		{trim(videoEssayLastRenderedVideoPath), "video essay render"},
+		{trim(montageClipRenderOutputPath), "montage playlist render"}
+	};
+
+	std::vector<std::string> results;
+	std::vector<std::string> notes;
+	std::unordered_set<std::string> seen;
+	for (const auto & candidate : candidates) {
+		if (candidate.path.empty()) {
+			continue;
+		}
+		if (!pathExists(candidate.path)) {
+			notes.push_back("Skipped missing " + candidate.label + ": " + candidate.path);
+			continue;
+		}
+
+		std::error_code ec;
+		const std::filesystem::path canonicalPath =
+			std::filesystem::weakly_canonical(std::filesystem::path(candidate.path), ec);
+		const std::string normalizedPath =
+			(ec ? std::filesystem::path(candidate.path) : canonicalPath)
+				.lexically_normal()
+				.string();
+		if (!seen.insert(ofToLower(normalizedPath)).second) {
+			continue;
+		}
+		results.push_back(normalizedPath);
+	}
+
+	if (statusOut != nullptr) {
+		if (results.empty()) {
+			*statusOut =
+				notes.empty()
+					? std::string("No generated video outputs are available yet. Render a video essay or montage playlist first.")
+					: notes.front();
+		} else {
+			std::ostringstream status;
+			status << "Found " << results.size() << " generated video output";
+			if (results.size() != 1) {
+				status << "s";
+			}
+			status << ".";
+			if (!notes.empty()) {
+				status << " " << notes.front();
+			}
+			*statusOut = status.str();
+		}
+	}
+
+	return results;
+}
+
+bool ofApp::populateMontageClipPlaylistFromGeneratedOutputs(std::string * statusOut) {
+	std::string generatedStatus;
+	const std::vector<std::string> generatedClipPaths =
+		collectGeneratedMontageClipPaths(&generatedStatus);
+	if (generatedClipPaths.empty()) {
+		if (statusOut != nullptr) {
+			*statusOut = generatedStatus;
+		}
+		return false;
+	}
+
+	std::vector<std::string> mergedClipPaths = extractPathList(montageClipPaths);
+	const size_t existingCount = mergedClipPaths.size();
+	std::unordered_set<std::string> seen;
+	for (const auto & path : mergedClipPaths) {
+		seen.insert(ofToLower(trim(path)));
+	}
+
+	size_t addedCount = 0;
+	for (const auto & path : generatedClipPaths) {
+		if (!seen.insert(ofToLower(path)).second) {
+			continue;
+		}
+		mergedClipPaths.push_back(path);
+		++addedCount;
+	}
+
+	if (addedCount == 0) {
+		if (statusOut != nullptr) {
+			*statusOut = "The generated video outputs are already in the montage clip playlist.";
+		}
+		return true;
+	}
+
+	std::ostringstream packed;
+	for (size_t i = 0; i < mergedClipPaths.size(); ++i) {
+		if (i > 0) {
+			packed << '\n';
+		}
+		packed << mergedClipPaths[i];
+	}
+	copyStringToBuffer(montageClipPaths, sizeof(montageClipPaths), packed.str());
+
+	if (statusOut != nullptr) {
+		std::ostringstream status;
+		status << "Added " << addedCount << " generated video output";
+		if (addedCount != 1) {
+			status << "s";
+		}
+		status << " to the montage clip playlist";
+		if (existingCount > 0) {
+			status << " while keeping " << existingCount << " existing clip";
+			if (existingCount != 1) {
+				status << "s";
+			}
+		}
+		status << ".";
+		*statusOut = status.str();
+	}
+	return true;
+}
+
 bool ofApp::ensureMontageClipVlcPreviewInitialized(std::string * errorOut) {
 	if (montageClipVlcInitialized) {
 		return true;
@@ -4711,6 +4850,7 @@ bool ofApp::loadMontageClipVlcPreview(std::string * errorOut) {
 }
 
 void ofApp::closeMontageClipVlcPreview() {
+	montageClipAutoRecordPending = false;
 	if (!montageClipVlcInitialized) {
 		return;
 	}
@@ -4778,7 +4918,11 @@ void ofApp::drawMontageClipVlcPreview() {
 }
 
 bool ofApp::startMontageClipVlcRecording(std::string * errorOut) {
-	if (!loadMontageClipVlcPreview(errorOut)) {
+	montageClipAutoRecordPending = false;
+	const bool hasLoadedPreview =
+		montageClipVlcInitialized &&
+		!montageClipVlcPlayer.getPlaylistStateInfo().items.empty();
+	if (!hasLoadedPreview && !loadMontageClipVlcPreview(errorOut)) {
 		return false;
 	}
 	if (montageClipVlcPlayer.isVideoRecording()) {
@@ -4829,7 +4973,64 @@ bool ofApp::startMontageClipVlcRecording(std::string * errorOut) {
 	return true;
 }
 
+bool ofApp::startMontageGeneratedClipPreviewAndRecording(std::string * errorOut) {
+	std::string populateStatus;
+	if (!populateMontageClipPlaylistFromGeneratedOutputs(&populateStatus)) {
+		montageClipPlaylistStatusMessage = populateStatus;
+		if (errorOut != nullptr) {
+			*errorOut = populateStatus;
+		}
+		return false;
+	}
+
+	std::string manifestError;
+	const std::string manifestPath = exportMontageClipPlaylistManifest(&manifestError);
+	if (!manifestPath.empty()) {
+		montageClipPlaylistManifestPath = manifestPath;
+	}
+
+	std::string loadError;
+	if (!loadMontageClipVlcPreview(&loadError)) {
+		montageClipPlaylistStatusMessage =
+			loadError.empty() ? std::string("Failed to load the generated clip playlist preview.") : loadError;
+		if (errorOut != nullptr) {
+			*errorOut = montageClipPlaylistStatusMessage;
+		}
+		return false;
+	}
+
+	if (!montageClipVlcPlayer.getTexture().isAllocated()) {
+		montageClipAutoRecordPending = true;
+		montageClipPlaylistStatusMessage =
+			populateStatus +
+			" Loaded the playlist preview. Recording will start automatically when the first frame is ready.";
+		if (errorOut != nullptr) {
+			errorOut->clear();
+		}
+		return true;
+	}
+
+	std::string recordError;
+	if (!startMontageClipVlcRecording(&recordError)) {
+		montageClipPlaylistStatusMessage =
+			recordError.empty() ? std::string("Failed to start recording the generated clip playlist preview.") : recordError;
+		if (errorOut != nullptr) {
+			*errorOut = montageClipPlaylistStatusMessage;
+		}
+		return false;
+	}
+
+	montageClipPlaylistStatusMessage =
+		populateStatus +
+		" Loaded the playlist preview and started recording. Use 'Stop + Render playlist' to finalize the mp4.";
+	if (errorOut != nullptr) {
+		errorOut->clear();
+	}
+	return true;
+}
+
 bool ofApp::stopMontageClipVlcRecording(std::string * errorOut) {
+	montageClipAutoRecordPending = false;
 	if (!montageClipVlcInitialized || !montageClipVlcPlayer.isVideoRecording()) {
 		if (errorOut) {
 			*errorOut = "Montage clip playlist recording is not active.";
@@ -4890,6 +5091,129 @@ bool ofApp::stopMontageClipVlcRecording(std::string * errorOut) {
 	montageClipVlcError.clear();
 	if (errorOut) {
 		errorOut->clear();
+	}
+	return true;
+}
+#endif
+
+#if !OFXGGML_HAS_OFXVLC4
+std::vector<std::string> ofApp::collectGeneratedMontageClipPaths(std::string * statusOut) const {
+	struct CandidatePath {
+		std::string path;
+		std::string label;
+	};
+
+	const std::vector<CandidatePath> candidates = {
+		{trim(videoEssayLastRenderedVideoPath), "video essay render"},
+		{trim(montageClipRenderOutputPath), "montage playlist render"}
+	};
+
+	std::vector<std::string> results;
+	std::vector<std::string> notes;
+	std::unordered_set<std::string> seen;
+	for (const auto & candidate : candidates) {
+		if (candidate.path.empty()) {
+			continue;
+		}
+		if (!pathExists(candidate.path)) {
+			notes.push_back("Skipped missing " + candidate.label + ": " + candidate.path);
+			continue;
+		}
+
+		std::error_code ec;
+		const std::filesystem::path canonicalPath =
+			std::filesystem::weakly_canonical(std::filesystem::path(candidate.path), ec);
+		const std::string normalizedPath =
+			(ec ? std::filesystem::path(candidate.path) : canonicalPath)
+				.lexically_normal()
+				.string();
+		if (!seen.insert(ofToLower(normalizedPath)).second) {
+			continue;
+		}
+		results.push_back(normalizedPath);
+	}
+
+	if (statusOut != nullptr) {
+		if (results.empty()) {
+			*statusOut =
+				notes.empty()
+					? std::string("No generated video outputs are available yet. Render a video essay or montage playlist first.")
+					: notes.front();
+		} else {
+			std::ostringstream status;
+			status << "Found " << results.size() << " generated video output";
+			if (results.size() != 1) {
+				status << "s";
+			}
+			status << ".";
+			if (!notes.empty()) {
+				status << " " << notes.front();
+			}
+			*statusOut = status.str();
+		}
+	}
+
+	return results;
+}
+
+bool ofApp::populateMontageClipPlaylistFromGeneratedOutputs(std::string * statusOut) {
+	std::string generatedStatus;
+	const std::vector<std::string> generatedClipPaths =
+		collectGeneratedMontageClipPaths(&generatedStatus);
+	if (generatedClipPaths.empty()) {
+		if (statusOut != nullptr) {
+			*statusOut = generatedStatus;
+		}
+		return false;
+	}
+
+	std::vector<std::string> mergedClipPaths = extractPathList(montageClipPaths);
+	const size_t existingCount = mergedClipPaths.size();
+	std::unordered_set<std::string> seen;
+	for (const auto & path : mergedClipPaths) {
+		seen.insert(ofToLower(trim(path)));
+	}
+
+	size_t addedCount = 0;
+	for (const auto & path : generatedClipPaths) {
+		if (!seen.insert(ofToLower(path)).second) {
+			continue;
+		}
+		mergedClipPaths.push_back(path);
+		++addedCount;
+	}
+
+	if (addedCount == 0) {
+		if (statusOut != nullptr) {
+			*statusOut = "The generated video outputs are already in the montage clip playlist.";
+		}
+		return true;
+	}
+
+	std::ostringstream packed;
+	for (size_t i = 0; i < mergedClipPaths.size(); ++i) {
+		if (i > 0) {
+			packed << '\n';
+		}
+		packed << mergedClipPaths[i];
+	}
+	copyStringToBuffer(montageClipPaths, sizeof(montageClipPaths), packed.str());
+
+	if (statusOut != nullptr) {
+		std::ostringstream status;
+		status << "Added " << addedCount << " generated video output";
+		if (addedCount != 1) {
+			status << "s";
+		}
+		status << " to the montage clip playlist";
+		if (existingCount > 0) {
+			status << " while keeping " << existingCount << " existing clip";
+			if (existingCount != 1) {
+				status << "s";
+			}
+		}
+		status << ".";
+		*statusOut = status.str();
 	}
 	return true;
 }

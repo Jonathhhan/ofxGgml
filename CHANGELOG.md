@@ -23,6 +23,7 @@ All notable changes to `ofxGgml` are documented in this file.
   - The GUI example now includes a dedicated `Video Essay` mode that can turn a topic plus loaded URLs or a crawler seed into source-backed research notes, a cited outline, a spoken script, voice cues, an SRT-ready cue sheet, and Phase 3 visual/scene/edit handoff output with one-click TTS, Vision, Diffusion, and Write reuse.
   - `Video Essay` can now also reuse the existing optional `ofxVlc4` lane in the GUI example for source-video subtitle preview plus texture-recorded render export, including muxing the generated narration track into the final essay video when voiceover audio is available.
   - Montage now also exposes a clip-playlist export lane in the GUI example, including JSON manifest export, optional `ofxVlc4` playlist preview, and texture-recorded playlist renders with optional external-audio mux.
+  - Montage clip-playlist export can now auto-collect generated video outputs such as essay renders or previous playlist renders, merge them into the current clip list, and defer recording until the `ofxVlc4` preview texture is actually ready.
   - `ofxGgmlInference::generateBatch(...)` now honors `allowParallelProcessing` directly and uses a small worker-pool style server-batch fallback instead of repeatedly spawning per-chunk thread bursts.
   - Chat and Translate now share the same lightweight TTS-preview pattern in the GUI example, with dedicated inline playback controls and a small shared preview/request state instead of duplicated per-mode wiring.
 
