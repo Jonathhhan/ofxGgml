@@ -81,6 +81,7 @@ This addon is released under the [MIT License](LICENSE).
 - Windows build scripts that refresh Visual Studio linking automatically
 - GUI example for local chat, review, and script-assisted workflows built mostly on addon helpers
   - GUI example `Easy` mode now demonstrates the high-level `ofxGgmlEasy` facade directly, including one-click chat, summarize, translate, citation search, `Video Essay`, and coding-agent `Plan` flows using the currently selected backend/model
+  - GUI example sidebar loading is now more centralized: `Video` has its own recommended catalog model, text modes can override the selected preset with any local GGUF path, and `Image` mode now keeps diffusion model / VAE / init / mask loading together in one shared sidebar section
   - GUI example Vision mode now also includes a small `Holoscan Bridge` section for live frame submission and inline preview.
     - The native Holoscan runtime path is Linux-only for now; Windows and other platforms stay on the addon fallback lane until that runtime is validated there.
   - GUI example Translate mode with auto-detect source language, natural vs. literal translation shortcuts, detect-and-translate flow, and more reliable prompt/input handoff buttons
@@ -179,6 +180,12 @@ By default, helper scripts now prefer a shared addon-level model folder:
 - `models/`
 
 That keeps large GGUF / Whisper model files out of per-example `bin/data/models` copies during development. The GUI example still falls back to bundled `bin/data/models` when you package a standalone app.
+
+In the current GUI example:
+
+- `Video` mode now has a dedicated recommended text-model preset in the shared catalog instead of relying on a generic text default
+- the shared sidebar can override the selected text-model preset with any local GGUF file through `Browse GGUF...`
+- `Image` mode keeps diffusion asset loading centralized in the sidebar under `Image Assets`, including diffusion model, optional VAE, init image, and inpaint mask image
 
 On Windows, the GUI example also adds central runtime folders such as:
 

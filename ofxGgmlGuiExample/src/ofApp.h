@@ -704,6 +704,7 @@ private:
 	// -- model presets --
 	std::vector<ModelPreset> modelPresets;
 	int selectedModelIndex = 0;
+	char customModelPath[1024] = {};
 	std::array<int, kModeCount> taskDefaultModelIndices = {};
 	mutable int cachedModelPathIndex = -1;
 	mutable std::string cachedModelPath;

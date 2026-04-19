@@ -423,39 +423,19 @@ void ofApp::drawDiffusionPanel() {
 		showWrappedTooltip("Copies the current Write panel text into the diffusion prompt.");
 	}
 
-	ImGui::SetNextItemWidth(compactModeFieldWidth);
-	ImGui::InputText("Model path", diffusionModelPath, sizeof(diffusionModelPath));
-	ImGui::SameLine();
-	if (ImGui::Button("Browse model...##Diffusion", ImVec2(110, 0))) {
-		ofFileDialogResult result = ofSystemLoadDialog("Select diffusion model", false);
-		if (result.bSuccess) {
-			copyStringToBuffer(diffusionModelPath, sizeof(diffusionModelPath), result.getPath());
-		}
-	}
-
-	ImGui::SetNextItemWidth(compactModeFieldWidth);
-	ImGui::InputText("VAE path", diffusionVaePath, sizeof(diffusionVaePath));
-	ImGui::SameLine();
-	if (ImGui::Button("Browse VAE...##Diffusion", ImVec2(110, 0))) {
-		ofFileDialogResult result = ofSystemLoadDialog("Select VAE file", false);
-		if (result.bSuccess) {
-			copyStringToBuffer(diffusionVaePath, sizeof(diffusionVaePath), result.getPath());
-		}
+	ImGui::TextDisabled("Model and VAE paths are managed in the sidebar.");
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Use the shared Image Assets section in the sidebar to load the diffusion model, VAE, and any task-specific images.");
 	}
 
 	if (needsInitImage) {
-		ImGui::SetNextItemWidth(compactModeFieldWidth);
-		ImGui::InputText("Init image", diffusionInitImagePath, sizeof(diffusionInitImagePath));
+		const std::string initImageLabel =
+			trim(diffusionInitImagePath).empty()
+				? std::string("(load it from the sidebar)")
+				: ofFilePath::getFileName(trim(diffusionInitImagePath));
+		ImGui::TextDisabled("Init image");
 		ImGui::SameLine();
-		if (ImGui::Button("Browse init...##Diffusion", ImVec2(110, 0))) {
-			ofFileDialogResult result = ofSystemLoadDialog("Select init image", false);
-			if (result.bSuccess) {
-				copyStringToBuffer(
-					diffusionInitImagePath,
-					sizeof(diffusionInitImagePath),
-					result.getPath());
-			}
-		}
+		ImGui::TextUnformatted(initImageLabel.c_str());
 		drawDiffusionImagePreview(
 			"Init preview",
 			trim(diffusionInitImagePath),
@@ -465,18 +445,13 @@ void ofApp::drawDiffusionPanel() {
 	}
 
 	if (needsMaskImage) {
-		ImGui::SetNextItemWidth(compactModeFieldWidth);
-		ImGui::InputText("Mask image", diffusionMaskImagePath, sizeof(diffusionMaskImagePath));
+		const std::string maskImageLabel =
+			trim(diffusionMaskImagePath).empty()
+				? std::string("(load it from the sidebar)")
+				: ofFilePath::getFileName(trim(diffusionMaskImagePath));
+		ImGui::TextDisabled("Mask image");
 		ImGui::SameLine();
-		if (ImGui::Button("Browse mask...##Diffusion", ImVec2(110, 0))) {
-			ofFileDialogResult result = ofSystemLoadDialog("Select mask image", false);
-			if (result.bSuccess) {
-				copyStringToBuffer(
-					diffusionMaskImagePath,
-					sizeof(diffusionMaskImagePath),
-					result.getPath());
-			}
-		}
+		ImGui::TextUnformatted(maskImageLabel.c_str());
 		drawDiffusionImagePreview(
 			"Mask preview",
 			trim(diffusionMaskImagePath),

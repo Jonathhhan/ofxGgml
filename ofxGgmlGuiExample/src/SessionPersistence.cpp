@@ -136,6 +136,7 @@ bool ofApp::saveSession(const std::string & path) {
 		{"citationSeedUrl", std::string(citationSeedUrl)},
 		{"textServerUrl", std::string(textServerUrl)},
 		{"textServerModel", std::string(textServerModel)},
+		{"customModelPath", std::string(customModelPath)},
 		{"visionPrompt", std::string(visionPrompt)},
 		{"visionImagePath", std::string(visionImagePath)},
 		{"visionVideoPath", std::string(visionVideoPath)},
@@ -578,6 +579,7 @@ bool ofApp::loadSession(const std::string & path) {
 	copyJsonString(citationSeedUrl, sizeof(citationSeedUrl), buffers, "citationSeedUrl");
 	copyJsonString(textServerUrl, sizeof(textServerUrl), buffers, "textServerUrl");
 	copyJsonString(textServerModel, sizeof(textServerModel), buffers, "textServerModel");
+	copyJsonString(customModelPath, sizeof(customModelPath), buffers, "customModelPath");
 	copyJsonString(visionPrompt, sizeof(visionPrompt), buffers, "visionPrompt");
 	copyJsonString(visionImagePath, sizeof(visionImagePath), buffers, "visionImagePath");
 	copyJsonString(visionVideoPath, sizeof(visionVideoPath), buffers, "visionVideoPath");

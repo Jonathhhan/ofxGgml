@@ -62,7 +62,12 @@
     "write": 1,
     "translate": 1,
     "custom": 1,
+    "videoEssay": 3,
+    "longVideo": 3,
     "vision": 1,
-    "speech": 1
+    "speech": 1,
+    "diffusion": 1,
+    "milkdrop": 1,
+    "easy": 1
   }
 }
