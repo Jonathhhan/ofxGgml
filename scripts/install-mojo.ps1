@@ -111,6 +111,9 @@ $mojoInstallCommand = if ($Stable) {
 $wrapperShPath = Join-Path $BinDir 'mojo.sh'
 $wrapperBatPath = Join-Path $BinDir 'mojo.bat'
 $setupShPath = Join-Path $BinDir 'install-mojo-wsl.sh'
+$crawlerScriptPath = Join-Path $BinDir 'mojo_crawl.py'
+$crawlerTemplatePath = Join-Path $scriptRoot 'mojo-crawl.py'
+$crawlerScriptWsl = Get-WslPath $crawlerScriptPath
 
 $wrapperSh = @'
 #!/usr/bin/env bash
@@ -122,9 +125,20 @@ if [[ ! -x "$MOJO_BIN" ]]; then
   echo "[Error] Mojo is not installed in $PROJECT_DIR. Run scripts/install-mojo.ps1 first." >&2
   exit 1
 fi
-exec "$MOJO_BIN" "$@"
+CRAWLER_SCRIPT="__CRAWLER_SCRIPT__"
+case "${1:-}" in
+  ""|--help|-h|help|--version|-V|version|run|build|test|repl|format|doc)
+    exec "$MOJO_BIN" "$@"
+    ;;
+esac
+if [[ -f "$CRAWLER_SCRIPT" ]]; then
+  exec python3 "$CRAWLER_SCRIPT" "$@"
+fi
+echo "[Error] Mojo crawler script was not found at $CRAWLER_SCRIPT." >&2
+exit 1
 '@
 $wrapperSh = $wrapperSh.Replace('__PROJECT_DIR__', $projectDirWsl)
+$wrapperSh = $wrapperSh.Replace('__CRAWLER_SCRIPT__', $crawlerScriptWsl)
 
 $wrapperBat = @'
 @echo off
@@ -145,6 +159,11 @@ exit /b %ERRORLEVEL%
 '@
 
 Write-Step "Writing Mojo wrapper scripts"
+if (-not (Test-Path $crawlerTemplatePath)) {
+    throw "Crawler template was not found at $crawlerTemplatePath"
+}
+$crawlerScript = Get-Content $crawlerTemplatePath -Raw
+New-Utf8File -Path $crawlerScriptPath -Content $crawlerScript
 New-Utf8File -Path $wrapperShPath -Content $wrapperSh
 New-Utf8File -Path $wrapperBatPath -Content $wrapperBat
 

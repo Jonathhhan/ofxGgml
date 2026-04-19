@@ -27,7 +27,7 @@ const char * const kDiffusionImageSizeLabels[] = {"128", "256", "384", "512", "6
 }
 
 void ofApp::drawDiffusionPanel() {
-	drawPanelHeader("Diffusion", "local image generation workflow via ofxStableDiffusion");
+	drawPanelHeader("Image", "local image generation workflow via ofxStableDiffusion");
 	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
 	ensureDiffusionPreviewResources();
 	const bool diffusionRuntimeAttached = ensureDiffusionBackendConfigured();

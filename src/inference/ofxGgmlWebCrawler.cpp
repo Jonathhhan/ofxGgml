@@ -645,6 +645,10 @@ ofxGgmlWebCrawlerResult ofxGgmlMojoWebCrawlerBackend::crawl(
 	if (result.exitCode != 0) {
 		result.error =
 			"Mojo exited with code " + std::to_string(result.exitCode) + ".";
+		const std::string trimmedOutput = trimCopy(result.commandOutput);
+		if (!trimmedOutput.empty()) {
+			result.error += " Output: " + trimmedOutput;
+		}
 		result.elapsedMs = elapsedMsSince(start);
 		if (createdTempDir && !request.keepOutputFiles) {
 			std::filesystem::remove_all(result.outputDir, ec);

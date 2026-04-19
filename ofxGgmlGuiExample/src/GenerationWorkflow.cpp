@@ -1517,7 +1517,7 @@ void ofApp::applyPendingOutput() {
 		fprintf(
 			stderr,
 			"%s\n",
-			formatConsoleLogLine("Long Video", "AI", longVideoStatus, true).c_str());
+			formatConsoleLogLine("Video", "AI", longVideoStatus, true).c_str());
 	}
 	if (pendingVoiceTranslatorDirty) {
 		voiceTranslatorStatus = pendingVoiceTranslatorStatus;

@@ -58,7 +58,7 @@
 // ---------------------------------------------------------------------------
 
 const char * ofApp::modeLabels[kModeCount] = {
-	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Video Essay", "Long Video", "Vision", "Speech", "TTS", "Diffusion", "CLIP", "MilkDrop", "Easy"
+	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Video Essay", "Video", "Vision", "Speech", "TTS", "Image", "CLIP", "MilkDrop", "Easy"
 };
 
 const char * const kTextBackendLabels[] = {
@@ -71,6 +71,20 @@ const char * const kDefaultSpeechServerUrl = "http://127.0.0.1:8081";
 
 namespace {
 	constexpr std::array<int, 8> kSupportedDiffusionImageSizes = {128, 256, 384, 512, 640, 768, 896, 1024};
+	const char * const kVideoStructureSettingLabels[] = {
+		"Three-act cinematic",
+		"Trailer / short-form",
+		"Music video rise",
+		"Loopable ambient",
+		"Documentary / essay",
+		"Product / brand spot"
+	};
+	const char * const kVideoPacingSettingLabels[] = {
+		"Balanced rise",
+		"Gentle build",
+		"Aggressive escalation",
+		"Punchy short-form"
+	};
 
 	std::string sanitizeFilenameStem(const std::string & text, const std::string & fallback = "output") {
 		std::string sanitized;
@@ -1741,6 +1755,98 @@ if (ImGui::Button("All##gpu", ImVec2(-1, 0))) {
 gpuLayers = detectedModelLayers > 0 ? detectedModelLayers : 128;
 }
 ImGui::EndDisabled();
+}
+
+if (activeMode == AiMode::LongVideo) {
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+	ImGui::Text("Video Settings");
+
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderFloat(
+		"##VideoTargetDurationSidebar",
+		&longVideoTargetDurationSeconds,
+		8.0f,
+		360.0f,
+		"Duration: %.0f s")) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderInt(
+		"##VideoSegmentsSidebar",
+		&longVideoChunkCount,
+		1,
+		16,
+		"Segments: %d")) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::Combo(
+		"##VideoStructureSidebar",
+		&longVideoStructureIndex,
+		kVideoStructureSettingLabels,
+		IM_ARRAYSIZE(kVideoStructureSettingLabels))) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::Combo(
+		"##VideoPacingSidebar",
+		&longVideoPacingIndex,
+		kVideoPacingSettingLabels,
+		IM_ARRAYSIZE(kVideoPacingSettingLabels))) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderInt(
+		"##VideoWidthSidebar",
+		&longVideoWidth,
+		128,
+		1280,
+		"Width: %d")) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderInt(
+		"##VideoHeightSidebar",
+		&longVideoHeight,
+		128,
+		1280,
+		"Height: %d")) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderInt(
+		"##VideoFpsSidebar",
+		&longVideoFps,
+		1,
+		30,
+		"FPS: %d")) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderInt(
+		"##VideoFramesPerSegmentSidebar",
+		&longVideoFramesPerChunk,
+		8,
+		160,
+		"Frames / segment: %d")) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::InputInt("Seed##VideoSidebar", &longVideoSeed)) {
+		autoSaveSession();
+	}
+	if (ImGui::Checkbox(
+		"Use prompt inheritance##VideoSidebar",
+		&longVideoUsePromptInheritance)) {
+		autoSaveSession();
+	}
+	if (ImGui::Checkbox(
+		"Favor loopable ending##VideoSidebar",
+		&longVideoFavorLoopableEnding)) {
+		autoSaveSession();
+	}
 }
 
 ImGui::Separator();

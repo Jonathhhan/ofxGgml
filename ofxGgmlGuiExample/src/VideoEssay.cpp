@@ -21,15 +21,18 @@ const char * const kVideoEssayAudienceLabels[] = {
 
 const char * const kLongVideoStructureLabels[] = {
 	"Three-act cinematic",
+	"Trailer / short-form",
 	"Music video rise",
 	"Loopable ambient",
-	"Documentary / essay"
+	"Documentary / essay",
+	"Product / brand spot"
 };
 
 const char * const kLongVideoPacingLabels[] = {
 	"Balanced rise",
 	"Gentle build",
-	"Aggressive escalation"
+	"Aggressive escalation",
+	"Punchy short-form"
 };
 
 struct TtsPreviewUiLabels {
@@ -66,9 +69,11 @@ std::string videoEssayAudienceForIndex(int index) {
 
 std::string longVideoStructureHintForIndex(int index) {
 	switch (index) {
-	case 1: return "music-driven rise with a strong payoff section";
-	case 2: return "loopable ambient progression with a seamless ending";
-	case 3: return "documentary essay with discovery, evidence, and takeaway beats";
+	case 1: return "short-form trailer progression with a hook, escalation, and strong closing beat";
+	case 2: return "music-driven rise with a strong payoff section";
+	case 3: return "loopable ambient progression with a seamless ending";
+	case 4: return "documentary essay with discovery, evidence, and takeaway beats";
+	case 5: return "product-led spot with feature reveals, clean hero shots, and a memorable final value beat";
 	default: return "three-act cinematic progression";
 	}
 }
@@ -77,6 +82,7 @@ std::string longVideoPacingProfileForIndex(int index) {
 	switch (index) {
 	case 1: return "gentle build with longer observation beats before the payoff";
 	case 2: return "aggressive escalation with shorter setup and denser climax beats";
+	case 3: return "punchy short-form pacing with an immediate hook and tight transitions";
 	default: return "balanced rise with stronger emphasis near the climax";
 	}
 }
@@ -823,9 +829,13 @@ void ofApp::runVideoEssayWorkflow() {
 }
 
 void ofApp::drawLongVideoPanel() {
-	drawPanelHeader("Long Video", "plan chunked long-form video prompts with continuity");
+	drawPanelHeader("Video", "plan chunked video prompts with continuity and shot progression");
+	ImGui::TextWrapped(
+		"Use this mode for trailers, shorts, music videos, ads, mood loops, or longer sequences. "
+		"It builds a continuity bible, segment prompts, and a reusable manifest from one brief.");
 
-	ImGui::Text("Concept");
+	ImGui::Spacing();
+	ImGui::Text("Project brief");
 	ImGui::InputTextMultiline(
 		"##LongVideoConcept",
 		longVideoConcept,
@@ -835,16 +845,16 @@ void ofApp::drawLongVideoPanel() {
 		autoSaveSession();
 	}
 
-	ImGui::InputText("Style", longVideoStyle, sizeof(longVideoStyle));
+	ImGui::InputText("Visual direction", longVideoStyle, sizeof(longVideoStyle));
 	if (ImGui::IsItemDeactivatedAfterEdit()) {
 		autoSaveSession();
 	}
-	ImGui::InputText("Negative style", longVideoNegativeStyle, sizeof(longVideoNegativeStyle));
+	ImGui::InputText("Avoid", longVideoNegativeStyle, sizeof(longVideoNegativeStyle));
 	if (ImGui::IsItemDeactivatedAfterEdit()) {
 		autoSaveSession();
 	}
 	ImGui::InputTextMultiline(
-		"Continuity goal",
+		"Creative / continuity goal",
 		longVideoContinuityGoal,
 		sizeof(longVideoContinuityGoal),
 		ImVec2(-1, 70));
@@ -861,7 +871,7 @@ void ofApp::drawLongVideoPanel() {
 		autoSaveSession();
 	}
 	ImGui::SameLine();
-	if (ImGui::SliderInt("Chunks##LongVideo", &longVideoChunkCount, 1, 16)) {
+	if (ImGui::SliderInt("Segments##LongVideo", &longVideoChunkCount, 1, 16)) {
 		autoSaveSession();
 	}
 
@@ -901,7 +911,7 @@ void ofApp::drawLongVideoPanel() {
 	}
 
 	if (ImGui::SliderInt(
-		"Frames / chunk##LongVideo",
+		"Frames / segment##LongVideo",
 		&longVideoFramesPerChunk,
 		8,
 		160)) {
@@ -917,6 +927,13 @@ void ofApp::drawLongVideoPanel() {
 		autoSaveSession();
 	}
 	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(visionPrompt).empty());
+	if (ImGui::SmallButton("Use Vision prompt##LongVideo")) {
+		copyStringToBuffer(longVideoConcept, sizeof(longVideoConcept), visionPrompt);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
 	ImGui::BeginDisabled(trim(videoEssayVisualConcept).empty());
 	if (ImGui::SmallButton("Use Video Essay concept##LongVideo")) {
 		copyStringToBuffer(longVideoConcept, sizeof(longVideoConcept), videoEssayVisualConcept);
@@ -930,9 +947,16 @@ void ofApp::drawLongVideoPanel() {
 		autoSaveSession();
 	}
 	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(visionOutput).empty());
+	if (ImGui::SmallButton("Use Vision analysis##LongVideo")) {
+		copyStringToBuffer(longVideoContinuityGoal, sizeof(longVideoContinuityGoal), visionOutput);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
 
 	ImGui::BeginDisabled(generating.load() || trim(longVideoConcept).empty());
-	if (ImGui::Button("Plan Long Video", ImVec2(170, 0))) {
+	if (ImGui::Button("Plan Video", ImVec2(170, 0))) {
 		runLongVideoPlanning();
 	}
 	ImGui::EndDisabled();
@@ -964,7 +988,7 @@ void ofApp::drawLongVideoPanel() {
 
 	if (!longVideoChunks.empty()) {
 		ImGui::Spacing();
-		ImGui::Text("Chunks");
+		ImGui::Text("Segments");
 		for (size_t i = 0; i < longVideoChunks.size(); ++i) {
 			const auto & chunk = longVideoChunks[i];
 			if (ImGui::CollapsingHeader(
@@ -1029,7 +1053,7 @@ void ofApp::runLongVideoPlanning() {
 
 	const std::string conceptText = trim(longVideoConcept);
 	if (conceptText.empty()) {
-		longVideoStatus = "[Error] Long-video concept is empty.";
+		longVideoStatus = "[Error] Video concept is empty.";
 		return;
 	}
 
@@ -1058,13 +1082,13 @@ void ofApp::runLongVideoPlanning() {
 	generating.store(true);
 	cancelRequested.store(false);
 	activeGenerationMode = AiMode::LongVideo;
-	generatingStatus = "Planning long-video chunks and continuity...";
+	generatingStatus = "Planning video chunks and continuity...";
 	generationStartTime = ofGetElapsedTimef();
 
 	{
 		std::lock_guard<std::mutex> lock(streamMutex);
 		streamingOutput =
-			"Building a long-video continuity bible, chunk plan, and manifest...";
+			"Building a video continuity bible, chunk plan, and manifest...";
 	}
 
 	if (workerThread.joinable()) {
@@ -1115,7 +1139,7 @@ void ofApp::runLongVideoPlanning() {
 				status =
 					"Planned " +
 					ofToString(result.chunks.size()) +
-					" long-video chunks with " +
+					" video segments with " +
 					structureHint +
 					" structure and built a manifest.";
 			} else {
@@ -1134,14 +1158,14 @@ void ofApp::runLongVideoPlanning() {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingLongVideoDirty = true;
 			pendingLongVideoStatus =
-				std::string("[Error] Long-video planning exception: ") + e.what();
+				std::string("[Error] Video planning exception: ") + e.what();
 			pendingLongVideoContinuityBible.clear();
 			pendingLongVideoManifestJson.clear();
 			pendingLongVideoChunks.clear();
 		} catch (...) {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingLongVideoDirty = true;
-			pendingLongVideoStatus = "[Error] Unknown long-video planning exception.";
+			pendingLongVideoStatus = "[Error] Unknown video planning exception.";
 			pendingLongVideoContinuityBible.clear();
 			pendingLongVideoManifestJson.clear();
 			pendingLongVideoChunks.clear();
