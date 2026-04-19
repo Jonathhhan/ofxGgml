@@ -2015,6 +2015,9 @@ ofxGgmlBatchResult ofxGgmlInference::generateBatch(
 	metrics.recordBatchStart(modelPath, requests.size());
 
 	const auto startTime = ofGetElapsedTimeMillis();
+	const bool allowParallelBatchProcessing =
+		batchSettings.allowParallelProcessing &&
+		normalizedConcurrencyLimit(batchSettings.maxConcurrentRequests) > 1;
 
 	// Check if all requests share compatible settings for server batch mode
 	bool allUseServer = true;
@@ -2037,7 +2040,10 @@ ofxGgmlBatchResult ofxGgmlInference::generateBatch(
 	}
 
 	// Try server-based batch processing first if conditions are met
-	if (batchSettings.preferServerBatch && allUseServer && settingsCompatible &&
+	if (allowParallelBatchProcessing &&
+		batchSettings.preferServerBatch &&
+		allUseServer &&
+		settingsCompatible &&
 		!sharedSettings.serverUrl.empty()) {
 		batchResult = processBatchViaServer(modelPath, requests, batchSettings);
 
@@ -2124,28 +2130,26 @@ ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
 	ofxGgmlBatchResult batchResult;
 	batchResult.results.resize(requests.size());
 
-	// For now, we'll process requests concurrently rather than as a true
-	// server batch, since not all llama-server implementations support
-	// the /v1/batch endpoint. This still provides parallelism benefits.
-
-	std::vector<std::thread> threads;
+	// For now, we use a small worker pool rather than a true /v1/batch call,
+	// since not all llama-server implementations expose that endpoint.
+	// Reusing workers avoids the repeated thread-burst overhead from the old
+	// chunked implementation while keeping the behavior predictable.
 	std::atomic<bool> shouldStop(false);
+	std::atomic<size_t> nextIndex(0);
 	std::atomic<size_t> processedCount(0);
 	std::atomic<size_t> failedCount(0);
 	const size_t maxConcurrent =
 		normalizedConcurrencyLimit(batchSettings.maxConcurrentRequests);
 
-	// Process in chunks based on maxConcurrentRequests
-	for (size_t startIdx = 0; startIdx < requests.size(); startIdx += maxConcurrent) {
-		threads.clear();
-
-		const size_t endIdx = std::min(startIdx + maxConcurrent, requests.size());
-
-		for (size_t i = startIdx; i < endIdx; ++i) {
-			if (shouldStop.load()) break;
-
-			threads.emplace_back([&, i]() {
-				if (shouldStop.load()) return;
+	std::vector<std::thread> workers;
+	workers.reserve(maxConcurrent);
+	for (size_t workerIndex = 0; workerIndex < maxConcurrent; ++workerIndex) {
+		workers.emplace_back([&]() {
+			while (!shouldStop.load(std::memory_order_relaxed)) {
+				const size_t i = nextIndex.fetch_add(1, std::memory_order_relaxed);
+				if (i >= requests.size()) {
+					return;
+				}
 
 				const auto & req = requests[i];
 				ofxGgmlInferenceResult result = generate(
@@ -2154,31 +2158,29 @@ ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
 					req.settings,
 					req.onChunk);
 
+				const bool success = result.success;
 				ofxGgmlBatchItemResult item;
 				item.id = req.id;
 				item.result = std::move(result);
 				item.batchIndex = i;
 				batchResult.results[i] = std::move(item);
 
-				if (batchResult.results[i].result.success) {
-					processedCount.fetch_add(1);
+				if (success) {
+					processedCount.fetch_add(1, std::memory_order_relaxed);
 				} else {
-					failedCount.fetch_add(1);
+					failedCount.fetch_add(1, std::memory_order_relaxed);
 					if (batchSettings.stopOnFirstError) {
-						shouldStop.store(true);
+						shouldStop.store(true, std::memory_order_relaxed);
 					}
 				}
-			});
-		}
-
-		// Wait for this chunk to complete
-		for (auto & thread : threads) {
-			if (thread.joinable()) {
-				thread.join();
 			}
-		}
+		});
+	}
 
-		if (shouldStop.load()) break;
+	for (auto & worker : workers) {
+		if (worker.joinable()) {
+			worker.join();
+		}
 	}
 
 	batchResult.processedCount = processedCount.load();
@@ -2206,14 +2208,15 @@ ofxGgmlBatchResult ofxGgmlInference::processBatchSequentially(
 			req.prompt,
 			req.settings,
 			req.onChunk);
+		const bool success = result.success;
 
 		ofxGgmlBatchItemResult item;
 		item.id = req.id;
-		item.result = result;
+		item.result = std::move(result);
 		item.batchIndex = i;
-		batchResult.results.push_back(item);
+		batchResult.results.push_back(std::move(item));
 
-		if (result.success) {
+		if (success) {
 			batchResult.processedCount++;
 		} else {
 			batchResult.failedCount++;

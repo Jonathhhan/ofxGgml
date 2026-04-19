@@ -30,6 +30,27 @@ const char * const kVisionWaitingLabels[] = {
 
 constexpr const char * kDefaultManagedTextServerUrl = "http://127.0.0.1:8080";
 
+void appendPathToBuffer(char * buffer, size_t bufferSize, const std::string & path) {
+	const std::string trimmedPath = trim(path);
+	if (trimmedPath.empty()) {
+		return;
+	}
+
+	std::vector<std::string> paths = extractPathList(buffer ? std::string(buffer) : std::string());
+	if (std::find(paths.begin(), paths.end(), trimmedPath) == paths.end()) {
+		paths.push_back(trimmedPath);
+	}
+
+	std::ostringstream joined;
+	for (size_t i = 0; i < paths.size(); ++i) {
+		if (i > 0) {
+			joined << '\n';
+		}
+		joined << paths[i];
+	}
+	copyStringToBuffer(buffer, bufferSize, joined.str());
+}
+
 struct VideoEditPresetDefinition {
 	const char * name;
 	const char * goal;
@@ -778,6 +799,9 @@ void ofApp::drawVisionPanel() {
 		montageEdlText.clear();
 		montageSrtText.clear();
 		montageVttText.clear();
+		montageClipPlaylistManifestPath.clear();
+		montageClipPlaylistStatusMessage.clear();
+		montageClipRenderOutputPath.clear();
 		montagePreviewBundle = {};
 		montageSubtitleTrack = {};
 		montageSourceSubtitleTrack = {};
@@ -788,6 +812,7 @@ void ofApp::drawVisionPanel() {
 		montagePreviewTimelineLastTickTime = 0.0f;
 #if OFXGGML_HAS_OFXVLC4
 		closeMontageVlcPreview();
+		closeMontageClipVlcPreview();
 #endif
 		selectedMontageCueIndex = -1;
 		autoSaveSession();
@@ -956,6 +981,147 @@ void ofApp::drawVisionPanel() {
 		ImGui::TextDisabled(
 			"Regenerate this example with ofxVlc4 in addons.make to enable direct subtitle-slave preview here.");
 #endif
+	}
+	ImGui::Separator();
+	ImGui::TextDisabled("Clip playlist export");
+	ImGui::TextWrapped(
+		"Collect rendered or generated clip paths, export a small playlist manifest, preview the sequence through ofxVlc4, and optionally record it back out to a final video.");
+	ImGui::InputTextMultiline(
+		"Clip paths (one per line)",
+		montageClipPaths,
+		sizeof(montageClipPaths),
+		ImVec2(-1, 90));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::BeginDisabled(trim(visionVideoPath).empty());
+	if (ImGui::Button("Add source video", ImVec2(150, 0))) {
+		appendPathToBuffer(montageClipPaths, sizeof(montageClipPaths), trim(visionVideoPath));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(videoEssayLastRenderedVideoPath).empty());
+	if (ImGui::Button("Add essay render", ImVec2(150, 0))) {
+		appendPathToBuffer(
+			montageClipPaths,
+			sizeof(montageClipPaths),
+			trim(videoEssayLastRenderedVideoPath));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	if (ImGui::Button("Browse clip...", ImVec2(130, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select clip", false);
+		if (result.bSuccess) {
+			appendPathToBuffer(montageClipPaths, sizeof(montageClipPaths), result.getPath());
+			autoSaveSession();
+		}
+	}
+
+	ImGui::InputText("Mux audio track", montageRenderAudioPath, sizeof(montageRenderAudioPath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(aceStepGeneratedTracks.empty());
+	if (ImGui::SmallButton("Use latest music")) {
+		copyStringToBuffer(
+			montageRenderAudioPath,
+			sizeof(montageRenderAudioPath),
+			trim(aceStepGeneratedTracks.back().path));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Browse audio...")) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select mux audio track", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(montageRenderAudioPath, sizeof(montageRenderAudioPath), result.getPath());
+			autoSaveSession();
+		}
+	}
+
+	if (ImGui::Button("Export playlist manifest", ImVec2(180, 0))) {
+		std::string error;
+		const std::string manifestPath = exportMontageClipPlaylistManifest(&error);
+		if (!manifestPath.empty()) {
+			montageClipPlaylistManifestPath = manifestPath;
+			montageClipPlaylistStatusMessage = "Exported montage clip manifest: " + manifestPath;
+		} else {
+			montageClipPlaylistStatusMessage =
+				error.empty() ? std::string("Failed to export the montage clip manifest.") : error;
+		}
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(montageClipPlaylistManifestPath).empty());
+	if (ImGui::Button("Copy manifest path", ImVec2(170, 0))) {
+		copyToClipboard(montageClipPlaylistManifestPath);
+	}
+	ImGui::EndDisabled();
+	if (!trim(montageClipPlaylistManifestPath).empty()) {
+		ImGui::TextDisabled("%s", montageClipPlaylistManifestPath.c_str());
+	}
+
+#if OFXGGML_HAS_OFXVLC4
+	if (ImGui::Button("Load clip playlist in ofxVlc4", ImVec2(220, 0))) {
+		std::string error;
+		if (loadMontageClipVlcPreview(&error)) {
+			montageClipPlaylistStatusMessage =
+				"Loaded the montage clip playlist into the optional ofxVlc4 preview.";
+		} else {
+			montageClipPlaylistStatusMessage =
+				error.empty() ? std::string("Failed to load the montage clip playlist preview.") : error;
+		}
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!montageClipVlcInitialized);
+	if (ImGui::Button("Close clip playlist", ImVec2(170, 0))) {
+		closeMontageClipVlcPreview();
+		montageClipPlaylistStatusMessage = "Closed the montage clip playlist preview.";
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!montageClipVlcInitialized || montageClipVlcPlayer.isVideoRecording());
+	if (ImGui::Button("Record playlist", ImVec2(150, 0))) {
+		std::string error;
+		if (startMontageClipVlcRecording(&error)) {
+			montageClipPlaylistStatusMessage = "Recording the montage clip playlist preview...";
+		} else {
+			montageClipPlaylistStatusMessage =
+				error.empty() ? std::string("Failed to start the montage clip playlist recording.") : error;
+		}
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!montageClipVlcInitialized || !montageClipVlcPlayer.isVideoRecording());
+	if (ImGui::Button("Stop + Render playlist", ImVec2(190, 0))) {
+		std::string error;
+		if (stopMontageClipVlcRecording(&error)) {
+			// status set by the helper
+		} else {
+			montageClipPlaylistStatusMessage =
+				error.empty() ? std::string("Failed to finalize the montage clip playlist render.") : error;
+		}
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	if (montageClipVlcInitialized) {
+		drawMontageClipVlcPreview();
+	}
+#else
+	ImGui::TextDisabled(
+		"Regenerate this example with ofxVlc4 in addons.make to enable clip-playlist preview and render export here.");
+#endif
+	if (!montageClipPlaylistStatusMessage.empty()) {
+		ImGui::TextDisabled("%s", montageClipPlaylistStatusMessage.c_str());
+	}
+	if (!trim(montageClipRenderOutputPath).empty()) {
+		ImGui::TextDisabled("Rendered playlist: %s", montageClipRenderOutputPath.c_str());
 	}
 	const ofxGgmlMontagePreviewTrack * subtitlePreviewTrack =
 		hasActivePreviewTrack ? activePreviewTrack : nullptr;

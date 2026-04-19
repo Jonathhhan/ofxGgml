@@ -218,6 +218,14 @@ const ofxGgmlTextAssistant & ofxGgmlVideoEssayWorkflow::getTextAssistant() const
 	return m_textAssistant;
 }
 
+ofxGgmlVideoPlanner & ofxGgmlVideoEssayWorkflow::getVideoPlanner() {
+	return m_videoPlanner;
+}
+
+const ofxGgmlVideoPlanner & ofxGgmlVideoEssayWorkflow::getVideoPlanner() const {
+	return m_videoPlanner;
+}
+
 std::string ofxGgmlVideoEssayWorkflow::buildOutlinePrompt(
 	const ofxGgmlVideoEssayRequest & request,
 	const ofxGgmlCitationSearchResult & citationResult) {
@@ -259,6 +267,41 @@ std::string ofxGgmlVideoEssayWorkflow::buildScriptPrompt(
 		<< "Outline:\n" << trimCopy(outline) << "\n\n"
 		<< buildCitationDigest(citationResult)
 		<< "\n\nScript:\n";
+	return prompt.str();
+}
+
+std::string ofxGgmlVideoEssayWorkflow::buildVisualConceptPrompt(
+	const ofxGgmlVideoEssayRequest & request,
+	const ofxGgmlCitationSearchResult & citationResult,
+	const std::vector<ofxGgmlVideoEssaySection> & sections) {
+	std::ostringstream prompt;
+	prompt
+		<< "Develop a coherent visual concept for a narrated video essay.\n"
+		<< "Topic: " << trimCopy(request.topic) << "\n"
+		<< "Target duration: " << std::max(15.0, request.targetDurationSeconds) << " seconds\n"
+		<< "Tone: " << trimCopy(request.tone) << "\n"
+		<< "Audience: " << trimCopy(request.audience) << "\n"
+		<< "Use the cited sections to shape a grounded documentary-style visual treatment."
+		<< " Favor concrete imagery, recurring motifs, editorial pacing, and scene continuity."
+		<< " Keep it useful for downstream video planning.\n"
+		<< "Return 1 short paragraph followed by 4 to 8 bullet points describing visual motifs, recurring entities,"
+		<< " environments, and camera language."
+		<< "\n\nSections:\n";
+
+	for (const auto & section : sections) {
+		prompt << "- " << (!trimCopy(section.title).empty() ? section.title : ("Section " + std::to_string(section.index + 1)))
+			<< " (" << std::fixed << std::setprecision(1) << std::max(1.0, section.estimatedDurationSeconds) << " s)"
+			<< ": " << trimCopy(section.summary);
+		if (!section.sourceIndices.empty()) {
+			prompt << " | cites";
+			for (const int sourceIndex : section.sourceIndices) {
+				prompt << " [Source " << sourceIndex << "]";
+			}
+		}
+		prompt << "\n";
+	}
+
+	prompt << "\n" << buildCitationDigest(citationResult) << "\n\nVisual concept:\n";
 	return prompt.str();
 }
 
@@ -386,6 +429,24 @@ std::string ofxGgmlVideoEssayWorkflow::buildSrt(
 	return output.str();
 }
 
+std::string ofxGgmlVideoEssayWorkflow::buildEditSourceSummary(
+	const std::vector<ofxGgmlVideoEssaySection> & sections) {
+	std::ostringstream summary;
+	for (const auto & section : sections) {
+		if (section.index > 0) {
+			summary << "\n";
+		}
+		summary << section.index + 1 << ". "
+			<< (!trimCopy(section.title).empty() ? section.title : ("Section " + std::to_string(section.index + 1)))
+			<< " | " << std::fixed << std::setprecision(1)
+			<< std::max(1.0, section.estimatedDurationSeconds) << " s";
+		if (!trimCopy(section.summary).empty()) {
+			summary << " | " << trimCopy(section.summary);
+		}
+	}
+	return summary.str();
+}
+
 ofxGgmlVideoEssayResult ofxGgmlVideoEssayWorkflow::run(
 	const ofxGgmlVideoEssayRequest & request) const {
 	ofxGgmlVideoEssayResult result;
@@ -473,6 +534,80 @@ ofxGgmlVideoEssayResult ofxGgmlVideoEssayWorkflow::run(
 	result.sections = parseSectionsFromScript(result.script, request.targetDurationSeconds);
 	result.voiceCues = buildVoiceCueSheet(result.sections);
 	result.srtText = buildSrt(result.voiceCues);
+
+	ofxGgmlTextAssistantRequest visualConceptRequest;
+	visualConceptRequest.task = ofxGgmlTextTask::Custom;
+	visualConceptRequest.labelOverride = "Build a visual concept for the video essay.";
+	visualConceptRequest.systemPrompt =
+		"You are a documentary creative director."
+		" Translate grounded research and spoken structure into a clear visual concept for downstream planning.";
+	visualConceptRequest.inputText = buildVisualConceptPrompt(
+		request,
+		result.citationResult,
+		result.sections);
+	const ofxGgmlTextAssistantResult visualConceptResult = m_textAssistant.run(
+		request.modelPath,
+		visualConceptRequest,
+		request.inferenceSettings);
+	if (!visualConceptResult.inference.error.empty()) {
+		result.scenePlanningError = visualConceptResult.inference.error;
+	} else {
+		result.visualConcept = sanitizeAssistantText(visualConceptResult.inference.text);
+	}
+
+	if (!trimCopy(result.visualConcept).empty()) {
+		ofxGgmlVideoPlannerRequest sceneRequest;
+		sceneRequest.prompt = result.visualConcept;
+		sceneRequest.durationSeconds = std::max(15.0, request.targetDurationSeconds);
+		sceneRequest.sceneCount = std::clamp(
+			static_cast<int>(result.sections.empty() ? 4 : result.sections.size()),
+			2,
+			8);
+		sceneRequest.beatCount = std::clamp(
+			static_cast<int>(std::lround(sceneRequest.durationSeconds / 12.0)),
+			3,
+			12);
+		sceneRequest.multiScene = sceneRequest.sceneCount > 1;
+		sceneRequest.preferredStyle = "grounded documentary essay, cinematic but factual";
+		const ofxGgmlVideoPlannerResult sceneResult = m_videoPlanner.plan(
+			request.modelPath,
+			sceneRequest,
+			request.inferenceSettings,
+			m_textAssistant.getInference());
+		if (sceneResult.success) {
+			result.scenePlan = sceneResult.plan;
+			result.scenePlanJson = ofxGgmlVideoPlanner::extractJsonObject(sceneResult.rawText);
+			result.scenePlanSummary = ofxGgmlVideoPlanner::summarizePlan(sceneResult.plan);
+		} else {
+			result.scenePlanningError = sceneResult.error;
+		}
+
+		ofxGgmlVideoEditPlannerRequest editRequest;
+		editRequest.sourcePrompt = result.visualConcept;
+		editRequest.editGoal =
+			"Build a video essay edit that supports the narration, preserves chronology, and keeps the sources grounded.";
+		editRequest.sourceAnalysis = buildEditSourceSummary(result.sections);
+		editRequest.targetDurationSeconds = std::max(15.0, request.targetDurationSeconds);
+		editRequest.clipCount = std::clamp(
+			static_cast<int>(result.sections.empty() ? 6 : result.sections.size() * 2),
+			3,
+			12);
+		editRequest.preserveChronology = true;
+		const ofxGgmlVideoEditPlannerResult editResult = m_videoPlanner.planEdits(
+			request.modelPath,
+			editRequest,
+			request.inferenceSettings,
+			m_textAssistant.getInference());
+		if (editResult.success) {
+			result.editPlan = editResult.plan;
+			result.editPlanJson = ofxGgmlVideoPlanner::extractJsonObject(editResult.rawText);
+			result.editPlanSummary = ofxGgmlVideoPlanner::summarizeEditPlan(editResult.plan);
+			result.editorBrief = ofxGgmlVideoPlanner::buildEditorBrief(editResult.plan);
+		} else {
+			result.editPlanningError = editResult.error;
+		}
+	}
+
 	result.success = true;
 	result.backendName = !result.citationResult.backendName.empty()
 		? result.citationResult.backendName

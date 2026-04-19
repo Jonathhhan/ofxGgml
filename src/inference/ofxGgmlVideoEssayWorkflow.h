@@ -2,6 +2,7 @@
 
 #include "assistants/ofxGgmlTextAssistant.h"
 #include "inference/ofxGgmlCitationSearch.h"
+#include "inference/ofxGgmlVideoPlanner.h"
 
 #include <string>
 #include <vector>
@@ -48,9 +49,19 @@ struct ofxGgmlVideoEssayResult {
 	ofxGgmlTextAssistantResult scriptResult;
 	std::string outline;
 	std::string script;
+	std::string visualConcept;
 	std::vector<ofxGgmlVideoEssaySection> sections;
 	std::vector<ofxGgmlVideoEssayVoiceCue> voiceCues;
 	std::string srtText;
+	std::string scenePlanJson;
+	std::string scenePlanSummary;
+	std::string editPlanJson;
+	std::string editPlanSummary;
+	std::string editorBrief;
+	std::string scenePlanningError;
+	std::string editPlanningError;
+	ofxGgmlVideoPlan scenePlan;
+	ofxGgmlVideoEditPlan editPlan;
 };
 
 class ofxGgmlVideoEssayWorkflow {
@@ -59,6 +70,8 @@ public:
 	const ofxGgmlCitationSearch & getCitationSearch() const;
 	ofxGgmlTextAssistant & getTextAssistant();
 	const ofxGgmlTextAssistant & getTextAssistant() const;
+	ofxGgmlVideoPlanner & getVideoPlanner();
+	const ofxGgmlVideoPlanner & getVideoPlanner() const;
 
 	ofxGgmlVideoEssayResult run(
 		const ofxGgmlVideoEssayRequest & request) const;
@@ -70,6 +83,10 @@ public:
 		const ofxGgmlVideoEssayRequest & request,
 		const ofxGgmlCitationSearchResult & citationResult,
 		const std::string & outline);
+	static std::string buildVisualConceptPrompt(
+		const ofxGgmlVideoEssayRequest & request,
+		const ofxGgmlCitationSearchResult & citationResult,
+		const std::vector<ofxGgmlVideoEssaySection> & sections);
 	static std::vector<ofxGgmlVideoEssaySection> parseSectionsFromScript(
 		const std::string & script,
 		double targetDurationSeconds = 0.0);
@@ -77,8 +94,11 @@ public:
 		const std::vector<ofxGgmlVideoEssaySection> & sections);
 	static std::string buildSrt(
 		const std::vector<ofxGgmlVideoEssayVoiceCue> & cues);
+	static std::string buildEditSourceSummary(
+		const std::vector<ofxGgmlVideoEssaySection> & sections);
 
 private:
 	ofxGgmlCitationSearch m_citationSearch;
 	ofxGgmlTextAssistant m_textAssistant;
+	ofxGgmlVideoPlanner m_videoPlanner;
 };

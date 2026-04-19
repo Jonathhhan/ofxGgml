@@ -113,6 +113,7 @@ bool ofApp::saveSession(const std::string & path) {
 		{"voiceTranslatorAudioPath", std::string(voiceTranslatorAudioPath)},
 		{"videoEssayTopic", std::string(videoEssayTopic)},
 		{"videoEssaySeedUrl", std::string(videoEssaySeedUrl)},
+		{"videoEssaySourceVideoPath", std::string(videoEssaySourceVideoPath)},
 		{"customInput", std::string(customInput)},
 		{"customSystemPrompt", std::string(customSystemPrompt)},
 		{"sourceUrlsInput", std::string(sourceUrlsInput)},
@@ -134,6 +135,8 @@ bool ofApp::saveSession(const std::string & path) {
 		{"montageGoal", std::string(montageGoal)},
 		{"montageEdlTitle", std::string(montageEdlTitle)},
 		{"montageReelName", std::string(montageReelName)},
+		{"montageClipPaths", std::string(montageClipPaths)},
+		{"montageRenderAudioPath", std::string(montageRenderAudioPath)},
 		{"videoEditGoal", std::string(videoEditGoal)},
 		{"speechAudioPath", std::string(speechAudioPath)},
 		{"speechExecutable", std::string(speechExecutable)},
@@ -197,6 +200,7 @@ bool ofApp::saveSession(const std::string & path) {
 		{"videoEditPresetIndex", videoEditPresetIndex},
 		{"videoEditClipCount", videoEditClipCount},
 		{"selectedVideoPlanSceneIndex", selectedVideoPlanSceneIndex},
+		{"selectedVideoEssaySceneIndex", selectedVideoEssaySceneIndex},
 		{"montageMaxClips", montageMaxClips},
 		{"montageFps", montageFps},
 		{"speechTaskIndex", speechTaskIndex},
@@ -301,6 +305,16 @@ bool ofApp::saveSession(const std::string & path) {
 		{"videoEssayOutline", videoEssayOutline},
 		{"videoEssayScript", videoEssayScript},
 		{"videoEssaySrtText", videoEssaySrtText},
+		{"videoEssayVisualConcept", videoEssayVisualConcept},
+		{"videoEssayScenePlanJson", videoEssayScenePlanJson},
+		{"videoEssayScenePlanSummary", videoEssayScenePlanSummary},
+		{"videoEssayScenePlanningError", videoEssayScenePlanningError},
+		{"videoEssayEditPlanJson", videoEssayEditPlanJson},
+		{"videoEssayEditPlanSummary", videoEssayEditPlanSummary},
+		{"videoEssayEditPlanningError", videoEssayEditPlanningError},
+		{"videoEssayEditorBrief", videoEssayEditorBrief},
+		{"videoEssayVlcPreviewStatusMessage", videoEssayVlcPreviewStatusMessage},
+		{"videoEssayLastRenderedVideoPath", videoEssayLastRenderedVideoPath},
 		{"customOutput", customOutput},
 		{"citationOutput", citationOutput},
 		{"visionOutput", visionOutput},
@@ -309,6 +323,9 @@ bool ofApp::saveSession(const std::string & path) {
 		{"montageEdlText", montageEdlText},
 		{"montageSrtText", montageSrtText},
 		{"montageVttText", montageVttText},
+		{"montageClipPlaylistManifestPath", montageClipPlaylistManifestPath},
+		{"montageClipPlaylistStatusMessage", montageClipPlaylistStatusMessage},
+		{"montageClipRenderOutputPath", montageClipRenderOutputPath},
 		{"videoPlanSummary", videoPlanSummary},
 		{"videoEditPlanSummary", videoEditPlanSummary},
 		{"speechOutput", speechOutput},
@@ -487,6 +504,11 @@ bool ofApp::loadSession(const std::string & path) {
 		"voiceTranslatorAudioPath");
 	copyJsonString(videoEssayTopic, sizeof(videoEssayTopic), buffers, "videoEssayTopic");
 	copyJsonString(videoEssaySeedUrl, sizeof(videoEssaySeedUrl), buffers, "videoEssaySeedUrl");
+	copyJsonString(
+		videoEssaySourceVideoPath,
+		sizeof(videoEssaySourceVideoPath),
+		buffers,
+		"videoEssaySourceVideoPath");
 	copyJsonString(customInput, sizeof(customInput), buffers, "customInput");
 	copyJsonString(customSystemPrompt, sizeof(customSystemPrompt), buffers, "customSystemPrompt");
 	copyJsonString(sourceUrlsInput, sizeof(sourceUrlsInput), buffers, "sourceUrlsInput");
@@ -508,6 +530,8 @@ bool ofApp::loadSession(const std::string & path) {
 	copyJsonString(montageGoal, sizeof(montageGoal), buffers, "montageGoal");
 	copyJsonString(montageEdlTitle, sizeof(montageEdlTitle), buffers, "montageEdlTitle");
 	copyJsonString(montageReelName, sizeof(montageReelName), buffers, "montageReelName");
+	copyJsonString(montageClipPaths, sizeof(montageClipPaths), buffers, "montageClipPaths");
+	copyJsonString(montageRenderAudioPath, sizeof(montageRenderAudioPath), buffers, "montageRenderAudioPath");
 	copyJsonString(videoEditGoal, sizeof(videoEditGoal), buffers, "videoEditGoal");
 	copyJsonString(speechAudioPath, sizeof(speechAudioPath), buffers, "speechAudioPath");
 	copyJsonString(speechExecutable, sizeof(speechExecutable), buffers, "speechExecutable");
@@ -569,6 +593,7 @@ bool ofApp::loadSession(const std::string & path) {
 	videoEditPresetIndex = std::clamp(getInt(indices, "videoEditPresetIndex", videoEditPresetIndex), 0, 5);
 	videoEditClipCount = std::clamp(getInt(indices, "videoEditClipCount", videoEditClipCount), 1, 12);
 	selectedVideoPlanSceneIndex = std::max(0, getInt(indices, "selectedVideoPlanSceneIndex", selectedVideoPlanSceneIndex));
+	selectedVideoEssaySceneIndex = std::max(0, getInt(indices, "selectedVideoEssaySceneIndex", selectedVideoEssaySceneIndex));
 	montageMaxClips = std::clamp(getInt(indices, "montageMaxClips", montageMaxClips), 1, 24);
 	montageFps = std::clamp(getInt(indices, "montageFps", montageFps), 12, 60);
 	speechTaskIndex = std::clamp(getInt(indices, "speechTaskIndex", speechTaskIndex), 0, 1);
@@ -724,6 +749,16 @@ bool ofApp::loadSession(const std::string & path) {
 	videoEssayOutline = getString(outputs, "videoEssayOutline");
 	videoEssayScript = getString(outputs, "videoEssayScript");
 	videoEssaySrtText = getString(outputs, "videoEssaySrtText");
+	videoEssayVisualConcept = getString(outputs, "videoEssayVisualConcept");
+	videoEssayScenePlanJson = getString(outputs, "videoEssayScenePlanJson");
+	videoEssayScenePlanSummary = getString(outputs, "videoEssayScenePlanSummary");
+	videoEssayScenePlanningError = getString(outputs, "videoEssayScenePlanningError");
+	videoEssayEditPlanJson = getString(outputs, "videoEssayEditPlanJson");
+	videoEssayEditPlanSummary = getString(outputs, "videoEssayEditPlanSummary");
+	videoEssayEditPlanningError = getString(outputs, "videoEssayEditPlanningError");
+	videoEssayEditorBrief = getString(outputs, "videoEssayEditorBrief");
+	videoEssayVlcPreviewStatusMessage = getString(outputs, "videoEssayVlcPreviewStatusMessage");
+	videoEssayLastRenderedVideoPath = getString(outputs, "videoEssayLastRenderedVideoPath");
 	customOutput = getString(outputs, "customOutput");
 	citationOutput = getString(outputs, "citationOutput");
 	visionOutput = getString(outputs, "visionOutput");
@@ -732,6 +767,9 @@ bool ofApp::loadSession(const std::string & path) {
 	montageEdlText = getString(outputs, "montageEdlText");
 	montageSrtText = getString(outputs, "montageSrtText");
 	montageVttText = getString(outputs, "montageVttText");
+	montageClipPlaylistManifestPath = getString(outputs, "montageClipPlaylistManifestPath");
+	montageClipPlaylistStatusMessage = getString(outputs, "montageClipPlaylistStatusMessage");
+	montageClipRenderOutputPath = getString(outputs, "montageClipRenderOutputPath");
 	videoPlanSummary = getString(outputs, "videoPlanSummary");
 	videoEditPlanSummary = getString(outputs, "videoEditPlanSummary");
 	speechOutput = getString(outputs, "speechOutput");

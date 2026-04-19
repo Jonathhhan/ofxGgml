@@ -19,6 +19,20 @@ const char * const kVideoEssayAudienceLabels[] = {
 	"Technical audience"
 };
 
+struct TtsPreviewUiLabels {
+	const char * comboLabel;
+	const char * pauseLabel;
+	const char * resumeLabel;
+	const char * playLabel;
+	const char * restartLabel;
+	const char * stopLabel;
+	const char * filePrefix;
+	const char * pausedStatus;
+	const char * playingStatus;
+	const char * restartedStatus;
+	const char * stoppedStatus;
+};
+
 std::string videoEssayToneForIndex(int index) {
 	switch (index) {
 	case 1: return "urgent, investigative, and high-clarity";
@@ -35,6 +49,126 @@ std::string videoEssayAudienceForIndex(int index) {
 	case 3: return "technical audience";
 	default: return "general audience";
 	}
+}
+
+std::string videoEssayPlanningStatusSuffix(const ofxGgmlVideoEssayResult & result) {
+	std::vector<std::string> notes;
+	if (!trim(result.visualConcept).empty()) {
+		notes.push_back("visual concept ready");
+	}
+	if (!trim(result.scenePlanJson).empty()) {
+		notes.push_back("scene plan ready");
+	} else if (!trim(result.scenePlanningError).empty()) {
+		notes.push_back("scene planning fallback");
+	}
+	if (!trim(result.editPlanJson).empty()) {
+		notes.push_back("edit plan ready");
+	} else if (!trim(result.editPlanningError).empty()) {
+		notes.push_back("edit planning fallback");
+	}
+	if (notes.empty()) {
+		return std::string();
+	}
+	std::ostringstream output;
+	output << " | ";
+	for (size_t i = 0; i < notes.size(); ++i) {
+		if (i > 0) {
+			output << ", ";
+		}
+		output << notes[i];
+	}
+	return output.str();
+}
+
+template <typename EnsureLoadedFn, typename StopPlaybackFn>
+void drawTtsPreviewControls(
+	const bool generating,
+	std::vector<ofxGgmlTtsAudioArtifact> & audioFiles,
+	int & selectedAudioIndex,
+	const std::string & loadedAudioPath,
+	bool & playbackPaused,
+	ofSoundPlayer & player,
+	std::string & statusMessage,
+	const TtsPreviewUiLabels & labels,
+	EnsureLoadedFn && ensureLoaded,
+	StopPlaybackFn && stopPlayback) {
+	if (audioFiles.empty()) {
+		return;
+	}
+
+	selectedAudioIndex = std::clamp(
+		selectedAudioIndex,
+		0,
+		std::max(0, static_cast<int>(audioFiles.size()) - 1));
+	if (audioFiles.size() > 1) {
+		std::string previewLabel =
+			ofFilePath::getBaseName(audioFiles[static_cast<size_t>(selectedAudioIndex)].path);
+		if (previewLabel.empty()) {
+			previewLabel = "Audio " + std::to_string(selectedAudioIndex + 1);
+		}
+		if (ImGui::BeginCombo(labels.comboLabel, previewLabel.c_str())) {
+			for (int i = 0; i < static_cast<int>(audioFiles.size()); ++i) {
+				const std::string fileLabel =
+					ofFilePath::getBaseName(audioFiles[static_cast<size_t>(i)].path);
+				const std::string itemLabel = fileLabel.empty()
+					? "Audio " + std::to_string(i + 1)
+					: fileLabel;
+				const bool selected = (selectedAudioIndex == i);
+				if (ImGui::Selectable(itemLabel.c_str(), selected)) {
+					selectedAudioIndex = i;
+					ensureLoaded(selectedAudioIndex, false);
+				}
+				if (selected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
+
+	const bool canPreviewAudio = !generating && !audioFiles.empty();
+	ImGui::BeginDisabled(!canPreviewAudio);
+	const bool audioLoaded = player.isLoaded() && !loadedAudioPath.empty();
+	const bool audioPlaying = audioLoaded && player.isPlaying();
+	const char * playPauseLabel = audioPlaying
+		? labels.pauseLabel
+		: (playbackPaused ? labels.resumeLabel : labels.playLabel);
+	if (ImGui::SmallButton(playPauseLabel)) {
+		if (!audioLoaded) {
+			ensureLoaded(selectedAudioIndex, true);
+		} else if (audioPlaying) {
+			player.setPaused(true);
+			playbackPaused = true;
+			statusMessage = labels.pausedStatus;
+		} else {
+			if (playbackPaused) {
+				player.setPaused(false);
+			} else {
+				player.play();
+			}
+			playbackPaused = false;
+			statusMessage = labels.playingStatus;
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton(labels.restartLabel)) {
+		if (ensureLoaded(selectedAudioIndex, false)) {
+			player.stop();
+			player.play();
+			playbackPaused = false;
+			statusMessage = labels.restartedStatus;
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton(labels.stopLabel)) {
+		stopPlayback(false);
+		statusMessage = labels.stoppedStatus;
+	}
+	ImGui::EndDisabled();
+	ImGui::TextDisabled(
+		"%s %s",
+		labels.filePrefix,
+		audioFiles[static_cast<size_t>(selectedAudioIndex)].path.c_str());
 }
 
 } // namespace
@@ -60,6 +194,25 @@ void ofApp::drawVideoEssayPanel() {
 	if (ImGui::IsItemDeactivatedAfterEdit()) {
 		autoSaveSession();
 	}
+	ImGui::InputText("Source video", videoEssaySourceVideoPath, sizeof(videoEssaySourceVideoPath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Browse video...##VideoEssay", ImVec2(120, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select video essay source video", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(videoEssaySourceVideoPath, sizeof(videoEssaySourceVideoPath), result.getPath());
+			autoSaveSession();
+		}
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(visionVideoPath).empty());
+	if (ImGui::SmallButton("Use Vision video##VideoEssay")) {
+		copyStringToBuffer(videoEssaySourceVideoPath, sizeof(videoEssaySourceVideoPath), visionVideoPath);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
 	if (ImGui::Checkbox("Use crawler URL##VideoEssay", &videoEssayUseCrawler)) {
 		autoSaveSession();
 	}
@@ -145,10 +298,7 @@ void ofApp::drawVideoEssayPanel() {
 	ImGui::SameLine();
 	ImGui::BeginDisabled(trim(videoEssayScript).empty());
 	if (ImGui::Button("Synthesize Voiceover", ImVec2(160, 0))) {
-		runTtsInferenceForText(
-			videoEssayScript,
-			"Video essay narration",
-			true);
+		speakVideoEssayReply(true);
 	}
 	ImGui::EndDisabled();
 	ImGui::SameLine();
@@ -156,6 +306,13 @@ void ofApp::drawVideoEssayPanel() {
 	if (ImGui::SmallButton("Use in Write##VideoEssay")) {
 		copyStringToBuffer(writeInput, sizeof(writeInput), videoEssayScript);
 		activeMode = AiMode::Write;
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(videoEssayVisualConcept).empty());
+	if (ImGui::SmallButton("Use in Vision##VideoEssay")) {
+		copyStringToBuffer(visionPrompt, sizeof(visionPrompt), videoEssayVisualConcept);
+		activeMode = AiMode::Vision;
 	}
 	ImGui::EndDisabled();
 	ImGui::SameLine();
@@ -167,6 +324,45 @@ void ofApp::drawVideoEssayPanel() {
 
 	if (!videoEssayStatus.empty()) {
 		ImGui::TextWrapped("%s", videoEssayStatus.c_str());
+	}
+	if (!videoEssayTtsPreview.statusMessage.empty()) {
+		ImGui::TextDisabled("%s", videoEssayTtsPreview.statusMessage.c_str());
+	}
+	if (!videoEssayVlcPreviewStatusMessage.empty()) {
+		ImGui::TextDisabled("%s", videoEssayVlcPreviewStatusMessage.c_str());
+	}
+
+	if (!videoEssayTtsPreview.audioFiles.empty()) {
+		ImGui::Spacing();
+		ImGui::Text("Voiceover Audio");
+		const TtsPreviewUiLabels ttsLabels = {
+			"##VideoEssayVoiceoverArtifact",
+			"Pause voiceover",
+			"Resume voiceover",
+			"Play voiceover",
+			"Restart voiceover",
+			"Stop voiceover",
+			"Voiceover file:",
+			"Paused video essay voiceover.",
+			"Playing video essay voiceover.",
+			"Restarted video essay voiceover.",
+			"Stopped video essay voiceover."
+		};
+		drawTtsPreviewControls(
+			generating.load(),
+			videoEssayTtsPreview.audioFiles,
+			videoEssayTtsPreview.selectedAudioIndex,
+			videoEssayTtsPreview.loadedAudioPath,
+			videoEssayTtsPreview.playbackPaused,
+			videoEssayTtsPreview.player,
+			videoEssayTtsPreview.statusMessage,
+			ttsLabels,
+			[this](int artifactIndex, bool autoplay) {
+				return ensureVideoEssayTtsAudioLoaded(artifactIndex, autoplay);
+			},
+			[this](bool clearLoadedPath) {
+				stopVideoEssayTtsPlayback(clearLoadedPath);
+			});
 	}
 
 	if (!videoEssayCitations.empty()) {
@@ -206,6 +402,14 @@ void ofApp::drawVideoEssayPanel() {
 		ImGui::EndChild();
 	}
 
+	if (!videoEssayVisualConcept.empty()) {
+		ImGui::Spacing();
+		ImGui::Text("Visual Concept");
+		ImGui::BeginChild("##VideoEssayVisualConcept", ImVec2(0, 110), true);
+		ImGui::TextWrapped("%s", videoEssayVisualConcept.c_str());
+		ImGui::EndChild();
+	}
+
 	if (!videoEssaySections.empty()) {
 		ImGui::Spacing();
 		ImGui::Text("Voice Cues");
@@ -231,6 +435,192 @@ void ofApp::drawVideoEssayPanel() {
 			ImGui::PopID();
 		}
 		ImGui::EndChild();
+	}
+
+	ofxGgmlVideoPlan parsedScenePlan;
+	bool scenePlanAvailable = false;
+	if (!trim(videoEssayScenePlanJson).empty()) {
+		const auto parsedResult =
+			ofxGgmlVideoPlanner::parsePlanJson(trim(videoEssayScenePlanJson));
+		if (parsedResult.isOk()) {
+			parsedScenePlan = parsedResult.value();
+			scenePlanAvailable = true;
+			selectedVideoEssaySceneIndex = std::clamp(
+				selectedVideoEssaySceneIndex,
+				0,
+				std::max(0, static_cast<int>(parsedScenePlan.scenes.size()) - 1));
+		}
+	}
+
+	if (!videoEssayScenePlanSummary.empty() || !trim(videoEssayScenePlanningError).empty()) {
+		ImGui::Spacing();
+		ImGui::Text("Scenes");
+		if (!videoEssayScenePlanSummary.empty()) {
+			ImGui::TextWrapped("%s", videoEssayScenePlanSummary.c_str());
+		}
+		if (!trim(videoEssayScenePlanningError).empty()) {
+			ImGui::TextDisabled("%s", videoEssayScenePlanningError.c_str());
+		}
+		if (scenePlanAvailable && !parsedScenePlan.scenes.empty()) {
+			ImGui::SetNextItemWidth(220);
+			if (ImGui::SliderInt(
+					"Selected scene",
+					&selectedVideoEssaySceneIndex,
+					0,
+					static_cast<int>(parsedScenePlan.scenes.size()) - 1,
+					"%d")) {
+				autoSaveSession();
+			}
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Load in Vision##VideoEssayScenePlan")) {
+				copyStringToBuffer(videoPlanJson, sizeof(videoPlanJson), videoEssayScenePlanJson);
+				videoPlanSummary = videoEssayScenePlanSummary;
+				copyStringToBuffer(visionPrompt, sizeof(visionPrompt), videoEssayVisualConcept);
+				videoPlanMultiScene = true;
+				activeMode = AiMode::Vision;
+			}
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Use scene in Diffusion##VideoEssay")) {
+				copyStringToBuffer(
+					diffusionPrompt,
+					sizeof(diffusionPrompt),
+					ofxGgmlVideoPlanner::buildScenePrompt(
+						parsedScenePlan,
+						static_cast<size_t>(selectedVideoEssaySceneIndex)));
+				activeMode = AiMode::Diffusion;
+			}
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Use sequence in Vision##VideoEssay")) {
+				copyStringToBuffer(
+					visionPrompt,
+					sizeof(visionPrompt),
+					ofxGgmlVideoPlanner::buildSceneSequencePrompt(parsedScenePlan));
+				activeMode = AiMode::Vision;
+			}
+			const auto & scene =
+				parsedScenePlan.scenes[static_cast<size_t>(selectedVideoEssaySceneIndex)];
+			ImGui::BeginChild("##VideoEssayScenePreview", ImVec2(0, 130), true);
+			ImGui::Text("%d. %s", scene.index, scene.title.c_str());
+			if (!scene.summary.empty()) {
+				ImGui::TextWrapped("%s", scene.summary.c_str());
+			}
+			if (!scene.transition.empty()) {
+				ImGui::TextDisabled("Transition: %s", scene.transition.c_str());
+			}
+			if (!scene.eventPrompt.empty()) {
+				ImGui::Spacing();
+				ImGui::TextWrapped("%s", scene.eventPrompt.c_str());
+			}
+			ImGui::EndChild();
+		}
+	}
+
+#if OFXGGML_HAS_OFXVLC4
+	if (!trim(videoEssaySrtText).empty()) {
+		ImGui::Spacing();
+		ImGui::Text("ofxVlc4 Preview / Render");
+		ImGui::TextWrapped(
+			"Preview the narrated essay subtitles against a source video, then record the VLC texture and mux it with the generated voiceover.");
+		ImGui::BeginDisabled(trim(videoEssaySourceVideoPath).empty());
+		if (ImGui::Button("Load in ofxVlc4 preview##VideoEssay", ImVec2(190, 0))) {
+			std::string error;
+			if (loadVideoEssayVlcPreview(&error)) {
+				videoEssayVlcPreviewStatusMessage =
+					"Loaded the video essay subtitles into the optional ofxVlc4 preview.";
+			} else {
+				videoEssayVlcPreviewStatusMessage =
+					error.empty() ? std::string("Failed to load the video essay VLC preview.") : error;
+			}
+			autoSaveSession();
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!videoEssayVlcPreviewInitialized);
+		if (ImGui::Button("Close preview##VideoEssayVlc", ImVec2(150, 0))) {
+			closeVideoEssayVlcPreview();
+			videoEssayVlcPreviewStatusMessage = "Closed the optional video essay VLC preview.";
+			autoSaveSession();
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::BeginDisabled(trim(videoEssaySourceVideoPath).empty());
+		if (ImGui::Button(
+				(videoEssayVlcPreviewInitialized && videoEssayVlcPreviewPlayer.isVideoRecording())
+					? "Stop + Render Video##VideoEssay"
+					: "Record Preview##VideoEssay",
+				ImVec2(190, 0))) {
+			std::string error;
+			if (videoEssayVlcPreviewInitialized && videoEssayVlcPreviewPlayer.isVideoRecording()) {
+				if (!stopVideoEssayVlcRecording(&error)) {
+					videoEssayVlcPreviewStatusMessage =
+						error.empty() ? std::string("Failed to finalize the video essay render.") : error;
+				}
+			} else {
+				if (!startVideoEssayVlcRecording(&error)) {
+					videoEssayVlcPreviewStatusMessage =
+						error.empty() ? std::string("Failed to start recording the video essay preview.") : error;
+				}
+			}
+			autoSaveSession();
+		}
+		ImGui::EndDisabled();
+
+		if (videoEssayVlcPreviewInitialized) {
+			const double sectionStartSeconds =
+				getVideoEssaySectionStartSeconds(selectedVideoEssaySceneIndex);
+			ImGui::BeginDisabled(sectionStartSeconds <= 0.0);
+			if (ImGui::SmallButton("Sync preview to selected section##VideoEssay")) {
+				videoEssayVlcPreviewPlayer.setTime(
+					static_cast<int>(std::max(0.0, sectionStartSeconds) * 1000.0));
+				videoEssayVlcPreviewStatusMessage =
+					"Synced the VLC preview to the selected video essay section.";
+			}
+			ImGui::EndDisabled();
+			drawVideoEssayVlcPreview();
+		}
+		if (!trim(videoEssayLastRenderedVideoPath).empty()) {
+			ImGui::TextDisabled("%s", videoEssayLastRenderedVideoPath.c_str());
+		}
+	}
+#else
+	if (!trim(videoEssaySrtText).empty()) {
+		ImGui::Spacing();
+		ImGui::TextDisabled(
+			"Regenerate this example with ofxVlc4 in addons.make to enable direct video essay preview and render export here.");
+	}
+#endif
+
+	if (!videoEssayEditPlanSummary.empty() ||
+		!videoEssayEditorBrief.empty() ||
+		!trim(videoEssayEditPlanningError).empty()) {
+		ImGui::Spacing();
+		ImGui::Text("Edit");
+		if (!videoEssayEditPlanSummary.empty()) {
+			ImGui::TextWrapped("%s", videoEssayEditPlanSummary.c_str());
+		}
+		if (!trim(videoEssayEditPlanningError).empty()) {
+			ImGui::TextDisabled("%s", videoEssayEditPlanningError.c_str());
+		}
+		ImGui::BeginDisabled(trim(videoEssayEditPlanJson).empty());
+		if (ImGui::SmallButton("Load edit plan in Vision##VideoEssay")) {
+			copyStringToBuffer(videoEditPlanJson, sizeof(videoEditPlanJson), videoEssayEditPlanJson);
+			videoEditPlanSummary = videoEssayEditPlanSummary;
+			resetVideoEditWorkflowState();
+			activeMode = AiMode::Vision;
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::BeginDisabled(trim(videoEssayEditorBrief).empty());
+		if (ImGui::SmallButton("Use brief in Write##VideoEssay")) {
+			copyStringToBuffer(writeInput, sizeof(writeInput), videoEssayEditorBrief);
+			activeMode = AiMode::Write;
+		}
+		ImGui::EndDisabled();
+		if (!videoEssayEditorBrief.empty()) {
+			ImGui::BeginChild("##VideoEssayEditorBrief", ImVec2(0, 135), true);
+			ImGui::TextWrapped("%s", videoEssayEditorBrief.c_str());
+			ImGui::EndChild();
+		}
 	}
 
 	if (!videoEssaySrtText.empty()) {
@@ -335,7 +725,8 @@ void ofApp::runVideoEssayWorkflow() {
 					ofToString(result.sections.size()) +
 					" sections, and " +
 					ofToString(result.voiceCues.size()) +
-					" voice cues.";
+					" voice cues." +
+					videoEssayPlanningStatusSuffix(result);
 			} else {
 				status = "[Error] " + result.error;
 			}
@@ -347,6 +738,14 @@ void ofApp::runVideoEssayWorkflow() {
 				pendingVideoEssayOutline = result.outline;
 				pendingVideoEssayScript = result.script;
 				pendingVideoEssaySrtText = result.srtText;
+				pendingVideoEssayVisualConcept = result.visualConcept;
+				pendingVideoEssayScenePlanJson = result.scenePlanJson;
+				pendingVideoEssayScenePlanSummary = result.scenePlanSummary;
+				pendingVideoEssayScenePlanningError = result.scenePlanningError;
+				pendingVideoEssayEditPlanJson = result.editPlanJson;
+				pendingVideoEssayEditPlanSummary = result.editPlanSummary;
+				pendingVideoEssayEditPlanningError = result.editPlanningError;
+				pendingVideoEssayEditorBrief = result.editorBrief;
 				pendingVideoEssayCitations = result.citationResult.citations;
 				pendingVideoEssaySections = result.sections;
 				pendingVideoEssayVoiceCues = result.voiceCues;
@@ -358,6 +757,14 @@ void ofApp::runVideoEssayWorkflow() {
 			pendingVideoEssayOutline.clear();
 			pendingVideoEssayScript.clear();
 			pendingVideoEssaySrtText.clear();
+			pendingVideoEssayVisualConcept.clear();
+			pendingVideoEssayScenePlanJson.clear();
+			pendingVideoEssayScenePlanSummary.clear();
+			pendingVideoEssayScenePlanningError.clear();
+			pendingVideoEssayEditPlanJson.clear();
+			pendingVideoEssayEditPlanSummary.clear();
+			pendingVideoEssayEditPlanningError.clear();
+			pendingVideoEssayEditorBrief.clear();
 			pendingVideoEssayCitations.clear();
 			pendingVideoEssaySections.clear();
 			pendingVideoEssayVoiceCues.clear();
@@ -368,6 +775,14 @@ void ofApp::runVideoEssayWorkflow() {
 			pendingVideoEssayOutline.clear();
 			pendingVideoEssayScript.clear();
 			pendingVideoEssaySrtText.clear();
+			pendingVideoEssayVisualConcept.clear();
+			pendingVideoEssayScenePlanJson.clear();
+			pendingVideoEssayScenePlanSummary.clear();
+			pendingVideoEssayScenePlanningError.clear();
+			pendingVideoEssayEditPlanJson.clear();
+			pendingVideoEssayEditPlanSummary.clear();
+			pendingVideoEssayEditPlanningError.clear();
+			pendingVideoEssayEditorBrief.clear();
 			pendingVideoEssayCitations.clear();
 			pendingVideoEssaySections.clear();
 			pendingVideoEssayVoiceCues.clear();

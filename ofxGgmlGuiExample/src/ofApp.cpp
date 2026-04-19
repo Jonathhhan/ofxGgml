@@ -70,9 +70,24 @@ const char * const kDefaultTextServerUrl = "http://127.0.0.1:8080";
 const char * const kDefaultSpeechServerUrl = "http://127.0.0.1:8081";
 
 namespace {
-constexpr std::array<int, 8> kSupportedDiffusionImageSizes = {128, 256, 384, 512, 640, 768, 896, 1024};
+	constexpr std::array<int, 8> kSupportedDiffusionImageSizes = {128, 256, 384, 512, 640, 768, 896, 1024};
 
-struct TokenLiteral {
+	std::string sanitizeFilenameStem(const std::string & text, const std::string & fallback = "output") {
+		std::string sanitized;
+		sanitized.reserve(text.size());
+		for (unsigned char c : text) {
+			if (std::isalnum(c)) {
+				sanitized.push_back(static_cast<char>(c));
+			} else if (c == '_' || c == '-') {
+				sanitized.push_back(static_cast<char>(c));
+			} else if (std::isspace(c)) {
+				sanitized.push_back('_');
+			}
+		}
+		return sanitized.empty() ? fallback : sanitized;
+	}
+
+	struct TokenLiteral {
 	const char * text;
 	size_t len;
 };
@@ -1038,13 +1053,16 @@ void ofApp::exit() {
     visionPreviewVideo.close();
   }
 #if OFXGGML_HAS_OFXVLC4
-  closeMontageVlcPreview();
+	closeMontageVlcPreview();
+	closeMontageClipVlcPreview();
+	closeVideoEssayVlcPreview();
 #endif
 #if OFXGGML_HAS_OFXPROJECTM
-  milkdropPreviewInitialized = false;
+	milkdropPreviewInitialized = false;
 #endif
 	stopChatTtsPlayback(true);
 	stopTranslateTtsPlayback(true);
+	stopVideoEssayTtsPlayback(true);
 	stopSpeechRecording(false);
 	if (speechInputStream.getSoundStream() != nullptr) {
 		speechInputStream.stop();
@@ -4030,6 +4048,54 @@ int ofApp::findActiveMontagePreviewCueIndex() const {
 		getSelectedMontagePreviewTimeSeconds());
 }
 
+double ofApp::getVideoEssaySectionStartSeconds(int sectionIndex) const {
+	if (sectionIndex < 0) {
+		return 0.0;
+	}
+	for (const auto & cue : videoEssayVoiceCues) {
+		if (cue.sectionIndex == sectionIndex) {
+			return std::max(0.0, cue.startSeconds);
+		}
+	}
+	return 0.0;
+}
+
+std::string ofApp::exportVideoEssaySubtitleTrack(std::string * errorOut) const {
+	const std::string srtText = trim(videoEssaySrtText);
+	if (srtText.empty()) {
+		if (errorOut) {
+			*errorOut = "No video essay SRT is available yet.";
+		}
+		return {};
+	}
+
+	const std::filesystem::path exportDir =
+		std::filesystem::path(ofToDataPath("cache/video_essay_preview", true));
+	std::error_code ec;
+	std::filesystem::create_directories(exportDir, ec);
+	if (ec) {
+		if (errorOut) {
+			*errorOut = "Failed to create the video essay preview cache directory.";
+		}
+		return {};
+	}
+
+	const std::string safeTopic =
+		sanitizeFilenameStem(trim(videoEssayTopic).empty() ? "video_essay" : trim(videoEssayTopic), "video_essay");
+	const std::filesystem::path outputPath =
+		exportDir / (safeTopic + "_essay_preview.srt");
+	std::ofstream outputFile(outputPath, std::ios::binary | std::ios::trunc);
+	if (!outputFile.is_open()) {
+		if (errorOut) {
+			*errorOut = "Failed to export the video essay subtitle preview.";
+		}
+		return {};
+	}
+	outputFile.write(srtText.data(), static_cast<std::streamsize>(srtText.size()));
+	outputFile.close();
+	return outputPath.string();
+}
+
 std::string ofApp::exportSelectedMontagePreviewTrack(
 	ofxGgmlMontagePreviewTextFormat format,
 	std::string * errorOut) const {
@@ -4054,7 +4120,361 @@ std::string ofApp::exportSelectedMontagePreviewTrack(
 	return outputPath.string();
 }
 
+std::string ofApp::exportMontageClipPlaylistManifest(std::string * errorOut) const {
+	const std::vector<std::string> clipPaths = extractPathList(montageClipPaths);
+	if (clipPaths.empty()) {
+		if (errorOut) {
+			*errorOut = "Add at least one clip path before exporting a montage playlist manifest.";
+		}
+		return {};
+	}
+
+	ofJson manifest = ofJson::object();
+	manifest["title"] = trim(montageEdlTitle).empty() ? "MONTAGE" : trim(montageEdlTitle);
+	manifest["goal"] = trim(montageGoal);
+	manifest["timingMode"] =
+		getSelectedMontagePreviewTimingMode() == ofxGgmlMontagePreviewTimingMode::Source
+			? "source"
+			: "montage";
+	manifest["audioPath"] = trim(montageRenderAudioPath);
+	manifest["clips"] = ofJson::array();
+
+	for (size_t i = 0; i < clipPaths.size(); ++i) {
+		const std::string normalizedPath = trim(clipPaths[i]);
+		std::error_code ec;
+		const bool exists = !normalizedPath.empty() &&
+			std::filesystem::exists(std::filesystem::path(normalizedPath), ec) &&
+			!ec;
+		ofJson clipJson = {
+			{"index", static_cast<int>(i)},
+			{"path", normalizedPath},
+			{"exists", exists}
+		};
+		manifest["clips"].push_back(clipJson);
+	}
+
+	const std::filesystem::path exportDir =
+		std::filesystem::path(ofToDataPath("cache/montage_export", true));
+	std::error_code dirEc;
+	std::filesystem::create_directories(exportDir, dirEc);
+	if (dirEc) {
+		if (errorOut) {
+			*errorOut = "Failed to create the montage export cache directory.";
+		}
+		return {};
+	}
+
+	const std::string safeTitle =
+		sanitizeFilenameStem(trim(montageEdlTitle).empty() ? "montage" : trim(montageEdlTitle), "montage");
+	const std::filesystem::path outputPath = exportDir / (safeTitle + "_playlist.json");
+	std::ofstream outputFile(outputPath, std::ios::binary | std::ios::trunc);
+	if (!outputFile.is_open()) {
+		if (errorOut) {
+			*errorOut = "Failed to write the montage playlist manifest.";
+		}
+		return {};
+	}
+	outputFile << manifest.dump(2);
+	outputFile.close();
+	return outputPath.string();
+}
+
 #if OFXGGML_HAS_OFXVLC4
+bool ofApp::ensureVideoEssayVlcPreviewInitialized(std::string * errorOut) {
+	if (videoEssayVlcPreviewInitialized) {
+		return true;
+	}
+
+	try {
+		videoEssayVlcPreviewPlayer.init(0, nullptr);
+		videoEssayVlcPreviewPlayer.setVolume(0);
+		videoEssayVlcPreviewPlayer.setSubtitleDelayMs(0);
+		videoEssayVlcPreviewPlayer.setSubtitleTextScale(1.0f);
+		videoEssayVlcPreviewInitialized = true;
+		videoEssayVlcPreviewError.clear();
+		return true;
+	} catch (const std::exception & e) {
+		videoEssayVlcPreviewError = std::string("Failed to initialize ofxVlc4 video essay preview: ") + e.what();
+		if (errorOut) {
+			*errorOut = videoEssayVlcPreviewError;
+		}
+		return false;
+	}
+}
+
+bool ofApp::loadVideoEssayVlcPreview(std::string * errorOut) {
+	if (!ensureVideoEssayVlcPreviewInitialized(errorOut)) {
+		return false;
+	}
+
+	const std::string videoPath = trim(videoEssaySourceVideoPath);
+	if (videoPath.empty()) {
+		videoEssayVlcPreviewError = "Select a source video before loading the video essay preview.";
+		if (errorOut) {
+			*errorOut = videoEssayVlcPreviewError;
+		}
+		return false;
+	}
+
+	std::string subtitleError;
+	const std::string subtitlePath = exportVideoEssaySubtitleTrack(&subtitleError);
+	if (subtitlePath.empty()) {
+		videoEssayVlcPreviewError =
+			subtitleError.empty() ? std::string("Failed to prepare the video essay SRT for ofxVlc4.")
+								  : subtitleError;
+		if (errorOut) {
+			*errorOut = videoEssayVlcPreviewError;
+		}
+		return false;
+	}
+
+	videoEssayVlcPreviewSubtitlePath = subtitlePath;
+
+	const bool reloadVideo = videoEssayVlcPreviewLoadedVideoPath != videoPath;
+	if (reloadVideo) {
+		videoEssayVlcPreviewPlayer.stop();
+		videoEssayVlcPreviewPlayer.clearMediaSlaves();
+		videoEssayVlcPreviewPlayer.clearPlaylist();
+		if (videoEssayVlcPreviewPlayer.addPathToPlaylist(videoPath) <= 0) {
+			videoEssayVlcPreviewError = "ofxVlc4 could not load the selected video essay source video.";
+			if (errorOut) {
+				*errorOut = videoEssayVlcPreviewError;
+			}
+			return false;
+		}
+		videoEssayVlcPreviewPlayer.playIndex(0);
+		videoEssayVlcPreviewPlayer.setVolume(0);
+		videoEssayVlcPreviewLoadedVideoPath = videoPath;
+		videoEssayVlcPreviewLoadedSubtitlePath.clear();
+	}
+
+	if (reloadVideo || videoEssayVlcPreviewLoadedSubtitlePath != subtitlePath) {
+		videoEssayVlcPreviewPlayer.clearMediaSlaves();
+		if (!videoEssayVlcPreviewPlayer.addSubtitleSlave(subtitlePath)) {
+			videoEssayVlcPreviewError = "ofxVlc4 could not attach the video essay subtitle slave.";
+			if (errorOut) {
+				*errorOut = videoEssayVlcPreviewError;
+			}
+			return false;
+		}
+		const auto subtitleTracks = videoEssayVlcPreviewPlayer.getSubtitleTracks();
+		if (!subtitleTracks.empty()) {
+			videoEssayVlcPreviewPlayer.selectSubtitleTrackById(subtitleTracks.back().id);
+		}
+		videoEssayVlcPreviewLoadedSubtitlePath = subtitlePath;
+	}
+
+	videoEssayVlcPreviewError.clear();
+	if (errorOut) {
+		errorOut->clear();
+	}
+	return true;
+}
+
+void ofApp::closeVideoEssayVlcPreview() {
+	if (!videoEssayVlcPreviewInitialized) {
+		return;
+	}
+	videoEssayVlcPreviewPlayer.close();
+	videoEssayVlcPreviewInitialized = false;
+	videoEssayVlcPreviewLoadedVideoPath.clear();
+	videoEssayVlcPreviewLoadedSubtitlePath.clear();
+}
+
+bool ofApp::startVideoEssayVlcRecording(std::string * errorOut) {
+	if (!loadVideoEssayVlcPreview(errorOut)) {
+		return false;
+	}
+	if (videoEssayVlcPreviewPlayer.isVideoRecording()) {
+		if (errorOut) {
+			*errorOut = "Video essay preview recording is already active.";
+		}
+		return false;
+	}
+
+	const ofTexture & previewTexture = videoEssayVlcPreviewPlayer.getTexture();
+	if (!previewTexture.isAllocated()) {
+		videoEssayVlcPreviewError = "Wait for the video essay preview to produce a frame before recording.";
+		if (errorOut) {
+			*errorOut = videoEssayVlcPreviewError;
+		}
+		return false;
+	}
+
+	const std::filesystem::path outputDir =
+		std::filesystem::path(ofToDataPath("generated/video_essay", true));
+	std::error_code ec;
+	std::filesystem::create_directories(outputDir, ec);
+	if (ec) {
+		videoEssayVlcPreviewError = "Failed to create the video essay render directory.";
+		if (errorOut) {
+			*errorOut = videoEssayVlcPreviewError;
+		}
+		return false;
+	}
+
+	const std::string safeTopic =
+		sanitizeFilenameStem(trim(videoEssayTopic).empty() ? "video_essay" : trim(videoEssayTopic), "video_essay");
+	const std::string recordingBasePath =
+		(outputDir / (safeTopic + "_" + ofGetTimestampString("%Y%m%d-%H%M%S"))).string();
+	if (!videoEssayVlcPreviewPlayer.startTextureRecordingSession(recordingBasePath, previewTexture)) {
+		videoEssayVlcPreviewError = "ofxVlc4 could not start texture recording for the video essay preview.";
+		if (errorOut) {
+			*errorOut = videoEssayVlcPreviewError;
+		}
+		return false;
+	}
+
+	videoEssayLastRenderedVideoPath.clear();
+	videoEssayVlcPreviewStatusMessage = "Recording the video essay VLC preview...";
+	if (errorOut) {
+		errorOut->clear();
+	}
+	return true;
+}
+
+bool ofApp::stopVideoEssayVlcRecording(std::string * errorOut) {
+	if (!videoEssayVlcPreviewInitialized || !videoEssayVlcPreviewPlayer.isVideoRecording()) {
+		if (errorOut) {
+			*errorOut = "Video essay preview recording is not active.";
+		}
+		return false;
+	}
+
+	if (!videoEssayVlcPreviewPlayer.stopRecordingSession()) {
+		videoEssayVlcPreviewError = "ofxVlc4 could not stop the video essay recording session cleanly.";
+		if (errorOut) {
+			*errorOut = videoEssayVlcPreviewError;
+		}
+		return false;
+	}
+
+	const std::string recordedVideoPath = trim(videoEssayVlcPreviewPlayer.getLastVideoRecordingPath());
+	if (recordedVideoPath.empty()) {
+		videoEssayVlcPreviewError = "The video essay preview recording did not produce a video file.";
+		if (errorOut) {
+			*errorOut = videoEssayVlcPreviewError;
+		}
+		return false;
+	}
+
+	const std::string narrationAudioPath =
+		videoEssayTtsPreview.audioFiles.empty()
+			? std::string()
+			: trim(videoEssayTtsPreview.audioFiles[static_cast<size_t>(
+				std::clamp(
+					videoEssayTtsPreview.selectedAudioIndex,
+					0,
+					std::max(0, static_cast<int>(videoEssayTtsPreview.audioFiles.size()) - 1)))].path);
+
+	if (!narrationAudioPath.empty() && std::filesystem::exists(narrationAudioPath)) {
+		const std::filesystem::path outputDir =
+			std::filesystem::path(ofToDataPath("generated/video_essay", true));
+		const std::string safeTopic =
+			sanitizeFilenameStem(trim(videoEssayTopic).empty() ? "video_essay" : trim(videoEssayTopic), "video_essay");
+		const std::filesystem::path outputPath =
+			outputDir / (safeTopic + "_render_" + ofGetTimestampString("%Y%m%d-%H%M%S") + ".mp4");
+		std::string muxError;
+		if (!ofxVlc4::muxRecordingFilesToMp4(
+				recordedVideoPath,
+				narrationAudioPath,
+				outputPath.string(),
+				30000,
+				&muxError)) {
+			videoEssayVlcPreviewError =
+				muxError.empty()
+					? std::string("Failed to mux the video essay preview with the narration audio.")
+					: muxError;
+			if (errorOut) {
+				*errorOut = videoEssayVlcPreviewError;
+			}
+			return false;
+		}
+		videoEssayLastRenderedVideoPath = outputPath.string();
+		videoEssayVlcPreviewStatusMessage = "Rendered narrated video essay preview: " + outputPath.string();
+	} else {
+		videoEssayLastRenderedVideoPath = recordedVideoPath;
+		videoEssayVlcPreviewStatusMessage =
+			"Recorded video essay preview without narration mux: " + recordedVideoPath;
+	}
+
+	videoEssayVlcPreviewError.clear();
+	if (errorOut) {
+		errorOut->clear();
+	}
+	return true;
+}
+
+void ofApp::drawVideoEssayVlcPreview() {
+	if (!videoEssayVlcPreviewInitialized) {
+		return;
+	}
+
+	if (!videoEssayVlcPreviewError.empty()) {
+		ImGui::TextDisabled("%s", videoEssayVlcPreviewError.c_str());
+	}
+
+	const ofTexture & previewTexture = videoEssayVlcPreviewPlayer.getTexture();
+	if (previewTexture.isAllocated()) {
+		const float availWidth = std::max(160.0f, ImGui::GetContentRegionAvail().x);
+		const float maxWidth = std::min(availWidth, 420.0f);
+		const float texWidth = std::max(1.0f, static_cast<float>(previewTexture.getWidth()));
+		const float texHeight = std::max(1.0f, static_cast<float>(previewTexture.getHeight()));
+		const float scale = std::min(maxWidth / texWidth, 240.0f / texHeight);
+		const glm::vec2 drawSize(
+			std::max(1.0f, texWidth * scale),
+			std::max(1.0f, texHeight * scale));
+		ImGui::BeginChild("##VideoEssayVlcPreview", ImVec2(0, drawSize.y + 12.0f), true);
+		ofxImGui::AddImage(previewTexture, drawSize);
+		ImGui::EndChild();
+	} else {
+		ImGui::TextDisabled("ofxVlc4 preview will appear here after the video essay media attaches.");
+	}
+
+	const float durationSeconds = std::max(0.0f, videoEssayVlcPreviewPlayer.getLength() / 1000.0f);
+	float previewPosition = std::clamp(videoEssayVlcPreviewPlayer.getPosition(), 0.0f, 1.0f);
+	const float currentSeconds = previewPosition * durationSeconds;
+	if (ImGui::Button(
+			videoEssayVlcPreviewPlayer.isPlaying() ? "Pause VLC preview##VideoEssay" : "Play VLC preview##VideoEssay",
+			ImVec2(170, 0))) {
+		videoEssayVlcPreviewPlayer.togglePlayPause();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Restart VLC preview##VideoEssay", ImVec2(170, 0))) {
+		videoEssayVlcPreviewPlayer.play();
+		videoEssayVlcPreviewPlayer.setPosition(0.0f);
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("%.2fs / %.2fs", currentSeconds, durationSeconds);
+
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderFloat("VLC preview position##VideoEssay", &previewPosition, 0.0f, 1.0f, "%.3f")) {
+		videoEssayVlcPreviewPlayer.setPosition(previewPosition);
+	}
+
+	int subtitleDelayMs = videoEssayVlcPreviewPlayer.getSubtitleDelayMs();
+	ImGui::SetNextItemWidth(180);
+	if (ImGui::SliderInt("VLC subtitle delay##VideoEssay", &subtitleDelayMs, -5000, 5000, "%d ms")) {
+		videoEssayVlcPreviewPlayer.setSubtitleDelayMs(subtitleDelayMs);
+	}
+	ImGui::SameLine();
+	float subtitleTextScale = videoEssayVlcPreviewPlayer.getSubtitleTextScale();
+	ImGui::SetNextItemWidth(180);
+	if (ImGui::SliderFloat("VLC subtitle scale##VideoEssay", &subtitleTextScale, 0.5f, 3.0f, "%.2fx")) {
+		videoEssayVlcPreviewPlayer.setSubtitleTextScale(subtitleTextScale);
+	}
+
+	const auto subtitleState = videoEssayVlcPreviewPlayer.getSubtitleStateInfo();
+	if (subtitleState.trackSelected && !subtitleState.selectedTrackLabel.empty()) {
+		ImGui::TextDisabled("Active VLC subtitle track: %s", subtitleState.selectedTrackLabel.c_str());
+	} else {
+		ImGui::TextDisabled("No VLC subtitle track selected yet.");
+	}
+	if (!videoEssayVlcPreviewLoadedSubtitlePath.empty()) {
+		ImGui::TextDisabled("%s", videoEssayVlcPreviewLoadedSubtitlePath.c_str());
+	}
+}
+
 bool ofApp::ensureMontageVlcPreviewInitialized(std::string * errorOut) {
 	if (montageVlcPreviewInitialized) {
 		return true;
@@ -4223,6 +4643,255 @@ void ofApp::drawMontageVlcPreview() {
 	if (!montageVlcPreviewLoadedSubtitlePath.empty()) {
 		ImGui::TextDisabled("%s", montageVlcPreviewLoadedSubtitlePath.c_str());
 	}
+}
+
+bool ofApp::ensureMontageClipVlcPreviewInitialized(std::string * errorOut) {
+	if (montageClipVlcInitialized) {
+		return true;
+	}
+
+	try {
+		montageClipVlcPlayer.init(0, nullptr);
+		montageClipVlcInitialized = true;
+		montageClipVlcError.clear();
+		return true;
+	} catch (const std::exception & e) {
+		montageClipVlcError =
+			std::string("Failed to initialize ofxVlc4 montage clip preview: ") + e.what();
+		if (errorOut) {
+			*errorOut = montageClipVlcError;
+		}
+		return false;
+	}
+}
+
+bool ofApp::loadMontageClipVlcPreview(std::string * errorOut) {
+	if (!ensureMontageClipVlcPreviewInitialized(errorOut)) {
+		return false;
+	}
+
+	const std::vector<std::string> clipPaths = extractPathList(montageClipPaths);
+	if (clipPaths.empty()) {
+		montageClipVlcError = "Add at least one clip path before loading the montage clip preview.";
+		if (errorOut) {
+			*errorOut = montageClipVlcError;
+		}
+		return false;
+	}
+
+	montageClipVlcPlayer.stop();
+	montageClipVlcPlayer.clearMediaSlaves();
+	montageClipVlcPlayer.clearPlaylist();
+
+	size_t addedCount = 0;
+	for (const auto & clipPath : clipPaths) {
+		std::error_code ec;
+		if (!std::filesystem::exists(std::filesystem::path(clipPath), ec) || ec) {
+			continue;
+		}
+		if (montageClipVlcPlayer.addPathToPlaylist(clipPath) > 0) {
+			++addedCount;
+		}
+	}
+
+	if (addedCount == 0) {
+		montageClipVlcError = "ofxVlc4 could not load any montage clip paths from the current list.";
+		if (errorOut) {
+			*errorOut = montageClipVlcError;
+		}
+		return false;
+	}
+
+	montageClipVlcPlayer.playIndex(0);
+	montageClipVlcError.clear();
+	if (errorOut) {
+		errorOut->clear();
+	}
+	return true;
+}
+
+void ofApp::closeMontageClipVlcPreview() {
+	if (!montageClipVlcInitialized) {
+		return;
+	}
+	montageClipVlcPlayer.close();
+	montageClipVlcInitialized = false;
+}
+
+void ofApp::drawMontageClipVlcPreview() {
+	if (!montageClipVlcInitialized) {
+		return;
+	}
+
+	if (!montageClipVlcError.empty()) {
+		ImGui::TextDisabled("%s", montageClipVlcError.c_str());
+	}
+
+	const ofTexture & previewTexture = montageClipVlcPlayer.getTexture();
+	if (previewTexture.isAllocated()) {
+		const float availWidth = std::max(160.0f, ImGui::GetContentRegionAvail().x);
+		const float maxWidth = std::min(availWidth, 420.0f);
+		const float texWidth = std::max(1.0f, static_cast<float>(previewTexture.getWidth()));
+		const float texHeight = std::max(1.0f, static_cast<float>(previewTexture.getHeight()));
+		const float scale = std::min(maxWidth / texWidth, 240.0f / texHeight);
+		const glm::vec2 drawSize(
+			std::max(1.0f, texWidth * scale),
+			std::max(1.0f, texHeight * scale));
+		ImGui::BeginChild("##MontageClipVlcPreview", ImVec2(0, drawSize.y + 12.0f), true);
+		ofxImGui::AddImage(previewTexture, drawSize);
+		ImGui::EndChild();
+	} else {
+		ImGui::TextDisabled("Playlist preview will appear here after the first clip attaches.");
+	}
+
+	const float durationSeconds = std::max(0.0f, montageClipVlcPlayer.getLength() / 1000.0f);
+	float previewPosition = std::clamp(montageClipVlcPlayer.getPosition(), 0.0f, 1.0f);
+	const float currentSeconds = previewPosition * durationSeconds;
+	if (ImGui::Button(
+			montageClipVlcPlayer.isPlaying() ? "Pause clip playlist" : "Play clip playlist",
+			ImVec2(150, 0))) {
+		montageClipVlcPlayer.togglePlayPause();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Previous clip", ImVec2(120, 0))) {
+		montageClipVlcPlayer.previousMediaListItem();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Next clip", ImVec2(120, 0))) {
+		montageClipVlcPlayer.nextMediaListItem();
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("%.2fs / %.2fs", currentSeconds, durationSeconds);
+
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderFloat("Clip playlist position", &previewPosition, 0.0f, 1.0f, "%.3f")) {
+		montageClipVlcPlayer.setPosition(previewPosition);
+	}
+
+	const auto playlistState = montageClipVlcPlayer.getPlaylistStateInfo();
+	if (!playlistState.items.empty()) {
+		ImGui::TextDisabled(
+			"Playlist: %d item(s), current index %d",
+			static_cast<int>(playlistState.items.size()),
+			playlistState.currentIndex);
+	}
+}
+
+bool ofApp::startMontageClipVlcRecording(std::string * errorOut) {
+	if (!loadMontageClipVlcPreview(errorOut)) {
+		return false;
+	}
+	if (montageClipVlcPlayer.isVideoRecording()) {
+		if (errorOut) {
+			*errorOut = "Montage clip playlist recording is already active.";
+		}
+		return false;
+	}
+
+	const ofTexture & previewTexture = montageClipVlcPlayer.getTexture();
+	if (!previewTexture.isAllocated()) {
+		montageClipVlcError = "The montage clip playlist preview has no texture to record yet.";
+		if (errorOut) {
+			*errorOut = montageClipVlcError;
+		}
+		return false;
+	}
+
+	const std::filesystem::path outputDir =
+		std::filesystem::path(ofToDataPath("generated/montage_export", true));
+	std::error_code dirEc;
+	std::filesystem::create_directories(outputDir, dirEc);
+	if (dirEc) {
+		montageClipVlcError = "Failed to create the montage export output directory.";
+		if (errorOut) {
+			*errorOut = montageClipVlcError;
+		}
+		return false;
+	}
+
+	const std::string safeTitle =
+		sanitizeFilenameStem(trim(montageEdlTitle).empty() ? "montage" : trim(montageEdlTitle), "montage");
+	const std::string recordingBasePath =
+		(outputDir / (safeTitle + "_" + ofGetTimestampString("%Y%m%d-%H%M%S"))).string();
+	if (!montageClipVlcPlayer.startTextureRecordingSession(recordingBasePath, previewTexture)) {
+		montageClipVlcError = "ofxVlc4 could not start texture recording for the montage clip playlist.";
+		if (errorOut) {
+			*errorOut = montageClipVlcError;
+		}
+		return false;
+	}
+
+	montageClipRenderOutputPath.clear();
+	montageClipPlaylistStatusMessage = "Recording the montage clip playlist preview...";
+	if (errorOut) {
+		errorOut->clear();
+	}
+	return true;
+}
+
+bool ofApp::stopMontageClipVlcRecording(std::string * errorOut) {
+	if (!montageClipVlcInitialized || !montageClipVlcPlayer.isVideoRecording()) {
+		if (errorOut) {
+			*errorOut = "Montage clip playlist recording is not active.";
+		}
+		return false;
+	}
+
+	if (!montageClipVlcPlayer.stopRecordingSession()) {
+		montageClipVlcError = "ofxVlc4 could not stop the montage clip playlist recording cleanly.";
+		if (errorOut) {
+			*errorOut = montageClipVlcError;
+		}
+		return false;
+	}
+
+	const std::string recordedVideoPath = trim(montageClipVlcPlayer.getLastVideoRecordingPath());
+	if (recordedVideoPath.empty()) {
+		montageClipVlcError = "The montage clip playlist recording did not produce a video file.";
+		if (errorOut) {
+			*errorOut = montageClipVlcError;
+		}
+		return false;
+	}
+
+	const std::string audioPath = trim(montageRenderAudioPath);
+	if (!audioPath.empty()) {
+		const std::filesystem::path outputDir =
+			std::filesystem::path(ofToDataPath("generated/montage_export", true));
+		const std::string safeTitle =
+			sanitizeFilenameStem(trim(montageEdlTitle).empty() ? "montage" : trim(montageEdlTitle), "montage");
+		const std::filesystem::path outputPath =
+			outputDir / (safeTitle + "_playlist_render_" + ofGetTimestampString("%Y%m%d-%H%M%S") + ".mp4");
+		std::string muxError;
+		if (!ofxVlc4::muxRecordingFilesToMp4(
+				recordedVideoPath,
+				audioPath,
+				outputPath.string(),
+				30000,
+				&muxError)) {
+			montageClipVlcError =
+				muxError.empty()
+					? std::string("Failed to mux the montage clip playlist with the selected audio track.")
+					: muxError;
+			if (errorOut) {
+				*errorOut = montageClipVlcError;
+			}
+			return false;
+		}
+		montageClipRenderOutputPath = outputPath.string();
+		montageClipPlaylistStatusMessage =
+			"Rendered montage clip playlist with muxed audio: " + outputPath.string();
+	} else {
+		montageClipRenderOutputPath = recordedVideoPath;
+		montageClipPlaylistStatusMessage =
+			"Recorded montage clip playlist without extra audio mux: " + recordedVideoPath;
+	}
+
+	montageClipVlcError.clear();
+	if (errorOut) {
+		errorOut->clear();
+	}
+	return true;
 }
 #endif
 
@@ -5156,6 +5825,17 @@ void ofApp::speakTranslatedReply(bool mirrorIntoTtsInput) {
 	runTtsInferenceForText(translatedText, "Translated voice output", mirrorIntoTtsInput);
 }
 
+void ofApp::speakVideoEssayReply(bool mirrorIntoTtsInput) {
+	const std::string narration = trim(videoEssayScript);
+	if (narration.empty()) {
+		videoEssayTtsPreview.statusMessage = "No video essay narration is available to synthesize yet.";
+		return;
+	}
+	videoEssayTtsPreview.request.pending = true;
+	videoEssayTtsPreview.statusMessage = "Synthesizing video essay voiceover...";
+	runTtsInferenceForText(narration, "Video essay narration", mirrorIntoTtsInput);
+}
+
 bool ofApp::ensureChatTtsAudioLoaded(int artifactIndex, bool autoplay) {
 	return ensurePreviewAudioLoaded(
 		chatTtsPreview.audioFiles,
@@ -5205,6 +5885,32 @@ void ofApp::stopTranslateTtsPlayback(bool clearLoadedPath) {
 		translateTtsPreview.player,
 		translateTtsPreview.playbackPaused,
 		translateTtsPreview.loadedAudioPath,
+		clearLoadedPath);
+}
+
+bool ofApp::ensureVideoEssayTtsAudioLoaded(int artifactIndex, bool autoplay) {
+	return ensurePreviewAudioLoaded(
+		videoEssayTtsPreview.audioFiles,
+		videoEssayTtsPreview.selectedAudioIndex,
+		videoEssayTtsPreview.loadedAudioPath,
+		videoEssayTtsPreview.playbackPaused,
+		videoEssayTtsPreview.player,
+		videoEssayTtsPreview.statusMessage,
+		"No video essay voiceover audio is available yet.",
+		"The selected video essay voiceover artifact has no file path.",
+		"Video essay voiceover file is missing: ",
+		"Failed to load video essay voiceover preview: ",
+		"Ready to play video essay voiceover.",
+		"Playing video essay voiceover.",
+		artifactIndex,
+		autoplay);
+}
+
+void ofApp::stopVideoEssayTtsPlayback(bool clearLoadedPath) {
+	stopPreviewAudioPlayback(
+		videoEssayTtsPreview.player,
+		videoEssayTtsPreview.playbackPaused,
+		videoEssayTtsPreview.loadedAudioPath,
 		clearLoadedPath);
 }
 

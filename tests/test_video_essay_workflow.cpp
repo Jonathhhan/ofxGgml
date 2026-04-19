@@ -51,3 +51,64 @@ TEST_CASE("Video essay workflow builds sequential voice cues and SRT", "[video_e
 	REQUIRE(srt.find("First sentence.") != std::string::npos);
 	REQUIRE(srt.find("Third sentence closes the argument") != std::string::npos);
 }
+
+TEST_CASE("Video essay workflow builds visual concept prompt from sections", "[video_essay]") {
+	ofxGgmlVideoEssayRequest request;
+	request.topic = "Night trains in Europe";
+	request.targetDurationSeconds = 120.0;
+	request.tone = "reflective, cinematic, and thoughtful";
+	request.audience = "creative filmmaker";
+
+	ofxGgmlCitationSearchResult citations;
+	citations.summary = "Rail travel is being reframed as a slower, lower-emission alternative.";
+	citations.citations.push_back({
+		"Quote about overnight routes expanding",
+		"Shows renewed demand.",
+		"Example source",
+		"https://example.com/night-trains",
+		1
+	});
+
+	std::vector<ofxGgmlVideoEssaySection> sections;
+	sections.push_back({
+		0,
+		"Hook",
+		"Opening with stations, sleepers, and night windows.",
+		"Night trains are returning as a practical and romantic form of travel [Source 1].",
+		18.0,
+		{1}
+	});
+
+	const std::string prompt =
+		ofxGgmlVideoEssayWorkflow::buildVisualConceptPrompt(request, citations, sections);
+	REQUIRE(prompt.find("Night trains in Europe") != std::string::npos);
+	REQUIRE(prompt.find("Hook") != std::string::npos);
+	REQUIRE(prompt.find("[Source 1]") != std::string::npos);
+	REQUIRE(prompt.find("Visual concept:") != std::string::npos);
+}
+
+TEST_CASE("Video essay workflow builds edit source summary from sections", "[video_essay]") {
+	std::vector<ofxGgmlVideoEssaySection> sections;
+	sections.push_back({
+		0,
+		"Intro",
+		"Quick setup of the problem.",
+		"Intro narration",
+		14.0,
+		{1}
+	});
+	sections.push_back({
+		1,
+		"Payoff",
+		"Closer on the human impact.",
+		"Payoff narration",
+		20.0,
+		{2}
+	});
+
+	const std::string summary =
+		ofxGgmlVideoEssayWorkflow::buildEditSourceSummary(sections);
+	REQUIRE(summary.find("1. Intro") != std::string::npos);
+	REQUIRE(summary.find("Quick setup of the problem.") != std::string::npos);
+	REQUIRE(summary.find("2. Payoff") != std::string::npos);
+}

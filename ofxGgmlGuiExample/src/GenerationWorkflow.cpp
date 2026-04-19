@@ -1219,6 +1219,16 @@ void ofApp::applyPendingOutput() {
 					ensureTranslateTtsAudioLoaded(0, true);
 				}
 			}
+			if (videoEssayTtsPreview.request.pending) {
+				videoEssayTtsPreview.audioFiles = pendingTtsAudioFiles;
+				videoEssayTtsPreview.selectedAudioIndex = 0;
+				videoEssayTtsPreview.loadedAudioPath.clear();
+				videoEssayTtsPreview.statusMessage = pendingOutput;
+				videoEssayTtsPreview.request.clear();
+				if (!videoEssayTtsPreview.audioFiles.empty()) {
+					ensureVideoEssayTtsAudioLoaded(0, true);
+				}
+			}
 			fprintf(
 				stderr,
 				"%s\n",
@@ -1335,6 +1345,14 @@ void ofApp::applyPendingOutput() {
 		videoEssayOutline = pendingVideoEssayOutline;
 		videoEssayScript = pendingVideoEssayScript;
 		videoEssaySrtText = pendingVideoEssaySrtText;
+		videoEssayVisualConcept = pendingVideoEssayVisualConcept;
+		videoEssayScenePlanJson = pendingVideoEssayScenePlanJson;
+		videoEssayScenePlanSummary = pendingVideoEssayScenePlanSummary;
+		videoEssayScenePlanningError = pendingVideoEssayScenePlanningError;
+		videoEssayEditPlanJson = pendingVideoEssayEditPlanJson;
+		videoEssayEditPlanSummary = pendingVideoEssayEditPlanSummary;
+		videoEssayEditPlanningError = pendingVideoEssayEditPlanningError;
+		videoEssayEditorBrief = pendingVideoEssayEditorBrief;
 		videoEssayCitations = pendingVideoEssayCitations;
 		videoEssaySections = pendingVideoEssaySections;
 		videoEssayVoiceCues = pendingVideoEssayVoiceCues;
@@ -1435,6 +1453,14 @@ void ofApp::applyPendingOutput() {
 	pendingVideoEssayOutline.clear();
 	pendingVideoEssayScript.clear();
 	pendingVideoEssaySrtText.clear();
+	pendingVideoEssayVisualConcept.clear();
+	pendingVideoEssayScenePlanJson.clear();
+	pendingVideoEssayScenePlanSummary.clear();
+	pendingVideoEssayScenePlanningError.clear();
+	pendingVideoEssayEditPlanJson.clear();
+	pendingVideoEssayEditPlanSummary.clear();
+	pendingVideoEssayEditPlanningError.clear();
+	pendingVideoEssayEditorBrief.clear();
 	pendingVideoEssayCitations.clear();
 	pendingVideoEssaySections.clear();
 	pendingVideoEssayVoiceCues.clear();

@@ -158,6 +158,7 @@ private:
 	bool voiceTranslatorSpeakOutput = true;
 	char videoEssayTopic[1024] = {};
 	char videoEssaySeedUrl[1024] = {};
+	char videoEssaySourceVideoPath[1024] = {};
 	bool videoEssayUseCrawler = false;
 	bool videoEssayIncludeCounterpoints = true;
 	int videoEssayCitationCount = 5;
@@ -184,6 +185,8 @@ private:
 	char montageGoal[4096] = {};
 	char montageEdlTitle[128] = "MONTAGE";
 	char montageReelName[32] = "AX";
+	char montageClipPaths[16384] = {};
+	char montageRenderAudioPath[1024] = {};
 	char videoEditGoal[4096] = {};
 	int visionTaskIndex = 0;
 	int videoTaskIndex = 0;
@@ -325,6 +328,7 @@ private:
 	std::string voiceTranslatorStatus;
 	std::string voiceTranslatorTranscript;
 	TtsPreviewState translateTtsPreview;
+	TtsPreviewState videoEssayTtsPreview;
 	std::string customOutput;
 	std::string citationOutput;
 	std::string visionOutput;
@@ -333,6 +337,9 @@ private:
 	std::string montageEdlText;
 	std::string montageSrtText;
 	std::string montageVttText;
+	std::string montageClipPlaylistManifestPath;
+	std::string montageClipPlaylistStatusMessage;
+	std::string montageClipRenderOutputPath;
 	std::string videoPlanSummary;
 	std::string videoEditPlanSummary;
 	std::string speechOutput;
@@ -415,6 +422,14 @@ private:
 	std::string montageVlcPreviewLoadedVideoPath;
 	std::string montageVlcPreviewLoadedSubtitlePath;
 	std::string montageVlcPreviewError;
+	ofxVlc4 montageClipVlcPlayer;
+	bool montageClipVlcInitialized = false;
+	std::string montageClipVlcError;
+	ofxVlc4 videoEssayVlcPreviewPlayer;
+	bool videoEssayVlcPreviewInitialized = false;
+	std::string videoEssayVlcPreviewLoadedVideoPath;
+	std::string videoEssayVlcPreviewLoadedSubtitlePath;
+	std::string videoEssayVlcPreviewError;
 #endif
 	int selectedMontageCueIndex = -1;
 	std::string speechDetectedLanguage;
@@ -524,13 +539,33 @@ private:
 	std::string videoEssayOutline;
 	std::string videoEssayScript;
 	std::string videoEssaySrtText;
+	std::string videoEssayVisualConcept;
+	std::string videoEssayScenePlanJson;
+	std::string videoEssayScenePlanSummary;
+	std::string videoEssayScenePlanningError;
+	std::string videoEssayEditPlanJson;
+	std::string videoEssayEditPlanSummary;
+	std::string videoEssayEditPlanningError;
+	std::string videoEssayEditorBrief;
 	std::vector<ofxGgmlCitationItem> videoEssayCitations;
 	std::vector<ofxGgmlVideoEssaySection> videoEssaySections;
 	std::vector<ofxGgmlVideoEssayVoiceCue> videoEssayVoiceCues;
+	int selectedVideoEssaySceneIndex = 0;
+	std::string videoEssayVlcPreviewSubtitlePath;
+	std::string videoEssayVlcPreviewStatusMessage;
+	std::string videoEssayLastRenderedVideoPath;
 	std::string pendingVideoEssayStatus;
 	std::string pendingVideoEssayOutline;
 	std::string pendingVideoEssayScript;
 	std::string pendingVideoEssaySrtText;
+	std::string pendingVideoEssayVisualConcept;
+	std::string pendingVideoEssayScenePlanJson;
+	std::string pendingVideoEssayScenePlanSummary;
+	std::string pendingVideoEssayScenePlanningError;
+	std::string pendingVideoEssayEditPlanJson;
+	std::string pendingVideoEssayEditPlanSummary;
+	std::string pendingVideoEssayEditPlanningError;
+	std::string pendingVideoEssayEditorBrief;
 	std::vector<ofxGgmlCitationItem> pendingVideoEssayCitations;
 	std::vector<ofxGgmlVideoEssaySection> pendingVideoEssaySections;
 	std::vector<ofxGgmlVideoEssayVoiceCue> pendingVideoEssayVoiceCues;
@@ -804,10 +839,13 @@ private:
 		bool mirrorIntoTtsInput = false);
 	void speakLatestChatReply(bool mirrorIntoTtsInput = true);
 	void speakTranslatedReply(bool mirrorIntoTtsInput = true);
+	void speakVideoEssayReply(bool mirrorIntoTtsInput = true);
 	bool ensureChatTtsAudioLoaded(int artifactIndex = -1, bool autoplay = false);
 	void stopChatTtsPlayback(bool clearLoadedPath = false);
 	bool ensureTranslateTtsAudioLoaded(int artifactIndex = -1, bool autoplay = false);
 	void stopTranslateTtsPlayback(bool clearLoadedPath = false);
+	bool ensureVideoEssayTtsAudioLoaded(int artifactIndex = -1, bool autoplay = false);
+	void stopVideoEssayTtsPlayback(bool clearLoadedPath = false);
 	void runDiffusionInference();
 	void runMusicToImagePromptGeneration();
 	void runImageToMusicPromptGeneration();
@@ -914,6 +952,8 @@ private:
 	void drawVisionImagePreview(const std::string & imagePath);
 	void drawVisionVideoPreview(const std::string & videoPath);
 	void drawMediaTexturePreview(const ofBaseHasTexture & previewTexture, const char * childId);
+	double getVideoEssaySectionStartSeconds(int sectionIndex) const;
+	std::string exportVideoEssaySubtitleTrack(std::string * errorOut = nullptr) const;
 	int findActiveMontageSourceCueIndex() const;
 	ofxGgmlMontagePreviewTimingMode getSelectedMontagePreviewTimingMode() const;
 	const ofxGgmlMontagePreviewTrack * getSelectedMontagePreviewTrack() const;
@@ -922,11 +962,24 @@ private:
 	std::string exportSelectedMontagePreviewTrack(
 		ofxGgmlMontagePreviewTextFormat format,
 		std::string * errorOut = nullptr) const;
+	std::string exportMontageClipPlaylistManifest(std::string * errorOut = nullptr) const;
 #if OFXGGML_HAS_OFXVLC4
+	bool ensureVideoEssayVlcPreviewInitialized(std::string * errorOut = nullptr);
+	bool loadVideoEssayVlcPreview(std::string * errorOut = nullptr);
+	void closeVideoEssayVlcPreview();
+	void drawVideoEssayVlcPreview();
+	bool startVideoEssayVlcRecording(std::string * errorOut = nullptr);
+	bool stopVideoEssayVlcRecording(std::string * errorOut = nullptr);
 	bool ensureMontageVlcPreviewInitialized(std::string * errorOut = nullptr);
 	bool loadMontageVlcPreview(std::string * errorOut = nullptr);
 	void closeMontageVlcPreview();
 	void drawMontageVlcPreview();
+	bool ensureMontageClipVlcPreviewInitialized(std::string * errorOut = nullptr);
+	bool loadMontageClipVlcPreview(std::string * errorOut = nullptr);
+	void closeMontageClipVlcPreview();
+	void drawMontageClipVlcPreview();
+	bool startMontageClipVlcRecording(std::string * errorOut = nullptr);
+	bool stopMontageClipVlcRecording(std::string * errorOut = nullptr);
 #endif
 	void rebuildMontageSubtitleTrackFromText();
 	void ensureDiffusionPreviewResources();

@@ -1230,6 +1230,31 @@ TEST_CASE("Batch inference API", "[inference][batch]") {
 		// Structure should be valid even if execution fails
 		REQUIRE(result.totalElapsedMs >= 0.0f);
 	}
+
+	SECTION("Disabling parallel batch processing forces sequential stop-on-error behavior") {
+		ofxGgmlInferenceSettings settings;
+		settings.useServerBackend = true;
+		settings.serverUrl = "http://127.0.0.1:1";
+		settings.maxTokens = 8;
+
+		std::vector<ofxGgmlBatchRequest> requests;
+		requests.emplace_back("req1", "prompt1", settings);
+		requests.emplace_back("req2", "prompt2", settings);
+		requests.emplace_back("req3", "prompt3", settings);
+
+		ofxGgmlBatchSettings batchSettings;
+		batchSettings.allowParallelProcessing = false;
+		batchSettings.stopOnFirstError = true;
+		batchSettings.maxConcurrentRequests = 3;
+		batchSettings.preferServerBatch = true;
+		batchSettings.fallbackToSequential = true;
+
+		auto result = inf.generateBatch("model.gguf", requests, batchSettings);
+		REQUIRE(result.results.size() == 1);
+		REQUIRE(result.failedCount == 1);
+		REQUIRE(result.processedCount == 0);
+		REQUIRE_FALSE(result.success);
+	}
 }
 
 TEST_CASE("Batch embedding API", "[inference][batch]") {

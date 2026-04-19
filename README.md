@@ -49,8 +49,8 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlImageSearch` for internet reference-image lookup through pluggable providers, with a working Wikimedia Commons backend
 - `ofxGgmlWebCrawler` as an optional website-ingestion bridge layer, with a `Mojo` CLI adapter for local website-to-Markdown crawling workflows
 - `ofxGgmlCitationSearch` for topic-oriented source-grounded quote extraction, with structured citation items built from loaded URLs or crawler-ingested website content
-- `ofxGgmlVideoEssayWorkflow` for local-first `topic -> cited outline -> narrated script -> voice cues -> SRT` orchestration on top of citation search and the text assistant
-- `ofxGgmlVideoEssayWorkflow` is intentionally staged: the current workflow covers research, outline, script, voice cues, and SRT/cue-sheet generation first, and leaves scene/edit execution as a higher planning layer
+- `ofxGgmlVideoEssayWorkflow` for local-first `topic -> cited outline -> narrated script -> voice cues -> SRT -> visual concept -> scene/edit planning` orchestration on top of citation search, the text assistant, and the shared video planner
+- `ofxGgmlVideoEssayWorkflow` stays intentionally staged: research, outline, script, voice cues, and SRT/cue-sheet generation remain the core path, while scene/edit planning is layered on as a handoff-friendly Phase 3 instead of forcing one renderer or export path
 - `ofxGgmlMediaPromptGenerator` for local-first cross-media prompt translation, starting with `Music -> Image` prompt generation that can reuse transcripts, lyrics, and existing text backends before handing the result to diffusion workflows
 - `ofxGgmlMusicGenerator` for general music-prompt generation, local-first ABC notation sketch generation, prompt sanitization/validation, and future pluggable rendered-audio backend bridges
 - `ofxGgmlMilkDropGenerator` for MilkDrop / projectM preset generation and editing through the existing text-inference backend, with prompt preparation, preset sanitization, and `.milk` file saving helpers
@@ -59,7 +59,8 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlEasy` now also covers crawler-backed citation research, subtitle-montage planning/export, AI-assisted video-edit planning, and MilkDrop preset generation/editing so apps can reuse the higher-level workflow helpers without depending on the full GUI example
 - `ofxGgmlEasy` now also covers cross-media prompt translation plus general music-prompt / ABC-sketch generation so apps can build `Music -> Image` and `Image -> Music` flows without wiring the lower-level helpers directly
 - `ofxGgmlEasy` now keeps text inference, crawling, and citation search on one persistent helper path, so `configureText()`, `configureWebCrawler()`, `getWebCrawler()`, `getCitationSearch()`, and `findCitations()` operate on the same configured pipeline
-- `ofxGgmlEasy` now also exposes `planVideoEssay(...)` so apps can reuse the new citation-to-script workflow without copying the GUI example glue
+  - `ofxGgmlEasy` now also exposes `planVideoEssay(...)` so apps can reuse the new citation-to-script workflow, including visual concept plus scene/edit handoff data, without copying the GUI example glue
+  - the `Video Essay` workflow can now also hand that Phase 3 output into an optional `ofxVlc4` preview/render lane in the GUI example, including source-video subtitle preview, inline playback controls, and texture-recorded essay renders muxed with the generated narration track
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
 - `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
 - `ofxGgmlCodeAssistant` now also exposes lightweight assistant sessions, a typed tool registry, approval callbacks for risky proposals, and streamed assistant events so apps can build safer IDE-style coding flows without reimplementing orchestration
@@ -74,10 +75,13 @@ This addon is released under the [MIT License](LICENSE).
 - async graph submission and explicit synchronization for frame-friendly compute
 - Windows build scripts that refresh Visual Studio linking automatically
 - GUI example for local chat, review, and script-assisted workflows built mostly on addon helpers
-- GUI example Translate mode with auto-detect source language, natural vs. literal translation shortcuts, detect-and-translate flow, and more reliable prompt/input handoff buttons
-- GUI example Chat and Translate modes now each keep a dedicated lightweight TTS preview lane, so spoken replies and translated voice output can be played, restarted, and stopped inline without bouncing through the main TTS panel
-- GUI example Montage mode can now preview restructured subtitle cues live, copy generated SRT/VTT exports, and keep a playback-facing subtitle track ready for external preview layers such as `ofxVlc4`
-- when the GUI example is regenerated with `ofxVlc4` enabled in `addons.make`, Montage mode can also load the active subtitle track directly into an optional `ofxVlc4` preview with subtitle delay / scale controls
+  - GUI example Translate mode with auto-detect source language, natural vs. literal translation shortcuts, detect-and-translate flow, and more reliable prompt/input handoff buttons
+  - GUI example Chat and Translate modes now each keep a dedicated lightweight TTS preview lane, so spoken replies and translated voice output can be played, restarted, and stopped inline without bouncing through the main TTS panel
+  - GUI example `Video Essay` mode now also supports optional `ofxVlc4` preview/render handoff, so a source video plus the generated essay SRT can be previewed live and texture-recorded into a muxed narration render without leaving the example
+  - GUI example `Montage` mode now also includes a clip-playlist export lane for generated or curated clip paths, with JSON playlist-manifest export, optional `ofxVlc4` playlist preview, and texture-recorded render export with optional external-audio mux
+  - GUI example Montage mode can now preview restructured subtitle cues live, copy generated SRT/VTT exports, and keep a playback-facing subtitle track ready for external preview layers such as `ofxVlc4`
+  - when the GUI example is regenerated with `ofxVlc4` enabled in `addons.make`, Montage mode can also load the active subtitle track directly into an optional `ofxVlc4` preview with subtitle delay / scale controls
+  - that same Montage area can now also collect clip paths into a small playlist manifest, preview the sequence through an optional second `ofxVlc4` lane, and record the playlist back out to a video file with optional audio mux
 - GUI example Summarize mode now includes a dedicated citation-research section that can extract quoted evidence from loaded URLs or crawl a seed website before building a cited summary
 - GUI example Diffusion mode now includes a `Music -> Image` helper that can turn a music caption plus optional lyrics/transcript into a reusable visual prompt for the existing diffusion flow
 - GUI example Vision mode now also includes a dedicated `Music Video` workflow section that can turn song text into a visual concept, apply music-video planning defaults, and hand the result directly into video planning, diffusion, and edit-plan generation
