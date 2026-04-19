@@ -585,3 +585,125 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 		REQUIRE_FALSE(risk.reasons.empty());
 	}
 }
+
+TEST_CASE("Code assistant sessions stream events and gate risky tool proposals", "[code_assistant]") {
+	const auto sourceDir = makeAssistantTestDir("session_flow");
+	{
+		std::ofstream out(sourceDir / "worker.cpp");
+		out << "int helper() { return 1; }\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(sourceDir.string()));
+
+	const std::string modelPath = createAssistantDummyModel();
+	const std::string exePath = createAssistantExecutable({
+		"GOAL: Tighten helper implementation",
+		"APPROACH: Update the helper and verify with one command",
+		"FILE: worker.cpp | update helper | helper",
+		"PATCH: replace | worker.cpp | update helper body",
+		"SEARCH: return 1;",
+		"REPLACE: return 2;",
+		"COMMAND: verify | . | fake-runner | --check",
+		"EXPECT: helper build passes"
+	});
+
+	ofxGgmlCodeAssistant assistant;
+	assistant.setCompletionExecutable(exePath);
+
+	ofxGgmlCodeAssistantRequest request;
+	request.action = ofxGgmlCodeAssistantAction::Edit;
+	request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+	request.userInput = "Update the helper implementation.";
+	request.requestStructuredResult = true;
+
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+
+	ofxGgmlCodeAssistantSession session;
+	session.activeMode = "Script";
+	session.selectedBackend = "Local";
+	session.recentTouchedFiles = {"previous.cpp"};
+	session.lastFailureReason = "Earlier verification failed.";
+
+	std::vector<ofxGgmlCodeAssistantEventKind> eventKinds;
+	std::vector<std::string> deniedTools;
+	const auto result = assistant.runWithSession(
+		modelPath,
+		request,
+		context,
+		&session,
+		{},
+		{},
+		[&](const ofxGgmlCodeAssistantToolCall & toolCall) {
+			if (toolCall.toolName == "run_verification") {
+				deniedTools.push_back(toolCall.toolName);
+				return false;
+			}
+			return true;
+		},
+		[&](const ofxGgmlCodeAssistantEvent & event) {
+			eventKinds.push_back(event.kind);
+			return true;
+		});
+
+	REQUIRE(result.inference.success);
+	REQUIRE(result.prepared.includedTaskMemory);
+	REQUIRE(result.prepared.prompt.find("Current task memory:") != std::string::npos);
+	REQUIRE(result.prepared.prompt.find("Earlier verification failed.") != std::string::npos);
+	REQUIRE(result.proposedToolCalls.size() >= 3);
+
+	const auto patchTool = std::find_if(
+		result.proposedToolCalls.begin(),
+		result.proposedToolCalls.end(),
+		[](const ofxGgmlCodeAssistantToolCall & toolCall) {
+			return toolCall.toolName == "apply_patch";
+		});
+	REQUIRE(patchTool != result.proposedToolCalls.end());
+	REQUIRE(patchTool->requiresApproval);
+	REQUIRE(patchTool->approved);
+
+	const auto verificationTool = std::find_if(
+		result.proposedToolCalls.begin(),
+		result.proposedToolCalls.end(),
+		[](const ofxGgmlCodeAssistantToolCall & toolCall) {
+			return toolCall.toolName == "run_verification";
+		});
+	REQUIRE(verificationTool != result.proposedToolCalls.end());
+	REQUIRE(verificationTool->requiresApproval);
+	REQUIRE_FALSE(verificationTool->approved);
+	REQUIRE(deniedTools.size() == 1);
+	REQUIRE(std::find(
+		result.structured.risks.begin(),
+		result.structured.risks.end(),
+		"Approval denied for run_verification.") != result.structured.risks.end());
+
+	REQUIRE_FALSE(eventKinds.empty());
+	REQUIRE(std::find(
+		eventKinds.begin(),
+		eventKinds.end(),
+		ofxGgmlCodeAssistantEventKind::SessionStarted) != eventKinds.end());
+	REQUIRE(std::find(
+		eventKinds.begin(),
+		eventKinds.end(),
+		ofxGgmlCodeAssistantEventKind::PromptPrepared) != eventKinds.end());
+	REQUIRE(std::find(
+		eventKinds.begin(),
+		eventKinds.end(),
+		ofxGgmlCodeAssistantEventKind::OutputChunk) != eventKinds.end());
+	REQUIRE(std::find(
+		eventKinds.begin(),
+		eventKinds.end(),
+		ofxGgmlCodeAssistantEventKind::ApprovalDenied) != eventKinds.end());
+	REQUIRE(std::find(
+		eventKinds.begin(),
+		eventKinds.end(),
+		ofxGgmlCodeAssistantEventKind::Completed) != eventKinds.end());
+
+	REQUIRE(session.revision == 1);
+	REQUIRE(session.recentTouchedFiles.size() == 1);
+	REQUIRE(session.recentTouchedFiles.front() == "worker.cpp");
+	REQUIRE_FALSE(session.recentPrompts.empty());
+	REQUIRE(session.lastFailureReason.empty());
+	REQUIRE(result.sessionRevision == session.revision);
+}

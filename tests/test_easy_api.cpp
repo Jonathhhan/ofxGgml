@@ -192,6 +192,33 @@ TEST_CASE("Easy API wraps common text workflows", "[easy_api]") {
 	REQUIRE(chat.inference.success);
 	REQUIRE(chat.prepared.prompt.find("How are you?") != std::string::npos);
 
+	const std::string musicPromptExePath = createEasyApiExecutable(
+		"Music prompt: cinematic synthwave soundtrack, neon pulses, reflective pacing, instrumental");
+	textConfig.completionExecutable = musicPromptExePath;
+	easy.configureText(textConfig);
+	const auto imageToMusic = easy.generateImageToMusicPrompt(
+		"Rain-soaked neon alley with a lone figure.",
+		"cinematic synthwave soundtrack",
+		"analog synth bass, glassy pads",
+		24,
+		true);
+	REQUIRE(imageToMusic.success);
+	REQUIRE(imageToMusic.musicPrompt.find("neon pulses") != std::string::npos);
+
+	const std::string abcExePath = createEasyApiExecutable(
+		"X:1\nT:Night Theme\nM:4/4\nL:1/8\nQ:1/4=92\nK:Cm\n|: C2 G2 A2 G2 | E2 D2 C4 :|");
+	textConfig.completionExecutable = abcExePath;
+	easy.configureText(textConfig);
+	const auto notation = easy.generateMusicNotation(
+		"nocturnal city montage",
+		"Night Theme",
+		"cinematic synth soundtrack",
+		16,
+		"Cm");
+	REQUIRE(notation.success);
+	REQUIRE(notation.validation.valid);
+	REQUIRE(notation.abcNotation.find("T:Night Theme") != std::string::npos);
+
 	const std::string milkExePath = createEasyApiExecutable("[preset00]\nzoom=1.02\nfRating=3.0");
 	textConfig.completionExecutable = milkExePath;
 	easy.configureText(textConfig);

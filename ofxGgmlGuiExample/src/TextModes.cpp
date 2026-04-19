@@ -18,6 +18,20 @@ const char * const kTextModeWaitingLabels[] = {
 	"generating..."
 };
 
+struct TtsPreviewUiLabels {
+	const char * comboLabel;
+	const char * pauseLabel;
+	const char * resumeLabel;
+	const char * playLabel;
+	const char * restartLabel;
+	const char * stopLabel;
+	const char * filePrefix;
+	const char * pausedStatus;
+	const char * playingStatus;
+	const char * restartedStatus;
+	const char * stoppedStatus;
+};
+
 void drawGeneratedOutputChild(
 	const char * childId,
 	const std::string & output,
@@ -44,6 +58,95 @@ void drawGeneratedOutputChild(
 		ImGui::TextWrapped("%s", output.c_str());
 	}
 	ImGui::EndChild();
+}
+
+template <typename EnsureLoadedFn, typename StopPlaybackFn>
+void drawTtsPreviewControls(
+	const bool generating,
+	std::vector<ofxGgmlTtsAudioArtifact> & audioFiles,
+	int & selectedAudioIndex,
+	const std::string & loadedAudioPath,
+	bool & playbackPaused,
+	ofSoundPlayer & player,
+	std::string & statusMessage,
+	const TtsPreviewUiLabels & labels,
+	EnsureLoadedFn && ensureLoaded,
+	StopPlaybackFn && stopPlayback) {
+	if (!audioFiles.empty()) {
+		selectedAudioIndex = std::clamp(
+			selectedAudioIndex,
+			0,
+			std::max(0, static_cast<int>(audioFiles.size()) - 1));
+		if (audioFiles.size() > 1) {
+			std::string previewLabel =
+				ofFilePath::getBaseName(audioFiles[static_cast<size_t>(selectedAudioIndex)].path);
+			if (previewLabel.empty()) {
+				previewLabel = "Audio " + std::to_string(selectedAudioIndex + 1);
+			}
+			if (ImGui::BeginCombo(labels.comboLabel, previewLabel.c_str())) {
+				for (int i = 0; i < static_cast<int>(audioFiles.size()); ++i) {
+					const std::string fileLabel =
+						ofFilePath::getBaseName(audioFiles[static_cast<size_t>(i)].path);
+					const std::string itemLabel = fileLabel.empty()
+						? "Audio " + std::to_string(i + 1)
+						: fileLabel;
+					const bool selected = (selectedAudioIndex == i);
+					if (ImGui::Selectable(itemLabel.c_str(), selected)) {
+						selectedAudioIndex = i;
+						ensureLoaded(selectedAudioIndex, false);
+					}
+					if (selected) {
+						ImGui::SetItemDefaultFocus();
+					}
+				}
+				ImGui::EndCombo();
+			}
+		}
+
+		const bool canPreviewAudio = !generating && !audioFiles.empty();
+		ImGui::BeginDisabled(!canPreviewAudio);
+		const bool audioLoaded = player.isLoaded() && !loadedAudioPath.empty();
+		const bool audioPlaying = audioLoaded && player.isPlaying();
+		const char * playPauseLabel = audioPlaying
+			? labels.pauseLabel
+			: (playbackPaused ? labels.resumeLabel : labels.playLabel);
+		if (ImGui::SmallButton(playPauseLabel)) {
+			if (!audioLoaded) {
+				ensureLoaded(selectedAudioIndex, true);
+			} else if (audioPlaying) {
+				player.setPaused(true);
+				playbackPaused = true;
+				statusMessage = labels.pausedStatus;
+			} else {
+				if (playbackPaused) {
+					player.setPaused(false);
+				} else {
+					player.play();
+				}
+				playbackPaused = false;
+				statusMessage = labels.playingStatus;
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(labels.restartLabel)) {
+			if (ensureLoaded(selectedAudioIndex, false)) {
+				player.stop();
+				player.play();
+				playbackPaused = false;
+				statusMessage = labels.restartedStatus;
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(labels.stopLabel)) {
+			stopPlayback(false);
+			statusMessage = labels.stoppedStatus;
+		}
+		ImGui::EndDisabled();
+		ImGui::TextDisabled(
+			"%s %s",
+			labels.filePrefix,
+			audioFiles[static_cast<size_t>(selectedAudioIndex)].path.c_str());
+	}
 }
 
 } // namespace
@@ -155,6 +258,50 @@ void ofApp::drawChatPanel() {
 		showWrappedTooltip("Optional source URLs for grounded answers in Chat, Summarize, and Custom.");
 	}
 
+	ImGui::Checkbox("Speak chat replies", &chatSpeakReplies);
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Automatically synthesize each assistant chat reply through the configured TTS backend.");
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(generating.load() || trim(chatLastAssistantReply).empty());
+	if (ImGui::SmallButton("Speak last reply")) {
+		speakLatestChatReply(true);
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Send the most recent assistant reply into the TTS pipeline and mirror it into the TTS panel.");
+	}
+	if (!chatTtsPreview.statusMessage.empty()) {
+		ImGui::TextDisabled("%s", chatTtsPreview.statusMessage.c_str());
+	}
+	drawTtsPreviewControls(
+		generating.load(),
+		chatTtsPreview.audioFiles,
+		chatTtsPreview.selectedAudioIndex,
+		chatTtsPreview.loadedAudioPath,
+		chatTtsPreview.playbackPaused,
+		chatTtsPreview.player,
+		chatTtsPreview.statusMessage,
+		{
+			"Chat audio",
+			"Pause chat audio",
+			"Resume chat audio",
+			"Play chat audio",
+			"Restart chat audio",
+			"Stop chat audio",
+			"Chat audio file:",
+			"Paused synthesized chat reply.",
+			"Playing synthesized chat reply.",
+			"Restarted synthesized chat reply.",
+			"Stopped synthesized chat reply."
+		},
+		[this](int artifactIndex, bool autoplay) {
+			return ensureChatTtsAudioLoaded(artifactIndex, autoplay);
+		},
+		[this](bool clearLoadedPath) {
+			stopChatTtsPlayback(clearLoadedPath);
+		});
+
 	std::string citationSuggestedTopic = trim(chatInput);
 	if (citationSuggestedTopic.empty()) {
 		for (auto it = chatMessages.rbegin(); it != chatMessages.rend(); ++it) {
@@ -204,6 +351,9 @@ void ofApp::drawChatPanel() {
 		ImGui::SameLine();
 		if (ImGui::SmallButton("Clear Chat")) {
 			chatMessages.clear();
+			chatLastAssistantReply.clear();
+			chatTtsPreview.clearPreviewArtifacts();
+			stopChatTtsPlayback(true);
 			streamingOutput.clear();
 		}
 	}
@@ -227,8 +377,7 @@ void ofApp::drawSummarizePanel() {
 		ofxGgmlTextAssistantRequest request;
 		request.task = task;
 		request.inputText = summarizeInput;
-		const auto prepared = textAssistant.preparePrompt(request);
-		runInference(AiMode::Summarize, request.inputText, "", prepared.prompt);
+		runPreparedTextRequest(AiMode::Summarize, request);
 	};
 
 	auto submitSummaryPrompt = [&](const std::string & userText,
@@ -272,16 +421,10 @@ void ofApp::drawSummarizePanel() {
 		request.inputText = hasSummarizeInput
 			? std::string(summarizeInput)
 			: std::string("Summarize the reference sources.");
-		const auto prepared = textAssistant.preparePrompt(request);
 		const auto realtimeSettings = buildLiveContextSettings(
 			sourceUrlsInput,
 			"Loaded sources for summarization");
-		runInference(
-			AiMode::Summarize,
-			request.inputText,
-			"",
-			prepared.prompt,
-			realtimeSettings);
+		runPreparedTextRequest(AiMode::Summarize, request, realtimeSettings);
 	}
 	ImGui::EndDisabled();
 
@@ -354,8 +497,7 @@ void ofApp::drawWritePanel() {
 		ofxGgmlTextAssistantRequest request;
 		request.task = task;
 		request.inputText = writeInput;
-		const auto prepared = textAssistant.preparePrompt(request);
-		runInference(AiMode::Write, request.inputText, "", prepared.prompt);
+		runPreparedTextRequest(AiMode::Write, request);
 	};
 
 	auto submitWritePrompt = [&](const std::string & userText,
@@ -468,6 +610,14 @@ void ofApp::drawTranslatePanel() {
 			deferredTranslateInput);
 		hasDeferredTranslateInput = false;
 		deferredTranslateInput.clear();
+	}
+	if (hasDeferredVoiceTranslatorAudioPath) {
+		copyStringToBuffer(
+			voiceTranslatorAudioPath,
+			sizeof(voiceTranslatorAudioPath),
+			deferredVoiceTranslatorAudioPath);
+		hasDeferredVoiceTranslatorAudioPath = false;
+		deferredVoiceTranslatorAudioPath.clear();
 	}
 	translateSourceLang = std::clamp(
 		translateSourceLang,
@@ -615,8 +765,7 @@ void ofApp::drawTranslatePanel() {
 	};
 	auto runTranslateTask = [&](const ofxGgmlTextTask task) {
 		const auto request = buildTranslateRequest(task);
-		const auto prepared = textAssistant.preparePrompt(request);
-		runInference(AiMode::Translate, request.inputText, "", prepared.prompt);
+		runPreparedTextRequest(AiMode::Translate, request);
 	};
 
 	ImGui::BeginDisabled(generating.load() || std::strlen(translateInput) == 0);
@@ -657,6 +806,123 @@ void ofApp::drawTranslatePanel() {
 	ImGui::EndDisabled();
 
 	ImGui::Separator();
+	ImGui::TextDisabled("Voice translator");
+	ImGui::TextWrapped(
+		"Chain speech transcription, text translation, and TTS into one pass. "
+		"Use it for text-to-voice translation or for translating an audio file into spoken output.");
+	if (ImGui::Checkbox("Speak translated output", &voiceTranslatorSpeakOutput)) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(generating.load() || trim(translateOutput).empty());
+	if (ImGui::SmallButton("Speak current translation")) {
+		speakTranslatedReply(true);
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Send the current translation directly into the configured TTS backend.");
+	}
+	if (!translateTtsPreview.statusMessage.empty()) {
+		ImGui::TextDisabled("%s", translateTtsPreview.statusMessage.c_str());
+	}
+	drawTtsPreviewControls(
+		generating.load(),
+		translateTtsPreview.audioFiles,
+		translateTtsPreview.selectedAudioIndex,
+		translateTtsPreview.loadedAudioPath,
+		translateTtsPreview.playbackPaused,
+		translateTtsPreview.player,
+		translateTtsPreview.statusMessage,
+		{
+			"Translated audio",
+			"Pause translated audio",
+			"Resume translated audio",
+			"Play translated audio",
+			"Restart translated audio",
+			"Stop translated audio",
+			"Translated audio file:",
+			"Paused translated voice output.",
+			"Playing translated voice output.",
+			"Restarted translated voice output.",
+			"Stopped translated voice output."
+		},
+		[this](int artifactIndex, bool autoplay) {
+			return ensureTranslateTtsAudioLoaded(artifactIndex, autoplay);
+		},
+		[this](bool clearLoadedPath) {
+			stopTranslateTtsPlayback(clearLoadedPath);
+		});
+
+	ImGui::SetNextItemWidth(-120.0f);
+	ImGui::InputText(
+		"Voice translator audio",
+		voiceTranslatorAudioPath,
+		sizeof(voiceTranslatorAudioPath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Browse##VoiceTranslatorAudio", ImVec2(100, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select audio file", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(
+				voiceTranslatorAudioPath,
+				sizeof(voiceTranslatorAudioPath),
+				result.getPath());
+			autoSaveSession();
+		}
+	}
+
+	ImGui::BeginDisabled(trim(speechAudioPath).empty());
+	if (ImGui::SmallButton("Use Speech audio")) {
+		deferredVoiceTranslatorAudioPath = speechAudioPath;
+		hasDeferredVoiceTranslatorAudioPath = true;
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	const bool hasBufferedMicAudio = [&]() {
+		std::lock_guard<std::mutex> lock(speechRecordMutex);
+		return !speechRecordedSamples.empty();
+	}();
+	ImGui::BeginDisabled(!hasBufferedMicAudio);
+	if (ImGui::SmallButton("Use Recording")) {
+		const std::string tempPath = flushSpeechRecordingToTempWav();
+		if (!tempPath.empty()) {
+			deferredVoiceTranslatorAudioPath = tempPath;
+			hasDeferredVoiceTranslatorAudioPath = true;
+			autoSaveSession();
+		}
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(speechOutput).empty());
+	if (ImGui::SmallButton("Use transcript")) {
+		deferredTranslateInput = speechOutput;
+		hasDeferredTranslateInput = true;
+	}
+	ImGui::EndDisabled();
+
+	ImGui::BeginDisabled(
+		generating.load() ||
+		(std::strlen(translateInput) == 0 && trim(translateOutput).empty()));
+	if (ImGui::Button("Translate + Speak", ImVec2(150, 0))) {
+		runVoiceTranslatorWorkflow(false);
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(generating.load() || trim(voiceTranslatorAudioPath).empty());
+	if (ImGui::Button("Audio -> Voice", ImVec2(150, 0))) {
+		runVoiceTranslatorWorkflow(true);
+	}
+	ImGui::EndDisabled();
+	if (!voiceTranslatorStatus.empty()) {
+		ImGui::TextDisabled("%s", voiceTranslatorStatus.c_str());
+	}
+	if (!voiceTranslatorTranscript.empty()) {
+		ImGui::TextWrapped("Transcript: %s", voiceTranslatorTranscript.c_str());
+	}
+
+	ImGui::Separator();
 	ImGui::Text("Output:");
 	if (!translateOutput.empty()) {
 		ImGui::SameLine();
@@ -671,6 +937,10 @@ void ofApp::drawTranslatePanel() {
 		ImGui::SameLine();
 		if (ImGui::SmallButton("Clear##TransClear")) {
 			translateOutput.clear();
+			voiceTranslatorStatus.clear();
+			voiceTranslatorTranscript.clear();
+			translateTtsPreview.clearPreviewArtifacts();
+			stopTranslateTtsPlayback(true);
 		}
 	}
 	drawGeneratedOutputChild(
@@ -739,8 +1009,7 @@ void ofApp::drawCustomPanel() {
 		request.task = ofxGgmlTextTask::Custom;
 		request.inputText = customInput;
 		request.systemPrompt = customSystemPrompt;
-		const auto prepared = textAssistant.preparePrompt(request);
-		runInference(AiMode::Custom, request.inputText, customSystemPrompt, prepared.prompt);
+		runPreparedTextRequest(AiMode::Custom, request);
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Run with Sources", ImVec2(150, 0))) {
@@ -748,16 +1017,10 @@ void ofApp::drawCustomPanel() {
 		request.task = ofxGgmlTextTask::Custom;
 		request.inputText = customInput;
 		request.systemPrompt = customSystemPrompt;
-		const auto prepared = textAssistant.preparePrompt(request);
 		const auto realtimeSettings = buildLiveContextSettings(
 			sourceUrlsInput,
 			"Loaded sources for this custom task");
-		runInference(
-			AiMode::Custom,
-			request.inputText,
-			customSystemPrompt,
-			prepared.prompt,
-			realtimeSettings);
+		runPreparedTextRequest(AiMode::Custom, request, realtimeSettings);
 	}
 	ImGui::EndDisabled();
 

@@ -58,7 +58,7 @@
 // ---------------------------------------------------------------------------
 
 const char * ofApp::modeLabels[kModeCount] = {
-	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Vision", "Speech", "TTS", "Diffusion", "CLIP", "MilkDrop"
+	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Video Essay", "Vision", "Speech", "TTS", "Diffusion", "CLIP", "MilkDrop"
 };
 
 const char * const kTextBackendLabels[] = {
@@ -76,6 +76,80 @@ struct TokenLiteral {
 	const char * text;
 	size_t len;
 };
+
+void stopPreviewAudioPlayback(
+	ofSoundPlayer & player,
+	bool & playbackPaused,
+	std::string & loadedAudioPath,
+	bool clearLoadedPath) {
+	if (player.isLoaded()) {
+		player.stop();
+		player.unload();
+	}
+	playbackPaused = false;
+	if (clearLoadedPath) {
+		loadedAudioPath.clear();
+	}
+}
+
+bool ensurePreviewAudioLoaded(
+	std::vector<ofxGgmlTtsAudioArtifact> & audioFiles,
+	int & selectedAudioIndex,
+	std::string & loadedAudioPath,
+	bool & playbackPaused,
+	ofSoundPlayer & player,
+	std::string & statusMessage,
+	const std::string & unavailableMessage,
+	const std::string & emptyPathMessage,
+	const std::string & missingPrefix,
+	const std::string & loadFailurePrefix,
+	const std::string & readyMessage,
+	const std::string & playingMessage,
+	int artifactIndex,
+	bool autoplay) {
+	if (audioFiles.empty()) {
+		statusMessage = unavailableMessage;
+		return false;
+	}
+
+	const int clampedIndex = std::clamp(
+		artifactIndex < 0 ? selectedAudioIndex : artifactIndex,
+		0,
+		std::max(0, static_cast<int>(audioFiles.size()) - 1));
+	selectedAudioIndex = clampedIndex;
+
+	const std::string audioPath =
+		trim(audioFiles[static_cast<size_t>(selectedAudioIndex)].path);
+	if (audioPath.empty()) {
+		statusMessage = emptyPathMessage;
+		return false;
+	}
+	if (!std::filesystem::exists(audioPath)) {
+		statusMessage = missingPrefix + audioPath;
+		return false;
+	}
+
+	if (loadedAudioPath != audioPath || !player.isLoaded()) {
+		stopPreviewAudioPlayback(player, playbackPaused, loadedAudioPath, false);
+		if (!player.load(audioPath, false)) {
+			statusMessage = loadFailurePrefix + audioPath;
+			return false;
+		}
+		player.setLoop(false);
+		player.setMultiPlay(false);
+		loadedAudioPath = audioPath;
+	}
+
+	playbackPaused = false;
+	if (autoplay) {
+		player.stop();
+		player.play();
+		statusMessage = playingMessage;
+	} else {
+		statusMessage = readyMessage;
+	}
+	return true;
+}
 
 
 
@@ -969,6 +1043,8 @@ void ofApp::exit() {
 #if OFXGGML_HAS_OFXPROJECTM
   milkdropPreviewInitialized = false;
 #endif
+	stopChatTtsPlayback(true);
+	stopTranslateTtsPlayback(true);
 	stopSpeechRecording(false);
 	if (speechInputStream.getSoundStream() != nullptr) {
 		speechInputStream.stop();
@@ -1019,14 +1095,21 @@ scriptOutput.clear();
   summarizeOutput.clear();
   writeOutput.clear();
   translateOutput.clear();
+  voiceTranslatorStatus.clear();
+  voiceTranslatorTranscript.clear();
+  translateTtsPreview.clearPreviewArtifacts();
   customOutput.clear();
 	citationOutput.clear();
   visionOutput.clear();
 visionSampledVideoFrames.clear();
 	speechOutput.clear();
+	chatLastAssistantReply.clear();
+	chatTtsPreview.clearPreviewArtifacts();
 	ttsOutput.clear();
-  diffusionOutput.clear();
-  clipOutput.clear();
+    diffusionOutput.clear();
+	musicToImagePromptOutput.clear();
+	musicToImageStatus.clear();
+    clipOutput.clear();
 	citationResults.clear();
   speechDetectedLanguage.clear();
 	speechTranscriptPath.clear();
@@ -1037,6 +1120,7 @@ visionSampledVideoFrames.clear();
 	ttsResolvedSpeakerPath.clear();
 	ttsAudioFiles.clear();
 	ttsMetadata.clear();
+	stopTranslateTtsPlayback(true);
 	diffusionBackendName.clear();
 diffusionElapsedMs = 0.0f;
 diffusionGeneratedImages.clear();
@@ -1517,6 +1601,7 @@ case AiMode::Summarize: drawSummarizePanel(); break;
 	case AiMode::Write:     drawWritePanel();     break;
 	case AiMode::Translate: drawTranslatePanel(); break;
 	case AiMode::Custom:    drawCustomPanel();    break;
+	case AiMode::VideoEssay: drawVideoEssayPanel(); break;
 	case AiMode::Vision:    drawVisionPanel();    break;
 	case AiMode::Speech:    drawSpeechPanel();    break;
 	case AiMode::Tts:       drawTtsPanel();       break;
@@ -1754,6 +1839,9 @@ const bool hasSelectedFile =
 	selectedScriptFileIndex < static_cast<int>(scriptSourceFiles.size()) &&
 	!scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].isDirectory;
 const bool hasUserInput = std::strlen(scriptInput) > 0;
+const bool hasWorkspaceSource =
+	sourceType == ofxGgmlScriptSourceType::LocalFolder &&
+	!scriptSource.getLocalFolderPath().empty();
 static char scriptBuildErrors[8192] = {};
 static bool restrictWorkspaceToFocusedFile = true;
 
@@ -1794,6 +1882,123 @@ auto buildWorkspaceAllowedFiles = [&]() {
 	}
 	return allowedFiles;
 };
+
+	struct ResolvedScriptReference {
+		std::string displayLabel;
+		std::string resolvedPath;
+		std::string resolvedSymbol;
+		bool resolved = false;
+		bool forceWorkspaceContext = false;
+	};
+
+	auto stripScriptAtReferences = [](const std::string & rawInput) {
+		std::string cleaned;
+		cleaned.reserve(rawInput.size());
+		auto isReferenceBoundary = [](char ch) {
+			return std::isspace(static_cast<unsigned char>(ch)) != 0 ||
+				ch == ',' || ch == ';' || ch == ')' || ch == '(' ||
+				ch == '[' || ch == ']' || ch == '{' || ch == '}' ||
+				ch == '"' || ch == '\'';
+		};
+		for (size_t i = 0; i < rawInput.size(); ++i) {
+			if (rawInput[i] == '@' &&
+				(i == 0 ||
+				 std::isspace(static_cast<unsigned char>(rawInput[i - 1])) ||
+				 rawInput[i - 1] == '(' || rawInput[i - 1] == '[' ||
+				 rawInput[i - 1] == '{' || rawInput[i - 1] == '"')) {
+				size_t end = i + 1;
+				while (end < rawInput.size() && !isReferenceBoundary(rawInput[end])) {
+					++end;
+				}
+				if (end > i + 1) {
+					i = end - 1;
+					continue;
+				}
+			}
+			cleaned.push_back(rawInput[i]);
+		}
+		return trim(cleaned);
+	};
+
+	auto resolveScriptReferences = [&](const std::string & rawInput) {
+		std::vector<ResolvedScriptReference> resolved;
+		const auto tokens = extractScriptAtReferenceTokens(rawInput);
+		for (const auto & token : tokens) {
+			ResolvedScriptReference item;
+			item.displayLabel = "@" + token.rawToken;
+			if (token.normalizedToken == "focused" ||
+				token.normalizedToken == "current" ||
+				token.normalizedToken == "thisfile") {
+				if (hasSelectedFile) {
+					item.resolved = true;
+					item.resolvedPath =
+						scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].fullPath;
+					item.displayLabel += " -> focused file";
+				} else {
+					item.displayLabel += " -> no focused file";
+				}
+			} else if (
+				token.normalizedToken == "recent" ||
+				token.normalizedToken == "touched") {
+				if (!recentScriptTouchedFiles.empty()) {
+					item.resolved = true;
+					item.resolvedPath = recentScriptTouchedFiles.front();
+					item.displayLabel +=
+						" -> recent touched files (" +
+						ofToString(static_cast<int>(recentScriptTouchedFiles.size())) + ")";
+				} else {
+					item.displayLabel += " -> no recent touched files";
+				}
+			} else if (
+				token.normalizedToken == "workspace" ||
+				token.normalizedToken == "repo") {
+				item.resolved = true;
+				item.forceWorkspaceContext = true;
+				item.displayLabel += " -> workspace context";
+			} else if (
+				token.normalizedToken.rfind("symbol:", 0) == 0 ||
+				token.normalizedToken.rfind("sym:", 0) == 0) {
+				const size_t split = token.normalizedToken.find(':');
+				const std::string rawSymbol =
+					split == std::string::npos
+						? std::string()
+						: trim(token.rawToken.substr(split + 1));
+				if (!rawSymbol.empty()) {
+					item.resolved = true;
+					item.resolvedSymbol = rawSymbol;
+					item.displayLabel += " -> symbol " + rawSymbol;
+				} else {
+					item.displayLabel += " -> missing symbol name";
+				}
+			} else {
+				std::vector<std::string> matches;
+				for (const auto & entry : scriptSourceFiles) {
+					if (entry.isDirectory) {
+						continue;
+					}
+					std::string normalizedName = ofToLower(entry.name);
+					std::string normalizedPath = ofToLower(entry.fullPath);
+					if (normalizedName == token.normalizedToken ||
+						normalizedName.find(token.normalizedToken) != std::string::npos ||
+						normalizedPath.find(token.normalizedToken) != std::string::npos) {
+						matches.push_back(entry.fullPath);
+					}
+				}
+				if (matches.size() == 1) {
+					item.resolved = true;
+					item.resolvedPath = matches.front();
+					item.displayLabel += " -> " + ofFilePath::getFileName(matches.front());
+				} else if (matches.empty()) {
+					item.displayLabel += " -> not found";
+				} else {
+					item.displayLabel +=
+						" -> ambiguous (" + ofToString(static_cast<int>(matches.size())) + " matches)";
+				}
+			}
+			resolved.push_back(item);
+		}
+		return resolved;
+	};
 
 auto appendScriptAssistantOutput = [&](const std::string & userLabel,
 	const std::string & assistantText) {
@@ -1968,9 +2173,11 @@ auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 	bool requestUnifiedDiff = false,
 	const std::string & buildErrors = std::string(),
 	const std::vector<std::string> & allowedFiles = {}) {
+	const auto resolvedReferences = resolveScriptReferences(userInput);
+	const std::string cleanedUserInput = stripScriptAtReferences(userInput);
 	ofxGgmlCodeAssistantRequest request;
 	request.action = action;
-	request.userInput = userInput;
+	request.userInput = cleanedUserInput.empty() ? userInput : cleanedUserInput;
 	request.lastTask = lastScriptRequest;
 	request.lastOutput = scriptOutput;
 	request.bodyOverride = bodyOverride;
@@ -1979,6 +2186,50 @@ auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 	request.requestUnifiedDiff = requestUnifiedDiff;
 	request.buildErrors = buildErrors;
 	request.allowedFiles = allowedFiles;
+	std::vector<std::string> mergedAllowedFiles = request.allowedFiles;
+	std::vector<std::string> targetSymbols;
+	std::vector<std::string> referenceNotes;
+	bool forceWorkspaceContext = false;
+	for (const auto & reference : resolvedReferences) {
+		referenceNotes.push_back(reference.displayLabel);
+		if (!reference.resolvedPath.empty()) {
+			mergedAllowedFiles.push_back(reference.resolvedPath);
+		}
+		if (!reference.resolvedSymbol.empty()) {
+			targetSymbols.push_back(reference.resolvedSymbol);
+		}
+		forceWorkspaceContext = forceWorkspaceContext || reference.forceWorkspaceContext;
+	}
+	std::sort(mergedAllowedFiles.begin(), mergedAllowedFiles.end());
+	mergedAllowedFiles.erase(
+		std::unique(mergedAllowedFiles.begin(), mergedAllowedFiles.end()),
+		mergedAllowedFiles.end());
+	std::sort(targetSymbols.begin(), targetSymbols.end());
+	targetSymbols.erase(
+		std::unique(targetSymbols.begin(), targetSymbols.end()),
+		targetSymbols.end());
+	request.allowedFiles = std::move(mergedAllowedFiles);
+	if (!targetSymbols.empty()) {
+		request.symbolQuery.targetSymbols = targetSymbols;
+		request.symbolQuery.query = cleanedUserInput.empty() ? userInput : cleanedUserInput;
+		request.symbolQuery.includeCallers = true;
+		request.symbolQuery.maxDefinitions = 4;
+		request.symbolQuery.maxReferences = 8;
+	}
+	if (!referenceNotes.empty()) {
+		std::ostringstream referenceBody;
+		referenceBody << "Explicit @ references from the user:\n";
+		for (const auto & note : referenceNotes) {
+			referenceBody << "- " << note << "\n";
+		}
+		if (forceWorkspaceContext) {
+			referenceBody << "- prefer full loaded workspace context for this request\n";
+		}
+		if (!trim(bodyOverride).empty()) {
+			referenceBody << "\n" << trim(bodyOverride);
+		}
+		request.bodyOverride = trim(referenceBody.str());
+	}
 	if (!scriptLanguages.empty() &&
 		selectedLanguageIndex >= 0 &&
 		selectedLanguageIndex < static_cast<int>(scriptLanguages.size())) {
@@ -1996,10 +2247,8 @@ auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 		: prepared.requestLabel;
 
 	scriptMessages.push_back({"user", requestLabel, ofGetElapsedTimef()});
-	runInference(AiMode::Script, taskText, "", prepared.prompt);
-	if (clearInputAfter) {
-		std::memset(scriptInput, 0, sizeof(scriptInput));
-	}
+	request.userInput = taskText;
+	runScriptAssistantRequest(request, requestLabel, clearInputAfter);
 };
 
 auto summarizeLocalChanges = [&](const std::string & focusText) {
@@ -2183,10 +2432,253 @@ bool canSendScriptChat = !generating.load() && hasUserInput;
 const ScriptSlashCommand slashCommand = hasUserInput
 	? parseScriptSlashCommand(scriptInput)
 	: ScriptSlashCommand{};
+const auto scriptReferences = hasUserInput
+	? resolveScriptReferences(scriptInput)
+	: std::vector<ResolvedScriptReference>{};
+const std::string currentScriptInput = std::string(scriptInput);
+const size_t lastScriptTokenStart = currentScriptInput.find_last_of(" \t\r\n");
+const std::string lastScriptToken = trim(
+	lastScriptTokenStart == std::string::npos
+		? currentScriptInput
+		: currentScriptInput.substr(lastScriptTokenStart + 1));
+const bool scriptHasAutocompleteToken =
+	!lastScriptToken.empty() && lastScriptToken.front() == '@';
+
+auto replaceTrailingScriptToken = [&](const std::string & replacement, bool appendTrailingSpace = true) {
+	std::string updatedInput = currentScriptInput;
+	const size_t tokenStart = lastScriptTokenStart == std::string::npos
+		? 0
+		: lastScriptTokenStart + 1;
+	updatedInput = updatedInput.substr(0, tokenStart) + replacement;
+	if (appendTrailingSpace) {
+		updatedInput += " ";
+	}
+	copyStringToBuffer(scriptInput, sizeof(scriptInput), updatedInput);
+};
+
+struct ScriptAutocompleteSuggestion {
+	std::string label;
+	std::string replacement;
+	std::string tooltip;
+};
+std::vector<ScriptAutocompleteSuggestion> autocompleteSuggestions;
+std::string autocompleteHint;
+if (scriptHasAutocompleteToken) {
+	const std::string tokenBody = trim(lastScriptToken.substr(1));
+	const std::string tokenBodyLower = ofToLower(tokenBody);
+	const auto pushAutocompleteSuggestion =
+		[&](const std::string & label,
+			const std::string & replacement,
+			const std::string & tooltip) {
+			if (autocompleteSuggestions.size() >= 8) {
+				return;
+			}
+			for (const auto & existing : autocompleteSuggestions) {
+				if (existing.replacement == replacement) {
+					return;
+				}
+			}
+			autocompleteSuggestions.push_back({label, replacement, tooltip});
+		};
+
+	const struct {
+		const char * token;
+		const char * tooltip;
+	} builtInReferences[] = {
+		{"@focused", "Reference the currently selected file."},
+		{"@recent", "Reference recent touched files."},
+		{"@workspace", "Bias toward the full loaded workspace."},
+		{"@symbol:", "Search semantic symbol context, for example @symbol:update."}
+	};
+
+	if (tokenBodyLower.rfind("symbol:", 0) == 0 || tokenBodyLower.rfind("sym:", 0) == 0) {
+		const size_t separator = tokenBody.find(':');
+		const std::string symbolNeedle = separator == std::string::npos
+			? std::string()
+			: trim(tokenBody.substr(separator + 1));
+		if (symbolNeedle.empty()) {
+			autocompleteHint = "Type after @symbol: to search indexed workspace symbols.";
+		} else if (!hasWorkspaceSource) {
+			autocompleteHint = "Load a local workspace to autocomplete semantic symbols.";
+		} else {
+			static std::string cachedSymbolNeedle;
+			static std::vector<std::string> cachedSymbolSuggestions;
+			if (cachedSymbolNeedle != symbolNeedle) {
+				cachedSymbolNeedle = symbolNeedle;
+				cachedSymbolSuggestions.clear();
+				ofxGgmlCodeAssistantSymbolQuery query;
+				query.query = symbolNeedle;
+				query.targetSymbols = {symbolNeedle};
+				query.includeCallers = true;
+				query.maxDefinitions = 6;
+				query.maxReferences = 6;
+				const auto symbolContext =
+					scriptAssistant.buildSymbolContext(query, buildScriptAssistantContext());
+				for (const auto & symbol : symbolContext.definitions) {
+					const std::string symbolName = trim(symbol.name);
+					if (symbolName.empty()) {
+						continue;
+					}
+					if (std::find(
+							cachedSymbolSuggestions.begin(),
+							cachedSymbolSuggestions.end(),
+							symbolName) == cachedSymbolSuggestions.end()) {
+						cachedSymbolSuggestions.push_back(symbolName);
+					}
+				}
+			}
+			for (const auto & symbolName : cachedSymbolSuggestions) {
+				pushAutocompleteSuggestion(
+					"@" + std::string("symbol:") + symbolName,
+					"@symbol:" + symbolName,
+					"Use semantic symbol grounding for " + symbolName + ".");
+			}
+			if (autocompleteSuggestions.empty()) {
+				autocompleteHint = "No symbol matches found yet. Try a broader name.";
+			}
+		}
+	} else {
+		for (const auto & builtInReference : builtInReferences) {
+			const std::string token = builtInReference.token;
+			if (tokenBody.empty() ||
+				ofToLower(token.substr(1)).find(tokenBodyLower) != std::string::npos) {
+				pushAutocompleteSuggestion(token, token, builtInReference.tooltip);
+			}
+		}
+		for (const auto & entry : scriptSourceFiles) {
+			if (entry.isDirectory) {
+				continue;
+			}
+			const std::string entryNameLower = ofToLower(entry.name);
+			const std::string entryPathLower = ofToLower(entry.fullPath);
+			if (tokenBody.empty() ||
+				entryNameLower.find(tokenBodyLower) != std::string::npos ||
+				entryPathLower.find(tokenBodyLower) != std::string::npos) {
+				pushAutocompleteSuggestion(
+					"@" + entry.name,
+					"@" + entry.name,
+					entry.fullPath);
+			}
+		}
+		if (autocompleteSuggestions.empty()) {
+			autocompleteHint = "No loaded file or reference matches the current @ token.";
+		}
+	}
+}
+
+const bool showScriptAutocompletePopup =
+	scriptHasAutocompleteToken && !autocompleteSuggestions.empty();
+if (!showScriptAutocompletePopup) {
+	scriptAutocompleteSelectedIndex = 0;
+	scriptAutocompleteLastToken.clear();
+} else {
+	if (scriptAutocompleteLastToken != lastScriptToken) {
+		scriptAutocompleteLastToken = lastScriptToken;
+		scriptAutocompleteSelectedIndex = 0;
+	} else {
+		scriptAutocompleteSelectedIndex =
+			ofClamp(scriptAutocompleteSelectedIndex, 0, static_cast<int>(autocompleteSuggestions.size()) - 1);
+	}
+}
+
+bool scriptAutocompleteAccepted = false;
+if (showScriptAutocompletePopup) {
+	if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, false)) {
+		scriptAutocompleteSelectedIndex =
+			(scriptAutocompleteSelectedIndex + 1) % static_cast<int>(autocompleteSuggestions.size());
+	}
+	if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false)) {
+		scriptAutocompleteSelectedIndex =
+			(scriptAutocompleteSelectedIndex - 1 + static_cast<int>(autocompleteSuggestions.size())) %
+			static_cast<int>(autocompleteSuggestions.size());
+	}
+	if (scriptChatSubmitted || ImGui::IsKeyPressed(ImGuiKey_Tab, false)) {
+		const auto & selectedSuggestion =
+			autocompleteSuggestions[static_cast<size_t>(scriptAutocompleteSelectedIndex)];
+		replaceTrailingScriptToken(selectedSuggestion.replacement);
+		scriptAutocompleteAccepted = true;
+	}
+}
+const bool effectiveScriptChatSubmitted = scriptChatSubmitted && !scriptAutocompleteAccepted;
+
+if (slashCommand.kind != ScriptSlashCommandKind::None) {
+	ImGui::TextDisabled("Detected slash action. Send will execute a structured Script command.");
+}
+
+	struct ScriptQuickChip {
+		const char * label;
+		const char * commandText;
+		const char * tooltip;
+	};
+	const ScriptQuickChip quickChips[] = {
+		{ "/review", "/review ", "Review the loaded workspace or current request." },
+		{ "/reviewfix", "/reviewfix ", "Review and ask for an actionable fix plan." },
+		{ "/nextedit", "/nextedit ", "Predict the most likely next change." },
+		{ "/tests", "/tests ", "Plan the highest-value tests." },
+		{ "@focused", "@focused ", "Reference the currently selected file." },
+		{ "@recent", "@recent ", "Reference recent touched files." },
+		{ "@workspace", "@workspace ", "Bias toward whole-workspace context." },
+		{ "@symbol:", "@symbol:", "Reference a symbol, for example @symbol:update." }
+	};
+	ImGui::TextDisabled("Quick actions:");
+	for (size_t chipIndex = 0; chipIndex < std::size(quickChips); ++chipIndex) {
+		ImGui::PushID(static_cast<int>(chipIndex));
+		if (ImGui::SmallButton(quickChips[chipIndex].label)) {
+			std::string updatedInput = trim(std::string(scriptInput));
+			if (!updatedInput.empty()) {
+				updatedInput += " ";
+			}
+			updatedInput += quickChips[chipIndex].commandText;
+			copyStringToBuffer(scriptInput, sizeof(scriptInput), updatedInput);
+		}
+	if (ImGui::IsItemHovered()) {
+			showWrappedTooltip(quickChips[chipIndex].tooltip);
+		}
+		ImGui::PopID();
+		if (chipIndex + 1 < std::size(quickChips)) {
+			ImGui::SameLine();
+		}
+	}
+
+if (scriptHasAutocompleteToken) {
+	ImGui::TextDisabled("Autocomplete:");
+	if (showScriptAutocompletePopup) {
+		if (ImGui::BeginChild("##ScriptAutocompletePopup", ImVec2(-1, 110), true)) {
+			for (size_t suggestionIndex = 0; suggestionIndex < autocompleteSuggestions.size(); ++suggestionIndex) {
+				const auto & suggestion = autocompleteSuggestions[suggestionIndex];
+				const bool isSelected =
+					static_cast<int>(suggestionIndex) == scriptAutocompleteSelectedIndex;
+				ImGui::PushID(static_cast<int>(suggestionIndex + 200));
+				if (ImGui::Selectable(suggestion.label.c_str(), isSelected)) {
+					scriptAutocompleteSelectedIndex = static_cast<int>(suggestionIndex);
+					replaceTrailingScriptToken(suggestion.replacement);
+				}
+				if (isSelected) {
+					ImGui::SetScrollHereY(0.5f);
+				}
+				if (ImGui::IsItemHovered() && !suggestion.tooltip.empty()) {
+					showWrappedTooltip(suggestion.tooltip);
+				}
+				ImGui::PopID();
+			}
+		}
+		ImGui::EndChild();
+		ImGui::TextDisabled("Use Up/Down + Enter, Tab, or click a suggestion.");
+	} else if (!autocompleteHint.empty()) {
+		ImGui::TextDisabled("%s", autocompleteHint.c_str());
+	}
+}
+
+if (!scriptReferences.empty()) {
+	ImGui::TextDisabled("Detected @ references:");
+	for (const auto & reference : scriptReferences) {
+		ImGui::BulletText("%s", reference.displayLabel.c_str());
+	}
+}
 
 ImGui::BeginDisabled(generating.load());
 if (canSendScriptChat) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.3f, 1.0f));
-if ((ImGui::Button("Send to Chat", ImVec2(110, 0)) || scriptChatSubmitted) && canSendScriptChat) {
+if ((ImGui::Button("Send to Chat", ImVec2(110, 0)) || effectiveScriptChatSubmitted) && canSendScriptChat) {
 	if (slashCommand.kind != ScriptSlashCommandKind::None) {
 		if (executeScriptSlashCommand(slashCommand)) {
 			std::memset(scriptInput, 0, sizeof(scriptInput));
@@ -2205,8 +2697,13 @@ ImGui::SameLine();
 	if (ImGui::Button("Clear Chat", ImVec2(90, 0))) {
 		scriptMessages.clear();
 		scriptOutput.clear();
+		scriptInlineCompletionOutput.clear();
+		scriptInlineCompletionTargetPath.clear();
 		lastScriptFailureReason.clear();
 		recentScriptTouchedFiles.clear();
+		scriptAssistantEvents.clear();
+		scriptAssistantToolCalls.clear();
+		scriptAssistantSession = {};
 		lastScriptOutputLikelyCutoff = false;
 		lastScriptOutputTail.clear();
 	}
@@ -2284,9 +2781,6 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 	const bool hasScriptOutput = !scriptOutput.empty();
 	const bool hasLastTask = !lastScriptRequest.empty();
 	const bool hasBuildErrors = trim(scriptBuildErrors).size() > 0;
-	const bool hasWorkspaceSource =
-		sourceType == ofxGgmlScriptSourceType::LocalFolder &&
-		!scriptSource.getLocalFolderPath().empty();
 	const std::string focusedScriptFileLabel =
 		(hasSelectedFile && selectedScriptFileIndex >= 0 &&
 		 selectedScriptFileIndex < static_cast<int>(scriptSourceFiles.size()))
@@ -2329,6 +2823,405 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			ImVec4(0.95f, 0.68f, 0.35f, 1.0f),
 			"Last failure: %s",
 			lastScriptFailureReason.c_str());
+	}
+
+	const auto describeScriptAssistantEventKind =
+		[](ofxGgmlCodeAssistantEventKind kind) {
+			switch (kind) {
+			case ofxGgmlCodeAssistantEventKind::SessionStarted:
+				return "Session started";
+			case ofxGgmlCodeAssistantEventKind::PromptPrepared:
+				return "Prompt prepared";
+			case ofxGgmlCodeAssistantEventKind::OutputChunk:
+				return "Streaming output";
+			case ofxGgmlCodeAssistantEventKind::StructuredResultReady:
+				return "Structured result";
+			case ofxGgmlCodeAssistantEventKind::ToolProposed:
+				return "Tool proposed";
+			case ofxGgmlCodeAssistantEventKind::ApprovalRequested:
+				return "Approval requested";
+			case ofxGgmlCodeAssistantEventKind::ApprovalGranted:
+				return "Approval granted";
+			case ofxGgmlCodeAssistantEventKind::ApprovalDenied:
+				return "Approval denied";
+			case ofxGgmlCodeAssistantEventKind::Completed:
+				return "Completed";
+			case ofxGgmlCodeAssistantEventKind::Error:
+				return "Error";
+			}
+			return "Event";
+		};
+	int approvalRequestCount = 0;
+	int verificationSuggestionCount = 0;
+	for (const auto & toolCall : scriptAssistantToolCalls) {
+		if (toolCall.requiresApproval) {
+			approvalRequestCount++;
+		}
+		if (toolCall.toolName == "run_verification") {
+			verificationSuggestionCount++;
+		}
+	}
+	if (!scriptAssistantEvents.empty() || !scriptAssistantToolCalls.empty()) {
+		ImGui::Spacing();
+		ImGui::TextDisabled(
+			"Assistant workflow: rev %llu | tools: %d | approvals: %d | verification: %d",
+			static_cast<unsigned long long>(scriptAssistantSession.revision),
+			static_cast<int>(scriptAssistantToolCalls.size()),
+			approvalRequestCount,
+			verificationSuggestionCount);
+		if (ImGui::BeginChild("##ScriptAssistantWorkflow", ImVec2(-1, 120), true)) {
+			if (!scriptAssistantToolCalls.empty()) {
+				ImGui::TextDisabled("Proposed tools:");
+				for (const auto & toolCall : scriptAssistantToolCalls) {
+					std::string line = toolCall.toolName;
+					if (!toolCall.summary.empty()) {
+						line += ": " + toolCall.summary;
+					}
+					if (toolCall.requiresApproval) {
+						line += toolCall.approved ? " [approved]" : " [approval denied]";
+					}
+					if (toolCall.toolName == "run_verification") {
+						line += " [verification]";
+					}
+					ImGui::BulletText("%s", line.c_str());
+				}
+			}
+			if (!scriptAssistantEvents.empty()) {
+				if (!scriptAssistantToolCalls.empty()) {
+					ImGui::Spacing();
+				}
+				ImGui::TextDisabled("Recent assistant events:");
+				const size_t maxEvents = std::min<size_t>(scriptAssistantEvents.size(), 8);
+				for (size_t index = scriptAssistantEvents.size() - maxEvents;
+					 index < scriptAssistantEvents.size();
+					 ++index) {
+					const auto & event = scriptAssistantEvents[index];
+					std::string line = describeScriptAssistantEventKind(event.kind);
+					if (!event.message.empty()) {
+						line += ": " + event.message;
+					} else if (!event.toolCall.summary.empty()) {
+						line += ": " + event.toolCall.summary;
+					} else if (!event.toolCall.toolName.empty()) {
+						line += ": " + event.toolCall.toolName;
+					}
+					ImGui::BulletText("%s", line.c_str());
+				}
+			}
+		}
+		ImGui::EndChild();
+	}
+
+	ofxGgmlCodeAssistantToolCall pendingApprovalToolCall;
+	bool hasPendingApproval = false;
+	{
+		std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
+		hasPendingApproval = scriptAssistantApprovalPending;
+		if (hasPendingApproval) {
+			pendingApprovalToolCall = scriptAssistantPendingApprovalToolCall;
+		}
+	}
+	if (hasPendingApproval) {
+		ImGui::Spacing();
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+			"Approval requested: Script assistant is waiting for your decision.");
+		if (!pendingApprovalToolCall.toolName.empty()) {
+			ImGui::TextWrapped(
+				"Tool: %s",
+				pendingApprovalToolCall.toolName.c_str());
+		}
+		if (!pendingApprovalToolCall.summary.empty()) {
+			ImGui::TextWrapped(
+				"Reason: %s",
+				pendingApprovalToolCall.summary.c_str());
+		}
+		if (!pendingApprovalToolCall.payload.empty()) {
+			ImGui::BeginChild("##ScriptApprovalPayload", ImVec2(-1, 90), true);
+			ImGui::TextWrapped("%s", pendingApprovalToolCall.payload.c_str());
+			ImGui::EndChild();
+		}
+		if (ImGui::Button("Approve Tool", ImVec2(120, 0))) {
+			{
+				std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
+				scriptAssistantApprovalDecisionApproved = true;
+				scriptAssistantApprovalDecisionReady = true;
+			}
+			scriptAssistantApprovalCv.notify_all();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Deny Tool", ImVec2(120, 0))) {
+			{
+				std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
+				scriptAssistantApprovalDecisionApproved = false;
+				scriptAssistantApprovalDecisionReady = true;
+			}
+			scriptAssistantApprovalCv.notify_all();
+		}
+	}
+
+	const auto requestFocusedInlineCompletion = [&]() {
+		if (!hasSelectedFile) {
+			appendScriptAssistantOutput(
+				"Inline completion",
+				"Select a focused file before requesting editor-style inline completion.");
+			return;
+		}
+		std::string focusedFileContent;
+		if (!scriptSource.loadFileContent(selectedScriptFileIndex, focusedFileContent)) {
+			appendScriptAssistantOutput(
+				"Inline completion",
+				"Could not load the focused file for inline completion.");
+			return;
+		}
+		std::string inlineInstruction = trim(scriptInlineInstruction);
+		if (inlineInstruction.empty()) {
+			inlineInstruction = trim(scriptInput);
+		}
+		if (inlineInstruction.empty()) {
+			inlineInstruction =
+				"Continue the next most useful code for this file while preserving style, structure, and current conventions.";
+		}
+		runScriptInlineCompletionRequest(
+			scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].fullPath,
+			focusedFileContent,
+			"",
+			inlineInstruction);
+	};
+
+	ImGui::Spacing();
+	ImGui::TextDisabled("Assistant intents:");
+	auto drawIntentButton =
+		[&](const char * label,
+			const char * tooltip,
+			bool enabled,
+			const auto & onClick) {
+			ImGui::BeginDisabled(!enabled);
+			if (ImGui::SmallButton(label) && enabled) {
+				onClick();
+			}
+			if (ImGui::IsItemHovered() && tooltip != nullptr && tooltip[0] != '\0') {
+				showWrappedTooltip(tooltip);
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+		};
+
+	if (hasPendingApproval) {
+		drawIntentButton(
+			"Approve",
+			"Allow the currently proposed tool call.",
+			true,
+			[&]() {
+				{
+					std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
+					scriptAssistantApprovalDecisionApproved = true;
+					scriptAssistantApprovalDecisionReady = true;
+				}
+				scriptAssistantApprovalCv.notify_all();
+			});
+		drawIntentButton(
+			"Deny",
+			"Reject the currently proposed tool call.",
+			true,
+			[&]() {
+				{
+					std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
+					scriptAssistantApprovalDecisionApproved = false;
+					scriptAssistantApprovalDecisionReady = true;
+				}
+				scriptAssistantApprovalCv.notify_all();
+			});
+		ImGui::TextDisabled("Pending tool approval comes first.");
+	} else if (!hasWorkspaceSource) {
+		drawIntentButton(
+			"Load workspace",
+			"Pick a local project so Script mode can ground edits and reviews.",
+			!generating.load(),
+			[&]() {
+				ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
+				if (result.bSuccess) {
+					clearDeferredScriptSourceRestore();
+					selectedScriptFileIndex = -1;
+					if (!scriptLanguages.empty()) {
+						scriptSource.setPreferredExtension(
+							scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
+					}
+					scriptSource.setLocalFolder(result.getPath());
+				}
+			});
+		drawIntentButton(
+			"Explain prompt",
+			"Turn the current Script prompt into an explanation request.",
+			!generating.load() && hasUserInput,
+			[&]() {
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::Explain,
+					scriptInput,
+					"",
+					"",
+					false);
+			});
+		ImGui::TextDisabled("Load a workspace to unlock grounded plans, symbol search, and dry runs.");
+	} else if (hasBuildErrors) {
+		drawIntentButton(
+			"Fix build",
+			"Use compiler output to propose the safest next build fix.",
+			!generating.load(),
+			[&]() {
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::FixBuild,
+					scriptInput,
+					"",
+					"",
+					false,
+					true,
+					true,
+					scriptBuildErrors,
+					buildWorkspaceAllowedFiles());
+			});
+		drawIntentButton(
+			"Review fix",
+			"Review the workspace and return a grounded fix plan.",
+			!generating.load(),
+			[&]() {
+				std::ostringstream body;
+				body << "Review the current workspace and return an actionable fix plan. "
+					<< "Only include concrete, evidence-backed issues. Prefer a structured plan and unified diff.";
+				if (hasUserInput) {
+					body << "\n\nFocus: " << trim(scriptInput);
+				}
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::Review,
+					scriptInput,
+					body.str(),
+					"Review with fix plan.",
+					true,
+					true,
+					true,
+					"",
+					buildWorkspaceAllowedFiles());
+			});
+		drawIntentButton(
+			"Dry run",
+			"Preview the latest structured patch plan against the workspace.",
+			!generating.load(),
+			[&]() { previewWorkspacePlan("Workspace dry run"); });
+		ImGui::TextDisabled("Compiler output is loaded, so build repair is the strongest next move.");
+	} else if (hasSelectedFile && !hasUserInput) {
+		drawIntentButton(
+			"Explain file",
+			"Seed the Script prompt from the currently focused file.",
+			!generating.load(),
+			[&]() {
+				copyStringToBuffer(
+					scriptInput,
+					sizeof(scriptInput),
+					("Explain how " + focusedScriptFileLabel +
+						" works, including key functions, data flow, and risks.").c_str());
+			});
+		drawIntentButton(
+			"Inline continue",
+			"Use editor-style continuation against the focused file instead of a chat request.",
+			!generating.load(),
+			[&]() { requestFocusedInlineCompletion(); });
+		drawIntentButton(
+			"Symbol context",
+			"Inspect semantic symbol context around the focused file or prompt.",
+			!generating.load(),
+			[&]() {
+				ofxGgmlCodeAssistantSymbolQuery query;
+				query.query = focusedScriptFileLabel;
+				query.includeCallers = true;
+				query.maxDefinitions = 6;
+				query.maxReferences = 8;
+				const auto symbolContext =
+					scriptAssistant.buildSymbolContext(query, buildScriptAssistantContext());
+				appendScriptAssistantOutput("Inspect symbol context", formatSymbolContext(symbolContext));
+			});
+		ImGui::TextDisabled("No chat prompt yet, so start from the focused file.");
+	} else if (hasWorkspaceSource && hasUserInput) {
+		drawIntentButton(
+			"Grounded edit",
+			"Build a structured edit plan using the loaded workspace.",
+			!generating.load(),
+			[&]() {
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::Edit,
+					scriptInput,
+					"",
+					"",
+					false,
+					true,
+					true,
+					"",
+					buildWorkspaceAllowedFiles());
+			});
+		drawIntentButton(
+			"Review",
+			"Review the loaded workspace using the current Script prompt as focus.",
+			!generating.load(),
+			[&]() {
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::Review,
+					scriptInput,
+					"",
+					"",
+					false);
+			});
+		drawIntentButton(
+			"Tests",
+			"Plan the highest-value verification steps for the current request.",
+			!generating.load(),
+			[&]() {
+				std::ostringstream body;
+				body << "Propose the highest-value tests for this workspace and request. "
+					<< "Prefer concrete test names, likely files, and verification commands. "
+					<< "If no additional tests are needed, say so clearly.";
+				if (hasUserInput) {
+					body << "\n\nFocus: " << trim(scriptInput);
+				}
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::Generate,
+					scriptInput,
+					body.str(),
+					"Plan tests.",
+					false,
+					true,
+					false,
+					"",
+					buildWorkspaceAllowedFiles());
+			});
+		ImGui::TextDisabled("You have both a workspace and a request, so use grounded planning instead of freeform chat.");
+	} else {
+		drawIntentButton(
+			"Review workspace",
+			"Run the hierarchical workspace review flow.",
+			!generating.load(),
+			[&]() { runHierarchicalReview(); });
+		drawIntentButton(
+			"Next edit",
+			"Predict the highest-value next change for the workspace.",
+			!generating.load(),
+			[&]() {
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::NextEdit,
+					scriptInput,
+					"",
+					"",
+					false,
+					true,
+					true,
+					"",
+					buildWorkspaceAllowedFiles());
+			});
+		drawIntentButton(
+			"Change summary",
+			"Summarize local Git changes professionally for reviewers.",
+			!generating.load() &&
+				sourceType == ofxGgmlScriptSourceType::LocalFolder &&
+				!scriptSource.getLocalFolderPath().empty(),
+			[&]() { summarizeLocalChanges(scriptInput); });
+		ImGui::TextDisabled("No prompt yet. Start with a review or next-edit prediction.");
 	}
 
 	ImGui::Spacing();
@@ -2422,6 +3315,60 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 }
 
 ImGui::EndDisabled();
+
+ImGui::Separator();
+ImGui::TextDisabled("Editor-style inline completion");
+if (hasSelectedFile) {
+	ImGui::TextWrapped(
+		"Focused file: %s",
+		scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].name.c_str());
+} else {
+	ImGui::TextDisabled("Select a file in the workspace list to use inline completion.");
+}
+if (ImGui::SmallButton("Use Script Prompt##Inline")) {
+	const std::string fallbackInstruction = trim(std::string(scriptInput));
+	if (!fallbackInstruction.empty()) {
+		copyStringToBuffer(
+			scriptInlineInstruction,
+			sizeof(scriptInlineInstruction),
+			fallbackInstruction);
+	}
+}
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Seed the inline-completion instruction from the current Script prompt.");
+}
+ImGui::SameLine();
+ImGui::TextDisabled("If blank, inline completion falls back to the current Script prompt.");
+ImGui::InputText(
+	"Inline instruction",
+	scriptInlineInstruction,
+	sizeof(scriptInlineInstruction));
+ImGui::BeginDisabled(generating.load() || !hasSelectedFile);
+if (ImGui::Button("Inline Complete", ImVec2(130, 0))) {
+	requestFocusedInlineCompletion();
+}
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Run editor-style continuation against the focused file instead of a chat request.");
+}
+ImGui::EndDisabled();
+if (!scriptInlineCompletionOutput.empty()) {
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Copy Completion##Inline")) {
+		copyToClipboard(scriptInlineCompletionOutput);
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Use in Chat##Inline")) {
+		copyStringToBuffer(scriptInput, sizeof(scriptInput), scriptInlineCompletionOutput);
+	}
+	const std::string inlineTargetLabel = trim(scriptInlineCompletionTargetPath);
+	if (!inlineTargetLabel.empty()) {
+		ImGui::TextDisabled("Target: %s", inlineTargetLabel.c_str());
+	}
+	if (ImGui::BeginChild("##InlineCompletionPreview", ImVec2(-1, 120), true)) {
+		ImGui::TextWrapped("%s", scriptInlineCompletionOutput.c_str());
+	}
+	ImGui::EndChild();
+}
 
 ImGui::Spacing();
 ImGui::TextDisabled("Quick Actions:");
@@ -3554,10 +4501,440 @@ void ofApp::runSpeechInference() {
 	});
 }
 
-void ofApp::runTtsInference() {
+void ofApp::runVoiceTranslatorWorkflow(bool useAudioInput) {
+	if (generating.load()) return;
+
+	if (translateLanguages.empty()) {
+		translateLanguages = ofxGgmlTextAssistant::defaultTranslateLanguages();
+	}
+	ensureTtsProfilesLoaded();
+
+	const auto resolveTranslateLanguageName = [&](int index, const std::string & fallback) {
+		if (index >= 0 && index < static_cast<int>(translateLanguages.size())) {
+			return translateLanguages[static_cast<size_t>(index)].name;
+		}
+		return fallback;
+	};
+
+	const std::string sourceLanguage = resolveTranslateLanguageName(
+		translateSourceLang,
+		"Auto detect");
+	std::string targetLanguage = resolveTranslateLanguageName(
+		translateTargetLang,
+		"English");
+	if (targetLanguage == "Auto detect") {
+		targetLanguage = "English";
+	}
+
+	const std::string inputText = trim(
+		std::strlen(translateInput) > 0
+			? std::string(translateInput)
+			: translateOutput);
+	const std::string audioPath = trim(voiceTranslatorAudioPath);
+	if (useAudioInput) {
+		if (audioPath.empty()) {
+			voiceTranslatorStatus = "Select an audio file or buffered recording first.";
+			return;
+		}
+	} else if (inputText.empty()) {
+		voiceTranslatorStatus = "Enter text to translate first.";
+		return;
+	}
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::Translate;
+	generationStartTime = ofGetElapsedTimef();
+	voiceTranslatorStatus = useAudioInput
+		? "Preparing audio translation workflow..."
+		: "Preparing translated voice workflow...";
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput = voiceTranslatorStatus;
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	const ofxGgmlSpeechModelProfile speechProfileBase =
+		speechProfiles.empty()
+			? ofxGgmlSpeechModelProfile{}
+			: speechProfiles[static_cast<size_t>(std::clamp(
+				selectedSpeechProfileIndex,
+				0,
+				std::max(0, static_cast<int>(speechProfiles.size()) - 1)))];
+	const std::string speechExecutableValue = trim(speechExecutable);
+	const std::string speechModelPathValue = trim(speechModelPath);
+	const std::string speechServerUrlValue = trim(speechServerUrl);
+	const std::string speechServerModelValue = trim(speechServerModel);
+	const std::string speechPromptValue = trim(speechPrompt);
+	const std::string speechLanguageHintValue = trim(speechLanguageHint);
+
+	const ofxGgmlTtsModelProfile ttsProfileBase = getSelectedTtsProfile();
+	const std::string ttsModelPathValue = trim(ttsModelPath);
+	const std::string ttsSpeakerPathValue = trim(ttsSpeakerPath);
+	const std::string ttsSpeakerReferenceValue = trim(ttsSpeakerReferencePath);
+	const std::string ttsOutputPathValue = trim(ttsOutputPath);
+	const std::string ttsPromptAudioPathValue = trim(ttsPromptAudioPath);
+	const std::string ttsLanguageValue = trim(ttsLanguage);
+	const int ttsTaskIndexValue = std::clamp(ttsTaskIndex, 0, 2);
+	const int requestSeed = ttsSeed;
+	const int requestMaxTokens = std::max(0, ttsMaxTokens);
+	const float requestTemperature = std::isfinite(ttsTemperature)
+		? std::clamp(ttsTemperature, 0.0f, 2.0f)
+		: 0.4f;
+	const float requestPenalty = std::isfinite(ttsRepetitionPenalty)
+		? std::clamp(ttsRepetitionPenalty, 1.0f, 3.0f)
+		: 1.1f;
+	const int requestRange = std::clamp(ttsRepetitionRange, 0, 512);
+	const int requestTopK = std::clamp(ttsTopK, 0, 200);
+	const float requestTopP = std::isfinite(ttsTopP)
+		? std::clamp(ttsTopP, 0.0f, 1.0f)
+		: 0.9f;
+	const float requestMinP = std::isfinite(ttsMinP)
+		? std::clamp(ttsMinP, 0.0f, 1.0f)
+		: 0.05f;
+	const bool requestStreamAudio = ttsStreamAudio;
+	const bool requestNormalizeText = ttsNormalizeText;
+	const auto ttsBackend = createConfiguredTtsBackend(trim(ttsExecutablePath));
+	const ofxGgmlInferenceSettings translateSettings =
+		buildCurrentTextInferenceSettings(AiMode::Translate);
+	const std::string modelPath = getSelectedModelPath();
+
+	workerThread = std::thread(
+		[this,
+		 useAudioInput,
+		 inputText,
+		 audioPath,
+		 sourceLanguage,
+		 targetLanguage,
+		 speechProfileBase,
+		 speechExecutableValue,
+		 speechModelPathValue,
+		 speechServerUrlValue,
+		 speechServerModelValue,
+		 speechPromptValue,
+		 speechLanguageHintValue,
+		 ttsProfileBase,
+		 ttsModelPathValue,
+		 ttsSpeakerPathValue,
+		 ttsSpeakerReferenceValue,
+		 ttsOutputPathValue,
+		 ttsPromptAudioPathValue,
+		 ttsLanguageValue,
+		 ttsTaskIndexValue,
+		 requestSeed,
+		 requestMaxTokens,
+		 requestTemperature,
+		 requestPenalty,
+		 requestRange,
+		 requestTopK,
+		 requestTopP,
+		 requestMinP,
+		 requestStreamAudio,
+		 requestNormalizeText,
+		 ttsBackend,
+		 translateSettings,
+		 modelPath]() {
+			auto setPendingTranslation = [this](const std::string & translatedText) {
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingOutput = translatedText;
+				pendingRole = "assistant";
+				pendingMode = AiMode::Translate;
+			};
+			auto clearPendingTtsArtifacts = [this]() {
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingTtsBackendName.clear();
+				pendingTtsElapsedMs = 0.0f;
+				pendingTtsResolvedSpeakerPath.clear();
+				pendingTtsAudioFiles.clear();
+				pendingTtsMetadata.clear();
+			};
+			auto setVoiceTranslatorStatus = [this](
+				const std::string & status,
+				const std::string & transcript) {
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingVoiceTranslatorStatus = status;
+				pendingVoiceTranslatorTranscript = transcript;
+				pendingVoiceTranslatorDirty = true;
+			};
+			auto setStreamingStatus = [this](const std::string & status) {
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = status;
+			};
+
+			try {
+				std::string transcript = inputText;
+				std::string detectedSourceLanguage = sourceLanguage;
+
+				if (useAudioInput) {
+					SpeechExecutionPlan speechPlan;
+					std::string speechPlanError;
+					if (!buildSpeechExecutionPlan(
+							speechProfileBase,
+							audioPath,
+							speechExecutableValue,
+							speechModelPathValue,
+							speechServerUrlValue,
+							speechServerModelValue,
+							speechPromptValue,
+							sourceLanguage == "Auto detect"
+								? speechLanguageHintValue
+								: sourceLanguage,
+							static_cast<int>(ofxGgmlSpeechTask::Transcribe),
+							false,
+							speechPlan,
+							speechPlanError)) {
+						clearPendingTtsArtifacts();
+						setPendingTranslation("[Error] " + speechPlanError);
+						setVoiceTranslatorStatus("[Error] " + speechPlanError, "");
+						generating.store(false);
+						return;
+					}
+
+					const ofxGgmlSpeechResult speechResult = executeSpeechExecutionPlan(
+						speechPlan,
+						[&](const std::string & status) {
+							setStreamingStatus(status);
+						},
+						[this](ofLogLevel level, const std::string & message) {
+							logWithLevel(level, message);
+						});
+					if (cancelRequested.load()) {
+						clearPendingTtsArtifacts();
+						setPendingTranslation("[Cancelled] Voice translator cancelled.");
+						setVoiceTranslatorStatus("[Cancelled] Voice translator cancelled.", "");
+						generating.store(false);
+						return;
+					}
+					if (!speechResult.success) {
+						clearPendingTtsArtifacts();
+						const std::string errorMessage = speechResult.error.empty()
+							? std::string("Speech transcription failed.")
+							: speechResult.error;
+						setPendingTranslation("[Error] " + errorMessage);
+						setVoiceTranslatorStatus("[Error] " + errorMessage, "");
+						generating.store(false);
+						return;
+					}
+
+					transcript = trim(speechResult.text);
+					if (transcript.empty()) {
+						clearPendingTtsArtifacts();
+						setPendingTranslation("[Error] Speech transcription returned no text.");
+						setVoiceTranslatorStatus("[Error] Speech transcription returned no text.", "");
+						generating.store(false);
+						return;
+					}
+
+					if (!trim(speechResult.detectedLanguage).empty()) {
+						detectedSourceLanguage = trim(speechResult.detectedLanguage);
+					}
+				}
+
+				ofxGgmlTextAssistantRequest translateRequest;
+				translateRequest.task = ofxGgmlTextTask::Translate;
+				translateRequest.inputText = transcript;
+				translateRequest.sourceLanguage = detectedSourceLanguage;
+				translateRequest.targetLanguage = targetLanguage;
+				translateRequest.labelOverride = "Voice translator";
+
+				setStreamingStatus("Translating to " + targetLanguage + "...");
+				const ofxGgmlTextAssistantResult translateResult = textAssistant.run(
+					modelPath,
+					translateRequest,
+					translateSettings,
+					[this](const std::string & partial) {
+						if (cancelRequested.load()) {
+							return false;
+						}
+						std::lock_guard<std::mutex> lock(streamMutex);
+						streamingOutput = partial;
+						return true;
+					});
+				if (cancelRequested.load()) {
+					clearPendingTtsArtifacts();
+					setPendingTranslation("[Cancelled] Voice translator cancelled.");
+					setVoiceTranslatorStatus("[Cancelled] Voice translator cancelled.", transcript);
+					generating.store(false);
+					return;
+				}
+				if (!translateResult.inference.success) {
+					clearPendingTtsArtifacts();
+					const std::string errorMessage = translateResult.inference.error.empty()
+						? std::string("Translation failed.")
+						: translateResult.inference.error;
+					setPendingTranslation("[Error] " + errorMessage);
+					setVoiceTranslatorStatus("[Error] " + errorMessage, transcript);
+					generating.store(false);
+					return;
+				}
+
+				const std::string translatedText = trim(translateResult.inference.text);
+				if (translatedText.empty()) {
+					clearPendingTtsArtifacts();
+					setPendingTranslation("[Error] Translation returned no text.");
+					setVoiceTranslatorStatus("[Error] Translation returned no text.", transcript);
+					generating.store(false);
+					return;
+				}
+
+				setPendingTranslation(translatedText);
+
+				if (!voiceTranslatorSpeakOutput) {
+					clearPendingTtsArtifacts();
+					setVoiceTranslatorStatus(
+						"Translated text ready in " + targetLanguage + ". Voice synthesis skipped.",
+						transcript);
+					generating.store(false);
+					return;
+				}
+
+				const auto task = static_cast<ofxGgmlTtsTask>(ttsTaskIndexValue);
+				if (!ttsBackend) {
+					clearPendingTtsArtifacts();
+					setVoiceTranslatorStatus(
+						"[Error] TTS backend is not available for translated voice output.",
+						transcript);
+					generating.store(false);
+					return;
+				}
+				if (task == ofxGgmlTtsTask::CloneVoice && ttsSpeakerReferenceValue.empty()) {
+					clearPendingTtsArtifacts();
+					setVoiceTranslatorStatus(
+						"[Error] Select a reference audio file for Clone Voice before running translated speech.",
+						transcript);
+					generating.store(false);
+					return;
+				}
+				if (task == ofxGgmlTtsTask::ContinueSpeech && ttsPromptAudioPathValue.empty()) {
+					clearPendingTtsArtifacts();
+					setVoiceTranslatorStatus(
+						"[Error] Select prompt audio for Continue Speech before running translated speech.",
+						transcript);
+					generating.store(false);
+					return;
+				}
+
+				const std::string effectiveModelPath = ttsModelPathValue.empty()
+					? suggestedModelPath(ttsProfileBase.modelPath, ttsProfileBase.modelFileHint)
+					: ttsModelPathValue;
+				const std::string effectiveSpeakerPath = ttsSpeakerPathValue.empty()
+					? suggestedModelPath(ttsProfileBase.speakerPath, ttsProfileBase.speakerFileHint)
+					: ttsSpeakerPathValue;
+				std::string effectiveOutputPath = ttsOutputPathValue;
+				if (effectiveOutputPath.empty()) {
+					effectiveOutputPath = ofToDataPath("generated/voice_translator.wav", true);
+				}
+
+				const std::filesystem::path outputDir =
+					std::filesystem::path(effectiveOutputPath).parent_path();
+				if (!outputDir.empty()) {
+					std::error_code dirEc;
+					std::filesystem::create_directories(outputDir, dirEc);
+					if (dirEc) {
+						clearPendingTtsArtifacts();
+						setVoiceTranslatorStatus(
+							"[Error] Failed to create translated voice output directory: " + outputDir.string(),
+							transcript);
+						generating.store(false);
+						return;
+					}
+				}
+
+				ofxGgmlTtsRequest ttsRequest;
+				ttsRequest.task = task;
+				ttsRequest.text = translatedText;
+				ttsRequest.modelPath = effectiveModelPath;
+				ttsRequest.speakerPath = effectiveSpeakerPath;
+				ttsRequest.speakerReferencePath = ttsSpeakerReferenceValue;
+				ttsRequest.language = ttsLanguageValue.empty()
+					? targetLanguage
+					: ttsLanguageValue;
+				ttsRequest.outputPath = effectiveOutputPath;
+				ttsRequest.promptAudioPath = ttsPromptAudioPathValue;
+				ttsRequest.seed = requestSeed;
+				ttsRequest.maxTokens = requestMaxTokens;
+				ttsRequest.temperature = requestTemperature;
+				ttsRequest.repetitionPenalty = requestPenalty;
+				ttsRequest.repetitionRange = requestRange;
+				ttsRequest.topK = requestTopK;
+				ttsRequest.topP = requestTopP;
+				ttsRequest.minP = requestMinP;
+				ttsRequest.streamAudio = requestStreamAudio;
+				ttsRequest.normalizeText = requestNormalizeText;
+
+				setStreamingStatus("Synthesizing translated voice...");
+				const ofxGgmlTtsResult ttsResult = ttsBackend->synthesize(ttsRequest);
+				if (cancelRequested.load()) {
+					clearPendingTtsArtifacts();
+					setVoiceTranslatorStatus("[Cancelled] Voice translator cancelled.", transcript);
+					generating.store(false);
+					return;
+				}
+				if (!ttsResult.success) {
+					clearPendingTtsArtifacts();
+					const std::string errorMessage = ttsResult.error.empty()
+						? std::string("Translated voice synthesis failed.")
+						: ttsResult.error;
+					setVoiceTranslatorStatus("[Error] " + errorMessage, transcript);
+					generating.store(false);
+					return;
+				}
+
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingTtsBackendName = ttsResult.backendName;
+					pendingTtsElapsedMs = ttsResult.elapsedMs;
+					pendingTtsResolvedSpeakerPath = ttsResult.speakerPath;
+					pendingTtsAudioFiles = ttsResult.audioFiles;
+					pendingTtsMetadata = ttsResult.metadata;
+				}
+
+				std::ostringstream status;
+				status << "Translated to " << targetLanguage << " and synthesized voice";
+				if (!ttsResult.backendName.empty()) {
+					status << " via " << ttsResult.backendName;
+				}
+				if (ttsResult.elapsedMs > 0.0f) {
+					status << " in " << ofxGgmlHelpers::formatDurationMs(ttsResult.elapsedMs);
+				}
+				status << ".";
+				if (!ttsResult.audioFiles.empty()) {
+					status << " Output: " << ttsResult.audioFiles.front().path;
+				}
+				setVoiceTranslatorStatus(status.str(), transcript);
+			} catch (const std::exception & e) {
+				clearPendingTtsArtifacts();
+				setPendingTranslation(std::string("[Error] Voice translator failed: ") + e.what());
+				setVoiceTranslatorStatus(
+					std::string("[Error] Voice translator failed: ") + e.what(),
+					std::string());
+			} catch (...) {
+				clearPendingTtsArtifacts();
+				setPendingTranslation("[Error] Voice translator failed.");
+				setVoiceTranslatorStatus(
+					"[Error] Voice translator failed.",
+					std::string());
+			}
+
+			generating.store(false);
+		});
+}
+
+void ofApp::runTtsInferenceForText(
+	const std::string & textValue,
+	const std::string & statusLabel,
+	bool mirrorIntoTtsInput) {
 	if (generating.load()) return;
 
 	ensureTtsProfilesLoaded();
+
+	if (mirrorIntoTtsInput) {
+		copyStringToBuffer(ttsInput, sizeof(ttsInput), textValue);
+	}
 
 	generating.store(true);
 	cancelRequested.store(false);
@@ -3574,7 +4951,7 @@ void ofApp::runTtsInference() {
 	}
 
 	const ofxGgmlTtsModelProfile profileBase = getSelectedTtsProfile();
-	const std::string text = trim(ttsInput);
+	const std::string text = trim(textValue);
 	const std::string executablePath = trim(ttsExecutablePath);
 	const std::string modelPath = trim(ttsModelPath);
 	const std::string speakerPath = trim(ttsSpeakerPath);
@@ -3605,7 +4982,7 @@ void ofApp::runTtsInference() {
 	const std::string backendLabel =
 		backend ? backend->backendName() : std::string("TTS backend");
 
-	workerThread = std::thread([this, backend, backendLabel, profileBase, text, modelPath, speakerPath, speakerReferencePath, outputPath, promptAudioPath, language, taskIndex, requestSeed, requestMaxTokens, requestTemperature, requestPenalty, requestRange, requestTopK, requestTopP, requestMinP, requestStreamAudio, requestNormalizeText]() {
+	workerThread = std::thread([this, backend, backendLabel, profileBase, statusLabel, text, modelPath, speakerPath, speakerReferencePath, outputPath, promptAudioPath, language, taskIndex, requestSeed, requestMaxTokens, requestTemperature, requestPenalty, requestRange, requestTopK, requestTopP, requestMinP, requestStreamAudio, requestNormalizeText]() {
 		auto setPending = [this](const std::string & textValue) {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingOutput = textValue;
@@ -3705,7 +5082,7 @@ void ofApp::runTtsInference() {
 				setPending("[Cancelled] TTS synthesis cancelled.");
 			} else if (result.success) {
 				std::ostringstream summary;
-				summary << "Synthesized audio";
+				summary << (trim(statusLabel).empty() ? "Synthesized audio" : trim(statusLabel));
 				if (!result.backendName.empty()) {
 					summary << " via " << result.backendName;
 				}
@@ -3751,6 +5128,84 @@ void ofApp::runTtsInference() {
 
 		generating.store(false);
 	});
+}
+
+void ofApp::runTtsInference() {
+	runTtsInferenceForText(ttsInput, "Synthesized audio", false);
+}
+
+void ofApp::speakLatestChatReply(bool mirrorIntoTtsInput) {
+	const std::string reply = trim(chatLastAssistantReply);
+	if (reply.empty()) {
+		chatTtsPreview.statusMessage = "No assistant reply available to synthesize yet.";
+		return;
+	}
+	chatTtsPreview.request.pending = true;
+	chatTtsPreview.statusMessage = "Synthesizing latest chat reply...";
+	runTtsInferenceForText(reply, "Synthesized chat reply", mirrorIntoTtsInput);
+}
+
+void ofApp::speakTranslatedReply(bool mirrorIntoTtsInput) {
+	const std::string translatedText = trim(translateOutput);
+	if (translatedText.empty()) {
+		translateTtsPreview.statusMessage = "No translated output is available to synthesize yet.";
+		return;
+	}
+	translateTtsPreview.request.pending = true;
+	translateTtsPreview.statusMessage = "Synthesizing translated voice output...";
+	runTtsInferenceForText(translatedText, "Translated voice output", mirrorIntoTtsInput);
+}
+
+bool ofApp::ensureChatTtsAudioLoaded(int artifactIndex, bool autoplay) {
+	return ensurePreviewAudioLoaded(
+		chatTtsPreview.audioFiles,
+		chatTtsPreview.selectedAudioIndex,
+		chatTtsPreview.loadedAudioPath,
+		chatTtsPreview.playbackPaused,
+		chatTtsPreview.player,
+		chatTtsPreview.statusMessage,
+		"No synthesized chat audio is available yet.",
+		"The selected chat audio artifact has no file path.",
+		"Chat audio file is missing: ",
+		"Failed to load chat audio preview: ",
+		"Ready to play synthesized chat reply.",
+		"Playing synthesized chat reply.",
+		artifactIndex,
+		autoplay);
+}
+
+void ofApp::stopChatTtsPlayback(bool clearLoadedPath) {
+	stopPreviewAudioPlayback(
+		chatTtsPreview.player,
+		chatTtsPreview.playbackPaused,
+		chatTtsPreview.loadedAudioPath,
+		clearLoadedPath);
+}
+
+bool ofApp::ensureTranslateTtsAudioLoaded(int artifactIndex, bool autoplay) {
+	return ensurePreviewAudioLoaded(
+		translateTtsPreview.audioFiles,
+		translateTtsPreview.selectedAudioIndex,
+		translateTtsPreview.loadedAudioPath,
+		translateTtsPreview.playbackPaused,
+		translateTtsPreview.player,
+		translateTtsPreview.statusMessage,
+		"No translated voice audio is available yet.",
+		"The selected translated voice artifact has no file path.",
+		"Translated voice file is missing: ",
+		"Failed to load translated voice preview: ",
+		"Ready to play translated voice output.",
+		"Playing translated voice output.",
+		artifactIndex,
+		autoplay);
+}
+
+void ofApp::stopTranslateTtsPlayback(bool clearLoadedPath) {
+	stopPreviewAudioPlayback(
+		translateTtsPreview.player,
+		translateTtsPreview.playbackPaused,
+		translateTtsPreview.loadedAudioPath,
+		clearLoadedPath);
 }
 
 bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,

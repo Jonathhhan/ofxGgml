@@ -35,6 +35,28 @@ enum class ofxGgmlCodeAssistantPatchKind {
 	DeleteFileOp
 };
 
+enum class ofxGgmlCodeAssistantToolCategory {
+	Context = 0,
+	Retrieval,
+	Grounding,
+	Patching,
+	Verification,
+	Analysis
+};
+
+enum class ofxGgmlCodeAssistantEventKind {
+	SessionStarted = 0,
+	PromptPrepared,
+	OutputChunk,
+	StructuredResultReady,
+	ToolProposed,
+	ApprovalRequested,
+	ApprovalGranted,
+	ApprovalDenied,
+	Completed,
+	Error
+};
+
 struct ofxGgmlCodeLanguagePreset {
 	std::string name;
 	std::string fileExtension;
@@ -88,6 +110,47 @@ struct ofxGgmlCodeAssistantPatchOperation {
 	std::string searchText;
 	std::string replacementText;
 	std::string content;
+};
+
+struct ofxGgmlCodeAssistantToolDefinition {
+	std::string name;
+	std::string description;
+	ofxGgmlCodeAssistantToolCategory category =
+		ofxGgmlCodeAssistantToolCategory::Analysis;
+	bool requiresApproval = false;
+	bool enabledByDefault = true;
+};
+
+struct ofxGgmlCodeAssistantToolCall {
+	std::string toolName;
+	std::string summary;
+	std::string payload;
+	ofxGgmlCodeAssistantToolCategory category =
+		ofxGgmlCodeAssistantToolCategory::Analysis;
+	bool requiresApproval = false;
+	bool approved = true;
+};
+
+struct ofxGgmlCodeAssistantSession {
+	std::string activeMode;
+	std::string selectedBackend;
+	std::string focusedFilePath;
+	std::vector<std::string> recentTouchedFiles;
+	std::string lastFailureReason;
+	std::vector<std::string> recentPrompts;
+	std::vector<std::string> recentSummaries;
+	size_t maxHistoryEntries = 8;
+	uint64_t revision = 0;
+};
+
+struct ofxGgmlCodeAssistantEvent {
+	ofxGgmlCodeAssistantEventKind kind =
+		ofxGgmlCodeAssistantEventKind::PromptPrepared;
+	std::string requestLabel;
+	std::string message;
+	std::string chunkText;
+	ofxGgmlCodeAssistantToolCall toolCall;
+	uint64_t sessionRevision = 0;
 };
 
 struct ofxGgmlCodeAssistantReviewFinding {
@@ -301,7 +364,14 @@ struct ofxGgmlCodeAssistantResult {
 	ofxGgmlCodeAssistantPreparedPrompt prepared;
 	ofxGgmlInferenceResult inference;
 	ofxGgmlCodeAssistantStructuredResult structured;
+	std::vector<ofxGgmlCodeAssistantToolCall> proposedToolCalls;
+	uint64_t sessionRevision = 0;
 };
+
+using ofxGgmlCodeAssistantApprovalCallback =
+	std::function<bool(const ofxGgmlCodeAssistantToolCall &)>;
+using ofxGgmlCodeAssistantEventCallback =
+	std::function<bool(const ofxGgmlCodeAssistantEvent &)>;
 
 /// Higher-level coding helper built on top of ofxGgmlInference,
 /// ofxGgmlScriptSource, and ofxGgmlProjectMemory.
@@ -311,6 +381,9 @@ public:
 	void setEmbeddingExecutable(const std::string & path);
 	ofxGgmlInference & getInference();
 	const ofxGgmlInference & getInference() const;
+	void registerTool(const ofxGgmlCodeAssistantToolDefinition & tool);
+	void resetToolRegistry();
+	std::vector<ofxGgmlCodeAssistantToolDefinition> getToolRegistry() const;
 
 	ofxGgmlCodeAssistantPreparedPrompt preparePrompt(
 		const ofxGgmlCodeAssistantRequest & request,
@@ -322,6 +395,16 @@ public:
 		const ofxGgmlCodeAssistantContext & context = {},
 		const ofxGgmlInferenceSettings & inferenceSettings = {},
 		const ofxGgmlPromptSourceSettings & sourceSettings = {},
+		std::function<bool(const std::string &)> onChunk = nullptr) const;
+	ofxGgmlCodeAssistantResult runWithSession(
+		const std::string & modelPath,
+		const ofxGgmlCodeAssistantRequest & request,
+		const ofxGgmlCodeAssistantContext & context = {},
+		ofxGgmlCodeAssistantSession * session = nullptr,
+		const ofxGgmlInferenceSettings & inferenceSettings = {},
+		const ofxGgmlPromptSourceSettings & sourceSettings = {},
+		ofxGgmlCodeAssistantApprovalCallback approvalCallback = nullptr,
+		ofxGgmlCodeAssistantEventCallback eventCallback = nullptr,
 		std::function<bool(const std::string &)> onChunk = nullptr) const;
 	ofxGgmlCodeAssistantResult runSpecToCode(
 		const std::string & modelPath,
@@ -362,6 +445,7 @@ public:
 		std::function<bool(const std::string &)> onChunk = nullptr) const;
 
 	static std::vector<ofxGgmlCodeLanguagePreset> defaultLanguagePresets();
+	static std::vector<ofxGgmlCodeAssistantToolDefinition> defaultToolRegistry();
 	static std::string defaultActionBody(
 		ofxGgmlCodeAssistantAction action,
 		const std::string & userInput,
@@ -382,11 +466,21 @@ public:
 		const ofxGgmlCodeAssistantStructuredResult & structured);
 	static std::vector<ofxGgmlCodeAssistantBuildError> parseBuildErrors(
 		const std::string & text);
+	static void seedContextFromSession(
+		ofxGgmlCodeAssistantContext * context,
+		const ofxGgmlCodeAssistantSession & session);
+	static void updateSessionFromResult(
+		ofxGgmlCodeAssistantSession * session,
+		const ofxGgmlCodeAssistantRequest & request,
+		const ofxGgmlCodeAssistantContext & context,
+		const ofxGgmlCodeAssistantResult & result);
 
 private:
 	ofxGgmlInference m_inference;
 	mutable std::mutex m_semanticCacheMutex;
+	mutable std::mutex m_toolRegistryMutex;
 	mutable std::string m_cachedWorkspaceRoot;
 	mutable uint64_t m_cachedWorkspaceGeneration = 0;
 	mutable ofxGgmlCodeAssistantSemanticIndex m_cachedSemanticIndex;
+	std::vector<ofxGgmlCodeAssistantToolDefinition> m_toolRegistry;
 };

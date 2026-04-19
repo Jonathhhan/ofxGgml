@@ -1,0 +1,84 @@
+#pragma once
+
+#include "assistants/ofxGgmlTextAssistant.h"
+#include "inference/ofxGgmlCitationSearch.h"
+
+#include <string>
+#include <vector>
+
+struct ofxGgmlVideoEssayRequest {
+	std::string modelPath;
+	std::string topic;
+	size_t maxCitations = 5;
+	bool useCrawler = false;
+	ofxGgmlWebCrawlerRequest crawlerRequest;
+	std::vector<std::string> sourceUrls;
+	double targetDurationSeconds = 90.0;
+	std::string tone = "clear, engaging, and grounded";
+	std::string audience = "general audience";
+	bool includeCounterpoints = true;
+	ofxGgmlInferenceSettings inferenceSettings;
+	ofxGgmlPromptSourceSettings sourceSettings;
+};
+
+struct ofxGgmlVideoEssaySection {
+	int index = 0;
+	std::string title;
+	std::string summary;
+	std::string narrationText;
+	double estimatedDurationSeconds = 0.0;
+	std::vector<int> sourceIndices;
+};
+
+struct ofxGgmlVideoEssayVoiceCue {
+	int index = 0;
+	int sectionIndex = -1;
+	std::string text;
+	double startSeconds = 0.0;
+	double endSeconds = 0.0;
+};
+
+struct ofxGgmlVideoEssayResult {
+	bool success = false;
+	float elapsedMs = 0.0f;
+	std::string backendName;
+	std::string error;
+	ofxGgmlCitationSearchResult citationResult;
+	ofxGgmlTextAssistantResult outlineResult;
+	ofxGgmlTextAssistantResult scriptResult;
+	std::string outline;
+	std::string script;
+	std::vector<ofxGgmlVideoEssaySection> sections;
+	std::vector<ofxGgmlVideoEssayVoiceCue> voiceCues;
+	std::string srtText;
+};
+
+class ofxGgmlVideoEssayWorkflow {
+public:
+	ofxGgmlCitationSearch & getCitationSearch();
+	const ofxGgmlCitationSearch & getCitationSearch() const;
+	ofxGgmlTextAssistant & getTextAssistant();
+	const ofxGgmlTextAssistant & getTextAssistant() const;
+
+	ofxGgmlVideoEssayResult run(
+		const ofxGgmlVideoEssayRequest & request) const;
+
+	static std::string buildOutlinePrompt(
+		const ofxGgmlVideoEssayRequest & request,
+		const ofxGgmlCitationSearchResult & citationResult);
+	static std::string buildScriptPrompt(
+		const ofxGgmlVideoEssayRequest & request,
+		const ofxGgmlCitationSearchResult & citationResult,
+		const std::string & outline);
+	static std::vector<ofxGgmlVideoEssaySection> parseSectionsFromScript(
+		const std::string & script,
+		double targetDurationSeconds = 0.0);
+	static std::vector<ofxGgmlVideoEssayVoiceCue> buildVoiceCueSheet(
+		const std::vector<ofxGgmlVideoEssaySection> & sections);
+	static std::string buildSrt(
+		const std::vector<ofxGgmlVideoEssayVoiceCue> & cues);
+
+private:
+	ofxGgmlCitationSearch m_citationSearch;
+	ofxGgmlTextAssistant m_textAssistant;
+};

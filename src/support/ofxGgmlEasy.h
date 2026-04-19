@@ -3,10 +3,14 @@
 #include "assistants/ofxGgmlChatAssistant.h"
 #include "assistants/ofxGgmlTextAssistant.h"
 #include "inference/ofxGgmlCitationSearch.h"
+#include "inference/ofxGgmlAceStepBridge.h"
+#include "inference/ofxGgmlMediaPromptGenerator.h"
 #include "inference/ofxGgmlMilkDropGenerator.h"
 #include "inference/ofxGgmlMontagePreviewBridge.h"
 #include "inference/ofxGgmlMontagePlanner.h"
+#include "inference/ofxGgmlMusicGenerator.h"
 #include "inference/ofxGgmlSpeechInference.h"
+#include "inference/ofxGgmlVideoEssayWorkflow.h"
 #include "inference/ofxGgmlVideoPlanner.h"
 #include "inference/ofxGgmlVisionInference.h"
 #include "inference/ofxGgmlWebCrawler.h"
@@ -117,8 +121,16 @@ public:
 	const ofxGgmlCitationSearch & getCitationSearch() const;
 	ofxGgmlVideoPlanner & getVideoPlanner();
 	const ofxGgmlVideoPlanner & getVideoPlanner() const;
+	ofxGgmlMediaPromptGenerator & getMediaPromptGenerator();
+	const ofxGgmlMediaPromptGenerator & getMediaPromptGenerator() const;
+	ofxGgmlMusicGenerator & getMusicGenerator();
+	const ofxGgmlMusicGenerator & getMusicGenerator() const;
+	ofxGgmlAceStepBridge & getAceStepBridge();
+	const ofxGgmlAceStepBridge & getAceStepBridge() const;
 	ofxGgmlMilkDropGenerator & getMilkDropGenerator();
 	const ofxGgmlMilkDropGenerator & getMilkDropGenerator() const;
+	ofxGgmlVideoEssayWorkflow & getVideoEssayWorkflow();
+	const ofxGgmlVideoEssayWorkflow & getVideoEssayWorkflow() const;
 
 	ofxGgmlInferenceResult complete(const std::string & prompt) const;
 	ofxGgmlChatAssistantResult chat(
@@ -139,6 +151,33 @@ public:
 		const std::string & question) const;
 	ofxGgmlSpeechResult transcribeAudio(const std::string & audioPath) const;
 	ofxGgmlSpeechResult translateAudio(const std::string & audioPath) const;
+	ofxGgmlMusicPromptResult generateMusicPrompt(
+		const std::string & sourceConcept,
+		const std::string & style = "cinematic instrumental soundtrack, expressive, high fidelity",
+		const std::string & instrumentation = "",
+		int targetDurationSeconds = 30,
+		bool instrumentalOnly = true) const;
+	ofxGgmlMusicNotationResult generateMusicNotation(
+		const std::string & sourceConcept,
+		const std::string & title = "Generated Theme",
+		const std::string & style = "cinematic instrumental soundtrack",
+		int bars = 16,
+		const std::string & key = "Cm") const;
+	ofxGgmlImageToMusicResult generateImageToMusicPrompt(
+		const std::string & imageDescription,
+		const std::string & musicalStyle = "cinematic instrumental soundtrack, expressive, high fidelity",
+		const std::string & instrumentation = "",
+		int targetDurationSeconds = 30,
+		bool instrumentalOnly = true) const;
+	std::string saveMusicNotation(
+		const std::string & abcNotation,
+		const std::string & outputPath) const;
+	ofxGgmlAceStepGenerateResult generateAceStepMusic(
+		const ofxGgmlAceStepRequest & request,
+		const std::string & serverUrl = "") const;
+	ofxGgmlAceStepUnderstandResult understandAceStepAudio(
+		const ofxGgmlAceStepUnderstandRequest & request,
+		const std::string & serverUrl = "") const;
 	ofxGgmlWebCrawlerResult crawlWebsite(
 		const std::string & startUrl,
 		int maxDepth = -1) const;
@@ -147,6 +186,8 @@ public:
 		const std::vector<std::string> & sourceUrls = {},
 		const std::string & crawlerUrl = "",
 		size_t maxCitations = 5) const;
+	ofxGgmlVideoEssayResult planVideoEssay(
+		const ofxGgmlVideoEssayRequest & request) const;
 	ofxGgmlEasyMontageResult planMontageFromSrt(
 		const std::string & srtPath,
 		const std::string & goal,
@@ -210,5 +251,9 @@ private:
 	ofxGgmlSpeechInference m_speechInference;
 	ofxGgmlCitationSearch m_citationSearch;
 	ofxGgmlVideoPlanner m_videoPlanner;
+	ofxGgmlMediaPromptGenerator m_mediaPromptGenerator;
+	ofxGgmlMusicGenerator m_musicGenerator;
+	ofxGgmlAceStepBridge m_aceStepBridge;
 	ofxGgmlMilkDropGenerator m_milkDropGenerator;
+	ofxGgmlVideoEssayWorkflow m_videoEssayWorkflow;
 };

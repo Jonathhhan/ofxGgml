@@ -53,6 +53,86 @@ void ofApp::drawDiffusionPanel() {
 		"This panel is wired for local image generation through ofxStableDiffusion. "
 		"It keeps prompt state, image handoff, CLIP reranking, and result reuse inside the AI Studio example.");
 
+	ImGui::Separator();
+	ImGui::Text("Music -> Image");
+	ImGui::TextWrapped(
+		"Local-first bridge: turn a music description and optional lyrics into a diffusion-ready visual prompt. "
+		"This uses the current text model plus any Whisper transcript you already generated.");
+	ImGui::BeginDisabled(trim(speechOutput).empty());
+	if (ImGui::Button("Use Speech Transcript", ImVec2(160, 0))) {
+		copyStringToBuffer(musicToImageLyrics, sizeof(musicToImageLyrics), speechOutput);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Copies the latest Speech output into the lyrics / transcript field.");
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(writeInput).empty());
+	if (ImGui::Button("Use Write Text", ImVec2(140, 0))) {
+		copyStringToBuffer(musicToImageDescription, sizeof(musicToImageDescription), writeInput);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Copies the current Write panel text into the music description field.");
+	}
+	ImGui::InputTextMultiline(
+		"Music description / caption",
+		musicToImageDescription,
+		sizeof(musicToImageDescription),
+		ImVec2(-1, 70));
+	ImGui::InputTextMultiline(
+		"Lyrics / transcript",
+		musicToImageLyrics,
+		sizeof(musicToImageLyrics),
+		ImVec2(-1, 70));
+	ImGui::SetNextItemWidth(compactModeFieldWidth);
+	ImGui::InputText("Visual style", musicToImageStyle, sizeof(musicToImageStyle));
+	ImGui::Checkbox("Include lyrics / transcript", &musicToImageIncludeLyrics);
+	const bool canGenerateMusicToImage =
+		!generating.load() &&
+		(!trim(musicToImageDescription).empty() || !trim(musicToImageLyrics).empty());
+	ImGui::BeginDisabled(!canGenerateMusicToImage);
+	if (ImGui::Button("Generate Visual Prompt", ImVec2(170, 0))) {
+		runMusicToImagePromptGeneration();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(musicToImagePromptOutput).empty());
+	if (ImGui::Button("Use in Diffusion", ImVec2(140, 0))) {
+		copyStringToBuffer(
+			diffusionPrompt,
+			sizeof(diffusionPrompt),
+			musicToImagePromptOutput);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	if (!musicToImageStatus.empty()) {
+		ImGui::TextDisabled("%s", musicToImageStatus.c_str());
+	}
+	ImGui::BeginChild("##MusicToImagePrompt", ImVec2(0, 100), true);
+	if (generating.load() &&
+		activeGenerationMode == AiMode::Diffusion &&
+		generatingStatus.find("music-inspired visual prompt") != std::string::npos) {
+		std::string partial;
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			partial = streamingOutput;
+		}
+		if (partial.empty()) {
+			int dots = static_cast<int>(ImGui::GetTime() * kDotsAnimationSpeed) % 4;
+			ImGui::TextDisabled("%s", kWaitingLabels[dots]);
+		} else {
+			ImGui::TextWrapped("%s", partial.c_str());
+		}
+	} else if (trim(musicToImagePromptOutput).empty()) {
+		ImGui::TextDisabled("Generated visual prompt appears here.");
+	} else {
+		ImGui::TextWrapped("%s", musicToImagePromptOutput.c_str());
+	}
+	ImGui::EndChild();
+
 	const auto applyDiffusionProfileDefaults =
 		[this](const ofxGgmlImageGenerationModelProfile & profile, bool onlyWhenEmpty) {
 			const std::string suggestedPath =
@@ -1043,6 +1123,96 @@ void ofApp::runDiffusionInference() {
 			setPending("[Error] Unknown failure during diffusion inference.");
 		}
 
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			streamingOutput.clear();
+		}
+		generating.store(false);
+	});
+}
+
+void ofApp::runMusicToImagePromptGeneration() {
+	if (generating.load()) {
+		return;
+	}
+
+	const std::string modelPath = getSelectedModelPath();
+	if (modelPath.empty()) {
+		musicToImageStatus = "[Error] Select a text model before generating a visual prompt.";
+		return;
+	}
+
+	const std::string musicDescription = trim(musicToImageDescription);
+	const std::string lyrics = trim(musicToImageLyrics);
+	if (musicDescription.empty() && lyrics.empty()) {
+		musicToImageStatus = "[Error] Enter a music description or lyrics first.";
+		return;
+	}
+
+	ofxGgmlInferenceSettings settings = buildCurrentTextInferenceSettings(AiMode::Diffusion);
+	settings.maxTokens = std::clamp(settings.maxTokens, 96, 512);
+	settings.temperature = std::clamp(settings.temperature, 0.1f, 0.9f);
+	settings.stopAtNaturalBoundary = true;
+
+	ofxGgmlMusicToImageRequest request;
+	request.musicDescription = musicDescription;
+	request.lyrics = lyrics;
+	request.visualStyle = trim(musicToImageStyle);
+	request.includeLyrics = musicToImageIncludeLyrics;
+
+	cancelRequested.store(false);
+	generating.store(true);
+	activeGenerationMode = AiMode::Diffusion;
+	generationStartTime = ofGetElapsedTimef();
+	generatingStatus = "Generating music-inspired visual prompt...";
+	musicToImageStatus = generatingStatus;
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput = "Generating music-inspired visual prompt...";
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	workerThread = std::thread([this, modelPath, request, settings]() mutable {
+		auto streamCallback = [this](const std::string & delta) -> bool {
+			std::lock_guard<std::mutex> lock(streamMutex);
+			streamingOutput += delta;
+			return !cancelRequested.load();
+		};
+
+		std::string promptOutput;
+		std::string statusText;
+		try {
+			const ofxGgmlMusicToImageResult result =
+				mediaPromptGenerator.generateMusicToImagePrompt(
+					modelPath,
+					request,
+					settings,
+					streamCallback);
+			if (cancelRequested.load()) {
+				statusText = "[Cancelled] Music-to-image prompt generation cancelled.";
+			} else if (result.success) {
+				promptOutput = result.visualPrompt;
+				statusText = "Generated music-inspired visual prompt.";
+			} else {
+				statusText = "[Error] " + (result.error.empty()
+					? std::string("Music-to-image prompt generation failed.")
+					: result.error);
+			}
+		} catch (const std::exception & e) {
+			statusText = std::string("[Error] Music-to-image prompt generation failed: ") + e.what();
+		} catch (...) {
+			statusText = "[Error] Music-to-image prompt generation failed.";
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingMusicToImagePromptOutput = promptOutput;
+			pendingMusicToImageStatus = statusText;
+			pendingMusicToImageDirty = true;
+		}
 		{
 			std::lock_guard<std::mutex> lock(streamMutex);
 			streamingOutput.clear();

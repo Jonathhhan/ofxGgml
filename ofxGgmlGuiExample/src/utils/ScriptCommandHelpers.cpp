@@ -3,6 +3,7 @@
 
 #include <cctype>
 #include <string>
+#include <vector>
 
 std::string normalizeSlashCommandName(const std::string & raw) {
 	std::string normalized;
@@ -56,6 +57,65 @@ ScriptSlashCommand parseScriptSlashCommand(const std::string & rawInput) {
 	return command;
 }
 
+std::vector<ScriptAtReferenceToken> extractScriptAtReferenceTokens(
+	const std::string & rawInput) {
+	std::vector<ScriptAtReferenceToken> tokens;
+	const std::string trimmedInput = trim(rawInput);
+	if (trimmedInput.empty()) {
+		return tokens;
+	}
+
+	auto normalizeToken = [](const std::string & raw) {
+		std::string normalized;
+		normalized.reserve(raw.size());
+		for (char ch : raw) {
+			if (ch == '\\') {
+				normalized.push_back('/');
+			} else {
+				normalized.push_back(
+					static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+			}
+		}
+		return normalized;
+	};
+
+	const auto isReferenceBoundary = [](char ch) {
+		return std::isspace(static_cast<unsigned char>(ch)) != 0 ||
+			ch == ',' || ch == ';' || ch == ')' || ch == '(' ||
+			ch == '[' || ch == ']' || ch == '{' || ch == '}' ||
+			ch == '"' || ch == '\'';
+	};
+
+	for (size_t i = 0; i < trimmedInput.size(); ++i) {
+		if (trimmedInput[i] != '@') {
+			continue;
+		}
+		if (i > 0) {
+			const char prev = trimmedInput[i - 1];
+			if (!std::isspace(static_cast<unsigned char>(prev)) &&
+				prev != '(' && prev != '[' && prev != '{' && prev != '"') {
+				continue;
+			}
+		}
+
+		size_t end = i + 1;
+		while (end < trimmedInput.size() && !isReferenceBoundary(trimmedInput[end])) {
+			++end;
+		}
+		if (end <= i + 1) {
+			continue;
+		}
+
+		ScriptAtReferenceToken token;
+		token.rawToken = trimmedInput.substr(i + 1, end - i - 1);
+		token.normalizedToken = normalizeToken(token.rawToken);
+		tokens.push_back(token);
+		i = end - 1;
+	}
+
+	return tokens;
+}
+
 std::string buildScriptCommandHelpText() {
 	return
 		"Slash commands:\n"
@@ -66,5 +126,11 @@ std::string buildScriptCommandHelpText() {
 		"- /tests [focus] -> propose the highest-value tests\n"
 		"- /fix [focus] -> produce a structured fix/edit plan\n"
 		"- /explain [focus] -> explain code or architecture\n"
-		"- /docs [focus] -> answer with grounded docs\n";
+		"- /docs [focus] -> answer with grounded docs\n"
+		"\n"
+		"@ references:\n"
+		"- @focused -> use the selected file\n"
+		"- @recent -> use recent touched files\n"
+		"- @workspace -> favor whole-workspace context\n"
+		"- @filename.cpp -> resolve a loaded file by name\n";
 }

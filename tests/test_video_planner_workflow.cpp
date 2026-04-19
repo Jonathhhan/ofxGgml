@@ -59,3 +59,100 @@ TEST_CASE("Video planner workflow summary reflects step routing", "[video_planne
 	REQUIRE(summary.find("handoff: Write") != std::string::npos);
 	REQUIRE(summary.find("handoff: Diffusion") != std::string::npos);
 }
+
+TEST_CASE("Video planner supports music-video section-aware plans", "[video_planner][music_video]") {
+	ofxGgmlVideoPlannerRequest request;
+	request.prompt = "Stylized night-drive music video with a strong chorus payoff.";
+	request.durationSeconds = 24.0;
+	request.beatCount = 8;
+	request.sceneCount = 4;
+	request.multiScene = true;
+	request.musicVideoMode = true;
+	request.sectionCount = 5;
+	request.sectionStructureHint = "intro -> verse -> chorus -> bridge -> outro";
+	request.cutIntensity = 0.85f;
+
+	const std::string planningPrompt = ofxGgmlVideoPlanner::buildPlanningPrompt(request);
+	REQUIRE(planningPrompt.find("Requested section count: 5") != std::string::npos);
+	REQUIRE(planningPrompt.find("Music-video cut intensity: aggressive") != std::string::npos);
+	REQUIRE(planningPrompt.find("\"sections\"") != std::string::npos);
+
+#ifdef OFXGGML_HEADLESS_STUBS
+	SUCCEED("JSON parsing is unavailable in headless stubs.");
+#else
+	const std::string jsonText = R"json(
+{
+  "originalPrompt": "night-drive music video",
+  "style": "neon cinematic",
+  "overallScene": "city streets at night",
+  "overallCamera": "gliding car-mounted camera",
+  "continuityNotes": "keep the lead performer visually consistent",
+  "negativePrompt": "muddy lighting",
+  "constraints": ["night exterior"],
+  "subjects": [],
+  "entities": [],
+  "beats": [
+    {
+      "startSeconds": 0.0,
+      "endSeconds": 6.0,
+      "summary": "intro build",
+      "camera": "slow push",
+      "scene": "streetlights",
+      "motion": "steady cruise",
+      "visualGoal": "set mood",
+      "subjects": ["lead"]
+    }
+  ],
+  "sections": [
+    {
+      "index": 1,
+      "label": "Verse 1",
+      "role": "setup",
+      "startSeconds": 0.0,
+      "endSeconds": 8.0,
+      "energy": "measured",
+      "cutDensity": "restrained",
+      "visualFocus": "character and city texture"
+    },
+    {
+      "index": 2,
+      "label": "Chorus",
+      "role": "payoff",
+      "startSeconds": 8.0,
+      "endSeconds": 16.0,
+      "energy": "high",
+      "cutDensity": "fast",
+      "visualFocus": "performance and lights"
+    }
+  ],
+  "scenes": [
+    {
+      "index": 1,
+      "title": "City ride",
+      "summary": "driver glides through the city",
+      "eventPrompt": "stylized night drive performance",
+      "background": "wet neon streets",
+      "cameraMovement": "smooth tracking",
+      "transition": "light streak whip",
+      "durationSeconds": 12.0,
+      "entityIds": []
+    }
+  ]
+}
+)json";
+
+	const auto parsed = ofxGgmlVideoPlanner::parsePlanJson(jsonText);
+	REQUIRE(parsed.isOk());
+	REQUIRE(parsed.value().sections.size() == 2);
+	REQUIRE(parsed.value().sections[1].label == "Chorus");
+
+	const std::string generationPrompt =
+		ofxGgmlVideoPlanner::buildGenerationPrompt(parsed.value());
+	REQUIRE(generationPrompt.find("Music-video sections:") != std::string::npos);
+	REQUIRE(generationPrompt.find("cut density: fast") != std::string::npos);
+
+	const std::string summary = ofxGgmlVideoPlanner::summarizePlan(parsed.value());
+	REQUIRE(summary.find("Sections:") != std::string::npos);
+	REQUIRE(summary.find("Chorus") != std::string::npos);
+#endif
+}

@@ -15,6 +15,7 @@ enum class AiMode {
 	Write,
 	Translate,
 	Custom,
+	VideoEssay,
 	Vision,
 	Speech,
 	Tts,
@@ -49,7 +50,7 @@ struct PromptTemplate {
 // Model Preset Initialization
 // ---------------------------------------------------------------------------
 
-constexpr int kModeCount = 12;
+constexpr int kModeCount = 13;
 
 void loadModelPresets(
 	std::vector<ModelPreset> & modelPresets,

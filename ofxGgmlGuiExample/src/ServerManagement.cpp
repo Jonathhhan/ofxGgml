@@ -105,6 +105,7 @@ void ofApp::applyServerFriendlyDefaultsForMode(AiMode mode) {
 	case AiMode::Write: tunedMaxTokens = 640; break;
 	case AiMode::Translate: tunedMaxTokens = 384; break;
 	case AiMode::Custom: tunedMaxTokens = 512; break;
+	case AiMode::VideoEssay: tunedMaxTokens = 896; break;
 	case AiMode::Vision:
 	case AiMode::Speech:
 	case AiMode::Diffusion:

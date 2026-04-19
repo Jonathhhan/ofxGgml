@@ -1,5 +1,6 @@
 #include "ofApp.h"
 
+#include "ofJson.h"
 #include "utils/BackendHelpers.h"
 #include "utils/ImGuiHelpers.h"
 #include "utils/PathHelpers.h"
@@ -58,7 +59,10 @@ bool ofApp::saveSession(const std::string & path) {
 		{"selectedTtsProfileIndex", selectedTtsProfileIndex},
 		{"selectedDiffusionProfileIndex", selectedDiffusionProfileIndex},
 		{"citationUseCrawler", citationUseCrawler},
-		{"citationMaxResults", citationMaxResults}
+		{"citationMaxResults", citationMaxResults},
+		{"videoEssayCitationCount", videoEssayCitationCount},
+		{"videoEssayToneIndex", videoEssayToneIndex},
+		{"videoEssayAudienceIndex", videoEssayAudienceIndex}
 	};
 	session["settings"]["modeMaxTokens"] = ofJson::array();
 	for (int i = 0; i < kModeCount; ++i) {
@@ -106,6 +110,9 @@ bool ofApp::saveSession(const std::string & path) {
 		{"summarizeInput", std::string(summarizeInput)},
 		{"writeInput", std::string(writeInput)},
 		{"translateInput", std::string(translateInput)},
+		{"voiceTranslatorAudioPath", std::string(voiceTranslatorAudioPath)},
+		{"videoEssayTopic", std::string(videoEssayTopic)},
+		{"videoEssaySeedUrl", std::string(videoEssaySeedUrl)},
 		{"customInput", std::string(customInput)},
 		{"customSystemPrompt", std::string(customSystemPrompt)},
 		{"sourceUrlsInput", std::string(sourceUrlsInput)},
@@ -158,6 +165,24 @@ bool ofApp::saveSession(const std::string & path) {
 		{"clipPrompt", std::string(clipPrompt)},
 		{"clipModelPath", std::string(clipModelPath)},
 		{"clipImagePaths", std::string(clipImagePaths)},
+		{"musicToImageDescription", std::string(musicToImageDescription)},
+		{"musicToImageLyrics", std::string(musicToImageLyrics)},
+		{"musicToImageStyle", std::string(musicToImageStyle)},
+		{"imageToMusicDescription", std::string(imageToMusicDescription)},
+		{"imageToMusicSceneNotes", std::string(imageToMusicSceneNotes)},
+		{"imageToMusicStyle", std::string(imageToMusicStyle)},
+		{"imageToMusicInstrumentation", std::string(imageToMusicInstrumentation)},
+		{"imageToMusicAbcTitle", std::string(imageToMusicAbcTitle)},
+		{"imageToMusicAbcKey", std::string(imageToMusicAbcKey)},
+		{"imageToMusicAbcOutputPath", std::string(imageToMusicAbcOutputPath)},
+		{"aceStepServerUrl", std::string(aceStepServerUrl)},
+		{"aceStepPrompt", std::string(aceStepPrompt)},
+		{"aceStepLyrics", std::string(aceStepLyrics)},
+		{"aceStepAudioPath", std::string(aceStepAudioPath)},
+		{"aceStepOutputDir", std::string(aceStepOutputDir)},
+		{"aceStepOutputPrefix", std::string(aceStepOutputPrefix)},
+		{"aceStepKeyscale", std::string(aceStepKeyscale)},
+		{"aceStepTimesignature", std::string(aceStepTimesignature)},
 		{"milkdropPrompt", std::string(milkdropPrompt)},
 		{"milkdropPresetPath", std::string(milkdropPresetPath)}
 	};
@@ -188,14 +213,26 @@ bool ofApp::saveSession(const std::string & path) {
 		{"imageSearchMaxResults", imageSearchMaxResults},
 		{"clipTopK", clipTopK},
 		{"clipVerbosity", clipVerbosity},
+		{"imageToMusicDurationSeconds", imageToMusicDurationSeconds},
+		{"imageToMusicAbcBars", imageToMusicAbcBars},
+		{"aceStepBpm", aceStepBpm},
+		{"aceStepDurationSeconds", aceStepDurationSeconds},
+		{"aceStepSeed", aceStepSeed},
+		{"musicVideoSectionCount", musicVideoSectionCount},
+		{"musicVideoStructureIndex", musicVideoStructureIndex},
 		{"milkdropCategoryIndex", milkdropCategoryIndex},
 		{"milkdropVariantCount", milkdropVariantCount}
 	};
 
 	session["floats"] = {
 		{"videoPlanDurationSeconds", videoPlanDurationSeconds},
+		{"musicVideoCutIntensity", musicVideoCutIntensity},
 		{"videoEditTargetDurationSeconds", videoEditTargetDurationSeconds},
 		{"montageMinScore", montageMinScore},
+		{"montageTargetDurationSeconds", montageTargetDurationSeconds},
+		{"montageMinSpacingSeconds", montageMinSpacingSeconds},
+		{"montagePreRollSeconds", montagePreRollSeconds},
+		{"montagePostRollSeconds", montagePostRollSeconds},
 		{"ttsTemperature", ttsTemperature},
 		{"ttsRepetitionPenalty", ttsRepetitionPenalty},
 		{"ttsTopP", ttsTopP},
@@ -204,10 +241,19 @@ bool ofApp::saveSession(const std::string & path) {
 		{"diffusionStrength", diffusionStrength},
 		{"milkdropRandomness", milkdropRandomness},
 		{"milkdropPreviewBeatSensitivity", milkdropPreviewBeatSensitivity},
-		{"milkdropPreviewPresetDuration", milkdropPreviewPresetDuration}
+		{"milkdropPreviewPresetDuration", milkdropPreviewPresetDuration},
+		{"videoEssayTargetDurationSeconds", videoEssayTargetDurationSeconds}
 	};
 
 	session["bools"] = {
+		{"chatSpeakReplies", chatSpeakReplies},
+		{"voiceTranslatorSpeakOutput", voiceTranslatorSpeakOutput},
+		{"videoEssayUseCrawler", videoEssayUseCrawler},
+		{"videoEssayIncludeCounterpoints", videoEssayIncludeCounterpoints},
+		{"musicToImageIncludeLyrics", musicToImageIncludeLyrics},
+		{"imageToMusicInstrumentalOnly", imageToMusicInstrumentalOnly},
+		{"aceStepUseWav", aceStepUseWav},
+		{"aceStepInstrumentalOnly", aceStepInstrumentalOnly},
 		{"videoPlanMultiScene", videoPlanMultiScene},
 		{"videoPlanUseForGeneration", videoPlanUseForGeneration},
 		{"montagePreserveChronology", montagePreserveChronology},
@@ -243,10 +289,18 @@ bool ofApp::saveSession(const std::string & path) {
 	};
 
 	session["outputs"] = {
+		{"chatLastAssistantReply", chatLastAssistantReply},
+		{"chatTtsStatusMessage", chatTtsPreview.statusMessage},
 		{"scriptOutput", scriptOutput},
 		{"summarizeOutput", summarizeOutput},
 		{"writeOutput", writeOutput},
 		{"translateOutput", translateOutput},
+		{"voiceTranslatorStatus", voiceTranslatorStatus},
+		{"voiceTranslatorTranscript", voiceTranslatorTranscript},
+		{"videoEssayStatus", videoEssayStatus},
+		{"videoEssayOutline", videoEssayOutline},
+		{"videoEssayScript", videoEssayScript},
+		{"videoEssaySrtText", videoEssaySrtText},
 		{"customOutput", customOutput},
 		{"citationOutput", citationOutput},
 		{"visionOutput", visionOutput},
@@ -264,6 +318,19 @@ bool ofApp::saveSession(const std::string & path) {
 		{"speechSegmentCount", speechSegmentCount},
 		{"ttsOutput", ttsOutput},
 		{"diffusionOutput", diffusionOutput},
+		{"musicToImagePromptOutput", musicToImagePromptOutput},
+		{"musicToImageStatus", musicToImageStatus},
+		{"musicVideoSectionSummary", musicVideoSectionSummary},
+		{"imageToMusicPromptOutput", imageToMusicPromptOutput},
+		{"imageToMusicNotationOutput", imageToMusicNotationOutput},
+		{"imageToMusicStatus", imageToMusicStatus},
+		{"imageToMusicSavedNotationPath", imageToMusicSavedNotationPath},
+		{"aceStepStatus", aceStepStatus},
+		{"aceStepGeneratedRequestJson", aceStepGeneratedRequestJson},
+		{"aceStepUnderstoodSummary", aceStepUnderstoodSummary},
+		{"aceStepUnderstoodCaption", aceStepUnderstoodCaption},
+		{"aceStepUnderstoodLyrics", aceStepUnderstoodLyrics},
+		{"aceStepUsedServerUrl", aceStepUsedServerUrl},
 		{"imageSearchOutput", imageSearchOutput},
 		{"clipOutput", clipOutput},
 		{"milkdropOutput", milkdropOutput},
@@ -385,6 +452,18 @@ bool ofApp::loadSession(const std::string & path) {
 	selectedSpeechProfileIndex = std::max(0, getInt(settings, "selectedSpeechProfileIndex", selectedSpeechProfileIndex));
 	selectedTtsProfileIndex = std::max(0, getInt(settings, "selectedTtsProfileIndex", selectedTtsProfileIndex));
 	selectedDiffusionProfileIndex = std::max(0, getInt(settings, "selectedDiffusionProfileIndex", selectedDiffusionProfileIndex));
+	videoEssayCitationCount = std::clamp(
+		getInt(settings, "videoEssayCitationCount", videoEssayCitationCount),
+		2,
+		12);
+	videoEssayToneIndex = std::clamp(
+		getInt(settings, "videoEssayToneIndex", videoEssayToneIndex),
+		0,
+		3);
+	videoEssayAudienceIndex = std::clamp(
+		getInt(settings, "videoEssayAudienceIndex", videoEssayAudienceIndex),
+		0,
+		3);
 	if (settings.contains("modeMaxTokens") && settings["modeMaxTokens"].is_array()) {
 		for (size_t i = 0; i < std::min<size_t>(settings["modeMaxTokens"].size(), kModeCount); ++i) {
 			modeMaxTokens[i] = std::clamp(settings["modeMaxTokens"][i].get<int>(), 32, 4096);
@@ -401,6 +480,13 @@ bool ofApp::loadSession(const std::string & path) {
 	copyJsonString(summarizeInput, sizeof(summarizeInput), buffers, "summarizeInput");
 	copyJsonString(writeInput, sizeof(writeInput), buffers, "writeInput");
 	copyJsonString(translateInput, sizeof(translateInput), buffers, "translateInput");
+	copyJsonString(
+		voiceTranslatorAudioPath,
+		sizeof(voiceTranslatorAudioPath),
+		buffers,
+		"voiceTranslatorAudioPath");
+	copyJsonString(videoEssayTopic, sizeof(videoEssayTopic), buffers, "videoEssayTopic");
+	copyJsonString(videoEssaySeedUrl, sizeof(videoEssaySeedUrl), buffers, "videoEssaySeedUrl");
 	copyJsonString(customInput, sizeof(customInput), buffers, "customInput");
 	copyJsonString(customSystemPrompt, sizeof(customSystemPrompt), buffers, "customSystemPrompt");
 	copyJsonString(sourceUrlsInput, sizeof(sourceUrlsInput), buffers, "sourceUrlsInput");
@@ -453,6 +539,24 @@ bool ofApp::loadSession(const std::string & path) {
 	copyJsonString(clipPrompt, sizeof(clipPrompt), buffers, "clipPrompt");
 	copyJsonString(clipModelPath, sizeof(clipModelPath), buffers, "clipModelPath");
 	copyJsonString(clipImagePaths, sizeof(clipImagePaths), buffers, "clipImagePaths");
+	copyJsonString(musicToImageDescription, sizeof(musicToImageDescription), buffers, "musicToImageDescription");
+	copyJsonString(musicToImageLyrics, sizeof(musicToImageLyrics), buffers, "musicToImageLyrics");
+	copyJsonString(musicToImageStyle, sizeof(musicToImageStyle), buffers, "musicToImageStyle");
+	copyJsonString(imageToMusicDescription, sizeof(imageToMusicDescription), buffers, "imageToMusicDescription");
+	copyJsonString(imageToMusicSceneNotes, sizeof(imageToMusicSceneNotes), buffers, "imageToMusicSceneNotes");
+	copyJsonString(imageToMusicStyle, sizeof(imageToMusicStyle), buffers, "imageToMusicStyle");
+	copyJsonString(imageToMusicInstrumentation, sizeof(imageToMusicInstrumentation), buffers, "imageToMusicInstrumentation");
+	copyJsonString(imageToMusicAbcTitle, sizeof(imageToMusicAbcTitle), buffers, "imageToMusicAbcTitle");
+	copyJsonString(imageToMusicAbcKey, sizeof(imageToMusicAbcKey), buffers, "imageToMusicAbcKey");
+	copyJsonString(imageToMusicAbcOutputPath, sizeof(imageToMusicAbcOutputPath), buffers, "imageToMusicAbcOutputPath");
+	copyJsonString(aceStepServerUrl, sizeof(aceStepServerUrl), buffers, "aceStepServerUrl");
+	copyJsonString(aceStepPrompt, sizeof(aceStepPrompt), buffers, "aceStepPrompt");
+	copyJsonString(aceStepLyrics, sizeof(aceStepLyrics), buffers, "aceStepLyrics");
+	copyJsonString(aceStepAudioPath, sizeof(aceStepAudioPath), buffers, "aceStepAudioPath");
+	copyJsonString(aceStepOutputDir, sizeof(aceStepOutputDir), buffers, "aceStepOutputDir");
+	copyJsonString(aceStepOutputPrefix, sizeof(aceStepOutputPrefix), buffers, "aceStepOutputPrefix");
+	copyJsonString(aceStepKeyscale, sizeof(aceStepKeyscale), buffers, "aceStepKeyscale");
+	copyJsonString(aceStepTimesignature, sizeof(aceStepTimesignature), buffers, "aceStepTimesignature");
 	copyJsonString(milkdropPrompt, sizeof(milkdropPrompt), buffers, "milkdropPrompt");
 	copyJsonString(milkdropPresetPath, sizeof(milkdropPresetPath), buffers, "milkdropPresetPath");
 
@@ -481,6 +585,28 @@ bool ofApp::loadSession(const std::string & path) {
 	imageSearchMaxResults = std::clamp(getInt(indices, "imageSearchMaxResults", imageSearchMaxResults), 1, 32);
 	clipTopK = std::clamp(getInt(indices, "clipTopK", clipTopK), 0, 16);
 	clipVerbosity = std::clamp(getInt(indices, "clipVerbosity", clipVerbosity), 0, 2);
+	imageToMusicDurationSeconds = std::clamp(
+		getInt(indices, "imageToMusicDurationSeconds", imageToMusicDurationSeconds),
+		8,
+		90);
+	imageToMusicAbcBars = std::clamp(
+		getInt(indices, "imageToMusicAbcBars", imageToMusicAbcBars),
+		8,
+		32);
+	aceStepBpm = std::max(0, getInt(indices, "aceStepBpm", aceStepBpm));
+	aceStepDurationSeconds = std::clamp(
+		getInt(indices, "aceStepDurationSeconds", aceStepDurationSeconds),
+		8,
+		180);
+	aceStepSeed = getInt(indices, "aceStepSeed", aceStepSeed);
+	musicVideoSectionCount = std::clamp(
+		getInt(indices, "musicVideoSectionCount", musicVideoSectionCount),
+		2,
+		8);
+	musicVideoStructureIndex = std::clamp(
+		getInt(indices, "musicVideoStructureIndex", musicVideoStructureIndex),
+		0,
+		4);
 	milkdropCategoryIndex = std::max(0, getInt(indices, "milkdropCategoryIndex", milkdropCategoryIndex));
 	milkdropVariantCount = std::clamp(
 		getInt(indices, "milkdropVariantCount", milkdropVariantCount),
@@ -489,8 +615,16 @@ bool ofApp::loadSession(const std::string & path) {
 	citationMaxResults = std::clamp(getInt(settings, "citationMaxResults", citationMaxResults), 1, 12);
 
 	videoPlanDurationSeconds = std::clamp(getFloat(floats, "videoPlanDurationSeconds", videoPlanDurationSeconds), 1.0f, 30.0f);
+	musicVideoCutIntensity = std::clamp(
+		getFloat(floats, "musicVideoCutIntensity", musicVideoCutIntensity),
+		0.0f,
+		1.0f);
 	videoEditTargetDurationSeconds = std::clamp(getFloat(floats, "videoEditTargetDurationSeconds", videoEditTargetDurationSeconds), 1.0f, 120.0f);
 	montageMinScore = std::clamp(getFloat(floats, "montageMinScore", montageMinScore), 0.0f, 1.0f);
+	montageTargetDurationSeconds = std::clamp(getFloat(floats, "montageTargetDurationSeconds", montageTargetDurationSeconds), 1.0f, 120.0f);
+	montageMinSpacingSeconds = std::clamp(getFloat(floats, "montageMinSpacingSeconds", montageMinSpacingSeconds), 0.0f, 15.0f);
+	montagePreRollSeconds = std::clamp(getFloat(floats, "montagePreRollSeconds", montagePreRollSeconds), 0.0f, 5.0f);
+	montagePostRollSeconds = std::clamp(getFloat(floats, "montagePostRollSeconds", montagePostRollSeconds), 0.0f, 5.0f);
 	ttsTemperature = std::clamp(getFloat(floats, "ttsTemperature", ttsTemperature), 0.0f, 2.0f);
 	ttsRepetitionPenalty = std::clamp(getFloat(floats, "ttsRepetitionPenalty", ttsRepetitionPenalty), 1.0f, 3.0f);
 	ttsTopP = std::clamp(getFloat(floats, "ttsTopP", ttsTopP), 0.0f, 1.0f);
@@ -506,7 +640,31 @@ bool ofApp::loadSession(const std::string & path) {
 		getFloat(floats, "milkdropPreviewPresetDuration", milkdropPreviewPresetDuration),
 		4.0f,
 		60.0f);
+	videoEssayTargetDurationSeconds = std::clamp(
+		getFloat(floats, "videoEssayTargetDurationSeconds", videoEssayTargetDurationSeconds),
+		30.0f,
+		360.0f);
 
+	chatSpeakReplies = getBool(bools, "chatSpeakReplies", chatSpeakReplies);
+	voiceTranslatorSpeakOutput = getBool(
+		bools,
+		"voiceTranslatorSpeakOutput",
+		voiceTranslatorSpeakOutput);
+	videoEssayUseCrawler = getBool(bools, "videoEssayUseCrawler", videoEssayUseCrawler);
+	videoEssayIncludeCounterpoints = getBool(
+		bools,
+		"videoEssayIncludeCounterpoints",
+		videoEssayIncludeCounterpoints);
+	musicToImageIncludeLyrics = getBool(bools, "musicToImageIncludeLyrics", musicToImageIncludeLyrics);
+	imageToMusicInstrumentalOnly = getBool(
+		bools,
+		"imageToMusicInstrumentalOnly",
+		imageToMusicInstrumentalOnly);
+	aceStepUseWav = getBool(bools, "aceStepUseWav", aceStepUseWav);
+	aceStepInstrumentalOnly = getBool(
+		bools,
+		"aceStepInstrumentalOnly",
+		aceStepInstrumentalOnly);
 	videoPlanMultiScene = getBool(bools, "videoPlanMultiScene", videoPlanMultiScene);
 	videoPlanUseForGeneration = getBool(bools, "videoPlanUseForGeneration", videoPlanUseForGeneration);
 	montagePreserveChronology = getBool(bools, "montagePreserveChronology", montagePreserveChronology);
@@ -560,6 +718,12 @@ bool ofApp::loadSession(const std::string & path) {
 	summarizeOutput = getString(outputs, "summarizeOutput");
 	writeOutput = getString(outputs, "writeOutput");
 	translateOutput = getString(outputs, "translateOutput");
+	voiceTranslatorStatus = getString(outputs, "voiceTranslatorStatus");
+	voiceTranslatorTranscript = getString(outputs, "voiceTranslatorTranscript");
+	videoEssayStatus = getString(outputs, "videoEssayStatus");
+	videoEssayOutline = getString(outputs, "videoEssayOutline");
+	videoEssayScript = getString(outputs, "videoEssayScript");
+	videoEssaySrtText = getString(outputs, "videoEssaySrtText");
 	customOutput = getString(outputs, "customOutput");
 	citationOutput = getString(outputs, "citationOutput");
 	visionOutput = getString(outputs, "visionOutput");
@@ -575,8 +739,23 @@ bool ofApp::loadSession(const std::string & path) {
 	speechTranscriptPath = getString(outputs, "speechTranscriptPath");
 	speechSrtPath = getString(outputs, "speechSrtPath");
 	speechSegmentCount = getInt(outputs, "speechSegmentCount", speechSegmentCount);
+	chatLastAssistantReply = getString(outputs, "chatLastAssistantReply");
+	chatTtsPreview.statusMessage = getString(outputs, "chatTtsStatusMessage");
 	ttsOutput = getString(outputs, "ttsOutput");
 	diffusionOutput = getString(outputs, "diffusionOutput");
+	musicToImagePromptOutput = getString(outputs, "musicToImagePromptOutput");
+	musicToImageStatus = getString(outputs, "musicToImageStatus");
+	musicVideoSectionSummary = getString(outputs, "musicVideoSectionSummary");
+	imageToMusicPromptOutput = getString(outputs, "imageToMusicPromptOutput");
+	imageToMusicNotationOutput = getString(outputs, "imageToMusicNotationOutput");
+	imageToMusicStatus = getString(outputs, "imageToMusicStatus");
+	imageToMusicSavedNotationPath = getString(outputs, "imageToMusicSavedNotationPath");
+	aceStepStatus = getString(outputs, "aceStepStatus");
+	aceStepGeneratedRequestJson = getString(outputs, "aceStepGeneratedRequestJson");
+	aceStepUnderstoodSummary = getString(outputs, "aceStepUnderstoodSummary");
+	aceStepUnderstoodCaption = getString(outputs, "aceStepUnderstoodCaption");
+	aceStepUnderstoodLyrics = getString(outputs, "aceStepUnderstoodLyrics");
+	aceStepUsedServerUrl = getString(outputs, "aceStepUsedServerUrl");
 	imageSearchOutput = getString(outputs, "imageSearchOutput");
 	clipOutput = getString(outputs, "clipOutput");
 	milkdropOutput = getString(outputs, "milkdropOutput");

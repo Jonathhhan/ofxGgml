@@ -75,6 +75,7 @@ bool aiModeSupportsTextBackend(AiMode mode) {
 	case AiMode::Write:
 	case AiMode::Translate:
 	case AiMode::Custom:
+	case AiMode::VideoEssay:
 	case AiMode::MilkDrop:
 		return true;
 	case AiMode::Vision:

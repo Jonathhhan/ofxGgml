@@ -49,13 +49,21 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlImageSearch` for internet reference-image lookup through pluggable providers, with a working Wikimedia Commons backend
 - `ofxGgmlWebCrawler` as an optional website-ingestion bridge layer, with a `Mojo` CLI adapter for local website-to-Markdown crawling workflows
 - `ofxGgmlCitationSearch` for topic-oriented source-grounded quote extraction, with structured citation items built from loaded URLs or crawler-ingested website content
+- `ofxGgmlVideoEssayWorkflow` for local-first `topic -> cited outline -> narrated script -> voice cues -> SRT` orchestration on top of citation search and the text assistant
+- `ofxGgmlVideoEssayWorkflow` is intentionally staged: the current workflow covers research, outline, script, voice cues, and SRT/cue-sheet generation first, and leaves scene/edit execution as a higher planning layer
+- `ofxGgmlMediaPromptGenerator` for local-first cross-media prompt translation, starting with `Music -> Image` prompt generation that can reuse transcripts, lyrics, and existing text backends before handing the result to diffusion workflows
+- `ofxGgmlMusicGenerator` for general music-prompt generation, local-first ABC notation sketch generation, prompt sanitization/validation, and future pluggable rendered-audio backend bridges
 - `ofxGgmlMilkDropGenerator` for MilkDrop / projectM preset generation and editing through the existing text-inference backend, with prompt preparation, preset sanitization, and `.milk` file saving helpers
 - `ofxGgmlMilkDropGenerator` now also supports basic preset validation, conservative repair prompts, and multi-variant preset generation for quicker visual iteration
 - `ofxGgmlEasy` as a small high-level facade for common text, chat, translation, vision, and speech tasks without wiring the lower-level assistants by hand
 - `ofxGgmlEasy` now also covers crawler-backed citation research, subtitle-montage planning/export, AI-assisted video-edit planning, and MilkDrop preset generation/editing so apps can reuse the higher-level workflow helpers without depending on the full GUI example
+- `ofxGgmlEasy` now also covers cross-media prompt translation plus general music-prompt / ABC-sketch generation so apps can build `Music -> Image` and `Image -> Music` flows without wiring the lower-level helpers directly
 - `ofxGgmlEasy` now keeps text inference, crawling, and citation search on one persistent helper path, so `configureText()`, `configureWebCrawler()`, `getWebCrawler()`, `getCitationSearch()`, and `findCitations()` operate on the same configured pipeline
+- `ofxGgmlEasy` now also exposes `planVideoEssay(...)` so apps can reuse the new citation-to-script workflow without copying the GUI example glue
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
 - `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
+- `ofxGgmlCodeAssistant` now also exposes lightweight assistant sessions, a typed tool registry, approval callbacks for risky proposals, and streamed assistant events so apps can build safer IDE-style coding flows without reimplementing orchestration
+- the GUI example Script mode now surfaces that assistant runtime directly with `@` references, quick slash/intents chips, streamed tool/approval status, and explicit approve/deny handling for risky proposals
 - `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, shadow-workspace safe apply, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
 - coding workflows now carry lightweight task memory such as active mode, selected backend, recent files, and last failure reason so retries and follow-up prompts stay more grounded
 - structured coding prompts now push a clearer inspect -> patch -> verify loop, stronger self-check instructions, and recovery from weak unstructured model replies
@@ -67,9 +75,14 @@ This addon is released under the [MIT License](LICENSE).
 - Windows build scripts that refresh Visual Studio linking automatically
 - GUI example for local chat, review, and script-assisted workflows built mostly on addon helpers
 - GUI example Translate mode with auto-detect source language, natural vs. literal translation shortcuts, detect-and-translate flow, and more reliable prompt/input handoff buttons
+- GUI example Chat and Translate modes now each keep a dedicated lightweight TTS preview lane, so spoken replies and translated voice output can be played, restarted, and stopped inline without bouncing through the main TTS panel
 - GUI example Montage mode can now preview restructured subtitle cues live, copy generated SRT/VTT exports, and keep a playback-facing subtitle track ready for external preview layers such as `ofxVlc4`
 - when the GUI example is regenerated with `ofxVlc4` enabled in `addons.make`, Montage mode can also load the active subtitle track directly into an optional `ofxVlc4` preview with subtitle delay / scale controls
 - GUI example Summarize mode now includes a dedicated citation-research section that can extract quoted evidence from loaded URLs or crawl a seed website before building a cited summary
+- GUI example Diffusion mode now includes a `Music -> Image` helper that can turn a music caption plus optional lyrics/transcript into a reusable visual prompt for the existing diffusion flow
+- GUI example Vision mode now also includes a dedicated `Music Video` workflow section that can turn song text into a visual concept, apply music-video planning defaults, and hand the result directly into video planning, diffusion, and edit-plan generation
+- the shared video planner now also supports music-video-aware section planning, including intro / verse / chorus / bridge style sections, section-level energy and cut-density hints, and section summaries that feed prompt generation and Music Video planning review
+- GUI example Vision mode now also includes an `Image / Prompt -> Music` helper that can turn a scene description into a reusable music-generation prompt and a local ABC notation sketch, with direct handoff into Custom mode or `.abc` saving
 - GUI example MilkDrop mode can generate `.milk` preset text from prompts, save presets, and optionally preview the result live through `ofxProjectM` when the example is regenerated with that addon enabled
 - GUI example MilkDrop mode now also includes validation, preset repair, quick variants, and projectM preview controls for beat sensitivity, preset duration, and microphone-driven reactive preview while Speech recording is active
 
@@ -85,7 +98,7 @@ Core implementation is split by concern:
 - `src/compute/` for tensors and graph building
 - `src/model/` for GGUF model loading
 - `src/inference/` for completion execution, grounded prompt assembly, and speech / vision / video inference helpers
-- `src/inference/` also now includes bridge scaffolds for optional CLIP-style ranking, TTS, and diffusion/image-generation backends such as `clip.cpp`, OuteTTS, and `ofxStableDiffusion`, plus higher-level planners and preview bridges for video, montage, and image search workflows
+- `src/inference/` also now includes bridge scaffolds for optional CLIP-style ranking, TTS, diffusion/image-generation, and music-generation backends such as `clip.cpp`, OuteTTS, `ofxStableDiffusion`, and future rendered-audio generators, plus higher-level planners and preview bridges for video, montage, media-prompt translation, and image search workflows
 - `src/inference/` also now includes optional web-ingestion helpers such as `ofxGgmlWebCrawler` plus topic-oriented quote extraction via `ofxGgmlCitationSearch` for local crawler-backed RAG/document pipelines
 - `src/assistants/` for chat, code, workspace, review, and text-task helpers
 - `src/support/` for script sources, project memory, and the high-level `ofxGgmlEasy` facade
@@ -237,6 +250,29 @@ auto editPlan = ai.planVideoEdit(
     "Turn this into a fast social recap.",
     "Opening skyline, transit, crowd reaction.");
 
+auto musicPrompt = ai.generateMusicPrompt(
+    "dreamy rainy neon city at night",
+    "ambient electronica",
+    "soft analog synths, sub bass, light vinyl crackle",
+    45);
+
+auto imageToMusic = ai.generateImageToMusicPrompt(
+    "orange dusk over a harbor with slow boats and reflected lights",
+    "gentle movement, reflective mood",
+    "cinematic ambient",
+    "warm piano and textured pads");
+
+auto abc = ai.generateMusicNotation(
+    "playful hand-drawn city chase",
+    "quirky chamber pop",
+    "pizzicato strings and clarinet",
+    16);
+if (abc.success) {
+    ai.saveMusicNotation(
+        abc.notationText,
+        "data/generated/music/city-chase.abc");
+}
+
 auto milkdrop = ai.generateMilkDropPreset(
     "neon kaleidoscope tunnel with bass-reactive zoom pulses",
     "Geometric",
@@ -268,7 +304,10 @@ if (!validation.valid) {
 - `getSpeechInference()`
 - `getWebCrawler()`
 - `getCitationSearch()`
+- `getMediaPromptGenerator()`
+- `getVideoEssayWorkflow()`
 - `getVideoPlanner()`
+- `getMusicGenerator()`
 - `getMilkDropGenerator()`
 
 ## Quick Wins: Developer Experience Features
@@ -664,6 +703,15 @@ The `GuiExample` now layers higher-level scripting workflows on top of those ass
 - one-click `Next Edit`, `Review Fix Plan`, and local `Change Summary` actions
 - server-first code generation with automatic CLI fallback when the server is unavailable
 - clearer Script-mode guidance in the UI, including backend/workspace context, suggested next steps, cached verification commands, and reuse of recent touched files / last failure reason for follow-up prompts
+
+For app-side orchestration, the code assistant now also exposes a lighter agent runtime surface:
+
+- `ofxGgmlCodeAssistantSession` keeps active mode, backend, touched files, last failure, and short prompt/result history
+- `defaultToolRegistry()`, `registerTool()`, and `getToolRegistry()` expose a typed assistant tool catalog for actions such as repo context reads, symbol retrieval, patch application, and verification
+- `runWithSession(...)` adds streamed events plus approval callbacks for risky proposals such as `apply_patch` and `run_verification`
+- `ofxGgmlCodeAssistantEvent` emits phases such as prompt prepared, output chunk, structured result ready, tool proposed, approval requested, and completed/error
+
+That keeps the addon aligned with editor-style assistant flows without forcing every openFrameworks app to rebuild session memory, tool summaries, and approval UX from scratch.
 
 Symbol context is no longer limited to file snippets. Apps can build a semantic index, query relevant definitions of `runInference` and likely callers, and feed that directly into coding or review prompts. When a local workspace exposes `compile_commands.json`, the assistant upgrades retrieval with compile-database-aware file coverage and range-based caller tracking. For planning-heavy flows, `buildCodeMap(...)` exposes a compact semantic code map, while `runSpecToCode(...)` turns a feature specification into a structured implementation plan with tests, review passes, and risk metadata.
 

@@ -59,6 +59,16 @@ std::string formatSeconds(double seconds) {
 	return out.str();
 }
 
+std::string describeCutIntensity(float intensity) {
+	if (intensity <= 0.33f) {
+		return "restrained";
+	}
+	if (intensity <= 0.66f) {
+		return "balanced";
+	}
+	return "aggressive";
+}
+
 std::string toLowerCopy(const std::string & text) {
 	std::string lowered = text;
 	std::transform(
@@ -189,6 +199,7 @@ std::string ofxGgmlVideoPlanner::buildPlanningPrompt(const ofxGgmlVideoPlannerRe
 	const double durationSeconds = std::max(1.0, request.durationSeconds);
 	const int beatCount = std::clamp(request.beatCount, 1, 12);
 	const int sceneCount = std::clamp(request.sceneCount, 1, 8);
+	const int sectionCount = std::clamp(request.sectionCount, 1, 8);
 	std::ostringstream prompt;
 	prompt
 		<< "You are a spatiotemporal planning assistant for text-to-video generation.\n"
@@ -204,17 +215,30 @@ std::string ofxGgmlVideoPlanner::buildPlanningPrompt(const ofxGgmlVideoPlannerRe
 			<< "- decompose the story into multiple coherent scenes with recurring entities\n"
 			<< "- keep character and object naming consistent across scenes\n";
 	}
+	if (request.musicVideoMode) {
+		prompt
+			<< "- treat the clip like a music video with explicit song sections such as intro, verse, chorus, bridge, and outro when useful\n"
+			<< "- vary cut density across sections so chorus/payoff moments can cut faster than intros or bridges\n"
+			<< "- keep the section progression musically readable and visually distinctive\n";
+	}
 	prompt << "\n"
 		<< "Requested duration: " << formatSeconds(durationSeconds) << "\n"
 		<< "Requested beat count: " << beatCount << "\n";
 	if (request.multiScene) {
 		prompt << "Requested scene count: " << sceneCount << "\n";
 	}
+	if (request.musicVideoMode) {
+		prompt << "Requested section count: " << sectionCount << "\n";
+		prompt << "Music-video cut intensity: " << describeCutIntensity(request.cutIntensity) << "\n";
+	}
 	if (!trimCopy(request.preferredStyle).empty()) {
 		prompt << "Preferred style: " << trimCopy(request.preferredStyle) << "\n";
 	}
 	if (!trimCopy(request.negativePrompt).empty()) {
 		prompt << "Negative prompt hints: " << trimCopy(request.negativePrompt) << "\n";
+	}
+	if (!trimCopy(request.sectionStructureHint).empty()) {
+		prompt << "Preferred section structure: " << trimCopy(request.sectionStructureHint) << "\n";
 	}
 	prompt
 		<< "\nJSON schema:\n"
@@ -244,6 +268,18 @@ std::string ofxGgmlVideoPlanner::buildPlanningPrompt(const ofxGgmlVideoPlannerRe
 		<< "      \"subjects\": [string]\n"
 		<< "    }\n"
 		<< "  ],\n"
+		<< "  \"sections\": [\n"
+		<< "    {\n"
+		<< "      \"index\": number,\n"
+		<< "      \"label\": string,\n"
+		<< "      \"role\": string,\n"
+		<< "      \"startSeconds\": number,\n"
+		<< "      \"endSeconds\": number,\n"
+		<< "      \"energy\": string,\n"
+		<< "      \"cutDensity\": string,\n"
+		<< "      \"visualFocus\": string\n"
+		<< "    }\n"
+		<< "  ],\n"
 		<< "  \"scenes\": [\n"
 		<< "    {\n"
 		<< "      \"index\": number,\n"
@@ -261,6 +297,9 @@ std::string ofxGgmlVideoPlanner::buildPlanningPrompt(const ofxGgmlVideoPlannerRe
 		<< (request.multiScene
 			? "Prefer filling the scenes array richly. beats can summarize finer within-scene timing.\n\n"
 			: "Prefer filling the beats array richly. scenes can be empty for single-scene prompts.\n\n")
+		<< (request.musicVideoMode
+			? "Fill the sections array meaningfully and align beat pacing with section energy. Use labels like intro, verse, chorus, bridge, drop, outro when appropriate.\n\n"
+			: "")
 		<< "User prompt:\n"
 		<< trimCopy(request.prompt);
 	return prompt.str();
@@ -434,6 +473,35 @@ Result<ofxGgmlVideoPlan> ofxGgmlVideoPlanner::parsePlanJson(const std::string & 
 		}
 	}
 
+	if (json.contains("sections") && json["sections"].is_array()) {
+		for (const auto & item : json["sections"]) {
+			if (!item.is_object()) {
+				continue;
+			}
+			ofxGgmlVideoPlanSection section;
+			section.index = jsonValueOr<int>(item, "index", 0);
+			section.label = jsonValueOr<std::string>(item, "label", "");
+			section.role = jsonValueOr<std::string>(item, "role", "");
+			section.startSeconds = jsonValueOr<double>(item, "startSeconds", 0.0);
+			section.endSeconds = jsonValueOr<double>(item, "endSeconds", section.startSeconds);
+			if (section.endSeconds < section.startSeconds) {
+				std::swap(section.startSeconds, section.endSeconds);
+			}
+			section.energy = jsonValueOr<std::string>(item, "energy", "");
+			section.cutDensity = jsonValueOr<std::string>(item, "cutDensity", "");
+			section.visualFocus = jsonValueOr<std::string>(item, "visualFocus", "");
+			if (section.index != 0 ||
+				!section.label.empty() ||
+				!section.role.empty() ||
+				section.endSeconds > section.startSeconds ||
+				!section.energy.empty() ||
+				!section.cutDensity.empty() ||
+				!section.visualFocus.empty()) {
+				plan.sections.push_back(section);
+			}
+		}
+	}
+
 	if (json.contains("scenes") && json["scenes"].is_array()) {
 		for (const auto & item : json["scenes"]) {
 			if (!item.is_object()) {
@@ -583,6 +651,33 @@ std::string ofxGgmlVideoPlanner::buildGenerationPrompt(const ofxGgmlVideoPlan & 
 			prompt << "\n- " << (!subject.label.empty() ? subject.label : subject.id);
 			if (!trimCopy(subject.description).empty()) {
 				prompt << ": " << subject.description;
+			}
+		}
+	}
+	if (!plan.sections.empty()) {
+		prompt << "\nMusic-video sections:";
+		for (const auto & section : plan.sections) {
+			prompt << "\n- ";
+			if (section.index > 0) {
+				prompt << section.index << ". ";
+			}
+			prompt << (!trimCopy(section.label).empty() ? section.label : "section");
+			if (!trimCopy(section.role).empty()) {
+				prompt << " (" << section.role << ")";
+			}
+			const std::string sectionRange =
+				describeTimeRange(section.startSeconds, section.endSeconds);
+			if (!trimCopy(sectionRange).empty()) {
+				prompt << " | " << sectionRange;
+			}
+			if (!trimCopy(section.energy).empty()) {
+				prompt << " | energy: " << section.energy;
+			}
+			if (!trimCopy(section.cutDensity).empty()) {
+				prompt << " | cut density: " << section.cutDensity;
+			}
+			if (!trimCopy(section.visualFocus).empty()) {
+				prompt << " | focus: " << section.visualFocus;
 			}
 		}
 	}
@@ -756,6 +851,33 @@ std::string ofxGgmlVideoPlanner::buildSceneSequencePrompt(const ofxGgmlVideoPlan
 			}
 		}
 	}
+	if (!plan.sections.empty()) {
+		prompt << "\nSection progression:";
+		for (const auto & section : plan.sections) {
+			prompt << "\n- ";
+			if (section.index > 0) {
+				prompt << section.index << ". ";
+			}
+			prompt << (!trimCopy(section.label).empty() ? section.label : "section");
+			if (!trimCopy(section.role).empty()) {
+				prompt << " (" << section.role << ")";
+			}
+			const std::string sectionRange =
+				describeTimeRange(section.startSeconds, section.endSeconds);
+			if (!trimCopy(sectionRange).empty()) {
+				prompt << " | " << sectionRange;
+			}
+			if (!trimCopy(section.energy).empty()) {
+				prompt << " | energy: " << section.energy;
+			}
+			if (!trimCopy(section.cutDensity).empty()) {
+				prompt << " | cut density: " << section.cutDensity;
+			}
+			if (!trimCopy(section.visualFocus).empty()) {
+				prompt << " | focus: " << section.visualFocus;
+			}
+		}
+	}
 	prompt << "\nScene sequence:";
 	for (const auto & scene : plan.scenes) {
 		prompt << "\n" << scene.index << ". ";
@@ -821,6 +943,33 @@ std::string ofxGgmlVideoPlanner::summarizePlan(const ofxGgmlVideoPlan & plan) {
 			summary << "\n- " << (!entity.label.empty() ? entity.label : entity.id);
 			if (!trimCopy(entity.role).empty()) {
 				summary << " (" << entity.role << ")";
+			}
+		}
+	}
+	if (!plan.sections.empty()) {
+		summary << "\nSections:";
+		for (const auto & section : plan.sections) {
+			summary << "\n- ";
+			if (section.index > 0) {
+				summary << section.index << ". ";
+			}
+			summary << (!trimCopy(section.label).empty() ? section.label : "section");
+			if (!trimCopy(section.role).empty()) {
+				summary << " (" << section.role << ")";
+			}
+			const std::string sectionRange =
+				describeTimeRange(section.startSeconds, section.endSeconds);
+			if (!trimCopy(sectionRange).empty()) {
+				summary << " | " << sectionRange;
+			}
+			if (!trimCopy(section.energy).empty()) {
+				summary << " | " << section.energy;
+			}
+			if (!trimCopy(section.cutDensity).empty()) {
+				summary << " | cuts: " << section.cutDensity;
+			}
+			if (!trimCopy(section.visualFocus).empty()) {
+				summary << " | focus: " << section.visualFocus;
 			}
 		}
 	}

@@ -57,7 +57,14 @@ void ofxGgmlEasy::configureText(const ofxGgmlEasyTextConfig & config) {
 	applyInferenceExecutables(m_citationSearch.getInference(), m_textConfig);
 	m_chatAssistant.setCompletionExecutable(m_textConfig.completionExecutable);
 	m_textAssistant.setCompletionExecutable(m_textConfig.completionExecutable);
+	m_mediaPromptGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
+	m_musicGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
 	m_milkDropGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
+	m_videoEssayWorkflow.getTextAssistant().setCompletionExecutable(
+		m_textConfig.completionExecutable);
+	applyInferenceExecutables(
+		m_videoEssayWorkflow.getCitationSearch().getInference(),
+		m_textConfig);
 }
 
 void ofxGgmlEasy::configureVision(const ofxGgmlEasyVisionConfig & config) {
@@ -154,12 +161,44 @@ const ofxGgmlVideoPlanner & ofxGgmlEasy::getVideoPlanner() const {
 	return m_videoPlanner;
 }
 
+ofxGgmlMediaPromptGenerator & ofxGgmlEasy::getMediaPromptGenerator() {
+	return m_mediaPromptGenerator;
+}
+
+const ofxGgmlMediaPromptGenerator & ofxGgmlEasy::getMediaPromptGenerator() const {
+	return m_mediaPromptGenerator;
+}
+
+ofxGgmlMusicGenerator & ofxGgmlEasy::getMusicGenerator() {
+	return m_musicGenerator;
+}
+
+const ofxGgmlMusicGenerator & ofxGgmlEasy::getMusicGenerator() const {
+	return m_musicGenerator;
+}
+
+ofxGgmlAceStepBridge & ofxGgmlEasy::getAceStepBridge() {
+	return m_aceStepBridge;
+}
+
+const ofxGgmlAceStepBridge & ofxGgmlEasy::getAceStepBridge() const {
+	return m_aceStepBridge;
+}
+
 ofxGgmlMilkDropGenerator & ofxGgmlEasy::getMilkDropGenerator() {
 	return m_milkDropGenerator;
 }
 
 const ofxGgmlMilkDropGenerator & ofxGgmlEasy::getMilkDropGenerator() const {
 	return m_milkDropGenerator;
+}
+
+ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::getVideoEssayWorkflow() {
+	return m_videoEssayWorkflow;
+}
+
+const ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::getVideoEssayWorkflow() const {
+	return m_videoEssayWorkflow;
 }
 
 ofxGgmlInferenceSettings ofxGgmlEasy::makeTextSettings() const {
@@ -380,6 +419,99 @@ ofxGgmlSpeechResult ofxGgmlEasy::translateAudio(const std::string & audioPath) c
 	return m_speechInference.transcribe(request);
 }
 
+ofxGgmlMusicPromptResult ofxGgmlEasy::generateMusicPrompt(
+	const std::string & sourceConcept,
+	const std::string & style,
+	const std::string & instrumentation,
+	int targetDurationSeconds,
+	bool instrumentalOnly) const {
+	ofxGgmlMusicPromptResult result;
+	if (m_textConfig.modelPath.empty()) {
+		result.error =
+			"Easy API text model is not configured. Call configureText(...) first.";
+		return result;
+	}
+
+	ofxGgmlMusicPromptRequest request;
+	request.sourceConcept = sourceConcept;
+	request.style = style;
+	request.instrumentation = instrumentation;
+	request.targetDurationSeconds = targetDurationSeconds;
+	request.instrumentalOnly = instrumentalOnly;
+	return m_musicGenerator.generateMusicPrompt(
+		m_textConfig.modelPath,
+		request,
+		makeTextSettings());
+}
+
+ofxGgmlMusicNotationResult ofxGgmlEasy::generateMusicNotation(
+	const std::string & sourceConcept,
+	const std::string & title,
+	const std::string & style,
+	int bars,
+	const std::string & key) const {
+	ofxGgmlMusicNotationResult result;
+	if (m_textConfig.modelPath.empty()) {
+		result.error =
+			"Easy API text model is not configured. Call configureText(...) first.";
+		return result;
+	}
+
+	ofxGgmlMusicNotationRequest request;
+	request.sourceConcept = sourceConcept;
+	request.title = title;
+	request.style = style;
+	request.bars = bars;
+	request.key = key;
+	return m_musicGenerator.generateAbcNotation(
+		m_textConfig.modelPath,
+		request,
+		makeTextSettings());
+}
+
+ofxGgmlImageToMusicResult ofxGgmlEasy::generateImageToMusicPrompt(
+	const std::string & imageDescription,
+	const std::string & musicalStyle,
+	const std::string & instrumentation,
+	int targetDurationSeconds,
+	bool instrumentalOnly) const {
+	ofxGgmlImageToMusicResult result;
+	if (m_textConfig.modelPath.empty()) {
+		result.error =
+			"Easy API text model is not configured. Call configureText(...) first.";
+		return result;
+	}
+
+	ofxGgmlImageToMusicRequest request;
+	request.imageDescription = imageDescription;
+	request.musicalStyle = musicalStyle;
+	request.instrumentation = instrumentation;
+	request.targetDurationSeconds = targetDurationSeconds;
+	request.instrumentalOnly = instrumentalOnly;
+	return m_mediaPromptGenerator.generateImageToMusicPrompt(
+		m_textConfig.modelPath,
+		request,
+		makeTextSettings());
+}
+
+std::string ofxGgmlEasy::saveMusicNotation(
+	const std::string & abcNotation,
+	const std::string & outputPath) const {
+	return m_musicGenerator.saveAbcNotation(abcNotation, outputPath);
+}
+
+ofxGgmlAceStepGenerateResult ofxGgmlEasy::generateAceStepMusic(
+	const ofxGgmlAceStepRequest & request,
+	const std::string & serverUrl) const {
+	return m_aceStepBridge.generate(request, serverUrl);
+}
+
+ofxGgmlAceStepUnderstandResult ofxGgmlEasy::understandAceStepAudio(
+	const ofxGgmlAceStepUnderstandRequest & request,
+	const std::string & serverUrl) const {
+	return m_aceStepBridge.understandAudio(request, serverUrl);
+}
+
 ofxGgmlWebCrawlerResult ofxGgmlEasy::crawlWebsite(
 	const std::string & startUrl,
 	int maxDepth) const {
@@ -407,6 +539,39 @@ ofxGgmlCitationSearchResult ofxGgmlEasy::findCitations(
 		request.crawlerRequest = makeCrawlerRequest(crawlerUrl);
 	}
 	return m_citationSearch.search(request);
+}
+
+ofxGgmlVideoEssayResult ofxGgmlEasy::planVideoEssay(
+	const ofxGgmlVideoEssayRequest & request) const {
+	ofxGgmlVideoEssayRequest effectiveRequest = request;
+	effectiveRequest.inferenceSettings = request.inferenceSettings;
+	if (effectiveRequest.modelPath.empty()) {
+		effectiveRequest.modelPath = m_textConfig.modelPath;
+	}
+	if (effectiveRequest.inferenceSettings.maxTokens <= 0) {
+		effectiveRequest.inferenceSettings = makeTextSettings();
+	}
+	if (effectiveRequest.crawlerRequest.executablePath.empty()) {
+		effectiveRequest.crawlerRequest.executablePath = m_crawlerConfig.executablePath;
+	}
+	if (effectiveRequest.crawlerRequest.outputDir.empty()) {
+		effectiveRequest.crawlerRequest.outputDir = m_crawlerConfig.outputDir;
+	}
+	if (effectiveRequest.crawlerRequest.maxDepth <= 0) {
+		effectiveRequest.crawlerRequest.maxDepth = std::max(1, m_crawlerConfig.maxDepth);
+	}
+	if (effectiveRequest.crawlerRequest.allowedDomains.empty()) {
+		effectiveRequest.crawlerRequest.allowedDomains = m_crawlerConfig.allowedDomains;
+	}
+	if (effectiveRequest.sourceSettings.maxSources == 0 &&
+		effectiveRequest.sourceSettings.maxCharsPerSource == 0 &&
+		effectiveRequest.sourceSettings.maxTotalChars == 0) {
+		effectiveRequest.sourceSettings.maxSources = 6;
+		effectiveRequest.sourceSettings.maxCharsPerSource = 2200;
+		effectiveRequest.sourceSettings.maxTotalChars = 14000;
+		effectiveRequest.sourceSettings.requestCitations = true;
+	}
+	return m_videoEssayWorkflow.run(effectiveRequest);
 }
 
 ofxGgmlEasyMontageResult ofxGgmlEasy::planMontageFromSrt(

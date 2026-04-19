@@ -4,6 +4,24 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `ofxGgmlCodeAssistantSession`, typed assistant tool definitions/calls, and streamed assistant-event callbacks so apps can keep lightweight coding-session state without rebuilding the whole GUI example workflow.
+- `ofxGgmlCodeAssistant::runWithSession(...)` as a higher-level coding-assistant entry point with approval callbacks for risky tool proposals such as patch application and verification commands.
+- `ofxGgmlMusicGenerator` as a new local-first music helper for reusable music-prompt generation, ABC notation sketch generation, notation sanitization/validation, file saving, and future pluggable rendered-audio backends.
+- `ofxGgmlEasy` now also exposes music-prompt generation, `Image -> Music` prompt generation, and ABC notation helpers through the same high-level facade used by text, speech, citation, montage, and MilkDrop workflows.
+- `ofxGgmlVideoEssayWorkflow` as a new citation-grounded wrapper for `topic -> outline -> narrated script -> voice cues -> SRT`, built from the existing citation-search and text-assistant layers instead of a separate backend stack.
+
+### Changed
+- `ofxGgmlCodeAssistant` now derives a first-pass tool plan from structured results, emits prompt/chunk/tool/approval/completion events during runs, and can seed/update task memory directly from a reusable session object.
+- Assistant test coverage now includes session seeding, streamed events, tool proposal generation, and approval gating for risky coding actions.
+- The GUI example Script mode now exposes the newer coding-assistant runtime directly through streamed workflow events, explicit approve/deny handling for risky tool proposals, IBM-style `@` file/symbol references, quick intent chips, and a separate inline-completion lane.
+- The GUI example Vision panel now also exposes a dedicated `Music Video` workflow section that reuses the shared `Music -> Image` state, applies music-video planning defaults, and hands the generated visual concept directly into video planning, diffusion, and edit-plan generation.
+- `ofxGgmlVideoPlanner` now also supports music-video-aware section planning, with optional intro / verse / chorus / bridge style sections, section-level cut-density hints, and section summaries that carry through prompt generation and plan review.
+- The GUI example Vision panel now includes an `Image / Prompt -> Music` workflow that can turn scene descriptions or existing text outputs into reusable music-generation prompts and local `.abc` sketch files, complementing the earlier Diffusion-side `Music -> Image` helper.
+- Headless test coverage now also covers the new media-prompt and music-generator helpers so the local-first cross-media workflow stays buildable outside the GUI example.
+- The GUI example now includes a dedicated `Video Essay` mode that can turn a topic plus loaded URLs or a crawler seed into source-backed research notes, a cited outline, a spoken script, voice cues, and an SRT-ready cue sheet with one-click TTS handoff.
+- Chat and Translate now share the same lightweight TTS-preview pattern in the GUI example, with dedicated inline playback controls and a small shared preview/request state instead of duplicated per-mode wiring.
+
 ## [1.0.4] - 2026-04-19
 
 ### Added
@@ -18,6 +36,7 @@ All notable changes to `ofxGgml` are documented in this file.
 - `ofxGgmlMilkDropGenerator` as a new text-backend-driven helper for generating, editing, sanitizing, and saving MilkDrop / projectM preset files.
 - `ofxGgmlMilkDropGenerator` now also exposes basic preset validation, conservative repair flows, and multi-variant generation for faster prompt iteration.
 - `ofxGgmlEasy` now also exposes MilkDrop helpers so apps can generate, edit, validate, repair, save, and generate preset variants without wiring the lower-level generator directly.
+- `ofxGgmlMediaPromptGenerator` as a local-first cross-media prompt helper, starting with `Music -> Image` prompt generation from music captions plus optional lyrics or transcripts.
 - Headless test coverage for the montage preview/export bridge, including bundle assembly, cue lookup, SRT/VTT text generation, and file export.
 - `ofxGgmlMontagePreviewBridge` as a new playback-facing bridge API for source-timed versus montage-timed subtitle tracks, cue lookup by time, and playlist-oriented montage preview bundles that can be consumed by companions such as `ofxVlc4`.
 - GUI-example montage subtitle preview/export updates, including generated montage-timed and source-timed subtitle tracks, inline cue preview, live preview playback text, and one-click SRT/VTT copying.
@@ -41,6 +60,7 @@ All notable changes to `ofxGgml` are documented in this file.
 - The GUI example video-editing workflow now keeps an active step, done/undone state, quick `Open next step` actions, and session persistence so longer editing passes can be resumed instead of re-triaged.
 - The GUI example video-editing workflow now also includes reusable editor presets such as `Trailer`, `Montage`, `Recap`, `Music Video`, `Social Short`, and `Product Teaser`, with one-click defaults for edit goal, clip count, target duration, and grounding.
 - The GUI example now includes a dedicated MilkDrop mode for prompt-driven `.milk` preset generation, save/open actions, validation/repair, quick variants, and optional live preview through `ofxProjectM` with beat-sensitivity, preset-duration, and microphone-reactive preview controls when that addon is available.
+- The GUI example Diffusion panel now includes a `Music -> Image` helper that can prepare a visual prompt from a music description and optional speech/lyric text, then hand it directly into the existing diffusion prompt field.
 - The GUI example text-heavy modes are now split into a dedicated `TextModes.cpp` translation unit, reducing `ofApp.cpp` concentration and making mode-level maintenance easier.
 - The GUI example speech and TTS flow now lives in a dedicated `SpeechTts.cpp` translation unit, further reducing `ofApp.cpp` concentration and keeping microphone, Whisper, and `chatllm.cpp` UI/runtime glue in one place.
 - GUI-example session persistence now lives in its own `SessionPersistence.cpp` translation unit, and stale disabled text-mode copies have been removed from `ofApp.cpp` so the remaining example shell is easier to navigate.

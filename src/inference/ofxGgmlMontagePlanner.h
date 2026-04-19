@@ -32,6 +32,8 @@ struct ofxGgmlMontageClip {
 	double score = 0.0;
 	std::string clipName;
 	std::string note;
+	std::string themeBucket;
+	std::string transitionSuggestion;
 };
 
 struct ofxGgmlMontageSubtitleCue {
@@ -62,6 +64,10 @@ struct ofxGgmlMontagePlannerRequest {
 	std::vector<ofxGgmlMontageSegment> segments;
 	size_t maxClips = 8;
 	double minScore = 0.18;
+	double minSpacingSeconds = 0.0;
+	double preRollSeconds = 0.0;
+	double postRollSeconds = 0.0;
+	double targetDurationSeconds = 0.0;
 	bool preserveChronology = true;
 	std::string fallbackReelName = "AX";
 };
@@ -102,4 +108,5 @@ public:
 		const ofxGgmlMontagePlan & plan,
 		const std::string & title = "MONTAGE",
 		int fps = 25);
+	static double computePlanDurationSeconds(const ofxGgmlMontagePlan & plan);
 };

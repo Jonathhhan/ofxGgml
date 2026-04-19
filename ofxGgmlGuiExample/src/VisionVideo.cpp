@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <sstream>
 #include <thread>
+#include <unordered_set>
 
 namespace {
 
@@ -311,6 +312,9 @@ void ofApp::drawVisionPanel() {
 	}
 	drawVisionImagePreview(trim(visionImagePath));
 	drawImageSearchPanel("Use Vision prompt", trim(visionPrompt));
+	drawImageToMusicSection();
+	drawAceStepMusicSection();
+	drawMusicVideoWorkflowSection();
 
 	static const char * visionTaskLabels[] = { "Describe", "OCR", "Ask" };
 	ImGui::SetNextItemWidth(180);
@@ -659,10 +663,32 @@ void ofApp::drawVisionPanel() {
 	if (ImGui::IsItemDeactivatedAfterEdit()) {
 		autoSaveSession();
 	}
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Target duration (s)", &montageTargetDurationSeconds, 1.0f, 120.0f, "%.1f");
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Min clip spacing (s)", &montageMinSpacingSeconds, 0.0f, 15.0f, "%.2f");
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Pre-roll handle (s)", &montagePreRollSeconds, 0.0f, 5.0f, "%.2f");
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Post-roll handle (s)", &montagePostRollSeconds, 0.0f, 5.0f, "%.2f");
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
 	ImGui::Checkbox("Preserve subtitle chronology", &montagePreserveChronology);
 	if (ImGui::IsItemDeactivatedAfterEdit()) {
 		autoSaveSession();
 	}
+	ImGui::TextDisabled(
+		"Spacing reduces adjacent picks; handles add visual lead-in/out around subtitle hits.");
 	static const char * montagePreviewTimingLabels[] = {
 		"Source-timed",
 		"Montage-timed"
@@ -769,6 +795,29 @@ void ofApp::drawVisionPanel() {
 	ImGui::EndDisabled();
 	if (!montageSummary.empty()) {
 		ImGui::TextWrapped("%s", montageSummary.c_str());
+	}
+	if (!montagePreviewBundle.playlistClips.empty()) {
+		double estimatedDurationSeconds = 0.0;
+		for (const auto & clip : montagePreviewBundle.playlistClips) {
+			estimatedDurationSeconds += std::max(0.0, clip.endSeconds - clip.startSeconds);
+		}
+		ImGui::TextDisabled(
+			"Estimated edit length: %.2f s across %d clip(s)",
+			estimatedDurationSeconds,
+			static_cast<int>(montagePreviewBundle.playlistClips.size()));
+		int themeBucketCount = 0;
+		{
+			std::unordered_set<std::string> buckets;
+			for (const auto & clip : montagePreviewBundle.playlistClips) {
+				if (!clip.themeBucket.empty()) {
+					buckets.insert(clip.themeBucket);
+				}
+			}
+			themeBucketCount = static_cast<int>(buckets.size());
+		}
+		if (themeBucketCount > 0) {
+			ImGui::TextDisabled("Theme buckets: %d", themeBucketCount);
+		}
 	}
 	const ofxGgmlMontagePreviewTrack * activePreviewTrack = getSelectedMontagePreviewTrack();
 	const bool hasActivePreviewTrack = activePreviewTrack != nullptr;
@@ -951,7 +1000,36 @@ void ofApp::drawVisionPanel() {
 			const auto & cue = subtitlePreviewTrack->cues[static_cast<size_t>(selectedMontageCueIndex)];
 			ImGui::TextDisabled("Selected cue");
 			ImGui::TextWrapped("%s", cue.text.c_str());
+			auto selectedClip = std::find_if(
+				montagePreviewBundle.playlistClips.begin(),
+				montagePreviewBundle.playlistClips.end(),
+				[&cue](const ofxGgmlMontageClip & clip) {
+					return clip.sourceId == cue.sourceId;
+				});
+			if (selectedClip != montagePreviewBundle.playlistClips.end()) {
+				if (!selectedClip->themeBucket.empty()) {
+					ImGui::TextDisabled("Theme: %s", selectedClip->themeBucket.c_str());
+				}
+				if (!selectedClip->transitionSuggestion.empty()) {
+					ImGui::TextWrapped("Transition: %s", selectedClip->transitionSuggestion.c_str());
+				}
+			}
 		}
+	}
+	if (!montagePreviewBundle.playlistClips.empty() &&
+		ImGui::TreeNode("Cut suggestions")) {
+		for (const auto & clip : montagePreviewBundle.playlistClips) {
+			std::ostringstream label;
+			label << clip.index << ". " << clip.clipName;
+			if (!clip.themeBucket.empty()) {
+				label << " [" << clip.themeBucket << "]";
+			}
+			ImGui::BulletText("%s", label.str().c_str());
+			if (!clip.transitionSuggestion.empty()) {
+				ImGui::TextWrapped("    %s", clip.transitionSuggestion.c_str());
+			}
+		}
+		ImGui::TreePop();
 	}
 	if (!montageEdlText.empty()) {
 		ImGui::TextDisabled("EDL");
@@ -988,15 +1066,7 @@ void ofApp::drawVisionPanel() {
 	videoEditPresetIndex = std::clamp(videoEditPresetIndex, 0, kVideoEditPresetCount - 1);
 	const auto applyVideoEditPreset =
 		[this](int presetIndex) {
-			const int clampedIndex = std::clamp(presetIndex, 0, kVideoEditPresetCount - 1);
-			const auto & preset = kVideoEditPresets[clampedIndex];
-			videoEditPresetIndex = clampedIndex;
-			copyStringToBuffer(videoEditGoal, sizeof(videoEditGoal), preset.goal);
-			videoEditClipCount = std::clamp(preset.clipCount, 1, 12);
-			videoEditTargetDurationSeconds = std::clamp(preset.targetDurationSeconds, 1.0f, 120.0f);
-			videoEditUseCurrentAnalysis = preset.useCurrentAnalysis;
-			resetVideoEditWorkflowState();
-			autoSaveSession();
+			applyVideoEditPresetByIndex(presetIndex);
 		};
 	ImGui::SetNextItemWidth(220);
 	ImGui::Combo(
@@ -1019,6 +1089,10 @@ void ofApp::drawVisionPanel() {
 	ImGui::SameLine();
 	if (ImGui::SmallButton("Recap")) {
 		applyVideoEditPreset(2);
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Music Video")) {
+		applyVideoEditPreset(3);
 	}
 	const auto & selectedEditPreset = kVideoEditPresets[videoEditPresetIndex];
 	ImGui::TextDisabled(
@@ -1419,6 +1493,885 @@ void ofApp::drawVisionPanel() {
 	}
 }
 
+bool ofApp::saveImageToMusicNotationToConfiguredPath() {
+	const std::string outputPath = trim(imageToMusicAbcOutputPath);
+	if (outputPath.empty()) {
+		imageToMusicStatus = "[Error] Choose an output .abc path first.";
+		return false;
+	}
+	const std::string savedPath =
+		musicGenerator.saveAbcNotation(imageToMusicNotationOutput, outputPath);
+	if (savedPath.empty()) {
+		imageToMusicStatus = "[Error] Failed to save the generated ABC notation.";
+		return false;
+	}
+	imageToMusicSavedNotationPath = savedPath;
+	copyStringToBuffer(
+		imageToMusicAbcOutputPath,
+		sizeof(imageToMusicAbcOutputPath),
+		savedPath);
+	imageToMusicStatus = "Saved ABC sketch to " + savedPath;
+	return true;
+}
+
+void ofApp::applyVideoEditPresetByIndex(int presetIndex) {
+	const int clampedIndex = std::clamp(presetIndex, 0, kVideoEditPresetCount - 1);
+	const auto & preset = kVideoEditPresets[clampedIndex];
+	videoEditPresetIndex = clampedIndex;
+	copyStringToBuffer(videoEditGoal, sizeof(videoEditGoal), preset.goal);
+	videoEditClipCount = std::clamp(preset.clipCount, 1, 12);
+	videoEditTargetDurationSeconds = std::clamp(preset.targetDurationSeconds, 1.0f, 120.0f);
+	videoEditUseCurrentAnalysis = preset.useCurrentAnalysis;
+	resetVideoEditWorkflowState();
+	autoSaveSession();
+}
+
+void ofApp::applyMusicVideoWorkflowDefaults(bool overwriteVisionPrompt) {
+	applyVideoEditPresetByIndex(3);
+	videoPlanMultiScene = true;
+	videoPlanGenerationMode = 1;
+	videoPlanBeatCount = std::max(videoPlanBeatCount, 8);
+	videoPlanSceneCount = std::max(videoPlanSceneCount, 4);
+	videoPlanDurationSeconds = std::max(videoPlanDurationSeconds, 24.0f);
+	musicVideoSectionCount = std::max(musicVideoSectionCount, 4);
+	musicVideoCutIntensity = std::max(musicVideoCutIntensity, 0.7f);
+	if (overwriteVisionPrompt) {
+		const std::string visualConcept = trim(musicToImagePromptOutput);
+		if (!visualConcept.empty()) {
+			copyStringToBuffer(visionPrompt, sizeof(visionPrompt), visualConcept);
+		} else {
+			const std::string fallback =
+				!trim(musicToImageDescription).empty()
+					? trim(musicToImageDescription)
+					: trim(musicToImageLyrics);
+			if (!fallback.empty()) {
+				copyStringToBuffer(visionPrompt, sizeof(visionPrompt), fallback);
+			}
+		}
+	}
+	autoSaveSession();
+}
+
+void ofApp::drawImageToMusicSection() {
+	if (trim(imageToMusicAbcOutputPath).empty()) {
+		std::filesystem::path baseDir = addonRootPath() / "generated" / "music";
+		if (baseDir.empty()) {
+			baseDir = std::filesystem::path(ofToDataPath("generated/music", true));
+		}
+		const std::string suggestion = (baseDir /
+			ofxGgmlMusicGenerator::makeSuggestedFileName(
+				trim(imageToMusicDescription).empty()
+					? trim(visionPrompt)
+					: trim(imageToMusicDescription))).lexically_normal().string();
+		copyStringToBuffer(
+			imageToMusicAbcOutputPath,
+			sizeof(imageToMusicAbcOutputPath),
+			suggestion);
+	}
+
+	ImGui::Separator();
+	ImGui::Text("Image / Prompt -> Music");
+	ImGui::TextWrapped(
+		"Turn a visual description into a backend-ready music prompt, then optionally sketch a local ABC theme. "
+		"This keeps the addon local-first: prompt translation and notation use the current text model, while actual audio rendering can be attached later through a music backend bridge.");
+
+	ImGui::BeginDisabled(trim(visionOutput).empty());
+	if (ImGui::Button("Use Vision Output", ImVec2(140, 0))) {
+		copyStringToBuffer(
+			imageToMusicDescription,
+			sizeof(imageToMusicDescription),
+			trim(visionOutput));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(visionPrompt).empty());
+	if (ImGui::Button("Use Vision Prompt", ImVec2(140, 0))) {
+		copyStringToBuffer(
+			imageToMusicDescription,
+			sizeof(imageToMusicDescription),
+			trim(visionPrompt));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(customInput).empty());
+	if (ImGui::Button("Use Custom Input", ImVec2(140, 0))) {
+		copyStringToBuffer(
+			imageToMusicDescription,
+			sizeof(imageToMusicDescription),
+			trim(customInput));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+
+	ImGui::InputTextMultiline(
+		"Visual description / scene",
+		imageToMusicDescription,
+		sizeof(imageToMusicDescription),
+		ImVec2(-1, 90));
+	ImGui::InputTextMultiline(
+		"Scene notes",
+		imageToMusicSceneNotes,
+		sizeof(imageToMusicSceneNotes),
+		ImVec2(-1, 70));
+	ImGui::InputText(
+		"Musical style",
+		imageToMusicStyle,
+		sizeof(imageToMusicStyle));
+	ImGui::InputText(
+		"Instrumentation",
+		imageToMusicInstrumentation,
+		sizeof(imageToMusicInstrumentation));
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt(
+		"Target music duration",
+		&imageToMusicDurationSeconds,
+		8,
+		90,
+		"%d s");
+	ImGui::SameLine();
+	ImGui::Checkbox("Instrumental only", &imageToMusicInstrumentalOnly);
+
+	const bool hasMusicInput =
+		!generating.load() &&
+		(!trim(imageToMusicDescription).empty() || !trim(imageToMusicSceneNotes).empty());
+	ImGui::BeginDisabled(!hasMusicInput);
+	if (ImGui::Button("Generate Music Prompt", ImVec2(170, 0))) {
+		runImageToMusicPromptGeneration();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!hasMusicInput);
+	if (ImGui::Button("Generate ABC Sketch", ImVec2(170, 0))) {
+		runImageToMusicNotationGeneration();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(imageToMusicPromptOutput).empty());
+	if (ImGui::Button("Use in Custom", ImVec2(120, 0))) {
+		copyStringToBuffer(customInput, sizeof(customInput), imageToMusicPromptOutput);
+		activeMode = AiMode::Custom;
+	}
+	ImGui::EndDisabled();
+
+	ImGui::SetNextItemWidth(220);
+	ImGui::InputText(
+		"ABC title",
+		imageToMusicAbcTitle,
+		sizeof(imageToMusicAbcTitle));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(120);
+	ImGui::InputText(
+		"Key",
+		imageToMusicAbcKey,
+		sizeof(imageToMusicAbcKey));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(140);
+	ImGui::SliderInt(
+		"Bars",
+		&imageToMusicAbcBars,
+		8,
+		32);
+
+	ImGui::InputText(
+		"ABC output path",
+		imageToMusicAbcOutputPath,
+		sizeof(imageToMusicAbcOutputPath));
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(imageToMusicNotationOutput).empty());
+	if (ImGui::Button("Save .abc", ImVec2(90, 0))) {
+		saveImageToMusicNotationToConfiguredPath();
+	}
+	ImGui::EndDisabled();
+
+	if (!imageToMusicStatus.empty()) {
+		ImGui::TextWrapped("%s", imageToMusicStatus.c_str());
+	}
+	if (!imageToMusicSavedNotationPath.empty()) {
+		ImGui::TextDisabled("Last saved notation: %s", imageToMusicSavedNotationPath.c_str());
+	}
+
+	ImGui::Text("Generated music prompt:");
+	ImGui::BeginChild("##ImageToMusicPromptOut", ImVec2(0, 90.0f), true);
+	if (imageToMusicPromptOutput.empty()) {
+		ImGui::TextDisabled("Music prompt output will appear here.");
+	} else {
+		ImGui::TextUnformatted(imageToMusicPromptOutput.c_str());
+	}
+	ImGui::EndChild();
+
+	ImGui::Text("Generated ABC sketch:");
+	ImGui::BeginChild("##ImageToMusicAbcOut", ImVec2(0, 140.0f), true);
+	if (imageToMusicNotationOutput.empty()) {
+		ImGui::TextDisabled("ABC notation output will appear here.");
+	} else {
+		ImGui::TextUnformatted(imageToMusicNotationOutput.c_str());
+	}
+	ImGui::EndChild();
+}
+
+void ofApp::drawAceStepMusicSection() {
+	if (trim(aceStepOutputDir).empty()) {
+		std::filesystem::path baseDir = addonRootPath() / "generated" / "music";
+		if (baseDir.empty()) {
+			baseDir = std::filesystem::path(ofToDataPath("generated/music", true));
+		}
+		copyStringToBuffer(
+			aceStepOutputDir,
+			sizeof(aceStepOutputDir),
+			baseDir.lexically_normal().string());
+	}
+
+	ImGui::Separator();
+	ImGui::Text("AceStep Music Backend");
+	ImGui::TextWrapped(
+		"Use an acestep.cpp-compatible server for rendered audio generation and audio understanding. "
+		"The bridge keeps prompt prep local-first, then hands prompt, lyrics, BPM, key, and duration to the AceStep API.");
+
+	ImGui::SetNextItemWidth(260);
+	ImGui::InputText(
+		"AceStep server",
+		aceStepServerUrl,
+		sizeof(aceStepServerUrl));
+
+	ImGui::BeginDisabled(trim(imageToMusicPromptOutput).empty());
+	if (ImGui::Button("Use Image->Music Prompt", ImVec2(180, 0))) {
+		copyStringToBuffer(
+			aceStepPrompt,
+			sizeof(aceStepPrompt),
+			trim(imageToMusicPromptOutput));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(speechOutput).empty());
+	if (ImGui::Button("Use Speech Transcript", ImVec2(180, 0))) {
+		copyStringToBuffer(
+			aceStepLyrics,
+			sizeof(aceStepLyrics),
+			trim(speechOutput));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(writeInput).empty());
+	if (ImGui::Button("Use Write Text", ImVec2(140, 0))) {
+		copyStringToBuffer(
+			aceStepLyrics,
+			sizeof(aceStepLyrics),
+			trim(writeInput));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+
+	ImGui::InputTextMultiline(
+		"Music prompt",
+		aceStepPrompt,
+		sizeof(aceStepPrompt),
+		ImVec2(-1, 90));
+	ImGui::InputTextMultiline(
+		"Lyrics",
+		aceStepLyrics,
+		sizeof(aceStepLyrics),
+		ImVec2(-1, 80));
+
+	ImGui::SetNextItemWidth(120);
+	ImGui::InputInt("BPM", &aceStepBpm);
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(140);
+	ImGui::SliderInt("Duration", &aceStepDurationSeconds, 8, 180, "%d s");
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(140);
+	ImGui::InputInt("Seed", &aceStepSeed);
+
+	ImGui::SetNextItemWidth(160);
+	ImGui::InputText(
+		"Key / scale",
+		aceStepKeyscale,
+		sizeof(aceStepKeyscale));
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(120);
+	ImGui::InputText(
+		"Time signature",
+		aceStepTimesignature,
+		sizeof(aceStepTimesignature));
+	ImGui::SameLine();
+	ImGui::Checkbox("WAV output", &aceStepUseWav);
+	ImGui::SameLine();
+	ImGui::Checkbox("Instrumental", &aceStepInstrumentalOnly);
+
+	ImGui::InputText(
+		"Output dir",
+		aceStepOutputDir,
+		sizeof(aceStepOutputDir));
+	ImGui::InputText(
+		"File prefix",
+		aceStepOutputPrefix,
+		sizeof(aceStepOutputPrefix));
+	ImGui::InputText(
+		"Audio for understand",
+		aceStepAudioPath,
+		sizeof(aceStepAudioPath));
+	ImGui::SameLine();
+	if (ImGui::Button("Browse audio...", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select audio", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(
+				aceStepAudioPath,
+				sizeof(aceStepAudioPath),
+				result.getPath());
+			autoSaveSession();
+		}
+	}
+
+	const bool canGenerateMusic =
+		!generating.load() &&
+		!trim(aceStepPrompt).empty();
+	ImGui::BeginDisabled(!canGenerateMusic);
+	if (ImGui::Button("Generate Music", ImVec2(160, 0))) {
+		runAceStepMusicGeneration();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	const bool canUnderstandAudio =
+		!generating.load() &&
+		!trim(aceStepAudioPath).empty();
+	ImGui::BeginDisabled(!canUnderstandAudio);
+	if (ImGui::Button("Understand Audio", ImVec2(160, 0))) {
+		runAceStepAudioUnderstanding();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	const bool hasUnderstoodMusic =
+		!trim(aceStepUnderstoodCaption).empty() ||
+		!trim(aceStepUnderstoodLyrics).empty();
+	ImGui::BeginDisabled(!hasUnderstoodMusic);
+	if (ImGui::Button("Use in Music -> Image", ImVec2(180, 0))) {
+		copyStringToBuffer(
+			musicToImageDescription,
+			sizeof(musicToImageDescription),
+			trim(aceStepUnderstoodCaption));
+		copyStringToBuffer(
+			musicToImageLyrics,
+			sizeof(musicToImageLyrics),
+			trim(aceStepUnderstoodLyrics));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!hasUnderstoodMusic);
+	if (ImGui::Button("Use in Music Video", ImVec2(180, 0))) {
+		copyStringToBuffer(
+			musicToImageDescription,
+			sizeof(musicToImageDescription),
+			trim(aceStepUnderstoodCaption));
+		copyStringToBuffer(
+			musicToImageLyrics,
+			sizeof(musicToImageLyrics),
+			trim(aceStepUnderstoodLyrics));
+		applyMusicVideoWorkflowDefaults(false);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+
+	if (!aceStepStatus.empty()) {
+		ImGui::TextWrapped("%s", aceStepStatus.c_str());
+	}
+	if (!trim(aceStepUsedServerUrl).empty()) {
+		ImGui::TextDisabled("Server: %s", aceStepUsedServerUrl.c_str());
+	}
+	if (!aceStepGeneratedTracks.empty()) {
+		ImGui::TextDisabled("Generated audio");
+		for (const auto & track : aceStepGeneratedTracks) {
+			ImGui::BulletText("%s", track.path.c_str());
+		}
+	}
+	if (!trim(aceStepUnderstoodSummary).empty()) {
+		ImGui::TextWrapped("%s", aceStepUnderstoodSummary.c_str());
+	}
+
+	ImGui::Text("Enriched AceStep request:");
+	ImGui::BeginChild("##AceStepRequestOut", ImVec2(0, 110.0f), true);
+	if (trim(aceStepGeneratedRequestJson).empty()) {
+		ImGui::TextDisabled("Enriched request JSON appears here after /lm or /understand.");
+	} else {
+		ImGui::TextUnformatted(aceStepGeneratedRequestJson.c_str());
+	}
+	ImGui::EndChild();
+}
+
+void ofApp::drawMusicVideoWorkflowSection() {
+	musicVideoSectionSummary.clear();
+	if (!trim(videoPlanJson).empty()) {
+		const auto parsedResult = ofxGgmlVideoPlanner::parsePlanJson(trim(videoPlanJson));
+		if (parsedResult.isOk() && !parsedResult.value().sections.empty()) {
+			std::ostringstream summary;
+			summary << "Detected song sections:";
+			for (const auto & section : parsedResult.value().sections) {
+				summary << "\n- ";
+				if (section.index > 0) {
+					summary << section.index << ". ";
+				}
+				summary << (!trim(section.label).empty() ? trim(section.label) : std::string("section"));
+				if (!trim(section.role).empty()) {
+					summary << " (" << trim(section.role) << ")";
+				}
+				if (!trim(section.cutDensity).empty()) {
+					summary << " | cuts: " << trim(section.cutDensity);
+				}
+				if (!trim(section.visualFocus).empty()) {
+					summary << " | focus: " << trim(section.visualFocus);
+				}
+			}
+			musicVideoSectionSummary = summary.str();
+		}
+	}
+
+	ImGui::Separator();
+	ImGui::Text("Music Video");
+	ImGui::TextWrapped(
+		"Use the song description or lyrics to build a visual concept, then hand that concept into the existing "
+		"video planner, diffusion prompt, and music-video edit workflow.");
+
+	ImGui::BeginDisabled(trim(speechOutput).empty());
+	if (ImGui::Button("Use Speech Transcript##MusicVideo", ImVec2(170, 0))) {
+		copyStringToBuffer(musicToImageLyrics, sizeof(musicToImageLyrics), trim(speechOutput));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(writeInput).empty());
+	if (ImGui::Button("Use Write Text##MusicVideo", ImVec2(150, 0))) {
+		copyStringToBuffer(musicToImageDescription, sizeof(musicToImageDescription), trim(writeInput));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(visionPrompt).empty());
+	if (ImGui::Button("Use Vision Prompt##MusicVideo", ImVec2(160, 0))) {
+		copyStringToBuffer(musicToImageDescription, sizeof(musicToImageDescription), trim(visionPrompt));
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+
+	ImGui::InputTextMultiline(
+		"Song / mood",
+		musicToImageDescription,
+		sizeof(musicToImageDescription),
+		ImVec2(-1, 70));
+	ImGui::InputTextMultiline(
+		"Lyrics / transcript",
+		musicToImageLyrics,
+		sizeof(musicToImageLyrics),
+		ImVec2(-1, 70));
+	ImGui::InputText(
+		"Visual concept style",
+		musicToImageStyle,
+		sizeof(musicToImageStyle));
+	ImGui::Checkbox("Include lyrics in visual concept", &musicToImageIncludeLyrics);
+	static const char * musicVideoStructureLabels[] = {
+		"Intro / Verse / Chorus / Bridge / Outro",
+		"Verse / Chorus loop",
+		"Slow build to drop",
+		"Three-act escalation",
+		"Performance cut"
+	};
+	ImGui::SetNextItemWidth(260);
+	ImGui::Combo(
+		"Song structure",
+		&musicVideoStructureIndex,
+		musicVideoStructureLabels,
+		IM_ARRAYSIZE(musicVideoStructureLabels));
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderInt("Section count", &musicVideoSectionCount, 2, 8);
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Cut intensity", &musicVideoCutIntensity, 0.0f, 1.0f, "%.2f");
+
+	const bool canGenerateConcept =
+		!generating.load() &&
+		(!trim(musicToImageDescription).empty() || !trim(musicToImageLyrics).empty());
+	ImGui::BeginDisabled(!canGenerateConcept);
+	if (ImGui::Button("Generate Visual Concept##MusicVideo", ImVec2(200, 0))) {
+		runMusicToImagePromptGeneration();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	if (ImGui::Button("Apply Music Video Defaults", ImVec2(200, 0))) {
+		applyMusicVideoWorkflowDefaults(false);
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(musicToImagePromptOutput).empty());
+	if (ImGui::Button("Use in Diffusion##MusicVideo", ImVec2(170, 0))) {
+		copyStringToBuffer(diffusionPrompt, sizeof(diffusionPrompt), musicToImagePromptOutput);
+		activeMode = AiMode::Diffusion;
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+
+	const bool hasVisualSource =
+		!trim(musicToImagePromptOutput).empty() ||
+		!trim(musicToImageDescription).empty() ||
+		!trim(musicToImageLyrics).empty();
+	ImGui::BeginDisabled(!hasVisualSource);
+	if (ImGui::Button("Use in Video Prompt##MusicVideo", ImVec2(180, 0))) {
+		applyMusicVideoWorkflowDefaults(true);
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!hasVisualSource || generating.load());
+	if (ImGui::Button("Plan Music Video##MusicVideo", ImVec2(180, 0))) {
+		applyMusicVideoWorkflowDefaults(true);
+		runVideoPlanning();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	const bool canPlanEdit =
+		!generating.load() &&
+		std::strlen(visionVideoPath) > 0 &&
+		(!videoEditUseCurrentAnalysis || !trim(visionOutput).empty());
+	ImGui::BeginDisabled(!canPlanEdit);
+	if (ImGui::Button("Plan Music Video Edit##MusicVideo", ImVec2(210, 0))) {
+		applyMusicVideoWorkflowDefaults(false);
+		runVideoEditPlanning();
+	}
+	ImGui::EndDisabled();
+
+	if (!musicToImageStatus.empty()) {
+		ImGui::TextWrapped("%s", musicToImageStatus.c_str());
+	}
+	ImGui::TextDisabled(
+		"Workflow defaults: %d beats | %d scenes | %d sections | %.1f s | preset: %s",
+		videoPlanBeatCount,
+		videoPlanSceneCount,
+		musicVideoSectionCount,
+		videoPlanDurationSeconds,
+		kVideoEditPresets[3].name);
+	if (!musicVideoSectionSummary.empty()) {
+		ImGui::TextWrapped("%s", musicVideoSectionSummary.c_str());
+	}
+
+	ImGui::BeginChild("##MusicVideoConceptOut", ImVec2(0, 90.0f), true);
+	if (trim(musicToImagePromptOutput).empty()) {
+		ImGui::TextDisabled("Generated music-video visual concept appears here.");
+	} else {
+		ImGui::TextUnformatted(musicToImagePromptOutput.c_str());
+	}
+	ImGui::EndChild();
+}
+
+void ofApp::runImageToMusicPromptGeneration() {
+	if (generating.load()) {
+		return;
+	}
+
+	const std::string modelPath = getSelectedModelPath();
+	if (modelPath.empty()) {
+		imageToMusicStatus = "[Error] Select a text model before generating a music prompt.";
+		return;
+	}
+
+	if (trim(imageToMusicDescription).empty() && trim(imageToMusicSceneNotes).empty()) {
+		imageToMusicStatus = "[Error] Enter a visual description or scene notes first.";
+		return;
+	}
+
+	mediaPromptGenerator.setCompletionExecutable(llmInference.getCompletionExecutable());
+	ofxGgmlInferenceSettings settings = buildCurrentTextInferenceSettings(AiMode::MilkDrop);
+	settings.maxTokens = std::clamp(settings.maxTokens, 96, 384);
+	settings.temperature = std::clamp(settings.temperature, 0.2f, 0.9f);
+	settings.stopAtNaturalBoundary = true;
+
+	ofxGgmlImageToMusicRequest request;
+	request.imageDescription = trim(imageToMusicDescription);
+	request.sceneNotes = trim(imageToMusicSceneNotes);
+	request.musicalStyle = trim(imageToMusicStyle);
+	request.instrumentation = trim(imageToMusicInstrumentation);
+	request.targetDurationSeconds = imageToMusicDurationSeconds;
+	request.instrumentalOnly = imageToMusicInstrumentalOnly;
+
+	cancelRequested.store(false);
+	generating.store(true);
+	activeGenerationMode = AiMode::Vision;
+	generationStartTime = ofGetElapsedTimef();
+	imageToMusicStatus = "Generating image-inspired music prompt...";
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	workerThread = std::thread([this, modelPath, request, settings]() {
+		std::string promptText;
+		std::string statusText;
+		try {
+			const ofxGgmlImageToMusicResult result =
+				mediaPromptGenerator.generateImageToMusicPrompt(
+					modelPath,
+					request,
+					settings,
+					nullptr);
+			if (cancelRequested.load()) {
+				statusText = "[Cancelled] Music prompt generation cancelled.";
+			} else if (result.success) {
+				promptText = result.musicPrompt;
+				statusText = "Generated image-inspired music prompt.";
+			} else {
+				statusText = "[Error] " + result.error;
+			}
+		} catch (const std::exception & e) {
+			statusText = std::string("[Error] Music prompt generation failed: ") + e.what();
+		} catch (...) {
+			statusText = "[Error] Unknown failure during music prompt generation.";
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingImageToMusicPromptOutput = promptText;
+			pendingImageToMusicStatus = statusText;
+			pendingImageToMusicDirty = true;
+		}
+		generating.store(false);
+	});
+}
+
+void ofApp::runImageToMusicNotationGeneration() {
+	if (generating.load()) {
+		return;
+	}
+
+	const std::string modelPath = getSelectedModelPath();
+	if (modelPath.empty()) {
+		imageToMusicStatus = "[Error] Select a text model before generating ABC notation.";
+		return;
+	}
+
+	const std::string sourceConcept = !trim(imageToMusicPromptOutput).empty()
+		? trim(imageToMusicPromptOutput)
+		: trim(imageToMusicDescription);
+	if (sourceConcept.empty()) {
+		imageToMusicStatus = "[Error] Generate a music prompt first or enter a visual description.";
+		return;
+	}
+
+	musicGenerator.setCompletionExecutable(llmInference.getCompletionExecutable());
+	ofxGgmlInferenceSettings settings = buildCurrentTextInferenceSettings(AiMode::MilkDrop);
+	settings.maxTokens = std::clamp(settings.maxTokens, 128, 512);
+	settings.temperature = std::clamp(settings.temperature, 0.15f, 0.75f);
+	settings.stopAtNaturalBoundary = false;
+
+	ofxGgmlMusicNotationRequest request;
+	request.sourceConcept = sourceConcept;
+	request.title = trim(imageToMusicAbcTitle).empty()
+		? std::string("Generated Theme")
+		: trim(imageToMusicAbcTitle);
+	request.style = trim(imageToMusicStyle).empty()
+		? std::string("cinematic instrumental soundtrack")
+		: trim(imageToMusicStyle);
+	request.key = trim(imageToMusicAbcKey).empty()
+		? std::string("Cm")
+		: trim(imageToMusicAbcKey);
+	request.bars = imageToMusicAbcBars;
+	request.instrumentalOnly = imageToMusicInstrumentalOnly;
+
+	cancelRequested.store(false);
+	generating.store(true);
+	activeGenerationMode = AiMode::Vision;
+	generationStartTime = ofGetElapsedTimef();
+	imageToMusicStatus = "Generating ABC music sketch...";
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	workerThread = std::thread([this, modelPath, request, settings]() {
+		std::string notationText;
+		std::string statusText;
+		try {
+			const ofxGgmlMusicNotationResult result =
+				musicGenerator.generateAbcNotation(
+					modelPath,
+					request,
+					settings,
+					nullptr);
+			if (cancelRequested.load()) {
+				statusText = "[Cancelled] ABC notation generation cancelled.";
+			} else if (result.success) {
+				notationText = result.abcNotation;
+				statusText = "Generated ABC music sketch.";
+			} else {
+				statusText = "[Error] " + result.error;
+			}
+		} catch (const std::exception & e) {
+			statusText = std::string("[Error] ABC notation generation failed: ") + e.what();
+		} catch (...) {
+			statusText = "[Error] Unknown failure during ABC notation generation.";
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingImageToMusicNotationOutput = notationText;
+			pendingImageToMusicStatus = statusText;
+			pendingImageToMusicDirty = true;
+		}
+		generating.store(false);
+	});
+}
+
+void ofApp::runAceStepMusicGeneration() {
+	if (generating.load()) {
+		return;
+	}
+
+	const std::string prompt = trim(aceStepPrompt);
+	if (prompt.empty()) {
+		aceStepStatus = "[Error] Enter a music prompt first.";
+		return;
+	}
+
+	cancelRequested.store(false);
+	generating.store(true);
+	activeGenerationMode = AiMode::Vision;
+	generationStartTime = ofGetElapsedTimef();
+	aceStepStatus = "Generating music with AceStep...";
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	ofxGgmlAceStepRequest request;
+	request.caption = prompt;
+	request.lyrics = trim(aceStepLyrics);
+	request.bpm = std::max(0, aceStepBpm);
+	request.durationSeconds = static_cast<float>(
+		std::clamp(aceStepDurationSeconds, 8, 180));
+	request.keyscale = trim(aceStepKeyscale);
+	request.timesignature = trim(aceStepTimesignature);
+	request.seed = aceStepSeed;
+	request.instrumentalOnly = aceStepInstrumentalOnly;
+	request.wavOutput = aceStepUseWav;
+	request.outputDir = trim(aceStepOutputDir);
+	request.outputPrefix = trim(aceStepOutputPrefix);
+	const std::string serverUrl = trim(aceStepServerUrl);
+
+	workerThread = std::thread([this, request, serverUrl]() {
+		std::string statusText;
+		std::string enrichedRequestJson;
+		std::string usedServerUrl;
+		std::vector<ofxGgmlGeneratedMusicTrack> tracks;
+		try {
+			const ofxGgmlAceStepGenerateResult result =
+				aceStepBridge.generate(request, serverUrl);
+			usedServerUrl = result.usedServerUrl;
+			enrichedRequestJson = result.enrichedRequestsJson;
+			tracks = result.tracks;
+			if (cancelRequested.load()) {
+				statusText = "[Cancelled] AceStep music generation cancelled.";
+			} else if (result.success) {
+				statusText = "Generated " +
+					ofToString(static_cast<int>(result.tracks.size())) +
+					" AceStep track" +
+					(result.tracks.size() == 1 ? "" : "s") + ".";
+			} else {
+				statusText = "[Error] " + result.error;
+			}
+		} catch (const std::exception & e) {
+			statusText = std::string("[Error] AceStep generation failed: ") + e.what();
+		} catch (...) {
+			statusText = "[Error] Unknown failure during AceStep generation.";
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingAceStepStatus = statusText;
+			pendingAceStepGeneratedRequestJson = enrichedRequestJson;
+			pendingAceStepUnderstoodSummary.clear();
+			pendingAceStepUnderstoodCaption.clear();
+			pendingAceStepUnderstoodLyrics.clear();
+			pendingAceStepUsedServerUrl = usedServerUrl;
+			pendingAceStepGeneratedTracks = tracks;
+			pendingAceStepDirty = true;
+		}
+		generating.store(false);
+	});
+}
+
+void ofApp::runAceStepAudioUnderstanding() {
+	if (generating.load()) {
+		return;
+	}
+
+	const std::string audioPath = trim(aceStepAudioPath);
+	if (audioPath.empty()) {
+		aceStepStatus = "[Error] Select an audio file first.";
+		return;
+	}
+
+	cancelRequested.store(false);
+	generating.store(true);
+	activeGenerationMode = AiMode::Vision;
+	generationStartTime = ofGetElapsedTimef();
+	aceStepStatus = "Understanding audio with AceStep...";
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	ofxGgmlAceStepUnderstandRequest request;
+	request.audioPath = audioPath;
+	request.requestTemplate.caption = trim(aceStepPrompt);
+	request.requestTemplate.lyrics = trim(aceStepLyrics);
+	request.requestTemplate.bpm = std::max(0, aceStepBpm);
+	request.requestTemplate.durationSeconds = static_cast<float>(
+		std::clamp(aceStepDurationSeconds, 8, 180));
+	request.requestTemplate.keyscale = trim(aceStepKeyscale);
+	request.requestTemplate.timesignature = trim(aceStepTimesignature);
+	request.requestTemplate.instrumentalOnly = aceStepInstrumentalOnly;
+	request.includeRequestTemplate =
+		!trim(request.requestTemplate.caption).empty() ||
+		!trim(request.requestTemplate.lyrics).empty() ||
+		request.requestTemplate.bpm > 0 ||
+		!trim(request.requestTemplate.keyscale).empty();
+	const std::string serverUrl = trim(aceStepServerUrl);
+
+	workerThread = std::thread([this, request, serverUrl]() {
+		std::string statusText;
+		std::string summaryText;
+		std::string captionText;
+		std::string lyricsText;
+		std::string responseJson;
+		std::string usedServerUrl;
+		try {
+			const ofxGgmlAceStepUnderstandResult result =
+				aceStepBridge.understandAudio(request, serverUrl);
+			usedServerUrl = result.usedServerUrl;
+			responseJson = result.rawJson;
+			summaryText = result.summary;
+			captionText = result.caption;
+			lyricsText = result.lyrics;
+			if (cancelRequested.load()) {
+				statusText = "[Cancelled] AceStep audio understanding cancelled.";
+			} else if (result.success) {
+				statusText = "Understood audio with AceStep.";
+			} else {
+				statusText = "[Error] " + result.error;
+			}
+		} catch (const std::exception & e) {
+			statusText = std::string("[Error] AceStep audio understanding failed: ") + e.what();
+		} catch (...) {
+			statusText = "[Error] Unknown failure during AceStep audio understanding.";
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingAceStepStatus = statusText;
+			pendingAceStepGeneratedRequestJson = responseJson;
+			pendingAceStepUnderstoodSummary = summaryText;
+			pendingAceStepUnderstoodCaption = captionText;
+			pendingAceStepUnderstoodLyrics = lyricsText;
+			pendingAceStepUsedServerUrl = usedServerUrl;
+			pendingAceStepGeneratedTracks.clear();
+			pendingAceStepDirty = true;
+		}
+		generating.store(false);
+	});
+}
+
 void ofApp::runVisionInference() {
 	if (generating.load()) return;
 
@@ -1618,8 +2571,27 @@ void ofApp::runVideoPlanning() {
 	const std::string preferredStyle = trim(diffusionPrompt);
 	const std::string negativePrompt = trim(diffusionNegativePrompt);
 	const bool multiScene = videoPlanMultiScene;
+	const bool musicVideoMode =
+		videoEditPresetIndex == 3 &&
+		(!trim(musicToImageDescription).empty() ||
+		 !trim(musicToImageLyrics).empty() ||
+		 !trim(musicToImagePromptOutput).empty());
+	const int sectionCount = std::clamp(musicVideoSectionCount, 2, 8);
+	const float cutIntensity = std::clamp(musicVideoCutIntensity, 0.0f, 1.0f);
+	const int structureIndex = std::clamp(musicVideoStructureIndex, 0, 4);
+	static const char * musicVideoStructureHints[] = {
+		"intro -> verse -> chorus -> bridge -> outro",
+		"verse -> chorus -> verse -> chorus",
+		"slow atmospheric build -> energetic drop -> release",
+		"setup -> escalation -> payoff",
+		"performance coverage with crowd and detail cutaways"
+	};
+	const std::string sectionStructureHint =
+		musicVideoMode
+			? musicVideoStructureHints[structureIndex]
+			: std::string();
 
-	workerThread = std::thread([this, modelPath, inferenceSettings, sourcePrompt, beatCount, sceneCount, durationSeconds, preferredStyle, negativePrompt, multiScene]() {
+	workerThread = std::thread([this, modelPath, inferenceSettings, sourcePrompt, beatCount, sceneCount, durationSeconds, preferredStyle, negativePrompt, multiScene, musicVideoMode, sectionCount, cutIntensity, sectionStructureHint]() {
 		auto setPending = [this](const std::string & text) {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingOutput = text;
@@ -1638,9 +2610,13 @@ void ofApp::runVideoPlanning() {
 			request.beatCount = beatCount;
 			request.sceneCount = sceneCount;
 			request.multiScene = multiScene;
+			request.musicVideoMode = musicVideoMode;
+			request.sectionCount = sectionCount;
 			request.durationSeconds = durationSeconds;
 			request.preferredStyle = preferredStyle;
 			request.negativePrompt = negativePrompt;
+			request.sectionStructureHint = sectionStructureHint;
+			request.cutIntensity = cutIntensity;
 
 			{
 				std::lock_guard<std::mutex> lock(streamMutex);
@@ -1716,9 +2692,17 @@ void ofApp::runMontagePlanning() {
 	const size_t maxClips = static_cast<size_t>(std::clamp(montageMaxClips, 1, 24));
 	const int fps = std::clamp(montageFps, 12, 60);
 	const double minScore = std::clamp(static_cast<double>(montageMinScore), 0.0, 1.0);
+	const double targetDurationSeconds =
+		std::clamp(static_cast<double>(montageTargetDurationSeconds), 1.0, 120.0);
+	const double minSpacingSeconds =
+		std::clamp(static_cast<double>(montageMinSpacingSeconds), 0.0, 15.0);
+	const double preRollSeconds =
+		std::clamp(static_cast<double>(montagePreRollSeconds), 0.0, 5.0);
+	const double postRollSeconds =
+		std::clamp(static_cast<double>(montagePostRollSeconds), 0.0, 5.0);
 	const bool preserveChronology = montagePreserveChronology;
 
-	workerThread = std::thread([this, srtPath, goal, reelName, edlTitle, maxClips, fps, minScore, preserveChronology]() {
+	workerThread = std::thread([this, srtPath, goal, reelName, edlTitle, maxClips, fps, minScore, targetDurationSeconds, minSpacingSeconds, preRollSeconds, postRollSeconds, preserveChronology]() {
 		auto setPending = [this](const std::string & text) {
 			std::lock_guard<std::mutex> lock(outputMutex);
 			pendingOutput = text;
@@ -1748,6 +2732,10 @@ void ofApp::runMontagePlanning() {
 				request.segments = segmentsResult.value();
 				request.maxClips = maxClips;
 				request.minScore = minScore;
+				request.targetDurationSeconds = targetDurationSeconds;
+				request.minSpacingSeconds = minSpacingSeconds;
+				request.preRollSeconds = preRollSeconds;
+				request.postRollSeconds = postRollSeconds;
 				request.preserveChronology = preserveChronology;
 				request.fallbackReelName = reelName.empty() ? "AX" : reelName;
 

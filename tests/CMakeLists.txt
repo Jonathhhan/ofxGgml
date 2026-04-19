@@ -120,11 +120,15 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND ADDON_SOURCES
         ../src/assistants/ofxGgmlChatAssistant.cpp
         ../src/inference/ofxGgmlDiffusionInference.cpp
+        ../src/inference/ofxGgmlAceStepBridge.cpp
         ../src/inference/ofxGgmlCitationSearch.cpp
         ../src/inference/ofxGgmlInference.cpp
+        ../src/inference/ofxGgmlMediaPromptGenerator.cpp
+        ../src/inference/ofxGgmlMusicGenerator.cpp
         ../src/inference/ofxGgmlMilkDropGenerator.cpp
         ../src/inference/ofxGgmlInferenceSourceInternals.cpp
         ../src/inference/ofxGgmlInferenceTextCleanup.cpp
+        ../src/inference/ofxGgmlVideoEssayWorkflow.cpp
         ../src/inference/ofxGgmlMontagePlanner.cpp
         ../src/inference/ofxGgmlMontagePreviewBridge.cpp
         ../src/inference/ofxGgmlSpeechInference.cpp
@@ -164,6 +168,7 @@ set(TEST_SOURCES
 if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND TEST_SOURCES
         test_inference.cpp
+        test_montage_planner.cpp
         test_montage_preview_bridge.cpp
         test_video_planner_workflow.cpp
         test_speech_inference.cpp
@@ -171,6 +176,10 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         test_video_inference.cpp
         test_assistant_eval.cpp
         test_easy_api.cpp
+        test_media_prompt_generator.cpp
+        test_music_generator.cpp
+        test_video_essay_workflow.cpp
+        test_acestep_bridge.cpp
         test_milkdrop_generator.cpp
         test_chat_assistant.cpp
         test_code_assistant.cpp

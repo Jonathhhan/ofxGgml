@@ -31,6 +31,17 @@ struct ofxGgmlVideoPlanBeat {
 	std::vector<std::string> subjects;
 };
 
+struct ofxGgmlVideoPlanSection {
+	int index = 0;
+	std::string label;
+	std::string role;
+	double startSeconds = 0.0;
+	double endSeconds = 0.0;
+	std::string energy;
+	std::string cutDensity;
+	std::string visualFocus;
+};
+
 struct ofxGgmlVideoPlanScene {
 	int index = 0;
 	std::string title;
@@ -54,6 +65,7 @@ struct ofxGgmlVideoPlan {
 	std::vector<ofxGgmlVideoPlanSubject> subjects;
 	std::vector<ofxGgmlVideoPlanEntity> entities;
 	std::vector<ofxGgmlVideoPlanBeat> beats;
+	std::vector<ofxGgmlVideoPlanSection> sections;
 	std::vector<ofxGgmlVideoPlanScene> scenes;
 };
 
@@ -123,8 +135,12 @@ struct ofxGgmlVideoPlannerRequest {
 	int beatCount = 4;
 	int sceneCount = 3;
 	bool multiScene = false;
+	bool musicVideoMode = false;
+	int sectionCount = 4;
 	std::string preferredStyle;
 	std::string negativePrompt;
+	std::string sectionStructureHint;
+	float cutIntensity = 0.65f;
 };
 
 struct ofxGgmlVideoEditPlannerRequest {

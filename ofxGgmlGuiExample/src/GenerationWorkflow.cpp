@@ -10,26 +10,22 @@
 #include <sstream>
 #include <thread>
 
-void ofApp::runInference(
-	AiMode mode,
-	const std::string & userText,
-	const std::string & systemPrompt,
-	const std::string & overridePrompt,
-	const ofxGgmlRealtimeInfoSettings & realtimeSettings) {
-	if (generating.load() || !engineReady) return;
-	if (mode == AiMode::Script) {
-		lastScriptRequest = userText;
-	}
-
-	const int chatLanguageIndexSnapshot = chatLanguageIndex;
-	const int selectedLanguageIndexSnapshot = selectedLanguageIndex;
-	const int translateSourceLangSnapshot = translateSourceLang;
-	const int translateTargetLangSnapshot = translateTargetLang;
-	const int selectedScriptFileIndexSnapshot = selectedScriptFileIndex;
-	const bool scriptIncludeRepoContextSnapshot = scriptIncludeRepoContext;
-	const auto recentScriptTouchedFilesSnapshot = recentScriptTouchedFiles;
-	const std::string lastScriptFailureReasonSnapshot = lastScriptFailureReason;
-	const std::string scriptBackendLabelSnapshot = [&]() {
+ofApp::InferenceModePromptSnapshot ofApp::makeInferenceModePromptSnapshot() const {
+	InferenceModePromptSnapshot snapshot;
+	snapshot.chatLanguageIndex = chatLanguageIndex;
+	snapshot.translateSourceLangIndex = translateSourceLang;
+	snapshot.translateTargetLangIndex = translateTargetLang;
+	snapshot.chatLanguages = chatLanguages;
+	snapshot.translateLanguages = translateLanguages;
+	snapshot.script.selectedLanguageIndex = selectedLanguageIndex;
+	snapshot.script.focusedFileIndex = selectedScriptFileIndex;
+	snapshot.script.includeRepoContext = scriptIncludeRepoContext;
+	snapshot.script.languages = scriptLanguages;
+	snapshot.script.recentTouchedFiles = recentScriptTouchedFiles;
+	snapshot.script.lastTask = lastScriptRequest;
+	snapshot.script.lastOutput = scriptOutput;
+	snapshot.script.lastFailureReason = lastScriptFailureReason;
+	snapshot.script.backendLabel = [&]() {
 		if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 			const std::string serverUrl = trim(textServerUrl);
 			return serverUrl.empty()
@@ -39,9 +35,720 @@ void ofApp::runInference(
 		const std::string cliPath = trim(llamaCliCommand);
 		return cliPath.empty() ? std::string("llama-completion") : cliPath;
 	}();
-	const auto chatLanguagesSnapshot = chatLanguages;
-	const auto scriptLanguagesSnapshot = scriptLanguages;
-	const auto translateLanguagesSnapshot = translateLanguages;
+	return snapshot;
+}
+
+ofxGgmlTextAssistantRequest ofApp::buildTextAssistantRequestForMode(
+	AiMode mode,
+	const std::string & inputText,
+	const std::string & systemPrompt,
+	const InferenceModePromptSnapshot & snapshot) const {
+	ofxGgmlTextAssistantRequest request;
+	request.inputText = inputText;
+	switch (mode) {
+	case AiMode::Summarize:
+		request.task = ofxGgmlTextTask::Summarize;
+		break;
+	case AiMode::Write:
+		request.task = ofxGgmlTextTask::Rewrite;
+		break;
+	case AiMode::Translate:
+		request.task = ofxGgmlTextTask::Translate;
+		if (snapshot.translateSourceLangIndex >= 0 &&
+			snapshot.translateSourceLangIndex <
+				static_cast<int>(snapshot.translateLanguages.size())) {
+			request.sourceLanguage = snapshot.translateLanguages
+				[static_cast<size_t>(snapshot.translateSourceLangIndex)]
+					.name;
+		}
+		if (snapshot.translateTargetLangIndex >= 0 &&
+			snapshot.translateTargetLangIndex <
+				static_cast<int>(snapshot.translateLanguages.size())) {
+			request.targetLanguage = snapshot.translateLanguages
+				[static_cast<size_t>(snapshot.translateTargetLangIndex)]
+					.name;
+		}
+		break;
+	case AiMode::Custom:
+	case AiMode::VideoEssay:
+		request.task = ofxGgmlTextTask::Custom;
+		request.systemPrompt = systemPrompt;
+		break;
+	default:
+		request.task = ofxGgmlTextTask::Custom;
+		break;
+	}
+	return request;
+}
+
+ofxGgmlCodeAssistantRequest ofApp::buildScriptAssistantRequest(
+	const std::string & inputText,
+	const InferenceModePromptSnapshot & snapshot) const {
+	ofxGgmlCodeAssistantRequest request;
+	request.action = ofxGgmlCodeAssistantAction::Ask;
+	request.userInput = inputText;
+	request.lastTask = snapshot.script.lastTask;
+	request.lastOutput = snapshot.script.lastOutput;
+	if (snapshot.script.selectedLanguageIndex >= 0 &&
+		snapshot.script.selectedLanguageIndex <
+			static_cast<int>(snapshot.script.languages.size())) {
+		request.language = snapshot.script.languages
+			[static_cast<size_t>(snapshot.script.selectedLanguageIndex)];
+	}
+	if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::Internet) {
+		request.webUrls = scriptSource.getInternetUrls();
+	}
+	return request;
+}
+
+ofxGgmlCodeAssistantContext ofApp::buildScriptAssistantContext(
+	const InferenceModePromptSnapshot & snapshot) {
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+	context.projectMemory = &scriptProjectMemory;
+	context.focusedFileIndex = snapshot.script.focusedFileIndex;
+	context.includeRepoContext = snapshot.script.includeRepoContext;
+	context.maxRepoFiles = kMaxScriptContextFiles;
+	context.maxFocusedFileChars = kMaxFocusedFileSnippetChars;
+	context.activeMode = "Script";
+	context.selectedBackend = snapshot.script.backendLabel;
+	context.recentTouchedFiles = snapshot.script.recentTouchedFiles;
+	context.lastFailureReason = snapshot.script.lastFailureReason;
+	return context;
+}
+
+std::string ofApp::buildPromptForMode(
+	AiMode mode,
+	const std::string & inputText,
+	const std::string & systemPrompt,
+	const InferenceModePromptSnapshot & snapshot) {
+	switch (mode) {
+	case AiMode::Chat: {
+		ofxGgmlChatAssistantRequest request;
+		request.userText = inputText;
+		request.systemPrompt = systemPrompt;
+		if (snapshot.chatLanguageIndex >= 0 &&
+			snapshot.chatLanguageIndex <
+				static_cast<int>(snapshot.chatLanguages.size())) {
+			request.responseLanguage = snapshot.chatLanguages
+				[static_cast<size_t>(snapshot.chatLanguageIndex)]
+					.name;
+		}
+		return chatAssistant.preparePrompt(request).prompt;
+	}
+	case AiMode::Script:
+		return scriptAssistant
+			.preparePrompt(
+				buildScriptAssistantRequest(inputText, snapshot),
+				buildScriptAssistantContext(snapshot))
+			.prompt;
+	case AiMode::Summarize:
+	case AiMode::Write:
+	case AiMode::Translate:
+	case AiMode::Custom:
+	case AiMode::VideoEssay:
+		return textAssistant.preparePrompt(
+			buildTextAssistantRequestForMode(
+				mode,
+				inputText,
+				systemPrompt,
+				snapshot))
+			.prompt;
+	case AiMode::MilkDrop: {
+		ofxGgmlMilkDropRequest request;
+		request.prompt = inputText;
+		return milkdropGenerator.preparePrompt(request).prompt;
+	}
+	default:
+		return inputText;
+	}
+}
+
+std::string ofApp::buildScriptContinuationPrompt(
+	const std::string & partialOutput,
+	const InferenceModePromptSnapshot & snapshot) const {
+	ofxGgmlCodeAssistantRequest request;
+	request.action = ofxGgmlCodeAssistantAction::ContinueCutoff;
+	request.userInput = partialOutput;
+	request.lastOutput = partialOutput;
+	if (snapshot.script.selectedLanguageIndex >= 0 &&
+		snapshot.script.selectedLanguageIndex <
+			static_cast<int>(snapshot.script.languages.size())) {
+		request.language = snapshot.script.languages
+			[static_cast<size_t>(snapshot.script.selectedLanguageIndex)];
+	}
+	return scriptAssistant.preparePrompt(request, {}).prompt;
+}
+
+void ofApp::runPreparedTextRequest(
+	AiMode mode,
+	const ofxGgmlTextAssistantRequest & request,
+	const ofxGgmlRealtimeInfoSettings & realtimeSettings) {
+	runInference(
+		mode,
+		request.inputText,
+		request.systemPrompt,
+		textAssistant.preparePrompt(request).prompt,
+		realtimeSettings);
+}
+
+void ofApp::runScriptAssistantRequest(
+	const ofxGgmlCodeAssistantRequest & request,
+	const std::string & requestLabel,
+	bool clearInputAfter,
+	const ofxGgmlRealtimeInfoSettings &) {
+	if (generating.load() || !engineReady) return;
+
+	lastScriptRequest = request.userInput;
+	const InferenceModePromptSnapshot promptSnapshot = makeInferenceModePromptSnapshot();
+	const ofxGgmlCodeAssistantContext assistantContext =
+		buildScriptAssistantContext(promptSnapshot);
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::Script;
+	generationStartTime = ofGetElapsedTimef();
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput.clear();
+	}
+
+	if (clearInputAfter) {
+		std::memset(scriptInput, 0, sizeof(scriptInput));
+	}
+
+	{
+		std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
+		scriptAssistantApprovalPending = false;
+		scriptAssistantApprovalDecisionReady = false;
+		scriptAssistantApprovalDecisionApproved = false;
+		scriptAssistantPendingApprovalToolCall = {};
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	workerThread = std::thread(
+		[this, request, requestLabel, assistantContext]() {
+			try {
+				const std::string modelPath = getSelectedModelPath();
+				std::string localError;
+				const bool preferredServerBackend =
+					(textInferenceBackend == TextInferenceBackend::LlamaServer);
+				bool useServerBackend = preferredServerBackend;
+
+				auto prepareCliBackend = [&](std::string * cliError = nullptr) -> bool {
+					std::string backendError;
+					if (modelPath.empty()) {
+						backendError = "No model preset selected.";
+					} else if (!std::filesystem::exists(modelPath)) {
+						backendError = "Model file not found: " + modelPath;
+					}
+					if (!backendError.empty()) {
+						if (cliError != nullptr) {
+							*cliError = backendError;
+						}
+						return false;
+					}
+					if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+						probeLlamaCli();
+						if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+							backendError =
+								"Optional CLI fallback is not installed. Build it with scripts/build-llama-cli.sh if you want a local non-server fallback.";
+							if (cliError != nullptr) {
+								*cliError = backendError;
+							}
+							return false;
+						}
+					}
+					scriptAssistant.getInference().setCompletionExecutable(llamaCliCommand);
+					scriptAssistant.getInference().probeCompletionCapabilities(true);
+					return true;
+				};
+
+				if (useServerBackend && !ensureTextServerReady(false, true)) {
+					const std::string serverError = !textServerStatusMessage.empty()
+						? textServerStatusMessage
+						: "Server-backed inference is not ready.";
+					std::string cliError;
+					if (prepareCliBackend(&cliError)) {
+						useServerBackend = false;
+						if (shouldLog(OF_LOG_NOTICE)) {
+							logWithLevel(
+								OF_LOG_NOTICE,
+								"Server-backed Script assistant is unavailable; falling back to local llama-completion for this request.");
+						}
+					} else {
+						localError = serverError;
+						if (!cliError.empty()) {
+							localError += " CLI fallback unavailable: " + cliError;
+						}
+					}
+				} else if (!useServerBackend && !prepareCliBackend(&localError)) {
+					// localError already populated
+				}
+
+				if (!localError.empty()) {
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingOutput = "[Error] " + localError;
+					pendingRole = "assistant";
+					pendingMode = AiMode::Script;
+					pendingScriptAssistantSessionDirty = false;
+					pendingScriptAssistantEvents.clear();
+					pendingScriptAssistantToolCalls.clear();
+					return;
+				}
+
+				ofxGgmlInferenceSettings inferenceSettings;
+				inferenceSettings.maxTokens = std::clamp(maxTokens, 1, 8192);
+				inferenceSettings.temperature = std::isfinite(temperature)
+					? std::clamp(temperature, 0.0f, 2.0f)
+					: kDefaultTemp;
+				inferenceSettings.topP = std::isfinite(topP)
+					? std::clamp(topP, 0.0f, 1.0f)
+					: kDefaultTopP;
+				inferenceSettings.topK = std::clamp(topK, 0, 200);
+				inferenceSettings.minP = std::isfinite(minP)
+					? std::clamp(minP, 0.0f, 1.0f)
+					: 0.0f;
+				inferenceSettings.repeatPenalty = std::isfinite(repeatPenalty)
+					? std::clamp(repeatPenalty, 1.0f, 2.0f)
+					: kDefaultRepeatPenalty;
+				inferenceSettings.contextSize = std::clamp(contextSize, 256, 16384);
+				inferenceSettings.batchSize = std::clamp(batchSize, 32, 4096);
+				inferenceSettings.threads = std::clamp(numThreads, 1, 128);
+				inferenceSettings.gpuLayers = std::clamp(
+					gpuLayers,
+					0,
+					detectedModelLayers > 0 ? detectedModelLayers : 128);
+				inferenceSettings.seed = seed;
+				inferenceSettings.simpleIo = true;
+				inferenceSettings.singleTurn = true;
+				inferenceSettings.autoProbeCliCapabilities = true;
+				inferenceSettings.trimPromptToContext = true;
+				inferenceSettings.allowBatchFallback = true;
+				inferenceSettings.autoContinueCutoff = autoContinueCutoff;
+				inferenceSettings.stopAtNaturalBoundary = stopAtNaturalBoundary;
+				inferenceSettings.autoPromptCache = usePromptCache;
+				inferenceSettings.promptCachePath =
+					usePromptCache ? promptCachePathFor(modelPath, AiMode::Script) : std::string();
+				inferenceSettings.mirostat = mirostatMode;
+				inferenceSettings.mirostatTau = mirostatTau;
+				inferenceSettings.mirostatEta = mirostatEta;
+				inferenceSettings.useServerBackend = useServerBackend;
+				if (useServerBackend) {
+					inferenceSettings.serverUrl = effectiveTextServerUrl(textServerUrl);
+					inferenceSettings.serverModel = trim(textServerModel);
+				}
+				if (!useServerBackend &&
+					!backendNames.empty() &&
+					selectedBackendIndex >= 0 &&
+					selectedBackendIndex < static_cast<int>(backendNames.size())) {
+					const std::string & selected =
+						backendNames[static_cast<size_t>(selectedBackendIndex)];
+					if (selected != "CPU") {
+						inferenceSettings.device = selected;
+					}
+				}
+				if (!useServerBackend && inferenceSettings.device.empty()) {
+					const std::string backend = ggml.getBackendName();
+					if (!backend.empty() && backend != "CPU" && backend != "none") {
+						inferenceSettings.device = backend;
+					}
+				}
+				if (!useServerBackend &&
+					inferenceSettings.gpuLayers == 0 &&
+					inferenceSettings.device != "CPU") {
+					inferenceSettings.gpuLayers =
+						detectedModelLayers > 0 ? detectedModelLayers : 999;
+				}
+
+				std::vector<ofxGgmlCodeAssistantEvent> assistantEvents;
+				auto eventCallback =
+					[&](const ofxGgmlCodeAssistantEvent & event) -> bool {
+					assistantEvents.push_back(event);
+					return !cancelRequested.load();
+				};
+				auto approvalCallback =
+					[&](const ofxGgmlCodeAssistantToolCall & toolCall) -> bool {
+					{
+						std::lock_guard<std::mutex> approvalLock(
+							scriptAssistantApprovalMutex);
+						scriptAssistantPendingApprovalToolCall = toolCall;
+						scriptAssistantApprovalPending = true;
+						scriptAssistantApprovalDecisionReady = false;
+						scriptAssistantApprovalDecisionApproved = false;
+					}
+					scriptAssistantApprovalCv.notify_all();
+
+					std::unique_lock<std::mutex> approvalLock(
+						scriptAssistantApprovalMutex);
+					scriptAssistantApprovalCv.wait(
+						approvalLock,
+						[&]() {
+							return cancelRequested.load() ||
+								scriptAssistantApprovalDecisionReady;
+						});
+
+					const bool approved = !cancelRequested.load() &&
+						scriptAssistantApprovalDecisionReady &&
+						scriptAssistantApprovalDecisionApproved;
+					scriptAssistantApprovalPending = false;
+					scriptAssistantApprovalDecisionReady = false;
+					scriptAssistantApprovalDecisionApproved = false;
+					scriptAssistantPendingApprovalToolCall = {};
+					return approved;
+				};
+				auto onChunk = [&](const std::string & chunk) -> bool {
+					if (cancelRequested.load()) {
+						return false;
+					}
+					std::lock_guard<std::mutex> lock(streamMutex);
+					streamingOutput = chunk;
+					return true;
+				};
+
+				ofxGgmlCodeAssistantSession localSessionCopy;
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					localSessionCopy = scriptAssistantSession;
+				}
+
+				ofxGgmlCodeAssistantRequest effectiveRequest = request;
+				effectiveRequest.labelOverride = requestLabel;
+				const auto assistantResult = scriptAssistant.runWithSession(
+					modelPath,
+					effectiveRequest,
+					assistantContext,
+					&localSessionCopy,
+					inferenceSettings,
+					{},
+					approvalCallback,
+					eventCallback,
+					onChunk);
+
+				std::string result = assistantResult.inference.text;
+				if (cancelRequested.load()) {
+					result = "[Generation cancelled]";
+				} else if (!assistantResult.inference.success) {
+					std::string streamedSnapshot;
+					{
+						std::lock_guard<std::mutex> lock(streamMutex);
+						streamedSnapshot = streamingOutput;
+					}
+					if (!trim(streamedSnapshot).empty()) {
+						result = streamedSnapshot;
+					} else {
+						const std::string assistantError =
+							assistantResult.inference.error.empty()
+								? "Inference failed."
+								: assistantResult.inference.error;
+						result = "[Error] " + assistantError;
+					}
+				}
+
+				const bool likelyCutoff =
+					isLikelyCutoffOutput(result, static_cast<int>(AiMode::Script));
+
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					if (!cancelRequested.load()) {
+						pendingOutput = result;
+						pendingRole = "assistant";
+						pendingMode = AiMode::Script;
+						pendingScriptAssistantSession = localSessionCopy;
+						pendingScriptAssistantSessionDirty = true;
+						pendingScriptAssistantEvents = std::move(assistantEvents);
+						pendingScriptAssistantToolCalls =
+							assistantResult.proposedToolCalls;
+						lastScriptOutputLikelyCutoff = likelyCutoff;
+						const size_t tailChars = std::min<size_t>(result.size(), 600);
+						lastScriptOutputTail =
+							result.substr(result.size() - tailChars);
+					}
+				}
+
+				{
+					std::lock_guard<std::mutex> lock(streamMutex);
+					streamingOutput.clear();
+				}
+				{
+					std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
+					scriptAssistantApprovalPending = false;
+					scriptAssistantApprovalDecisionReady = false;
+					scriptAssistantApprovalDecisionApproved = false;
+					scriptAssistantPendingApprovalToolCall = {};
+				}
+				scriptAssistantApprovalCv.notify_all();
+			} catch (const std::exception & e) {
+				logWithLevel(
+					OF_LOG_ERROR,
+					std::string("Exception in Script assistant worker: ") + e.what());
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingOutput =
+					std::string("[Error] Internal exception: ") + e.what();
+				pendingRole = "assistant";
+				pendingMode = AiMode::Script;
+				pendingScriptAssistantSessionDirty = false;
+				pendingScriptAssistantEvents.clear();
+				pendingScriptAssistantToolCalls.clear();
+				{
+					std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
+					scriptAssistantApprovalPending = false;
+					scriptAssistantApprovalDecisionReady = false;
+					scriptAssistantApprovalDecisionApproved = false;
+					scriptAssistantPendingApprovalToolCall = {};
+				}
+				scriptAssistantApprovalCv.notify_all();
+			} catch (...) {
+				logWithLevel(OF_LOG_ERROR, "Unknown exception in Script assistant worker");
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingOutput = "[Error] Unknown internal exception occurred.";
+				pendingRole = "assistant";
+				pendingMode = AiMode::Script;
+				pendingScriptAssistantSessionDirty = false;
+				pendingScriptAssistantEvents.clear();
+				pendingScriptAssistantToolCalls.clear();
+				{
+					std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
+					scriptAssistantApprovalPending = false;
+					scriptAssistantApprovalDecisionReady = false;
+					scriptAssistantApprovalDecisionApproved = false;
+					scriptAssistantPendingApprovalToolCall = {};
+				}
+				scriptAssistantApprovalCv.notify_all();
+			}
+
+			generating.store(false);
+		});
+}
+
+void ofApp::runScriptInlineCompletionRequest(
+	const std::string & targetFilePath,
+	const std::string & prefix,
+	const std::string & suffix,
+	const std::string & instruction) {
+	if (generating.load() || !engineReady) return;
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::Script;
+	generationStartTime = ofGetElapsedTimef();
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput.clear();
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	workerThread = std::thread(
+		[this, targetFilePath, prefix, suffix, instruction]() {
+			try {
+				const std::string modelPath = getSelectedModelPath();
+				std::string localError;
+				const bool preferredServerBackend =
+					(textInferenceBackend == TextInferenceBackend::LlamaServer);
+				bool useServerBackend = preferredServerBackend;
+
+				auto prepareCliBackend = [&](std::string * cliError = nullptr) -> bool {
+					std::string backendError;
+					if (modelPath.empty()) {
+						backendError = "No model preset selected.";
+					} else if (!std::filesystem::exists(modelPath)) {
+						backendError = "Model file not found: " + modelPath;
+					}
+					if (!backendError.empty()) {
+						if (cliError != nullptr) {
+							*cliError = backendError;
+						}
+						return false;
+					}
+					if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+						probeLlamaCli();
+						if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+							backendError =
+								"Optional CLI fallback is not installed. Build it with scripts/build-llama-cli.sh if you want a local non-server fallback.";
+							if (cliError != nullptr) {
+								*cliError = backendError;
+							}
+							return false;
+						}
+					}
+					scriptAssistant.getInference().setCompletionExecutable(llamaCliCommand);
+					scriptAssistant.getInference().probeCompletionCapabilities(true);
+					return true;
+				};
+
+				if (useServerBackend && !ensureTextServerReady(false, true)) {
+					const std::string serverError = !textServerStatusMessage.empty()
+						? textServerStatusMessage
+						: "Server-backed inference is not ready.";
+					std::string cliError;
+					if (prepareCliBackend(&cliError)) {
+						useServerBackend = false;
+					} else {
+						localError = serverError;
+						if (!cliError.empty()) {
+							localError += " CLI fallback unavailable: " + cliError;
+						}
+					}
+				} else if (!useServerBackend && !prepareCliBackend(&localError)) {
+				}
+
+				if (!localError.empty()) {
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingOutput = "[Error] " + localError;
+					pendingRole = "assistant";
+					pendingMode = AiMode::Script;
+					pendingScriptInlineCompletionOutput.clear();
+					pendingScriptInlineCompletionTargetPath.clear();
+					return;
+				}
+
+				ofxGgmlInferenceSettings inferenceSettings;
+				inferenceSettings.maxTokens = std::clamp(maxTokens, 1, 8192);
+				inferenceSettings.temperature = std::isfinite(temperature)
+					? std::clamp(temperature, 0.0f, 2.0f)
+					: kDefaultTemp;
+				inferenceSettings.topP = std::isfinite(topP)
+					? std::clamp(topP, 0.0f, 1.0f)
+					: kDefaultTopP;
+				inferenceSettings.topK = std::clamp(topK, 0, 200);
+				inferenceSettings.minP = std::isfinite(minP)
+					? std::clamp(minP, 0.0f, 1.0f)
+					: 0.0f;
+				inferenceSettings.repeatPenalty = std::isfinite(repeatPenalty)
+					? std::clamp(repeatPenalty, 1.0f, 2.0f)
+					: kDefaultRepeatPenalty;
+				inferenceSettings.contextSize = std::clamp(contextSize, 256, 16384);
+				inferenceSettings.batchSize = std::clamp(batchSize, 32, 4096);
+				inferenceSettings.threads = std::clamp(numThreads, 1, 128);
+				inferenceSettings.gpuLayers = std::clamp(
+					gpuLayers,
+					0,
+					detectedModelLayers > 0 ? detectedModelLayers : 128);
+				inferenceSettings.seed = seed;
+				inferenceSettings.simpleIo = true;
+				inferenceSettings.singleTurn = true;
+				inferenceSettings.autoProbeCliCapabilities = true;
+				inferenceSettings.trimPromptToContext = true;
+				inferenceSettings.allowBatchFallback = true;
+				inferenceSettings.autoPromptCache = usePromptCache;
+				inferenceSettings.promptCachePath =
+					usePromptCache ? promptCachePathFor(modelPath, AiMode::Script) : std::string();
+				inferenceSettings.useServerBackend = useServerBackend;
+				if (useServerBackend) {
+					inferenceSettings.serverUrl = effectiveTextServerUrl(textServerUrl);
+					inferenceSettings.serverModel = trim(textServerModel);
+				}
+				if (!useServerBackend &&
+					!backendNames.empty() &&
+					selectedBackendIndex >= 0 &&
+					selectedBackendIndex < static_cast<int>(backendNames.size())) {
+					const std::string & selected =
+						backendNames[static_cast<size_t>(selectedBackendIndex)];
+					if (selected != "CPU") {
+						inferenceSettings.device = selected;
+					}
+				}
+
+				ofxGgmlCodeAssistantInlineCompletionRequest request;
+				if (!scriptLanguages.empty() &&
+					selectedLanguageIndex >= 0 &&
+					selectedLanguageIndex < static_cast<int>(scriptLanguages.size())) {
+					request.language = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)];
+				}
+				request.filePath = targetFilePath;
+				request.prefix = prefix;
+				request.suffix = suffix;
+				request.instruction = instruction;
+				request.maxTokens = std::clamp(maxTokens, 32, 512);
+				request.singleLine = false;
+				request.useFillInTheMiddle = !suffix.empty();
+
+				auto onChunk = [&](const std::string & chunk) -> bool {
+					if (cancelRequested.load()) {
+						return false;
+					}
+					std::lock_guard<std::mutex> lock(streamMutex);
+					streamingOutput = chunk;
+					return true;
+				};
+
+				const auto completionResult = scriptAssistant.runInlineCompletion(
+					modelPath,
+					request,
+					inferenceSettings,
+					onChunk);
+
+				std::string completion = completionResult.completion;
+				if (cancelRequested.load()) {
+					completion = "[Generation cancelled]";
+				} else if (!completionResult.inference.success && trim(completion).empty()) {
+					completion = "[Error] " + (completionResult.inference.error.empty()
+						? std::string("Inline completion failed.")
+						: completionResult.inference.error);
+				}
+
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					if (!cancelRequested.load()) {
+						pendingOutput = completion;
+						pendingRole = "assistant";
+						pendingMode = AiMode::Script;
+						pendingScriptInlineCompletionOutput = completion;
+						pendingScriptInlineCompletionTargetPath = targetFilePath;
+					}
+				}
+
+				{
+					std::lock_guard<std::mutex> lock(streamMutex);
+					streamingOutput.clear();
+				}
+			} catch (const std::exception & e) {
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingOutput =
+					std::string("[Error] Inline completion exception: ") + e.what();
+				pendingRole = "assistant";
+				pendingMode = AiMode::Script;
+				pendingScriptInlineCompletionOutput.clear();
+				pendingScriptInlineCompletionTargetPath.clear();
+			} catch (...) {
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingOutput = "[Error] Unknown inline completion exception occurred.";
+				pendingRole = "assistant";
+				pendingMode = AiMode::Script;
+				pendingScriptInlineCompletionOutput.clear();
+				pendingScriptInlineCompletionTargetPath.clear();
+			}
+
+			generating.store(false);
+		});
+}
+
+void ofApp::runInference(
+	AiMode mode,
+	const std::string & userText,
+	const std::string & systemPrompt,
+	const std::string & overridePrompt,
+	const ofxGgmlRealtimeInfoSettings & realtimeSettings) {
+	if (generating.load() || !engineReady) return;
+	if (mode == AiMode::Script) {
+		ofxGgmlCodeAssistantRequest request =
+			buildScriptAssistantRequest(userText, makeInferenceModePromptSnapshot());
+		if (!overridePrompt.empty()) {
+			request.bodyOverride = overridePrompt;
+		}
+		runScriptAssistantRequest(request, userText, false, realtimeSettings);
+		return;
+	}
+
+	const InferenceModePromptSnapshot promptSnapshot = makeInferenceModePromptSnapshot();
 
 	generating.store(true);
 	cancelRequested.store(false);
@@ -64,18 +771,7 @@ void ofApp::runInference(
 		 systemPrompt,
 		 overridePrompt,
 		 realtimeSettings,
-		 chatLanguageIndexSnapshot,
-		 selectedLanguageIndexSnapshot,
-		 translateSourceLangSnapshot,
-		 translateTargetLangSnapshot,
-		 selectedScriptFileIndexSnapshot,
-		 scriptIncludeRepoContextSnapshot,
-		 recentScriptTouchedFilesSnapshot,
-		 lastScriptFailureReasonSnapshot,
-		 scriptBackendLabelSnapshot,
-		 chatLanguagesSnapshot,
-		 scriptLanguagesSnapshot,
-		 translateLanguagesSnapshot]() {
+		 promptSnapshot]() {
 			try {
 				const bool preserveLlamaInstructions = (mode == AiMode::Script);
 				ofxGgmlRealtimeInfoSettings effectiveRealtimeSettings = realtimeSettings;
@@ -98,98 +794,10 @@ void ofApp::runInference(
 						 liveContextMode == LiveContextMode::LiveContextStrictCitations);
 				}
 
-				auto buildPromptForCurrentMode = [&](const std::string & text) {
-					switch (mode) {
-					case AiMode::Chat: {
-						ofxGgmlChatAssistantRequest request;
-						request.userText = text;
-						request.systemPrompt = systemPrompt;
-						if (chatLanguageIndexSnapshot > 0 &&
-							chatLanguageIndexSnapshot <
-								static_cast<int>(chatLanguagesSnapshot.size())) {
-							request.responseLanguage =
-								chatLanguagesSnapshot[static_cast<size_t>(chatLanguageIndexSnapshot)]
-									.name;
-						}
-						return chatAssistant.preparePrompt(request).prompt;
-					}
-					case AiMode::Script: {
-						ofxGgmlCodeAssistantRequest request;
-						request.action = ofxGgmlCodeAssistantAction::Ask;
-						request.userInput = text;
-						request.lastTask = lastScriptRequest;
-						request.lastOutput = scriptOutput;
-						if (selectedLanguageIndexSnapshot >= 0 &&
-							selectedLanguageIndexSnapshot <
-								static_cast<int>(scriptLanguagesSnapshot.size())) {
-							request.language = scriptLanguagesSnapshot
-								[static_cast<size_t>(selectedLanguageIndexSnapshot)];
-						}
-
-						ofxGgmlCodeAssistantContext context;
-						context.scriptSource = &scriptSource;
-						context.projectMemory = &scriptProjectMemory;
-						context.focusedFileIndex = selectedScriptFileIndexSnapshot;
-						context.includeRepoContext = scriptIncludeRepoContextSnapshot;
-						context.maxRepoFiles = kMaxScriptContextFiles;
-						context.maxFocusedFileChars = kMaxFocusedFileSnippetChars;
-						context.activeMode = "Script";
-						context.selectedBackend = scriptBackendLabelSnapshot;
-						context.recentTouchedFiles = recentScriptTouchedFilesSnapshot;
-						context.lastFailureReason = lastScriptFailureReasonSnapshot;
-						return scriptAssistant.preparePrompt(request, context).prompt;
-					}
-					case AiMode::Summarize: {
-						ofxGgmlTextAssistantRequest request;
-						request.task = ofxGgmlTextTask::Summarize;
-						request.inputText = text;
-						return textAssistant.preparePrompt(request).prompt;
-					}
-					case AiMode::Write: {
-						ofxGgmlTextAssistantRequest request;
-						request.task = ofxGgmlTextTask::Rewrite;
-						request.inputText = text;
-						return textAssistant.preparePrompt(request).prompt;
-					}
-					case AiMode::Translate: {
-						ofxGgmlTextAssistantRequest request;
-						request.task = ofxGgmlTextTask::Translate;
-						request.inputText = text;
-						if (translateSourceLangSnapshot >= 0 &&
-							translateSourceLangSnapshot <
-								static_cast<int>(translateLanguagesSnapshot.size())) {
-							request.sourceLanguage = translateLanguagesSnapshot
-								[static_cast<size_t>(translateSourceLangSnapshot)]
-									.name;
-						}
-						if (translateTargetLangSnapshot >= 0 &&
-							translateTargetLangSnapshot <
-								static_cast<int>(translateLanguagesSnapshot.size())) {
-							request.targetLanguage = translateLanguagesSnapshot
-								[static_cast<size_t>(translateTargetLangSnapshot)]
-									.name;
-						}
-						return textAssistant.preparePrompt(request).prompt;
-					}
-					case AiMode::Custom: {
-						ofxGgmlTextAssistantRequest request;
-						request.task = ofxGgmlTextTask::Custom;
-						request.inputText = text;
-						request.systemPrompt = systemPrompt;
-						return textAssistant.preparePrompt(request).prompt;
-					}
-					case AiMode::MilkDrop: {
-						ofxGgmlMilkDropRequest request;
-						request.prompt = text;
-						return milkdropGenerator.preparePrompt(request).prompt;
-					}
-					default:
-						return text;
-					}
-				};
-
 				std::string prompt =
-					overridePrompt.empty() ? buildPromptForCurrentMode(userText) : overridePrompt;
+					overridePrompt.empty()
+						? buildPromptForMode(mode, userText, systemPrompt, promptSnapshot)
+						: overridePrompt;
 				if (effectiveRealtimeSettings.enabled ||
 					!effectiveRealtimeSettings.explicitUrls.empty()) {
 					prompt = ofxGgmlInference::buildPromptWithRealtimeInfo(
@@ -317,19 +925,8 @@ void ofApp::runInference(
 					result.rfind("[Error]", 0) != 0 && !cancelRequested.load()) {
 					const size_t tailChars = std::min<size_t>(result.size(), 600);
 					const std::string tail = result.substr(result.size() - tailChars);
-					ofxGgmlCodeAssistantRequest continuationRequest;
-					continuationRequest.action =
-						ofxGgmlCodeAssistantAction::ContinueCutoff;
-					continuationRequest.userInput = tail;
-					continuationRequest.lastOutput = tail;
-					if (selectedLanguageIndexSnapshot >= 0 &&
-						selectedLanguageIndexSnapshot <
-							static_cast<int>(scriptLanguagesSnapshot.size())) {
-						continuationRequest.language = scriptLanguagesSnapshot
-							[static_cast<size_t>(selectedLanguageIndexSnapshot)];
-					}
 					std::string continuationPrompt =
-						scriptAssistant.preparePrompt(continuationRequest, {}).prompt;
+						buildScriptContinuationPrompt(tail, promptSnapshot);
 					bool contTrimmed = false;
 					const size_t contEstimatedTokens = continuationPrompt.size() / 3;
 					const size_t contMaxCtxTokens = static_cast<size_t>(contextSize);
@@ -418,6 +1015,7 @@ void ofApp::stopGeneration() {
 	if (generating.load()) {
 		cancelRequested.store(true);
 		killInferenceProcess();
+		scriptAssistantApprovalCv.notify_all();
 	}
 	if (workerThread.joinable()) {
 		workerThread.join();
@@ -432,7 +1030,14 @@ void ofApp::stopGeneration() {
 void ofApp::applyPendingOutput() {
 	std::lock_guard<std::mutex> lock(outputMutex);
 	const bool hasPendingTextOutput = !pendingOutput.empty();
-	if (!hasPendingTextOutput && !pendingImageSearchDirty) {
+	if (!hasPendingTextOutput &&
+		!pendingMusicToImageDirty &&
+		!pendingImageToMusicDirty &&
+		!pendingAceStepDirty &&
+		!pendingImageSearchDirty &&
+		!pendingCitationDirty &&
+		!pendingVideoEssayDirty &&
+		!pendingVoiceTranslatorDirty) {
 		return;
 	}
 
@@ -440,13 +1045,26 @@ void ofApp::applyPendingOutput() {
 		switch (pendingMode) {
 		case AiMode::Chat:
 			chatMessages.push_back({"assistant", pendingOutput, ofGetElapsedTimef()});
+			chatLastAssistantReply = pendingOutput;
 			fprintf(
 				stderr,
 				"%s\n",
 				formatConsoleLogLine("ChatWindow", "AI", pendingOutput, true).c_str());
+			if (chatSpeakReplies && !trim(pendingOutput).empty()) {
+				speakLatestChatReply(false);
+			}
 			break;
 		case AiMode::Script:
 			scriptOutput = pendingOutput;
+			if (!pendingScriptInlineCompletionOutput.empty()) {
+				scriptInlineCompletionOutput = pendingScriptInlineCompletionOutput;
+				scriptInlineCompletionTargetPath = pendingScriptInlineCompletionTargetPath;
+			}
+			if (pendingScriptAssistantSessionDirty) {
+				scriptAssistantSession = pendingScriptAssistantSession;
+			}
+			scriptAssistantEvents = pendingScriptAssistantEvents;
+			scriptAssistantToolCalls = pendingScriptAssistantToolCalls;
 			scriptMessages.push_back({"assistant", pendingOutput, ofGetElapsedTimef()});
 			if (pendingOutput.rfind("[Error]", 0) != 0) {
 				scriptProjectMemory.addInteraction(lastScriptRequest, pendingOutput);
@@ -581,6 +1199,26 @@ void ofApp::applyPendingOutput() {
 			ttsResolvedSpeakerPath = pendingTtsResolvedSpeakerPath;
 			ttsAudioFiles = pendingTtsAudioFiles;
 			ttsMetadata = pendingTtsMetadata;
+			if (chatTtsPreview.request.pending) {
+				chatTtsPreview.audioFiles = pendingTtsAudioFiles;
+				chatTtsPreview.selectedAudioIndex = 0;
+				chatTtsPreview.loadedAudioPath.clear();
+				chatTtsPreview.statusMessage = pendingOutput;
+				chatTtsPreview.request.clear();
+				if (!chatTtsPreview.audioFiles.empty()) {
+					ensureChatTtsAudioLoaded(0, true);
+				}
+			}
+			if (translateTtsPreview.request.pending) {
+				translateTtsPreview.audioFiles = pendingTtsAudioFiles;
+				translateTtsPreview.selectedAudioIndex = 0;
+				translateTtsPreview.loadedAudioPath.clear();
+				translateTtsPreview.statusMessage = pendingOutput;
+				translateTtsPreview.request.clear();
+				if (!translateTtsPreview.audioFiles.empty()) {
+					ensureTranslateTtsAudioLoaded(0, true);
+				}
+			}
 			fprintf(
 				stderr,
 				"%s\n",
@@ -626,6 +1264,40 @@ void ofApp::applyPendingOutput() {
 		}
 	}
 
+	if (pendingMusicToImageDirty) {
+		musicToImagePromptOutput = pendingMusicToImagePromptOutput;
+		musicToImageStatus = pendingMusicToImageStatus;
+		fprintf(
+			stderr,
+			"%s\n",
+			formatConsoleLogLine("Music to Image", "AI", musicToImageStatus, true).c_str());
+	}
+	if (pendingImageToMusicDirty) {
+		if (!pendingImageToMusicPromptOutput.empty()) {
+			imageToMusicPromptOutput = pendingImageToMusicPromptOutput;
+		}
+		if (!pendingImageToMusicNotationOutput.empty()) {
+			imageToMusicNotationOutput = pendingImageToMusicNotationOutput;
+		}
+		imageToMusicStatus = pendingImageToMusicStatus;
+		fprintf(
+			stderr,
+			"%s\n",
+			formatConsoleLogLine("Image to Music", "AI", imageToMusicStatus, true).c_str());
+	}
+	if (pendingAceStepDirty) {
+		aceStepStatus = pendingAceStepStatus;
+		aceStepGeneratedRequestJson = pendingAceStepGeneratedRequestJson;
+		aceStepUnderstoodSummary = pendingAceStepUnderstoodSummary;
+		aceStepUnderstoodCaption = pendingAceStepUnderstoodCaption;
+		aceStepUnderstoodLyrics = pendingAceStepUnderstoodLyrics;
+		aceStepUsedServerUrl = pendingAceStepUsedServerUrl;
+		aceStepGeneratedTracks = pendingAceStepGeneratedTracks;
+		fprintf(
+			stderr,
+			"%s\n",
+			formatConsoleLogLine("AceStep", "AI", aceStepStatus, true).c_str());
+	}
 	if (pendingImageSearchDirty) {
 		imageSearchOutput = pendingImageSearchOutput;
 		imageSearchBackendName = pendingImageSearchBackendName;
@@ -658,8 +1330,54 @@ void ofApp::applyPendingOutput() {
 			"%s\n",
 			formatConsoleLogLine("Citations", "AI", citationOutput, true).c_str());
 	}
+	if (pendingVideoEssayDirty) {
+		videoEssayStatus = pendingVideoEssayStatus;
+		videoEssayOutline = pendingVideoEssayOutline;
+		videoEssayScript = pendingVideoEssayScript;
+		videoEssaySrtText = pendingVideoEssaySrtText;
+		videoEssayCitations = pendingVideoEssayCitations;
+		videoEssaySections = pendingVideoEssaySections;
+		videoEssayVoiceCues = pendingVideoEssayVoiceCues;
+		fprintf(
+			stderr,
+			"%s\n",
+			formatConsoleLogLine("Video Essay", "AI", videoEssayStatus, true).c_str());
+	}
+	if (pendingVoiceTranslatorDirty) {
+		voiceTranslatorStatus = pendingVoiceTranslatorStatus;
+		voiceTranslatorTranscript = pendingVoiceTranslatorTranscript;
+			if (!pendingTtsBackendName.empty() || !pendingTtsAudioFiles.empty()) {
+				ttsBackendName = pendingTtsBackendName;
+				ttsElapsedMs = pendingTtsElapsedMs;
+				ttsResolvedSpeakerPath = pendingTtsResolvedSpeakerPath;
+				ttsAudioFiles = pendingTtsAudioFiles;
+				ttsMetadata = pendingTtsMetadata;
+				ttsOutput = pendingVoiceTranslatorStatus;
+				translateTtsPreview.audioFiles = pendingTtsAudioFiles;
+				translateTtsPreview.selectedAudioIndex = 0;
+				translateTtsPreview.loadedAudioPath.clear();
+				translateTtsPreview.statusMessage = pendingVoiceTranslatorStatus;
+				if (!translateTtsPreview.audioFiles.empty()) {
+					ensureTranslateTtsAudioLoaded(0, true);
+				}
+			}
+		fprintf(
+			stderr,
+			"%s\n",
+			formatConsoleLogLine(
+				"Voice Translator",
+				"AI",
+				voiceTranslatorStatus,
+				true).c_str());
+	}
 
 	pendingOutput.clear();
+	pendingScriptInlineCompletionOutput.clear();
+	pendingScriptInlineCompletionTargetPath.clear();
+	pendingScriptAssistantSession = {};
+	pendingScriptAssistantSessionDirty = false;
+	pendingScriptAssistantEvents.clear();
+	pendingScriptAssistantToolCalls.clear();
 	pendingSpeechDetectedLanguage.clear();
 	pendingSpeechTranscriptPath.clear();
 	pendingSpeechSrtPath.clear();
@@ -688,6 +1406,21 @@ void ofApp::applyPendingOutput() {
 	pendingDiffusionElapsedMs = 0.0f;
 	pendingDiffusionImages.clear();
 	pendingDiffusionMetadata.clear();
+	pendingMusicToImagePromptOutput.clear();
+	pendingMusicToImageStatus.clear();
+	pendingMusicToImageDirty = false;
+	pendingImageToMusicPromptOutput.clear();
+	pendingImageToMusicNotationOutput.clear();
+	pendingImageToMusicStatus.clear();
+	pendingImageToMusicDirty = false;
+	pendingAceStepStatus.clear();
+	pendingAceStepGeneratedRequestJson.clear();
+	pendingAceStepUnderstoodSummary.clear();
+	pendingAceStepUnderstoodCaption.clear();
+	pendingAceStepUnderstoodLyrics.clear();
+	pendingAceStepUsedServerUrl.clear();
+	pendingAceStepGeneratedTracks.clear();
+	pendingAceStepDirty = false;
 	pendingImageSearchOutput.clear();
 	pendingImageSearchBackendName.clear();
 	pendingImageSearchElapsedMs = 0.0f;
@@ -698,6 +1431,17 @@ void ofApp::applyPendingOutput() {
 	pendingCitationElapsedMs = 0.0f;
 	pendingCitationResults.clear();
 	pendingCitationDirty = false;
+	pendingVideoEssayStatus.clear();
+	pendingVideoEssayOutline.clear();
+	pendingVideoEssayScript.clear();
+	pendingVideoEssaySrtText.clear();
+	pendingVideoEssayCitations.clear();
+	pendingVideoEssaySections.clear();
+	pendingVideoEssayVoiceCues.clear();
+	pendingVideoEssayDirty = false;
+	pendingVoiceTranslatorStatus.clear();
+	pendingVoiceTranslatorTranscript.clear();
+	pendingVoiceTranslatorDirty = false;
 	pendingClipBackendName.clear();
 	pendingClipElapsedMs = 0.0f;
 	pendingClipEmbeddingDimension = 0;

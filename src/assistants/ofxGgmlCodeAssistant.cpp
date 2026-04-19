@@ -613,6 +613,73 @@ std::string riskLevelForScore(float score) {
 	return "low";
 }
 
+void appendBoundedHistory(
+	std::vector<std::string> * history,
+	const std::string & value,
+	size_t maxEntries) {
+	if (history == nullptr) {
+		return;
+	}
+	const std::string trimmed = trimCopy(value);
+	if (trimmed.empty()) {
+		return;
+	}
+	history->push_back(trimmed);
+	if (maxEntries == 0) {
+		history->clear();
+		return;
+	}
+	if (history->size() > maxEntries) {
+		history->erase(
+			history->begin(),
+			history->begin() +
+				static_cast<std::ptrdiff_t>(history->size() - maxEntries));
+	}
+}
+
+bool emitAssistantEvent(
+	const ofxGgmlCodeAssistantEventCallback & callback,
+	const ofxGgmlCodeAssistantEvent & event) {
+	if (!callback) {
+		return true;
+	}
+	return callback(event);
+}
+
+std::string summarizeVerificationCommands(
+	const std::vector<ofxGgmlCodeAssistantCommandSuggestion> & commands) {
+	if (commands.empty()) {
+		return {};
+	}
+	std::vector<std::string> labels;
+	labels.reserve(commands.size());
+	for (const auto & command : commands) {
+		std::string label = trimCopy(command.label);
+		if (label.empty()) {
+			label = trimCopy(command.executable);
+		}
+		if (!label.empty()) {
+			labels.push_back(label);
+		}
+	}
+	return joinStrings(labels, ", ");
+}
+
+std::string summarizeTouchedFiles(
+	const std::vector<ofxGgmlCodeAssistantFileIntent> & files) {
+	if (files.empty()) {
+		return {};
+	}
+	std::vector<std::string> labels;
+	labels.reserve(files.size());
+	for (const auto & file : files) {
+		if (!trimCopy(file.filePath).empty()) {
+			labels.push_back(file.filePath);
+		}
+	}
+	return joinStrings(labels, ", ");
+}
+
 std::string unescapeTaggedValue(const std::string & text) {
 	std::string out;
 	out.reserve(text.size());
@@ -1658,6 +1725,87 @@ ofxGgmlInference & ofxGgmlCodeAssistant::getInference() {
 
 const ofxGgmlInference & ofxGgmlCodeAssistant::getInference() const {
 	return m_inference;
+}
+
+void ofxGgmlCodeAssistant::registerTool(
+	const ofxGgmlCodeAssistantToolDefinition & tool) {
+	std::lock_guard<std::mutex> lock(m_toolRegistryMutex);
+	if (m_toolRegistry.empty()) {
+		m_toolRegistry = defaultToolRegistry();
+	}
+	auto it = std::find_if(
+		m_toolRegistry.begin(),
+		m_toolRegistry.end(),
+		[&](const ofxGgmlCodeAssistantToolDefinition & existing) {
+			return existing.name == tool.name;
+		});
+	if (it != m_toolRegistry.end()) {
+		*it = tool;
+		return;
+	}
+	m_toolRegistry.push_back(tool);
+}
+
+void ofxGgmlCodeAssistant::resetToolRegistry() {
+	std::lock_guard<std::mutex> lock(m_toolRegistryMutex);
+	m_toolRegistry = defaultToolRegistry();
+}
+
+std::vector<ofxGgmlCodeAssistantToolDefinition>
+ofxGgmlCodeAssistant::getToolRegistry() const {
+	std::lock_guard<std::mutex> lock(m_toolRegistryMutex);
+	if (!m_toolRegistry.empty()) {
+		return m_toolRegistry;
+	}
+	return defaultToolRegistry();
+}
+
+std::vector<ofxGgmlCodeAssistantToolDefinition>
+ofxGgmlCodeAssistant::defaultToolRegistry() {
+	return {
+		{
+			"read_repo_context",
+			"Read repository instructions, focused files, and nearby snippets.",
+			ofxGgmlCodeAssistantToolCategory::Context,
+			false,
+			true
+		},
+		{
+			"search_symbols",
+			"Retrieve semantic definitions, references, and caller context.",
+			ofxGgmlCodeAssistantToolCategory::Retrieval,
+			false,
+			true
+		},
+		{
+			"fetch_grounding_sources",
+			"Load explicit web or documentation sources for grounded answers.",
+			ofxGgmlCodeAssistantToolCategory::Grounding,
+			false,
+			true
+		},
+		{
+			"apply_patch",
+			"Apply structured file edits or unified diffs in the workspace.",
+			ofxGgmlCodeAssistantToolCategory::Patching,
+			true,
+			true
+		},
+		{
+			"run_verification",
+			"Run build, test, or verification commands for the proposed change.",
+			ofxGgmlCodeAssistantToolCategory::Verification,
+			true,
+			true
+		},
+		{
+			"review_changes",
+			"Inspect proposed patches, findings, and risks before execution.",
+			ofxGgmlCodeAssistantToolCategory::Analysis,
+			false,
+			true
+		}
+	};
 }
 
 std::vector<ofxGgmlCodeLanguagePreset> ofxGgmlCodeAssistant::defaultLanguagePresets() {
@@ -2893,6 +3041,76 @@ std::vector<ofxGgmlCodeAssistantBuildError> ofxGgmlCodeAssistant::parseBuildErro
 	return errors;
 }
 
+void ofxGgmlCodeAssistant::seedContextFromSession(
+	ofxGgmlCodeAssistantContext * context,
+	const ofxGgmlCodeAssistantSession & session) {
+	if (context == nullptr) {
+		return;
+	}
+	if (trimCopy(context->activeMode).empty()) {
+		context->activeMode = session.activeMode;
+	}
+	if (trimCopy(context->selectedBackend).empty()) {
+		context->selectedBackend = session.selectedBackend;
+	}
+	if (context->recentTouchedFiles.empty()) {
+		context->recentTouchedFiles = session.recentTouchedFiles;
+	}
+	if (trimCopy(context->lastFailureReason).empty()) {
+		context->lastFailureReason = session.lastFailureReason;
+	}
+}
+
+void ofxGgmlCodeAssistant::updateSessionFromResult(
+	ofxGgmlCodeAssistantSession * session,
+	const ofxGgmlCodeAssistantRequest & request,
+	const ofxGgmlCodeAssistantContext & context,
+	const ofxGgmlCodeAssistantResult & result) {
+	if (session == nullptr) {
+		return;
+	}
+
+	if (!trimCopy(context.activeMode).empty()) {
+		session->activeMode = context.activeMode;
+	}
+	if (!trimCopy(context.selectedBackend).empty()) {
+		session->selectedBackend = context.selectedBackend;
+	}
+	if (!trimCopy(result.prepared.focusedFileName).empty()) {
+		session->focusedFilePath = result.prepared.focusedFileName;
+	}
+
+	std::vector<std::string> touchedFiles;
+	for (const auto & fileIntent : result.structured.filesToTouch) {
+		if (!trimCopy(fileIntent.filePath).empty()) {
+			touchedFiles.push_back(fileIntent.filePath);
+		}
+	}
+	if (!touchedFiles.empty()) {
+		session->recentTouchedFiles = touchedFiles;
+	} else if (!context.recentTouchedFiles.empty()) {
+		session->recentTouchedFiles = context.recentTouchedFiles;
+	}
+
+	appendBoundedHistory(
+		&session->recentPrompts,
+		trimCopy(request.userInput).empty()
+			? result.prepared.body
+			: request.userInput,
+		session->maxHistoryEntries);
+	appendBoundedHistory(
+		&session->recentSummaries,
+		!trimCopy(result.structured.goalSummary).empty()
+			? result.structured.goalSummary
+			: result.prepared.requestLabel,
+		session->maxHistoryEntries);
+
+	session->lastFailureReason = result.inference.success
+		? std::string()
+		: trimCopy(result.inference.error);
+	session->revision += 1;
+}
+
 ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult(
 	const std::string & text) {
 	ofxGgmlCodeAssistantStructuredResult structured;
@@ -3373,6 +3591,114 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 	return prepared;
 }
 
+namespace {
+
+std::optional<ofxGgmlCodeAssistantToolDefinition> findToolDefinition(
+	const std::vector<ofxGgmlCodeAssistantToolDefinition> & registry,
+	const std::string & toolName) {
+	const auto it = std::find_if(
+		registry.begin(),
+		registry.end(),
+		[&](const ofxGgmlCodeAssistantToolDefinition & tool) {
+			return tool.name == toolName;
+		});
+	if (it == registry.end()) {
+		return std::nullopt;
+	}
+	return *it;
+}
+
+void appendToolCallIfEnabled(
+	std::vector<ofxGgmlCodeAssistantToolCall> * calls,
+	const std::vector<ofxGgmlCodeAssistantToolDefinition> & registry,
+	const std::string & toolName,
+	const std::string & summary,
+	const std::string & payload = {}) {
+	if (calls == nullptr) {
+		return;
+	}
+	const auto tool = findToolDefinition(registry, toolName);
+	if (!tool || !tool->enabledByDefault) {
+		return;
+	}
+	ofxGgmlCodeAssistantToolCall call;
+	call.toolName = tool->name;
+	call.summary = summary;
+	call.payload = payload;
+	call.category = tool->category;
+	call.requiresApproval = tool->requiresApproval;
+	calls->push_back(std::move(call));
+}
+
+std::vector<ofxGgmlCodeAssistantToolCall> buildProposedToolCalls(
+	const ofxGgmlCodeAssistantPreparedPrompt & prepared,
+	const ofxGgmlCodeAssistantRequest & request,
+	const ofxGgmlCodeAssistantStructuredResult & structured,
+	const std::vector<ofxGgmlCodeAssistantToolDefinition> & registry) {
+	std::vector<ofxGgmlCodeAssistantToolCall> calls;
+
+	if (prepared.includedRepoContext || prepared.includedFocusedFile ||
+		prepared.includedTaskMemory) {
+		appendToolCallIfEnabled(
+			&calls,
+			registry,
+			"read_repo_context",
+			"Use repository instructions, focused files, and task memory.",
+			prepared.focusedFileName);
+	}
+
+	if (prepared.includedSymbolContext || prepared.includedCodeMap) {
+		appendToolCallIfEnabled(
+			&calls,
+			registry,
+			"search_symbols",
+			"Use semantic symbol retrieval and code-map context.",
+			prepared.retrievedSymbolContext.query);
+	}
+
+	if (!request.webUrls.empty()) {
+		appendToolCallIfEnabled(
+			&calls,
+			registry,
+			"fetch_grounding_sources",
+			"Use explicit external grounding sources.",
+			joinStrings(request.webUrls, ", "));
+	}
+
+	if (!structured.patchOperations.empty() ||
+		!trimCopy(structured.unifiedDiff).empty()) {
+		appendToolCallIfEnabled(
+			&calls,
+			registry,
+			"apply_patch",
+			"Apply the proposed patch set to touched files.",
+			summarizeTouchedFiles(structured.filesToTouch));
+	}
+
+	if (!structured.verificationCommands.empty()) {
+		appendToolCallIfEnabled(
+			&calls,
+			registry,
+			"run_verification",
+			"Run verification commands for the proposed change.",
+			summarizeVerificationCommands(structured.verificationCommands));
+	}
+
+	if (!structured.reviewFindings.empty() ||
+		!structured.riskAssessment.reasons.empty()) {
+		appendToolCallIfEnabled(
+			&calls,
+			registry,
+			"review_changes",
+			"Inspect findings, risks, and suggested follow-up work.",
+			trimCopy(structured.riskAssessment.level));
+	}
+
+	return calls;
+}
+
+} // namespace
+
 ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::run(
 	const std::string & modelPath,
 	const ofxGgmlCodeAssistantRequest & request,
@@ -3380,13 +3706,53 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::run(
 	const ofxGgmlInferenceSettings & inferenceSettings,
 	const ofxGgmlPromptSourceSettings & sourceSettings,
 	std::function<bool(const std::string &)> onChunk) const {
+	return runWithSession(
+		modelPath,
+		request,
+		context,
+		nullptr,
+		inferenceSettings,
+		sourceSettings,
+		nullptr,
+		nullptr,
+		onChunk);
+}
+
+ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runWithSession(
+	const std::string & modelPath,
+	const ofxGgmlCodeAssistantRequest & request,
+	const ofxGgmlCodeAssistantContext & context,
+	ofxGgmlCodeAssistantSession * session,
+	const ofxGgmlInferenceSettings & inferenceSettings,
+	const ofxGgmlPromptSourceSettings & sourceSettings,
+	ofxGgmlCodeAssistantApprovalCallback approvalCallback,
+	ofxGgmlCodeAssistantEventCallback eventCallback,
+	std::function<bool(const std::string &)> onChunk) const {
 	ofxGgmlCodeAssistantResult result;
-	result.prepared = preparePrompt(request, context);
+	ofxGgmlCodeAssistantContext effectiveContext = context;
+	if (session != nullptr) {
+		seedContextFromSession(&effectiveContext, *session);
+		ofxGgmlCodeAssistantEvent sessionEvent;
+		sessionEvent.kind = ofxGgmlCodeAssistantEventKind::SessionStarted;
+		sessionEvent.requestLabel = trimCopy(request.labelOverride);
+		sessionEvent.message = "Assistant session started.";
+		sessionEvent.sessionRevision = session->revision;
+		(void)emitAssistantEvent(eventCallback, sessionEvent);
+	}
+
+	result.prepared = preparePrompt(request, effectiveContext);
+	ofxGgmlCodeAssistantEvent preparedEvent;
+	preparedEvent.kind = ofxGgmlCodeAssistantEventKind::PromptPrepared;
+	preparedEvent.requestLabel = result.prepared.requestLabel;
+	preparedEvent.message = "Prepared coding prompt.";
+	preparedEvent.sessionRevision = session != nullptr ? session->revision : 0;
+	(void)emitAssistantEvent(eventCallback, preparedEvent);
 
 	std::vector<ofxGgmlPromptSource> sources;
-	if (context.attachScriptSourceDocuments && context.scriptSource != nullptr) {
+	if (effectiveContext.attachScriptSourceDocuments &&
+		effectiveContext.scriptSource != nullptr) {
 		const auto docs = ofxGgmlInference::collectScriptSourceDocuments(
-			*context.scriptSource,
+			*effectiveContext.scriptSource,
 			sourceSettings);
 		sources.insert(sources.end(), docs.begin(), docs.end());
 	}
@@ -3397,6 +3763,19 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::run(
 		sources.insert(sources.end(), webSources.begin(), webSources.end());
 	}
 
+	auto streamCallback = [&](const std::string & chunk) {
+		ofxGgmlCodeAssistantEvent event;
+		event.kind = ofxGgmlCodeAssistantEventKind::OutputChunk;
+		event.requestLabel = result.prepared.requestLabel;
+		event.chunkText = chunk;
+		event.sessionRevision = session != nullptr ? session->revision : 0;
+		const bool keepStreaming = emitAssistantEvent(eventCallback, event);
+		if (!keepStreaming) {
+			return false;
+		}
+		return onChunk ? onChunk(chunk) : true;
+	};
+
 	if (!sources.empty()) {
 		result.inference = m_inference.generateWithSources(
 			modelPath,
@@ -3404,13 +3783,13 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::run(
 			sources,
 			inferenceSettings,
 			sourceSettings,
-			onChunk);
+			streamCallback);
 	} else {
 		result.inference = m_inference.generate(
 			modelPath,
 			result.prepared.prompt,
 			inferenceSettings,
-			onChunk);
+			streamCallback);
 	}
 
 	result.structured = parseStructuredResult(result.inference.text);
@@ -3464,6 +3843,77 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::run(
 	for (const auto & reason : result.structured.riskAssessment.reasons) {
 		addUniqueString(&result.structured.risks, reason);
 	}
+	result.proposedToolCalls = buildProposedToolCalls(
+		result.prepared,
+		request,
+		result.structured,
+		getToolRegistry());
+
+	ofxGgmlCodeAssistantEvent structuredEvent;
+	structuredEvent.kind = ofxGgmlCodeAssistantEventKind::StructuredResultReady;
+	structuredEvent.requestLabel = result.prepared.requestLabel;
+	structuredEvent.message = result.structured.detectedStructuredOutput
+		? "Structured coding result parsed."
+		: "Inference returned without structured tags.";
+	structuredEvent.sessionRevision = session != nullptr ? session->revision : 0;
+	(void)emitAssistantEvent(eventCallback, structuredEvent);
+
+	for (auto & toolCall : result.proposedToolCalls) {
+		ofxGgmlCodeAssistantEvent toolEvent;
+		toolEvent.kind = ofxGgmlCodeAssistantEventKind::ToolProposed;
+		toolEvent.requestLabel = result.prepared.requestLabel;
+		toolEvent.message = toolCall.summary;
+		toolEvent.toolCall = toolCall;
+		toolEvent.sessionRevision = session != nullptr ? session->revision : 0;
+		(void)emitAssistantEvent(eventCallback, toolEvent);
+
+		if (!toolCall.requiresApproval || !approvalCallback) {
+			continue;
+		}
+
+		ofxGgmlCodeAssistantEvent approvalEvent = toolEvent;
+		approvalEvent.kind = ofxGgmlCodeAssistantEventKind::ApprovalRequested;
+		approvalEvent.message = "Approval requested for " + toolCall.toolName + ".";
+		(void)emitAssistantEvent(eventCallback, approvalEvent);
+
+		toolCall.approved = approvalCallback(toolCall);
+		ofxGgmlCodeAssistantEvent decisionEvent = toolEvent;
+		decisionEvent.kind = toolCall.approved
+			? ofxGgmlCodeAssistantEventKind::ApprovalGranted
+			: ofxGgmlCodeAssistantEventKind::ApprovalDenied;
+		decisionEvent.message = toolCall.approved
+			? "Approval granted for " + toolCall.toolName + "."
+			: "Approval denied for " + toolCall.toolName + ".";
+		decisionEvent.toolCall = toolCall;
+		(void)emitAssistantEvent(eventCallback, decisionEvent);
+
+		if (!toolCall.approved) {
+			addUniqueString(
+				&result.structured.risks,
+				"Approval denied for " + toolCall.toolName + ".");
+			addUniqueString(
+				&result.structured.questions,
+				"Proceed without " + toolCall.toolName + ", or approve it explicitly?");
+		}
+	}
+
+	if (session != nullptr) {
+		updateSessionFromResult(session, request, effectiveContext, result);
+		result.sessionRevision = session->revision;
+	}
+
+	ofxGgmlCodeAssistantEvent completedEvent;
+	completedEvent.kind = result.inference.success
+		? ofxGgmlCodeAssistantEventKind::Completed
+		: ofxGgmlCodeAssistantEventKind::Error;
+	completedEvent.requestLabel = result.prepared.requestLabel;
+	completedEvent.message = result.inference.success
+		? "Assistant run completed."
+		: (trimCopy(result.inference.error).empty()
+			? "Assistant run failed."
+			: result.inference.error);
+	completedEvent.sessionRevision = result.sessionRevision;
+	(void)emitAssistantEvent(eventCallback, completedEvent);
 	return result;
 }
 

@@ -121,6 +121,29 @@ bool isStopWord(const std::string & token) {
 	return stopWords.find(token) != stopWords.end();
 }
 
+bool clipsRespectSpacing(
+	const ofxGgmlMontageSegment & candidate,
+	const std::vector<size_t> & selectedIndices,
+	const std::vector<ofxGgmlMontageSegment> & segments,
+	double minSpacingSeconds) {
+	if (minSpacingSeconds <= 0.0) {
+		return true;
+	}
+	for (size_t selectedIndex : selectedIndices) {
+		if (selectedIndex >= segments.size()) {
+			continue;
+		}
+		const auto & selected = segments[selectedIndex];
+		const bool separated =
+			candidate.endSeconds + minSpacingSeconds <= selected.startSeconds ||
+			candidate.startSeconds >= selected.endSeconds + minSpacingSeconds;
+		if (!separated) {
+			return false;
+		}
+	}
+	return true;
+}
+
 std::string sanitizeEdlTitle(const std::string & value) {
 	const std::string collapsed = collapseWhitespace(value);
 	if (collapsed.empty()) {
@@ -146,6 +169,50 @@ std::string sanitizeSubtitleText(const std::string & text) {
 		}
 	}
 	return sanitized;
+}
+
+std::string chooseThemeBucket(
+	const std::vector<std::string> & goalTokens,
+	const std::unordered_set<std::string> & goalLookup,
+	const ofxGgmlMontageSegment & segment) {
+	for (const auto & token : goalTokens) {
+		if (token.size() < 4) {
+			continue;
+		}
+		const auto & segmentTokens = segment.keywords;
+		if (std::find(segmentTokens.begin(), segmentTokens.end(), token) != segmentTokens.end()) {
+			return token;
+		}
+	}
+	for (const auto & token : segment.keywords) {
+		if (goalLookup.find(token) != goalLookup.end() && token.size() >= 4) {
+			return token;
+		}
+	}
+	return segment.keywords.empty() ? std::string("general") : segment.keywords.front();
+}
+
+std::string suggestTransition(
+	const ofxGgmlMontageClip * previousClip,
+	const ofxGgmlMontageClip & clip) {
+	if (previousClip == nullptr) {
+		return "Open clean on the first strong beat.";
+	}
+	const double sourceGapSeconds = clip.startSeconds - previousClip->endSeconds;
+	if (!previousClip->themeBucket.empty() &&
+		previousClip->themeBucket == clip.themeBucket) {
+		if (sourceGapSeconds <= 2.0) {
+			return "Use a match cut or rhythmic straight cut to keep the motif flowing.";
+		}
+		return "Use an audio bridge or L-cut to reconnect the recurring motif.";
+	}
+	if (sourceGapSeconds >= 8.0) {
+		return "Use a contrast cut with a short audio lead to signal the time jump.";
+	}
+	if (sourceGapSeconds >= 3.0) {
+		return "Use a quick dip or breath frame between the motif change.";
+	}
+	return "Use a straight cut on motion or cadence.";
 }
 
 ofxGgmlMontageMatch scoreSegmentAgainstGoalTokens(
@@ -348,7 +415,55 @@ ofxGgmlMontagePlannerResult ofxGgmlMontagePlanner::plan(
 	});
 
 	const size_t clipCount = std::clamp<size_t>(request.maxClips, 1, matches.size());
-	matches.resize(clipCount);
+	std::vector<ofxGgmlMontageMatch> selectedMatches;
+	selectedMatches.reserve(clipCount);
+	std::vector<size_t> selectedSegmentIndices;
+	selectedSegmentIndices.reserve(clipCount);
+	std::unordered_set<std::string> usedThemeBuckets;
+	double selectedDurationSeconds = 0.0;
+	const double targetDurationSeconds = std::max(0.0, request.targetDurationSeconds);
+	for (const auto & match : matches) {
+		if (selectedMatches.size() >= clipCount) {
+			break;
+		}
+		if (match.segmentIndex >= request.segments.size()) {
+			continue;
+		}
+		if (!clipsRespectSpacing(
+				request.segments[match.segmentIndex],
+				selectedSegmentIndices,
+				request.segments,
+				std::max(0.0, request.minSpacingSeconds))) {
+			continue;
+		}
+		const auto & candidateSegment = request.segments[match.segmentIndex];
+		const std::string themeBucket =
+			chooseThemeBucket(goalTokens, goalLookup, candidateSegment);
+		const double handledDurationSeconds =
+			std::max(0.0, candidateSegment.endSeconds - candidateSegment.startSeconds) +
+			std::max(0.0, request.preRollSeconds) +
+			std::max(0.0, request.postRollSeconds);
+		if (targetDurationSeconds > 0.0 &&
+			!selectedMatches.empty() &&
+			selectedDurationSeconds >= targetDurationSeconds &&
+			usedThemeBuckets.find(themeBucket) != usedThemeBuckets.end()) {
+			continue;
+		}
+		selectedSegmentIndices.push_back(match.segmentIndex);
+		selectedMatches.push_back(match);
+		usedThemeBuckets.insert(themeBucket);
+		selectedDurationSeconds += handledDurationSeconds;
+		if (targetDurationSeconds > 0.0 &&
+			selectedDurationSeconds >= targetDurationSeconds &&
+			selectedMatches.size() >= 2) {
+			break;
+		}
+	}
+	if (selectedMatches.empty()) {
+		result.error = "No subtitle segments met the montage spacing and similarity rules.";
+		return result;
+	}
+	matches = std::move(selectedMatches);
 	if (request.preserveChronology) {
 		std::sort(matches.begin(), matches.end(), [](const ofxGgmlMontageMatch & a, const ofxGgmlMontageMatch & b) {
 			return a.segmentIndex < b.segmentIndex;
@@ -356,6 +471,7 @@ ofxGgmlMontagePlannerResult ofxGgmlMontagePlanner::plan(
 	}
 
 	plan.matches = matches;
+	ofxGgmlMontageClip * previousClip = nullptr;
 	for (size_t i = 0; i < matches.size(); ++i) {
 		const auto & match = matches[i];
 		const auto & segment = request.segments[match.segmentIndex];
@@ -363,12 +479,17 @@ ofxGgmlMontagePlannerResult ofxGgmlMontagePlanner::plan(
 		clip.index = static_cast<int>(i + 1);
 		clip.sourceId = segment.sourceId;
 		clip.reelName = sanitizeReelName(segment.reelName, request.fallbackReelName);
-		clip.startSeconds = segment.startSeconds;
-		clip.endSeconds = segment.endSeconds;
+		clip.startSeconds = std::max(0.0, segment.startSeconds - std::max(0.0, request.preRollSeconds));
+		clip.endSeconds = std::max(
+			clip.startSeconds,
+			segment.endSeconds + std::max(0.0, request.postRollSeconds));
 		clip.score = match.totalScore;
 		clip.clipName = "SEG_" + std::to_string(match.segmentIndex + 1);
 		clip.note = segment.text;
+		clip.themeBucket = chooseThemeBucket(goalTokens, goalLookup, segment);
+		clip.transitionSuggestion = suggestTransition(previousClip, clip);
 		plan.clips.push_back(std::move(clip));
+		previousClip = &plan.clips.back();
 	}
 
 	plan.notes.push_back("Heuristic montage selected from subtitle similarity against the edit goal.");
@@ -376,6 +497,63 @@ ofxGgmlMontagePlannerResult ofxGgmlMontagePlanner::plan(
 		? "Clips are ordered chronologically after relevance filtering."
 		: "Clips are ordered by similarity score.");
 	plan.notes.push_back("Selected " + std::to_string(plan.clips.size()) + " clip(s) from " + std::to_string(request.segments.size()) + " subtitle segments.");
+	if (request.minSpacingSeconds > 0.0) {
+		std::ostringstream note;
+		note << "Enforced a minimum spacing of "
+			 << std::fixed << std::setprecision(2)
+			 << request.minSpacingSeconds
+			 << " s between selected subtitle moments to improve visual variety.";
+		plan.notes.push_back(note.str());
+	}
+	if (request.preRollSeconds > 0.0 || request.postRollSeconds > 0.0) {
+		std::ostringstream note;
+		note << "Applied visual context handles";
+		if (request.preRollSeconds > 0.0) {
+			note << " (pre-roll " << std::fixed << std::setprecision(2) << request.preRollSeconds << " s";
+			if (request.postRollSeconds > 0.0) {
+				note << ", ";
+			} else {
+				note << ")";
+			}
+		}
+		if (request.postRollSeconds > 0.0) {
+			if (request.preRollSeconds <= 0.0) {
+				note << " (";
+			}
+			note << "post-roll " << std::fixed << std::setprecision(2) << request.postRollSeconds << " s)";
+		}
+		plan.notes.push_back(note.str());
+	}
+	if (targetDurationSeconds > 0.0) {
+		std::ostringstream note;
+		note << "Planned toward a target montage duration of "
+			 << std::fixed << std::setprecision(2)
+			 << targetDurationSeconds
+			 << " s.";
+		plan.notes.push_back(note.str());
+	}
+	if (!plan.clips.empty()) {
+		std::unordered_set<std::string> buckets;
+		for (const auto & clip : plan.clips) {
+			if (!clip.themeBucket.empty()) {
+				buckets.insert(clip.themeBucket);
+			}
+		}
+		if (!buckets.empty()) {
+			std::vector<std::string> sortedBuckets(buckets.begin(), buckets.end());
+			std::sort(sortedBuckets.begin(), sortedBuckets.end());
+			plan.notes.push_back(
+				"Theme buckets in play: " + joinStrings(sortedBuckets, ", ") + ".");
+		}
+	}
+	{
+		std::ostringstream note;
+		note << "Estimated montage duration: "
+			 << std::fixed << std::setprecision(2)
+			 << computePlanDurationSeconds(plan)
+			 << " s.";
+		plan.notes.push_back(note.str());
+	}
 	plan.notes.push_back("Review durations and transitions before final conform.");
 
 	for (const auto & token : plan.recurringKeywords) {
@@ -408,6 +586,9 @@ std::string ofxGgmlMontagePlanner::summarizePlan(const ofxGgmlMontagePlan & plan
 				<< formatTimecode(clip.startSeconds, 25) << " - "
 				<< formatTimecode(clip.endSeconds, 25)
 				<< " | score " << std::fixed << std::setprecision(2) << clip.score;
+			if (!clip.themeBucket.empty()) {
+				out << " | theme " << clip.themeBucket;
+			}
 			if (!clip.note.empty()) {
 				out << " | " << clip.note;
 			}
@@ -444,8 +625,14 @@ std::string ofxGgmlMontagePlanner::buildEditorBrief(const ofxGgmlMontagePlan & p
 			out << "\n- " << clip.reelName
 				<< " " << formatTimecode(clip.startSeconds, 25)
 				<< " - " << formatTimecode(clip.endSeconds, 25);
+			if (!clip.themeBucket.empty()) {
+				out << " | theme: " << clip.themeBucket;
+			}
 			if (!clip.note.empty()) {
 				out << " | " << clip.note;
+			}
+			if (!clip.transitionSuggestion.empty()) {
+				out << "\n  transition: " << clip.transitionSuggestion;
 			}
 		}
 	}
@@ -586,7 +773,21 @@ std::string ofxGgmlMontagePlanner::buildEdl(
 		if (!clip.note.empty()) {
 			edl << "* COMMENT: " << clip.note << "\n";
 		}
+		if (!clip.themeBucket.empty()) {
+			edl << "* THEME: " << clip.themeBucket << "\n";
+		}
+		if (!clip.transitionSuggestion.empty()) {
+			edl << "* TRANSITION: " << clip.transitionSuggestion << "\n";
+		}
 		recordCursorSeconds = recordOut;
 	}
 	return edl.str();
+}
+
+double ofxGgmlMontagePlanner::computePlanDurationSeconds(const ofxGgmlMontagePlan & plan) {
+	double duration = 0.0;
+	for (const auto & clip : plan.clips) {
+		duration += std::max(0.0, clip.endSeconds - clip.startSeconds);
+	}
+	return duration;
 }
