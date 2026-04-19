@@ -38,7 +38,8 @@ common:
 	ADDON_INCLUDES_EXCLUDE += libs/mojo/%
 	ADDON_INCLUDES_EXCLUDE += libs/llama/bin/%
 	ADDON_INCLUDES_EXCLUDE += libs/whisper/bin/%
-	ADDON_LIBS_EXCLUDE += build/%
+	# Do not exclude generic build/% library paths here, because the actual
+	# ggml runtime libs intentionally live under libs/ggml/build/.
 	ADDON_LIBS_EXCLUDE += libs/acestep/%
 	ADDON_LIBS_EXCLUDE += libs/mojo/%
 	ADDON_LIBS_EXCLUDE += libs/llama/bin/%
