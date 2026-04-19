@@ -7,6 +7,7 @@ param(
     [int]$Jobs = 0,
     [switch]$Refetch,
     [switch]$Clean,
+    [switch]$KeepArtifacts,
     [switch]$DryRun
 )
 
@@ -186,14 +187,25 @@ function Update-RepositorySubmodules {
     )
 }
 
+function Get-DefaultRuntimeRoot {
+    param([string]$AddonRoot)
+
+    $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+    if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
+        return (Join-Path $localAppData 'ofxGgml\acestep')
+    }
+    return (Join-Path $AddonRoot '.runtime\acestep')
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $addonRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
+$defaultRuntimeRoot = Get-DefaultRuntimeRoot -AddonRoot $addonRoot
 
 if ([string]::IsNullOrWhiteSpace($SourceDir)) {
-    $SourceDir = Join-Path $addonRoot 'libs\acestep\source'
+    $SourceDir = Join-Path $defaultRuntimeRoot 'source'
 }
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
-    $BuildDir = Join-Path $addonRoot 'libs\acestep\build'
+    $BuildDir = Join-Path $defaultRuntimeRoot 'build'
 }
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     $InstallDir = Join-Path $addonRoot 'libs\acestep\bin'
@@ -278,6 +290,16 @@ if (-not $DryRun) {
     if ($copied -eq 0) {
         Write-Warning "No AceStep runtime artifacts were found under $BuildDir. The project may build different target names on this platform."
     }
+
+    if (-not $KeepArtifacts) {
+        Write-Step "Pruning AceStep source/build artifacts"
+        if ((Test-Path -LiteralPath $BuildDir) -and ($BuildDir -ne $InstallDir)) {
+            Remove-Item -LiteralPath $BuildDir -Recurse -Force
+        }
+        if ((Test-Path -LiteralPath $SourceDir) -and ($SourceDir -ne $InstallDir)) {
+            Remove-Item -LiteralPath $SourceDir -Recurse -Force
+        }
+    }
 }
 
 Write-Host ""
@@ -287,6 +309,9 @@ Write-Host "  build:   $BuildDir"
 Write-Host "  install: $InstallDir"
 if (-not [string]::IsNullOrWhiteSpace($resolvedBranch)) {
     Write-Host "  branch:  $resolvedBranch"
+}
+if (-not $KeepArtifacts) {
+    Write-Host "  cache:   pruned after install"
 }
 Write-Host "  server url default in ofxGgml: http://127.0.0.1:8085"
 Write-Host ""

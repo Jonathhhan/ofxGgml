@@ -6,7 +6,7 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ### Added
 - The GUI example AceStep panel now includes an explicit server setup check plus a one-click install-command helper, making it clearer that prompt/ABC workflows stay local-first while rendered audio requires an external AceStep server.
-- `scripts/install-acestep.ps1` and `scripts/install-acestep.bat` as addon-local helpers for checking out and building AceStep into `libs/acestep/`.
+- `scripts/install-acestep.ps1` and `scripts/install-acestep.bat` as addon-local helpers for checking out and building AceStep while keeping only the final runtime binaries under `libs/acestep/bin`.
 - The AceStep installer now validates external command failures properly, auto-detects or falls back across common branch names, initializes required submodules such as `ggml`, and reports checkout-layout issues more clearly when upstream changes break the expected build root.
 - `ofxGgmlCodeAssistantSession`, typed assistant tool definitions/calls, and streamed assistant-event callbacks so apps can keep lightweight coding-session state without rebuilding the whole GUI example workflow.
 - `ofxGgmlCodeAssistant::runWithSession(...)` as a higher-level coding-assistant entry point with approval callbacks for risky tool proposals such as patch application and verification commands.
@@ -20,6 +20,8 @@ All notable changes to `ofxGgml` are documented in this file.
 - `ofxGgmlVideoEssayWorkflow` now also exposes request validation plus a reusable JSON manifest for downstream render/export tools, so source-backed essay planning can travel more cleanly into `ofxVlc4`, diffusion, or external clip renderers.
 
 ### Changed
+- The AceStep installer now defaults its checkout/build cache to `%LOCALAPPDATA%\ofxGgml\acestep`, prunes source/build artifacts after a successful install unless `-KeepArtifacts` is requested, and leaves the addon tree with only the small runtime binaries that the GUI/example uses.
+- The Mojo installer now keeps its WSL-backed project/venv outside the addon tree under `%LOCALAPPDATA%\ofxGgml\mojo\project` while still creating the discovered launcher at `libs/mojo/bin/mojo.bat`, reducing project-generator breakage from local runtime folders inside the addon.
 - `ofxGgmlCodeAssistant` now derives a first-pass tool plan from structured results, emits prompt/chunk/tool/approval/completion events during runs, and can seed/update task memory directly from a reusable session object.
 - Assistant test coverage now includes session seeding, streamed events, tool proposal generation, and approval gating for risky coding actions.
 - The GUI example Script mode now exposes the newer coding-assistant runtime directly through streamed workflow events, explicit approve/deny handling for risky tool proposals, `Build` / `Plan` agent switching, IBM-style `@` references including broad read-oriented `@general`, quick intent chips, and a separate inline-completion lane.

@@ -121,7 +121,7 @@ Supporting areas:
 
 - `libs/ggml/`
 - `scripts/` for user-facing setup, build, download, and benchmark entry points
-  - includes `scripts/install-acestep.ps1` / `scripts/install-acestep.bat` for checking out and building a local AceStep runtime under `libs/acestep/`
+  - includes `scripts/install-acestep.ps1` / `scripts/install-acestep.bat` for building a local AceStep runtime while keeping only the final launcher/runtime binaries under `libs/acestep/bin`
 - `scripts/dev/` for maintainer update and patching helpers
 - `docs/`
 - `tests/`
@@ -514,11 +514,11 @@ scripts\install-acestep.bat
 
 The installer now auto-detects the remote default branch when possible, falls back across common branch names (`main`, `master`, `dev`, `trunk`), and initializes required submodules so upstream branch/layout changes fail less often.
 
-The helper installs into:
+By default the helper now keeps the heavy checkout/build tree outside the addon under `%LOCALAPPDATA%\ofxGgml\acestep\`, copies the final runtime files into:
 
-- `libs/acestep/source`
-- `libs/acestep/build`
 - `libs/acestep/bin`
+
+and prunes the temporary source/build artifacts after a successful install. Pass `-KeepArtifacts` if you intentionally want to keep the checkout/build tree for debugging.
 
 After starting the AceStep server, open the GUI example's `Vision -> AceStep Music Backend` section and use `Check AceStep server` to verify that the configured URL is reachable.
 
@@ -985,7 +985,7 @@ On Windows, the recommended local setup is the bundled installer script:
 
 `scripts/install-mojo.ps1`
 
-That script installs Mojo into a local WSL-backed environment under `libs/mojo/project` and creates a Windows launcher at `libs/mojo/bin/mojo.bat`, which the crawler now discovers automatically.
+That script installs Mojo into a local WSL-backed environment under `%LOCALAPPDATA%\ofxGgml\mojo\project` and creates a small Windows launcher at `libs/mojo/bin/mojo.bat`, which the crawler discovers automatically without leaving the full WSL venv inside the addon tree.
 
 The default `Mojo` adapter currently supports:
 

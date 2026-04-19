@@ -64,11 +64,22 @@ function New-Utf8File {
     [System.IO.File]::WriteAllText($Path, $Content, $encoding)
 }
 
+function Get-DefaultRuntimeRoot {
+    param([string]$AddonRoot)
+
+    $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+    if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
+        return (Join-Path $localAppData 'ofxGgml\mojo')
+    }
+    return (Join-Path $AddonRoot '.runtime\mojo')
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $addonRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
+$defaultRuntimeRoot = Get-DefaultRuntimeRoot -AddonRoot $addonRoot
 
 if ([string]::IsNullOrWhiteSpace($ProjectDir)) {
-    $ProjectDir = Join-Path $addonRoot 'libs\mojo\project'
+    $ProjectDir = Join-Path $defaultRuntimeRoot 'project'
 }
 if ([string]::IsNullOrWhiteSpace($BinDir)) {
     $BinDir = Join-Path $addonRoot 'libs\mojo\bin'
@@ -105,7 +116,7 @@ $wrapperSh = @'
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/../project" && pwd)"
+PROJECT_DIR="__PROJECT_DIR__"
 MOJO_BIN="$PROJECT_DIR/.venv/bin/mojo"
 if [[ ! -x "$MOJO_BIN" ]]; then
   echo "[Error] Mojo is not installed in $PROJECT_DIR. Run scripts/install-mojo.ps1 first." >&2
@@ -113,6 +124,7 @@ if [[ ! -x "$MOJO_BIN" ]]; then
 fi
 exec "$MOJO_BIN" "$@"
 '@
+$wrapperSh = $wrapperSh.Replace('__PROJECT_DIR__', $projectDirWsl)
 
 $wrapperBat = @'
 @echo off
@@ -167,3 +179,4 @@ Write-Step "Installing Mojo in the local WSL environment"
 Invoke-LoggedCommand 'wsl.exe' @('-e', 'bash', $setupShPathWsl)
 
 Write-Step "Mojo is ready at $wrapperBatPath"
+Write-Host "  runtime: $ProjectDir"

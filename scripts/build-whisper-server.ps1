@@ -8,6 +8,7 @@ param(
     [switch]$CpuOnly,
     [switch]$Refetch,
     [switch]$Clean,
+    [switch]$KeepArtifacts,
     [switch]$DryRun
 )
 
@@ -70,14 +71,25 @@ function Test-CudaAvailable {
     return $false
 }
 
+function Get-DefaultRuntimeRoot {
+    param([string]$AddonRoot)
+
+    $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+    if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
+        return (Join-Path $localAppData 'ofxGgml\whisper-runtime')
+    }
+    return (Join-Path $AddonRoot '.runtime\whisper-runtime')
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $addonRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
+$defaultRuntimeRoot = Get-DefaultRuntimeRoot -AddonRoot $addonRoot
 
 if ([string]::IsNullOrWhiteSpace($SourceDir)) {
-    $SourceDir = Join-Path $addonRoot 'build\whisper.cpp-src'
+    $SourceDir = Join-Path $defaultRuntimeRoot 'source'
 }
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
-    $BuildDir = Join-Path $addonRoot 'build\whisper.cpp-build'
+    $BuildDir = Join-Path $defaultRuntimeRoot 'build'
 }
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     $InstallDir = Join-Path $addonRoot 'libs\whisper\bin'
@@ -197,6 +209,16 @@ if ($DryRun) {
     Get-ChildItem -LiteralPath $releaseBinDir -Filter '*.dll' | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $InstallDir -Force
     }
+
+    if (-not $KeepArtifacts) {
+        Write-Step "Pruning whisper.cpp source/build artifacts"
+        if ((Test-Path -LiteralPath $BuildDir) -and ($BuildDir -ne $InstallDir)) {
+            Remove-Item -LiteralPath $BuildDir -Recurse -Force
+        }
+        if ((Test-Path -LiteralPath $SourceDir) -and ($SourceDir -ne $InstallDir)) {
+            Remove-Item -LiteralPath $SourceDir -Recurse -Force
+        }
+    }
 }
 
 Write-Host ""
@@ -207,3 +229,6 @@ Write-Host "  install: $InstallDir"
 Write-Host "  cli:     $(Join-Path $InstallDir 'whisper-cli.exe')"
 Write-Host "  server:  $(Join-Path $InstallDir 'whisper-server.exe')"
 Write-Host "  cuda:    $useCuda"
+if (-not $KeepArtifacts) {
+    Write-Host "  cache:   pruned after install"
+}
