@@ -63,7 +63,15 @@ bool ofApp::saveSession(const std::string & path) {
 		{"citationMaxResults", citationMaxResults},
 		{"videoEssayCitationCount", videoEssayCitationCount},
 		{"videoEssayToneIndex", videoEssayToneIndex},
-		{"videoEssayAudienceIndex", videoEssayAudienceIndex}
+		{"videoEssayAudienceIndex", videoEssayAudienceIndex},
+		{"longVideoChunkCount", longVideoChunkCount},
+		{"longVideoStructureIndex", longVideoStructureIndex},
+		{"longVideoPacingIndex", longVideoPacingIndex},
+		{"longVideoWidth", longVideoWidth},
+		{"longVideoHeight", longVideoHeight},
+		{"longVideoFps", longVideoFps},
+		{"longVideoFramesPerChunk", longVideoFramesPerChunk},
+		{"longVideoSeed", longVideoSeed}
 	};
 	session["settings"]["modeMaxTokens"] = ofJson::array();
 	for (int i = 0; i < kModeCount; ++i) {
@@ -117,6 +125,10 @@ bool ofApp::saveSession(const std::string & path) {
 		{"videoEssayTopic", std::string(videoEssayTopic)},
 		{"videoEssaySeedUrl", std::string(videoEssaySeedUrl)},
 		{"videoEssaySourceVideoPath", std::string(videoEssaySourceVideoPath)},
+		{"longVideoConcept", std::string(longVideoConcept)},
+		{"longVideoStyle", std::string(longVideoStyle)},
+		{"longVideoNegativeStyle", std::string(longVideoNegativeStyle)},
+		{"longVideoContinuityGoal", std::string(longVideoContinuityGoal)},
 		{"customInput", std::string(customInput)},
 		{"customSystemPrompt", std::string(customSystemPrompt)},
 		{"sourceUrlsInput", std::string(sourceUrlsInput)},
@@ -227,6 +239,7 @@ bool ofApp::saveSession(const std::string & path) {
 		{"aceStepBpm", aceStepBpm},
 		{"aceStepDurationSeconds", aceStepDurationSeconds},
 		{"aceStepSeed", aceStepSeed},
+		{"aceStepSelectedTrackIndex", aceStepSelectedTrackIndex},
 		{"musicVideoSectionCount", musicVideoSectionCount},
 		{"musicVideoStructureIndex", musicVideoStructureIndex},
 		{"milkdropCategoryIndex", milkdropCategoryIndex},
@@ -252,7 +265,8 @@ bool ofApp::saveSession(const std::string & path) {
 		{"milkdropPreviewBeatSensitivity", milkdropPreviewBeatSensitivity},
 		{"milkdropPreviewPresetDuration", milkdropPreviewPresetDuration},
 		{"videoEssayTargetDurationSeconds", videoEssayTargetDurationSeconds},
-		{"easyTargetDurationSeconds", easyTargetDurationSeconds}
+		{"easyTargetDurationSeconds", easyTargetDurationSeconds},
+		{"longVideoTargetDurationSeconds", longVideoTargetDurationSeconds}
 	};
 
 	session["bools"] = {
@@ -261,6 +275,8 @@ bool ofApp::saveSession(const std::string & path) {
 		{"voiceTranslatorSpeakOutput", voiceTranslatorSpeakOutput},
 		{"videoEssayUseCrawler", videoEssayUseCrawler},
 		{"videoEssayIncludeCounterpoints", videoEssayIncludeCounterpoints},
+		{"longVideoUsePromptInheritance", longVideoUsePromptInheritance},
+		{"longVideoFavorLoopableEnding", longVideoFavorLoopableEnding},
 		{"musicToImageIncludeLyrics", musicToImageIncludeLyrics},
 		{"imageToMusicInstrumentalOnly", imageToMusicInstrumentalOnly},
 		{"aceStepUseWav", aceStepUseWav},
@@ -323,6 +339,9 @@ bool ofApp::saveSession(const std::string & path) {
 		{"videoEssayEditorBrief", videoEssayEditorBrief},
 		{"videoEssayVlcPreviewStatusMessage", videoEssayVlcPreviewStatusMessage},
 		{"videoEssayLastRenderedVideoPath", videoEssayLastRenderedVideoPath},
+		{"longVideoStatus", longVideoStatus},
+		{"longVideoContinuityBible", longVideoContinuityBible},
+		{"longVideoManifestJson", longVideoManifestJson},
 		{"customOutput", customOutput},
 		{"citationOutput", citationOutput},
 		{"visionOutput", visionOutput},
@@ -490,6 +509,26 @@ bool ofApp::loadSession(const std::string & path) {
 		getInt(settings, "videoEssayAudienceIndex", videoEssayAudienceIndex),
 		0,
 		3);
+	longVideoChunkCount = std::clamp(
+		getInt(settings, "longVideoChunkCount", longVideoChunkCount),
+		1,
+		16);
+	longVideoStructureIndex = std::clamp(
+		getInt(settings, "longVideoStructureIndex", longVideoStructureIndex),
+		0,
+		3);
+	longVideoPacingIndex = std::clamp(
+		getInt(settings, "longVideoPacingIndex", longVideoPacingIndex),
+		0,
+		2);
+	longVideoWidth = std::clamp(getInt(settings, "longVideoWidth", longVideoWidth), 128, 1920);
+	longVideoHeight = std::clamp(getInt(settings, "longVideoHeight", longVideoHeight), 128, 1920);
+	longVideoFps = std::clamp(getInt(settings, "longVideoFps", longVideoFps), 1, 60);
+	longVideoFramesPerChunk = std::clamp(
+		getInt(settings, "longVideoFramesPerChunk", longVideoFramesPerChunk),
+		8,
+		240);
+	longVideoSeed = getInt(settings, "longVideoSeed", longVideoSeed);
 	if (settings.contains("modeMaxTokens") && settings["modeMaxTokens"].is_array()) {
 		for (size_t i = 0; i < std::min<size_t>(settings["modeMaxTokens"].size(), kModeCount); ++i) {
 			modeMaxTokens[i] = std::clamp(settings["modeMaxTokens"][i].get<int>(), 32, 4096);
@@ -520,6 +559,18 @@ bool ofApp::loadSession(const std::string & path) {
 		sizeof(videoEssaySourceVideoPath),
 		buffers,
 		"videoEssaySourceVideoPath");
+	copyJsonString(longVideoConcept, sizeof(longVideoConcept), buffers, "longVideoConcept");
+	copyJsonString(longVideoStyle, sizeof(longVideoStyle), buffers, "longVideoStyle");
+	copyJsonString(
+		longVideoNegativeStyle,
+		sizeof(longVideoNegativeStyle),
+		buffers,
+		"longVideoNegativeStyle");
+	copyJsonString(
+		longVideoContinuityGoal,
+		sizeof(longVideoContinuityGoal),
+		buffers,
+		"longVideoContinuityGoal");
 	copyJsonString(customInput, sizeof(customInput), buffers, "customInput");
 	copyJsonString(customSystemPrompt, sizeof(customSystemPrompt), buffers, "customSystemPrompt");
 	copyJsonString(sourceUrlsInput, sizeof(sourceUrlsInput), buffers, "sourceUrlsInput");
@@ -637,6 +688,9 @@ bool ofApp::loadSession(const std::string & path) {
 		8,
 		180);
 	aceStepSeed = getInt(indices, "aceStepSeed", aceStepSeed);
+	aceStepSelectedTrackIndex = std::max(
+		0,
+		getInt(indices, "aceStepSelectedTrackIndex", aceStepSelectedTrackIndex));
 	musicVideoSectionCount = std::clamp(
 		getInt(indices, "musicVideoSectionCount", musicVideoSectionCount),
 		2,
@@ -682,6 +736,10 @@ bool ofApp::loadSession(const std::string & path) {
 		getFloat(floats, "videoEssayTargetDurationSeconds", videoEssayTargetDurationSeconds),
 		30.0f,
 		360.0f);
+	longVideoTargetDurationSeconds = std::clamp(
+		getFloat(floats, "longVideoTargetDurationSeconds", longVideoTargetDurationSeconds),
+		8.0f,
+		360.0f);
 	easyTargetDurationSeconds = std::clamp(
 		getFloat(floats, "easyTargetDurationSeconds", easyTargetDurationSeconds),
 		30.0f,
@@ -698,6 +756,14 @@ bool ofApp::loadSession(const std::string & path) {
 		bools,
 		"videoEssayIncludeCounterpoints",
 		videoEssayIncludeCounterpoints);
+	longVideoUsePromptInheritance = getBool(
+		bools,
+		"longVideoUsePromptInheritance",
+		longVideoUsePromptInheritance);
+	longVideoFavorLoopableEnding = getBool(
+		bools,
+		"longVideoFavorLoopableEnding",
+		longVideoFavorLoopableEnding);
 	musicToImageIncludeLyrics = getBool(bools, "musicToImageIncludeLyrics", musicToImageIncludeLyrics);
 	imageToMusicInstrumentalOnly = getBool(
 		bools,
@@ -778,6 +844,9 @@ bool ofApp::loadSession(const std::string & path) {
 	videoEssayEditorBrief = getString(outputs, "videoEssayEditorBrief");
 	videoEssayVlcPreviewStatusMessage = getString(outputs, "videoEssayVlcPreviewStatusMessage");
 	videoEssayLastRenderedVideoPath = getString(outputs, "videoEssayLastRenderedVideoPath");
+	longVideoStatus = getString(outputs, "longVideoStatus");
+	longVideoContinuityBible = getString(outputs, "longVideoContinuityBible");
+	longVideoManifestJson = getString(outputs, "longVideoManifestJson");
 	customOutput = getString(outputs, "customOutput");
 	citationOutput = getString(outputs, "citationOutput");
 	visionOutput = getString(outputs, "visionOutput");

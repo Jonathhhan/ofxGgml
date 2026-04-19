@@ -56,6 +56,7 @@ This addon is released under the [MIT License](LICENSE).
   - the workflow now also exposes request validation plus a reusable JSON manifest that captures topic, sources, cues, planning summaries, and warnings for downstream render/export tools
 - `ofxGgmlMediaPromptGenerator` for local-first cross-media prompt translation, starting with `Music -> Image` prompt generation that can reuse transcripts, lyrics, and existing text backends before handing the result to diffusion workflows
 - `ofxGgmlMusicGenerator` for general music-prompt generation, local-first ABC notation sketch generation, prompt sanitization/validation, and future pluggable rendered-audio backend bridges
+- `ofxGgmlAceStepBridge` for optional rendered-music and audio-understanding workflows against an external `acestep.cpp`-compatible server
 - `ofxGgmlMilkDropGenerator` for MilkDrop / projectM preset generation and editing through the existing text-inference backend, with prompt preparation, preset sanitization, and `.milk` file saving helpers
 - `ofxGgmlMilkDropGenerator` now also supports basic preset validation, conservative repair prompts, and multi-variant preset generation for quicker visual iteration
 - `ofxGgmlEasy` as a small high-level facade for common text, chat, translation, vision, and speech tasks without wiring the lower-level assistants by hand
@@ -120,6 +121,7 @@ Supporting areas:
 
 - `libs/ggml/`
 - `scripts/` for user-facing setup, build, download, and benchmark entry points
+  - includes `scripts/install-acestep.ps1` / `scripts/install-acestep.bat` for checking out and building a local AceStep runtime under `libs/acestep/`
 - `scripts/dev/` for maintainer update and patching helpers
 - `docs/`
 - `tests/`
@@ -492,6 +494,31 @@ scripts\setup_windows.bat --skip-ggml --model-preset 2
 ```
 
 `download-model` covers the text GGUF presets used by chat/script/write flows. Speech (`Whisper`) and multimodal `Vision` models are configured separately in the addon and GUI example because they use different runtimes and file layouts. The current Vision defaults favor EU-safe llama-server profiles such as `LFM2.5-VL` for general image understanding and `GLM-OCR` for OCR-heavy work.
+
+### AceStep music backend
+
+The music tools are split intentionally:
+
+- `Image -> Music` prompt generation and ABC sketch generation stay local-first and do not require AceStep
+- rendered audio generation and audio understanding do require an external AceStep-compatible server
+
+To install a local AceStep checkout into the addon:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-acestep.ps1
+```
+
+```bat
+scripts\install-acestep.bat
+```
+
+The helper installs into:
+
+- `libs/acestep/source`
+- `libs/acestep/build`
+- `libs/acestep/bin`
+
+After starting the AceStep server, open the GUI example's `Vision -> AceStep Music Backend` section and use `Check AceStep server` to verify that the configured URL is reachable.
 
 `setup_windows.bat` and `setup_linux_macos.sh` now follow the server-first path by default: they build `ggml`, leave the local `llama.cpp` runtime optional, and let you opt into addon-local `llama-server` plus CLI fallback tools with `--with-llama-cli` only when you want them.
 

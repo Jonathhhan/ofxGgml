@@ -126,6 +126,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/inference/ofxGgmlMediaPromptGenerator.cpp
         ../src/inference/ofxGgmlMusicGenerator.cpp
         ../src/inference/ofxGgmlMilkDropGenerator.cpp
+        ../src/inference/ofxGgmlLongVideoPlanner.cpp
         ../src/inference/ofxGgmlInferenceSourceInternals.cpp
         ../src/inference/ofxGgmlInferenceTextCleanup.cpp
         ../src/inference/ofxGgmlVideoEssayWorkflow.cpp
@@ -179,6 +180,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         test_easy_api.cpp
         test_media_prompt_generator.cpp
         test_music_generator.cpp
+        test_long_video_planner.cpp
         test_video_essay_workflow.cpp
         test_acestep_bridge.cpp
         test_milkdrop_generator.cpp

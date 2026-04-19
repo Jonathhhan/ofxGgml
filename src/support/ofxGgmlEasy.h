@@ -9,6 +9,7 @@
 #include "inference/ofxGgmlMilkDropGenerator.h"
 #include "inference/ofxGgmlMontagePreviewBridge.h"
 #include "inference/ofxGgmlMontagePlanner.h"
+#include "inference/ofxGgmlLongVideoPlanner.h"
 #include "inference/ofxGgmlMusicGenerator.h"
 #include "inference/ofxGgmlSpeechInference.h"
 #include "inference/ofxGgmlVideoEssayWorkflow.h"
@@ -132,6 +133,8 @@ public:
 	const ofxGgmlMilkDropGenerator & getMilkDropGenerator() const;
 	ofxGgmlVideoEssayWorkflow & getVideoEssayWorkflow();
 	const ofxGgmlVideoEssayWorkflow & getVideoEssayWorkflow() const;
+	ofxGgmlLongVideoPlanner & getLongVideoPlanner();
+	const ofxGgmlLongVideoPlanner & getLongVideoPlanner() const;
 	ofxGgmlCodingAgent & getCodingAgent();
 	const ofxGgmlCodingAgent & getCodingAgent() const;
 
@@ -191,6 +194,10 @@ public:
 		size_t maxCitations = 5) const;
 	ofxGgmlVideoEssayResult planVideoEssay(
 		const ofxGgmlVideoEssayRequest & request) const;
+	ofxGgmlLongVideoPlanResult planLongVideo(
+		const ofxGgmlLongVideoPlanRequest & request) const;
+	std::string buildLongVideoManifestJson(
+		const ofxGgmlLongVideoPlanRequest & request) const;
 	ofxGgmlCodingAgentResult runCodingAgent(
 		const ofxGgmlCodingAgentRequest & request,
 		const ofxGgmlCodeAssistantContext & context = {},
@@ -264,5 +271,6 @@ private:
 	ofxGgmlAceStepBridge m_aceStepBridge;
 	ofxGgmlMilkDropGenerator m_milkDropGenerator;
 	ofxGgmlVideoEssayWorkflow m_videoEssayWorkflow;
+	ofxGgmlLongVideoPlanner m_longVideoPlanner;
 	ofxGgmlCodingAgent m_codingAgent;
 };

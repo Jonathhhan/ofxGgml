@@ -58,7 +58,7 @@
 // ---------------------------------------------------------------------------
 
 const char * ofApp::modeLabels[kModeCount] = {
-	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Video Essay", "Vision", "Speech", "TTS", "Diffusion", "CLIP", "MilkDrop", "Easy"
+	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Video Essay", "Long Video", "Vision", "Speech", "TTS", "Diffusion", "CLIP", "MilkDrop", "Easy"
 };
 
 const char * const kTextBackendLabels[] = {
@@ -1089,6 +1089,9 @@ void ofApp::update() {
   }
 #endif
 #if OFXGGML_HAS_OFXVLC4
+  if (aceStepVlcInitialized) {
+		aceStepVlcPlayer.update();
+  }
   if (montageVlcPreviewInitialized) {
 		montageVlcPreviewPlayer.update();
   }
@@ -1222,6 +1225,7 @@ void ofApp::exit() {
     visionPreviewVideo.close();
   }
 #if OFXGGML_HAS_OFXVLC4
+	closeAceStepVlcPreview();
 	closeMontageVlcPreview();
 	closeMontageClipVlcPreview();
 	closeVideoEssayVlcPreview();
@@ -1799,6 +1803,7 @@ case AiMode::Summarize: drawSummarizePanel(); break;
 	case AiMode::Translate: drawTranslatePanel(); break;
 	case AiMode::Custom:    drawCustomPanel();    break;
 	case AiMode::VideoEssay: drawVideoEssayPanel(); break;
+	case AiMode::LongVideo: drawLongVideoPanel(); break;
 	case AiMode::Vision:    drawVisionPanel();    break;
 	case AiMode::Speech:    drawSpeechPanel();    break;
 	case AiMode::Tts:       drawTtsPanel();       break;
@@ -4457,6 +4462,127 @@ bool ofApp::populateMontageClipPlaylistFromGeneratedOutputs(std::string * status
 }
 
 #if OFXGGML_HAS_OFXVLC4
+bool ofApp::ensureAceStepVlcPreviewInitialized(std::string * errorOut) {
+	if (aceStepVlcInitialized) {
+		return true;
+	}
+
+	try {
+		aceStepVlcPlayer.init(0, nullptr);
+		aceStepVlcPlayer.setVolume(100);
+		aceStepVlcInitialized = true;
+		aceStepVlcError.clear();
+		return true;
+	} catch (const std::exception & e) {
+		aceStepVlcError =
+			std::string("Failed to initialize ofxVlc4 AceStep audio preview: ") + e.what();
+		if (errorOut != nullptr) {
+			*errorOut = aceStepVlcError;
+		}
+		return false;
+	}
+}
+
+bool ofApp::loadAceStepVlcPreview(int trackIndex, std::string * errorOut) {
+	if (!ensureAceStepVlcPreviewInitialized(errorOut)) {
+		return false;
+	}
+
+	if (aceStepGeneratedTracks.empty()) {
+		aceStepVlcError = "Generate music first before loading the ofxVlc4 audio preview.";
+		if (errorOut != nullptr) {
+			*errorOut = aceStepVlcError;
+		}
+		return false;
+	}
+
+	trackIndex = std::clamp(
+		trackIndex,
+		0,
+		std::max(0, static_cast<int>(aceStepGeneratedTracks.size()) - 1));
+	const std::string audioPath =
+		trim(aceStepGeneratedTracks[static_cast<size_t>(trackIndex)].path);
+	if (audioPath.empty()) {
+		aceStepVlcError = "The selected generated track does not have a valid audio path.";
+		if (errorOut != nullptr) {
+			*errorOut = aceStepVlcError;
+		}
+		return false;
+	}
+
+	const bool reloadAudio = aceStepVlcLoadedAudioPath != audioPath;
+	if (reloadAudio) {
+		aceStepVlcPlayer.stop();
+		aceStepVlcPlayer.clearMediaSlaves();
+		aceStepVlcPlayer.clearPlaylist();
+		if (aceStepVlcPlayer.addPathToPlaylist(audioPath) <= 0) {
+			aceStepVlcError = "ofxVlc4 could not load the selected generated music track.";
+			if (errorOut != nullptr) {
+				*errorOut = aceStepVlcError;
+			}
+			return false;
+		}
+		aceStepVlcPlayer.playIndex(0);
+		aceStepVlcLoadedAudioPath = audioPath;
+		aceStepSelectedTrackIndex = trackIndex;
+	}
+
+	aceStepVlcError.clear();
+	if (errorOut != nullptr) {
+		errorOut->clear();
+	}
+	return true;
+}
+
+void ofApp::closeAceStepVlcPreview() {
+	if (!aceStepVlcInitialized) {
+		return;
+	}
+
+	aceStepVlcPlayer.close();
+	aceStepVlcInitialized = false;
+	aceStepVlcLoadedAudioPath.clear();
+}
+
+void ofApp::drawAceStepVlcPreview() {
+	if (!aceStepVlcInitialized) {
+		return;
+	}
+
+	if (!aceStepVlcError.empty()) {
+		ImGui::TextDisabled("%s", aceStepVlcError.c_str());
+	}
+
+	const float durationSeconds = std::max(0.0f, aceStepVlcPlayer.getLength() / 1000.0f);
+	float previewPosition = std::clamp(aceStepVlcPlayer.getPosition(), 0.0f, 1.0f);
+	const float currentSeconds = previewPosition * durationSeconds;
+	if (ImGui::Button(
+			aceStepVlcPlayer.isPlaying() ? "Pause audio preview" : "Play audio preview",
+			ImVec2(170, 0))) {
+		aceStepVlcPlayer.togglePlayPause();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Restart audio preview", ImVec2(170, 0))) {
+		aceStepVlcPlayer.play();
+		aceStepVlcPlayer.setPosition(0.0f);
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Stop audio preview", ImVec2(150, 0))) {
+		aceStepVlcPlayer.stop();
+		aceStepVlcPlayer.setPosition(0.0f);
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("%.2fs / %.2fs", currentSeconds, durationSeconds);
+
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::SliderFloat("Audio preview position##AceStep", &previewPosition, 0.0f, 1.0f, "%.3f")) {
+		aceStepVlcPlayer.setPosition(previewPosition);
+	}
+	if (!aceStepVlcLoadedAudioPath.empty()) {
+		ImGui::TextDisabled("%s", aceStepVlcLoadedAudioPath.c_str());
+	}
+}
+
 bool ofApp::ensureVideoEssayVlcPreviewInitialized(std::string * errorOut) {
 	if (videoEssayVlcPreviewInitialized) {
 		return true;

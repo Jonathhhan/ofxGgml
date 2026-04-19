@@ -2,6 +2,7 @@
 
 #include "ofMain.h"
 #include "ofxGgml.h"
+#include "bridges/ofxGgmlHoloscanBridge.h"
 #include "ofxImGui.h"
 #include "config/ModelPresets.h"
 #include "panels/DeviceInfoPanel.h"
@@ -173,6 +174,21 @@ private:
 	float videoEssayTargetDurationSeconds = 90.0f;
 	int videoEssayToneIndex = 0;
 	int videoEssayAudienceIndex = 0;
+	char longVideoConcept[4096] = {};
+	char longVideoStyle[1024] = "cinematic, coherent, detailed, motion-aware";
+	char longVideoNegativeStyle[1024] = "flicker, identity drift, abrupt style changes, broken continuity";
+	char longVideoContinuityGoal[2048] = "Preserve subject identity, camera language, palette, and motion logic across adjacent chunks.";
+	float longVideoTargetDurationSeconds = 60.0f;
+	int longVideoChunkCount = 6;
+	int longVideoStructureIndex = 0;
+	int longVideoPacingIndex = 0;
+	int longVideoWidth = 640;
+	int longVideoHeight = 384;
+	int longVideoFps = 12;
+	int longVideoFramesPerChunk = 49;
+	int longVideoSeed = -1;
+	bool longVideoUsePromptInheritance = true;
+	bool longVideoFavorLoopableEnding = false;
 	char customInput[4096] = {};
 	char customSystemPrompt[2048] = {};
 	char sourceUrlsInput[2048] = {};
@@ -310,6 +326,7 @@ private:
 	int aceStepBpm = 0;
 	int aceStepDurationSeconds = 30;
 	int aceStepSeed = -1;
+	int aceStepSelectedTrackIndex = 0;
 	bool aceStepUseWav = true;
 	bool aceStepInstrumentalOnly = false;
 	int musicVideoSectionCount = 4;
@@ -443,6 +460,10 @@ private:
 	ofxVlc4 montageClipVlcPlayer;
 	bool montageClipVlcInitialized = false;
 	std::string montageClipVlcError;
+	ofxVlc4 aceStepVlcPlayer;
+	bool aceStepVlcInitialized = false;
+	std::string aceStepVlcLoadedAudioPath;
+	std::string aceStepVlcError;
 	ofxVlc4 videoEssayVlcPreviewPlayer;
 	bool videoEssayVlcPreviewInitialized = false;
 	std::string videoEssayVlcPreviewLoadedVideoPath;
@@ -572,6 +593,10 @@ private:
 	std::string videoEssayVlcPreviewSubtitlePath;
 	std::string videoEssayVlcPreviewStatusMessage;
 	std::string videoEssayLastRenderedVideoPath;
+	std::string longVideoStatus;
+	std::string longVideoContinuityBible;
+	std::string longVideoManifestJson;
+	std::vector<ofxGgmlLongVideoPlanChunk> longVideoChunks;
 	std::string pendingVideoEssayStatus;
 	std::string pendingVideoEssayOutline;
 	std::string pendingVideoEssayScript;
@@ -588,6 +613,11 @@ private:
 	std::vector<ofxGgmlVideoEssaySection> pendingVideoEssaySections;
 	std::vector<ofxGgmlVideoEssayVoiceCue> pendingVideoEssayVoiceCues;
 	bool pendingVideoEssayDirty = false;
+	std::string pendingLongVideoStatus;
+	std::string pendingLongVideoContinuityBible;
+	std::string pendingLongVideoManifestJson;
+	std::vector<ofxGgmlLongVideoPlanChunk> pendingLongVideoChunks;
+	bool pendingLongVideoDirty = false;
 	std::vector<ofxGgmlSampledVideoFrame> visionSampledVideoFrames;
 	std::vector<ofxGgmlSampledVideoFrame> pendingVisionSampledVideoFrames;
 	std::string pendingMontageSummary;
@@ -636,8 +666,8 @@ private:
 	float mirostatTau = 5.0f;
 	float mirostatEta = 0.1f;
 	int chatLanguageIndex = 0;                       // 0=Auto, otherwise force response language
-	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 896, 384, 512, 512, 512, 384, 640};
-	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1};
+	std::array<int, kModeCount> modeMaxTokens = {512, 1024, 384, 512, 512, 512, 896, 896, 384, 512, 512, 512, 384, 640, 512};
+	std::array<int, kModeCount> modeTextBackendIndices = {1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1};
 	TextInferenceBackend textInferenceBackend = TextInferenceBackend::LlamaServer;
 	ServerStatusState textServerStatus = ServerStatusState::Unknown;
 	std::string textServerStatusMessage;
@@ -881,6 +911,7 @@ private:
 	void runImageSearch();
 	void runCitationSearch();
 	void runVideoEssayWorkflow();
+	void runLongVideoPlanning();
 	void runClipInference();
 	void runMilkDropGeneration(
 		bool editExisting = false,
@@ -960,6 +991,7 @@ private:
 	void drawTranslatePanel();
 	void drawCustomPanel();
 	void drawVideoEssayPanel();
+	void drawLongVideoPanel();
 	void drawVisionPanel();
 	void drawMilkDropPanel();
 	void drawImageSearchPanel(
@@ -994,6 +1026,10 @@ private:
 	std::vector<std::string> collectGeneratedMontageClipPaths(std::string * statusOut = nullptr) const;
 	bool populateMontageClipPlaylistFromGeneratedOutputs(std::string * statusOut = nullptr);
 #if OFXGGML_HAS_OFXVLC4
+	bool ensureAceStepVlcPreviewInitialized(std::string * errorOut = nullptr);
+	bool loadAceStepVlcPreview(int trackIndex, std::string * errorOut = nullptr);
+	void closeAceStepVlcPreview();
+	void drawAceStepVlcPreview();
 	bool ensureVideoEssayVlcPreviewInitialized(std::string * errorOut = nullptr);
 	bool loadVideoEssayVlcPreview(std::string * errorOut = nullptr);
 	void closeVideoEssayVlcPreview();

@@ -19,6 +19,19 @@ const char * const kVideoEssayAudienceLabels[] = {
 	"Technical audience"
 };
 
+const char * const kLongVideoStructureLabels[] = {
+	"Three-act cinematic",
+	"Music video rise",
+	"Loopable ambient",
+	"Documentary / essay"
+};
+
+const char * const kLongVideoPacingLabels[] = {
+	"Balanced rise",
+	"Gentle build",
+	"Aggressive escalation"
+};
+
 struct TtsPreviewUiLabels {
 	const char * comboLabel;
 	const char * pauseLabel;
@@ -48,6 +61,23 @@ std::string videoEssayAudienceForIndex(int index) {
 	case 2: return "creative filmmaker";
 	case 3: return "technical audience";
 	default: return "general audience";
+	}
+}
+
+std::string longVideoStructureHintForIndex(int index) {
+	switch (index) {
+	case 1: return "music-driven rise with a strong payoff section";
+	case 2: return "loopable ambient progression with a seamless ending";
+	case 3: return "documentary essay with discovery, evidence, and takeaway beats";
+	default: return "three-act cinematic progression";
+	}
+}
+
+std::string longVideoPacingProfileForIndex(int index) {
+	switch (index) {
+	case 1: return "gentle build with longer observation beats before the payoff";
+	case 2: return "aggressive escalation with shorter setup and denser climax beats";
+	default: return "balanced rise with stronger emphasis near the climax";
 	}
 }
 
@@ -786,6 +816,335 @@ void ofApp::runVideoEssayWorkflow() {
 			pendingVideoEssayCitations.clear();
 			pendingVideoEssaySections.clear();
 			pendingVideoEssayVoiceCues.clear();
+		}
+
+		generating.store(false);
+	});
+}
+
+void ofApp::drawLongVideoPanel() {
+	drawPanelHeader("Long Video", "plan chunked long-form video prompts with continuity");
+
+	ImGui::Text("Concept");
+	ImGui::InputTextMultiline(
+		"##LongVideoConcept",
+		longVideoConcept,
+		sizeof(longVideoConcept),
+		ImVec2(-1, 96));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+
+	ImGui::InputText("Style", longVideoStyle, sizeof(longVideoStyle));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::InputText("Negative style", longVideoNegativeStyle, sizeof(longVideoNegativeStyle));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::InputTextMultiline(
+		"Continuity goal",
+		longVideoContinuityGoal,
+		sizeof(longVideoContinuityGoal),
+		ImVec2(-1, 70));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+
+	if (ImGui::SliderFloat(
+		"Target duration (s)##LongVideo",
+		&longVideoTargetDurationSeconds,
+		8.0f,
+		360.0f,
+		"%.0f s")) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::SliderInt("Chunks##LongVideo", &longVideoChunkCount, 1, 16)) {
+		autoSaveSession();
+	}
+
+	ImGui::SetNextItemWidth(240);
+	if (ImGui::Combo(
+		"Structure##LongVideo",
+		&longVideoStructureIndex,
+		kLongVideoStructureLabels,
+		IM_ARRAYSIZE(kLongVideoStructureLabels))) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(220);
+	if (ImGui::Combo(
+		"Pacing##LongVideo",
+		&longVideoPacingIndex,
+		kLongVideoPacingLabels,
+		IM_ARRAYSIZE(kLongVideoPacingLabels))) {
+		autoSaveSession();
+	}
+	if (ImGui::Checkbox(
+		"Favor loopable ending##LongVideo",
+		&longVideoFavorLoopableEnding)) {
+		autoSaveSession();
+	}
+
+	if (ImGui::SliderInt("Width##LongVideo", &longVideoWidth, 128, 1280)) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::SliderInt("Height##LongVideo", &longVideoHeight, 128, 1280)) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::SliderInt("FPS##LongVideo", &longVideoFps, 1, 30)) {
+		autoSaveSession();
+	}
+
+	if (ImGui::SliderInt(
+		"Frames / chunk##LongVideo",
+		&longVideoFramesPerChunk,
+		8,
+		160)) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::InputInt("Seed##LongVideo", &longVideoSeed)) {
+		autoSaveSession();
+	}
+	if (ImGui::Checkbox(
+		"Use prompt inheritance##LongVideo",
+		&longVideoUsePromptInheritance)) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(videoEssayVisualConcept).empty());
+	if (ImGui::SmallButton("Use Video Essay concept##LongVideo")) {
+		copyStringToBuffer(longVideoConcept, sizeof(longVideoConcept), videoEssayVisualConcept);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(diffusionPrompt).empty());
+	if (ImGui::SmallButton("Use Diffusion prompt##LongVideo")) {
+		copyStringToBuffer(longVideoConcept, sizeof(longVideoConcept), diffusionPrompt);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+
+	ImGui::BeginDisabled(generating.load() || trim(longVideoConcept).empty());
+	if (ImGui::Button("Plan Long Video", ImVec2(170, 0))) {
+		runLongVideoPlanning();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(longVideoManifestJson).empty());
+	if (ImGui::SmallButton("Copy manifest##LongVideo")) {
+		copyToClipboard(longVideoManifestJson);
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(longVideoContinuityBible).empty());
+	if (ImGui::SmallButton("Copy continuity bible##LongVideo")) {
+		copyToClipboard(longVideoContinuityBible);
+	}
+	ImGui::EndDisabled();
+
+	if (!longVideoStatus.empty()) {
+		ImGui::Spacing();
+		ImGui::TextWrapped("%s", longVideoStatus.c_str());
+	}
+
+	if (!longVideoContinuityBible.empty()) {
+		ImGui::Spacing();
+		ImGui::Text("Continuity Bible");
+		ImGui::BeginChild("##LongVideoContinuity", ImVec2(0, 120), true);
+		ImGui::TextWrapped("%s", longVideoContinuityBible.c_str());
+		ImGui::EndChild();
+	}
+
+	if (!longVideoChunks.empty()) {
+		ImGui::Spacing();
+		ImGui::Text("Chunks");
+		for (size_t i = 0; i < longVideoChunks.size(); ++i) {
+			const auto & chunk = longVideoChunks[i];
+			if (ImGui::CollapsingHeader(
+				(chunk.id + " - " + chunk.title).c_str(),
+				ImGuiTreeNodeFlags_DefaultOpen)) {
+				ImGui::TextWrapped("Goal: %s", chunk.sectionGoal.c_str());
+				ImGui::TextWrapped("Continuity: %s", chunk.continuityNote.c_str());
+				ImGui::TextWrapped(
+					"Timing %.1fs -> %.1fs | Progression %.2f",
+					chunk.startSeconds,
+					chunk.endSeconds,
+					chunk.progressionWeight);
+				ImGui::TextWrapped("Transition: %s", chunk.transitionHint.c_str());
+				ImGui::TextWrapped(
+					"Duration %.1fs | %dx%d | %d fps | %d frames | seed %lld",
+					chunk.targetDurationSeconds,
+					chunk.width,
+					chunk.height,
+					chunk.fps,
+					chunk.frameCount,
+					static_cast<long long>(chunk.seed));
+				if (ImGui::SmallButton(("Use in Vision##LongVideo" + std::to_string(i)).c_str())) {
+					copyStringToBuffer(visionPrompt, sizeof(visionPrompt), chunk.prompt);
+					activeMode = AiMode::Vision;
+				}
+				ImGui::SameLine();
+				if (ImGui::SmallButton(("Use in Diffusion##LongVideo" + std::to_string(i)).c_str())) {
+					copyStringToBuffer(diffusionPrompt, sizeof(diffusionPrompt), chunk.prompt);
+					copyStringToBuffer(
+						diffusionNegativePrompt,
+						sizeof(diffusionNegativePrompt),
+						chunk.negativePrompt);
+					activeMode = AiMode::Diffusion;
+				}
+				ImGui::SameLine();
+				if (ImGui::SmallButton(("Copy prompt##LongVideo" + std::to_string(i)).c_str())) {
+					copyToClipboard(chunk.prompt);
+				}
+				ImGui::BeginChild(
+					("##LongVideoPrompt" + std::to_string(i)).c_str(),
+					ImVec2(0, 90),
+					true);
+				ImGui::TextWrapped("%s", chunk.prompt.c_str());
+				ImGui::EndChild();
+			}
+		}
+	}
+
+	if (!longVideoManifestJson.empty()) {
+		ImGui::Spacing();
+		ImGui::Text("Manifest");
+		ImGui::BeginChild("##LongVideoManifest", ImVec2(0, 180), true);
+		ImGui::TextWrapped("%s", longVideoManifestJson.c_str());
+		ImGui::EndChild();
+	}
+}
+
+void ofApp::runLongVideoPlanning() {
+	if (generating.load()) {
+		return;
+	}
+
+	const std::string conceptText = trim(longVideoConcept);
+	if (conceptText.empty()) {
+		longVideoStatus = "[Error] Long-video concept is empty.";
+		return;
+	}
+
+	configureEasyApiFromCurrentUi();
+	const std::string modelPath = getSelectedModelPath();
+	const ofxGgmlInferenceSettings inferenceSettings =
+		buildCurrentTextInferenceSettings(AiMode::LongVideo);
+	const std::string style = trim(longVideoStyle);
+	const std::string negativeStyle = trim(longVideoNegativeStyle);
+	const std::string continuityGoal = trim(longVideoContinuityGoal);
+	const double targetDurationSeconds = std::clamp(
+		static_cast<double>(longVideoTargetDurationSeconds),
+		8.0,
+		360.0);
+	const int chunkCount = std::clamp(longVideoChunkCount, 1, 16);
+	const int width = std::clamp(longVideoWidth, 128, 1920);
+	const int height = std::clamp(longVideoHeight, 128, 1920);
+	const int fps = std::clamp(longVideoFps, 1, 60);
+	const int framesPerChunk = std::clamp(longVideoFramesPerChunk, 8, 240);
+	const int64_t seedValue = static_cast<int64_t>(longVideoSeed);
+	const bool usePromptInheritance = longVideoUsePromptInheritance;
+	const std::string structureHint = longVideoStructureHintForIndex(longVideoStructureIndex);
+	const std::string pacingProfile = longVideoPacingProfileForIndex(longVideoPacingIndex);
+	const bool favorLoopableEnding = longVideoFavorLoopableEnding;
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::LongVideo;
+	generatingStatus = "Planning long-video chunks and continuity...";
+	generationStartTime = ofGetElapsedTimef();
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput =
+			"Building a long-video continuity bible, chunk plan, and manifest...";
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	workerThread = std::thread([this,
+		modelPath,
+		inferenceSettings,
+		conceptText,
+		style,
+		negativeStyle,
+		continuityGoal,
+		targetDurationSeconds,
+		chunkCount,
+		width,
+		height,
+		fps,
+		framesPerChunk,
+		seedValue,
+		usePromptInheritance,
+		structureHint,
+		pacingProfile,
+		favorLoopableEnding]() {
+		try {
+			ofxGgmlLongVideoPlanRequest request;
+			request.modelPath = modelPath;
+			request.conceptText = conceptText;
+			request.style = style;
+			request.negativeStyle = negativeStyle;
+			request.continuityGoal = continuityGoal;
+			request.targetDurationSeconds = targetDurationSeconds;
+			request.chunkCount = chunkCount;
+			request.width = width;
+			request.height = height;
+			request.fps = fps;
+			request.framesPerChunk = framesPerChunk;
+			request.seed = seedValue;
+			request.usePromptInheritance = usePromptInheritance;
+			request.structureHint = structureHint;
+			request.pacingProfile = pacingProfile;
+			request.favorLoopableEnding = favorLoopableEnding;
+			request.inferenceSettings = inferenceSettings;
+
+			const ofxGgmlLongVideoPlanResult result = easyApi.planLongVideo(request);
+			std::string status;
+			if (result.success) {
+				status =
+					"Planned " +
+					ofToString(result.chunks.size()) +
+					" long-video chunks with " +
+					structureHint +
+					" structure and built a manifest.";
+			} else {
+				status = "[Error] " + result.error;
+			}
+
+			{
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingLongVideoDirty = true;
+				pendingLongVideoStatus = status;
+				pendingLongVideoContinuityBible = result.continuityBible;
+				pendingLongVideoManifestJson = result.manifestJson;
+				pendingLongVideoChunks = result.chunks;
+			}
+		} catch (const std::exception & e) {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingLongVideoDirty = true;
+			pendingLongVideoStatus =
+				std::string("[Error] Long-video planning exception: ") + e.what();
+			pendingLongVideoContinuityBible.clear();
+			pendingLongVideoManifestJson.clear();
+			pendingLongVideoChunks.clear();
+		} catch (...) {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingLongVideoDirty = true;
+			pendingLongVideoStatus = "[Error] Unknown long-video planning exception.";
+			pendingLongVideoContinuityBible.clear();
+			pendingLongVideoManifestJson.clear();
+			pendingLongVideoChunks.clear();
 		}
 
 		generating.store(false);

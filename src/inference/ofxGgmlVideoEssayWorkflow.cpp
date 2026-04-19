@@ -495,7 +495,13 @@ std::string ofxGgmlVideoEssayWorkflow::buildWorkflowManifest(
 	manifest["audience"] = request.audience;
 	manifest["include_counterpoints"] = request.includeCounterpoints;
 	manifest["use_crawler"] = request.useCrawler;
-	manifest["source_urls"] = request.sourceUrls;
+	ofJson sourceUrls = ofJson::array();
+	for (const auto & sourceUrl : request.sourceUrls) {
+		ofJson sourceUrlJson;
+		sourceUrlJson = sourceUrl;
+		sourceUrls.push_back(sourceUrlJson);
+	}
+	manifest["source_urls"] = std::move(sourceUrls);
 	manifest["crawler_start_url"] = request.crawlerRequest.startUrl;
 	manifest["max_citations"] = static_cast<int>(request.maxCitations);
 	manifest["success"] = result.success;
@@ -508,30 +514,48 @@ std::string ofxGgmlVideoEssayWorkflow::buildWorkflowManifest(
 	manifest["scene_planning_error"] = result.scenePlanningError;
 	manifest["edit_planning_error"] = result.editPlanningError;
 	manifest["validation"]["ok"] = result.validation.ok;
-	manifest["validation"]["errors"] = result.validation.errors;
-	manifest["validation"]["warnings"] = result.validation.warnings;
+	ofJson validationErrors = ofJson::array();
+	for (const auto & error : result.validation.errors) {
+		ofJson errorJson;
+		errorJson = error;
+		validationErrors.push_back(errorJson);
+	}
+	manifest["validation"]["errors"] = std::move(validationErrors);
+	ofJson validationWarnings = ofJson::array();
+	for (const auto & warning : result.validation.warnings) {
+		ofJson warningJson;
+		warningJson = warning;
+		validationWarnings.push_back(warningJson);
+	}
+	manifest["validation"]["warnings"] = std::move(validationWarnings);
 
 	ofJson sections = ofJson::array();
 	for (const auto & section : result.sections) {
-		sections.push_back({
-			{"index", section.index},
-			{"title", section.title},
-			{"summary", section.summary},
-			{"estimated_duration_seconds", section.estimatedDurationSeconds},
-			{"source_indices", section.sourceIndices}
-		});
+		ofJson sourceIndices = ofJson::array();
+		for (const int sourceIndex : section.sourceIndices) {
+			ofJson sourceIndexJson;
+			sourceIndexJson = sourceIndex;
+			sourceIndices.push_back(sourceIndexJson);
+		}
+		ofJson sectionJson;
+		sectionJson["index"] = section.index;
+		sectionJson["title"] = section.title;
+		sectionJson["summary"] = section.summary;
+		sectionJson["estimated_duration_seconds"] = section.estimatedDurationSeconds;
+		sectionJson["source_indices"] = std::move(sourceIndices);
+		sections.push_back(sectionJson);
 	}
 	manifest["sections"] = std::move(sections);
 
 	ofJson cues = ofJson::array();
 	for (const auto & cue : result.voiceCues) {
-		cues.push_back({
-			{"index", cue.index},
-			{"section_index", cue.sectionIndex},
-			{"text", cue.text},
-			{"start_seconds", cue.startSeconds},
-			{"end_seconds", cue.endSeconds}
-		});
+		ofJson cueJson;
+		cueJson["index"] = cue.index;
+		cueJson["section_index"] = cue.sectionIndex;
+		cueJson["text"] = cue.text;
+		cueJson["start_seconds"] = cue.startSeconds;
+		cueJson["end_seconds"] = cue.endSeconds;
+		cues.push_back(cueJson);
 	}
 	manifest["voice_cues"] = std::move(cues);
 	return manifest.dump(2);

@@ -1059,6 +1059,7 @@ void ofApp::applyPendingOutput() {
 		!pendingImageSearchDirty &&
 		!pendingCitationDirty &&
 		!pendingVideoEssayDirty &&
+		!pendingLongVideoDirty &&
 		!pendingVoiceTranslatorDirty) {
 		return;
 	}
@@ -1332,6 +1333,19 @@ void ofApp::applyPendingOutput() {
 		aceStepUnderstoodLyrics = pendingAceStepUnderstoodLyrics;
 		aceStepUsedServerUrl = pendingAceStepUsedServerUrl;
 		aceStepGeneratedTracks = pendingAceStepGeneratedTracks;
+		aceStepSelectedTrackIndex = std::clamp(
+			aceStepSelectedTrackIndex,
+			0,
+			std::max(0, static_cast<int>(aceStepGeneratedTracks.size()) - 1));
+#if OFXGGML_HAS_OFXVLC4
+		if (aceStepGeneratedTracks.empty()) {
+			closeAceStepVlcPreview();
+		} else if (!aceStepVlcLoadedAudioPath.empty() &&
+			aceStepSelectedTrackIndex < static_cast<int>(aceStepGeneratedTracks.size()) &&
+			trim(aceStepGeneratedTracks[static_cast<size_t>(aceStepSelectedTrackIndex)].path) != aceStepVlcLoadedAudioPath) {
+			closeAceStepVlcPreview();
+		}
+#endif
 		fprintf(
 			stderr,
 			"%s\n",
@@ -1389,6 +1403,16 @@ void ofApp::applyPendingOutput() {
 			stderr,
 			"%s\n",
 			formatConsoleLogLine("Video Essay", "AI", videoEssayStatus, true).c_str());
+	}
+	if (pendingLongVideoDirty) {
+		longVideoStatus = pendingLongVideoStatus;
+		longVideoContinuityBible = pendingLongVideoContinuityBible;
+		longVideoManifestJson = pendingLongVideoManifestJson;
+		longVideoChunks = pendingLongVideoChunks;
+		fprintf(
+			stderr,
+			"%s\n",
+			formatConsoleLogLine("Long Video", "AI", longVideoStatus, true).c_str());
 	}
 	if (pendingVoiceTranslatorDirty) {
 		voiceTranslatorStatus = pendingVoiceTranslatorStatus;
@@ -1494,6 +1518,11 @@ void ofApp::applyPendingOutput() {
 	pendingVideoEssaySections.clear();
 	pendingVideoEssayVoiceCues.clear();
 	pendingVideoEssayDirty = false;
+	pendingLongVideoStatus.clear();
+	pendingLongVideoContinuityBible.clear();
+	pendingLongVideoManifestJson.clear();
+	pendingLongVideoChunks.clear();
+	pendingLongVideoDirty = false;
 	pendingVoiceTranslatorStatus.clear();
 	pendingVoiceTranslatorTranscript.clear();
 	pendingVoiceTranslatorDirty = false;

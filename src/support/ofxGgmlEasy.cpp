@@ -69,6 +69,8 @@ void ofxGgmlEasy::syncTextBackends() {
 	m_milkDropGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
 	m_videoEssayWorkflow.getTextAssistant().setCompletionExecutable(
 		m_textConfig.completionExecutable);
+	m_longVideoPlanner.getTextAssistant().setCompletionExecutable(
+		m_textConfig.completionExecutable);
 	applyInferenceExecutables(
 		m_videoEssayWorkflow.getCitationSearch().getInference(),
 		m_textConfig);
@@ -206,6 +208,14 @@ ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::getVideoEssayWorkflow() {
 
 const ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::getVideoEssayWorkflow() const {
 	return m_videoEssayWorkflow;
+}
+
+ofxGgmlLongVideoPlanner & ofxGgmlEasy::getLongVideoPlanner() {
+	return m_longVideoPlanner;
+}
+
+const ofxGgmlLongVideoPlanner & ofxGgmlEasy::getLongVideoPlanner() const {
+	return m_longVideoPlanner;
 }
 
 ofxGgmlCodingAgent & ofxGgmlEasy::getCodingAgent() {
@@ -587,6 +597,25 @@ ofxGgmlVideoEssayResult ofxGgmlEasy::planVideoEssay(
 		effectiveRequest.sourceSettings.requestCitations = true;
 	}
 	return m_videoEssayWorkflow.run(effectiveRequest);
+}
+
+ofxGgmlLongVideoPlanResult ofxGgmlEasy::planLongVideo(
+	const ofxGgmlLongVideoPlanRequest & request) const {
+	ofxGgmlLongVideoPlanRequest effectiveRequest = request;
+	effectiveRequest.inferenceSettings = request.inferenceSettings;
+	if (effectiveRequest.modelPath.empty()) {
+		effectiveRequest.modelPath = m_textConfig.modelPath;
+	}
+	if (effectiveRequest.inferenceSettings.maxTokens <= 0) {
+		effectiveRequest.inferenceSettings = makeTextSettings();
+	}
+	return m_longVideoPlanner.run(effectiveRequest);
+}
+
+std::string ofxGgmlEasy::buildLongVideoManifestJson(
+	const ofxGgmlLongVideoPlanRequest & request) const {
+	const ofxGgmlLongVideoPlanResult result = planLongVideo(request);
+	return result.manifestJson;
 }
 
 ofxGgmlCodingAgentResult ofxGgmlEasy::runCodingAgent(

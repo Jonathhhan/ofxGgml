@@ -1197,11 +1197,15 @@ void ofApp::drawVisionPanel() {
 	}
 	ImGui::SameLine();
 	ImGui::BeginDisabled(aceStepGeneratedTracks.empty());
-	if (ImGui::SmallButton("Use latest music")) {
+	if (ImGui::SmallButton("Use selected music")) {
+		const int selectedTrackIndex = std::clamp(
+			aceStepSelectedTrackIndex,
+			0,
+			std::max(0, static_cast<int>(aceStepGeneratedTracks.size()) - 1));
 		copyStringToBuffer(
 			montageRenderAudioPath,
 			sizeof(montageRenderAudioPath),
-			trim(aceStepGeneratedTracks.back().path));
+			trim(aceStepGeneratedTracks[static_cast<size_t>(selectedTrackIndex)].path));
 		autoSaveSession();
 	}
 	ImGui::EndDisabled();
@@ -2078,6 +2082,45 @@ void ofApp::drawAceStepMusicSection() {
 	ImGui::TextWrapped(
 		"Use an acestep.cpp-compatible server for rendered audio generation and audio understanding. "
 		"The bridge keeps prompt prep local-first, then hands prompt, lyrics, BPM, key, and duration to the AceStep API.");
+	ImGui::TextDisabled(
+		"No AceStep install is needed for local music-prompt or ABC-sketch generation. "
+		"You only need AceStep when you want rendered audio tracks or audio understanding.");
+	if (ImGui::SmallButton("Check AceStep server")) {
+		const std::string serverUrl = trim(aceStepServerUrl);
+		const ofxGgmlAceStepHealthResult health = aceStepBridge.healthCheck(serverUrl);
+		if (health.success) {
+			const ofxGgmlAceStepPropsResult props = aceStepBridge.fetchProps(serverUrl);
+			std::ostringstream status;
+			status << "AceStep server is reachable";
+			if (!trim(health.status).empty()) {
+				status << " (" << trim(health.status) << ")";
+			}
+			if (props.success) {
+				status << ". /lm: "
+					<< (trim(props.lmStatus).empty() ? std::string("ok") : trim(props.lmStatus))
+					<< ", /synth: "
+					<< (trim(props.synthStatus).empty() ? std::string("ok") : trim(props.synthStatus));
+				if (props.maxBatch > 0) {
+					status << ", max batch " << props.maxBatch;
+				}
+			}
+			aceStepStatus = status.str() + ".";
+			aceStepUsedServerUrl = health.usedServerUrl;
+		} else {
+			aceStepStatus =
+				"[Setup] AceStep server is not reachable. Run scripts\\install-acestep.ps1 to install a local backend under libs\\acestep, then start its server and point this URL at it.";
+			aceStepUsedServerUrl = health.usedServerUrl;
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Copy install command##AceStep")) {
+		copyToClipboard(
+			"powershell -ExecutionPolicy Bypass -File .\\scripts\\install-acestep.ps1");
+		aceStepStatus =
+			"Copied the AceStep installer command. It installs under libs\\acestep and does not affect prompt-only music tools.";
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("Installer: scripts\\install-acestep.ps1");
 
 	ImGui::SetNextItemWidth(260);
 	ImGui::InputText(
@@ -2232,10 +2275,88 @@ void ofApp::drawAceStepMusicSection() {
 		ImGui::TextDisabled("Server: %s", aceStepUsedServerUrl.c_str());
 	}
 	if (!aceStepGeneratedTracks.empty()) {
+		aceStepSelectedTrackIndex = std::clamp(
+			aceStepSelectedTrackIndex,
+			0,
+			std::max(0, static_cast<int>(aceStepGeneratedTracks.size()) - 1));
 		ImGui::TextDisabled("Generated audio");
-		for (const auto & track : aceStepGeneratedTracks) {
-			ImGui::BulletText("%s", track.path.c_str());
+
+		std::string selectedTrackLabel =
+			ofFilePath::getBaseName(
+				aceStepGeneratedTracks[static_cast<size_t>(aceStepSelectedTrackIndex)].path);
+		if (selectedTrackLabel.empty()) {
+			selectedTrackLabel =
+				"Track " + std::to_string(aceStepSelectedTrackIndex + 1);
 		}
+		if (ImGui::BeginCombo("Generated tracks##AceStep", selectedTrackLabel.c_str())) {
+			for (int i = 0; i < static_cast<int>(aceStepGeneratedTracks.size()); ++i) {
+				const auto & track = aceStepGeneratedTracks[static_cast<size_t>(i)];
+				std::string label = ofFilePath::getBaseName(track.path);
+				if (!trim(track.label).empty()) {
+					if (!label.empty()) {
+						label += " - ";
+					}
+					label += trim(track.label);
+				}
+				if (label.empty()) {
+					label = "Track " + std::to_string(i + 1);
+				}
+				const bool selected = (aceStepSelectedTrackIndex == i);
+				if (ImGui::Selectable(label.c_str(), selected)) {
+					aceStepSelectedTrackIndex = i;
+					autoSaveSession();
+				}
+				if (selected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+#if OFXGGML_HAS_OFXVLC4
+		if (ImGui::Button("Preview in ofxVlc4##AceStep", ImVec2(190, 0))) {
+			std::string error;
+			if (!loadAceStepVlcPreview(aceStepSelectedTrackIndex, &error) && !error.empty()) {
+				aceStepStatus = error;
+			}
+		}
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!aceStepVlcInitialized);
+		if (ImGui::Button("Close preview##AceStep", ImVec2(150, 0))) {
+			closeAceStepVlcPreview();
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+#endif
+		if (ImGui::Button("Use for montage export##AceStep", ImVec2(190, 0))) {
+			copyStringToBuffer(
+				montageRenderAudioPath,
+				sizeof(montageRenderAudioPath),
+				trim(aceStepGeneratedTracks[static_cast<size_t>(aceStepSelectedTrackIndex)].path));
+			aceStepStatus = "Connected the selected generated track to the montage export audio path.";
+			autoSaveSession();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Use for understand##AceStep", ImVec2(170, 0))) {
+			copyStringToBuffer(
+				aceStepAudioPath,
+				sizeof(aceStepAudioPath),
+				trim(aceStepGeneratedTracks[static_cast<size_t>(aceStepSelectedTrackIndex)].path));
+			autoSaveSession();
+		}
+		const auto & selectedTrack =
+			aceStepGeneratedTracks[static_cast<size_t>(aceStepSelectedTrackIndex)];
+		if (!trim(selectedTrack.label).empty()) {
+			ImGui::TextDisabled("%s", selectedTrack.label.c_str());
+		}
+		ImGui::TextDisabled("%s", selectedTrack.path.c_str());
+#if OFXGGML_HAS_OFXVLC4
+		if (aceStepVlcInitialized) {
+			drawAceStepVlcPreview();
+		}
+#else
+		ImGui::TextDisabled(
+			"Regenerate this example with ofxVlc4 in addons.make to enable direct audio preview here.");
+#endif
 	}
 	if (!trim(aceStepUnderstoodSummary).empty()) {
 		ImGui::TextWrapped("%s", aceStepUnderstoodSummary.c_str());

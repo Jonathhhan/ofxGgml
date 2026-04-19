@@ -5,6 +5,8 @@ All notable changes to `ofxGgml` are documented in this file.
 ## [Unreleased]
 
 ### Added
+- The GUI example AceStep panel now includes an explicit server setup check plus a one-click install-command helper, making it clearer that prompt/ABC workflows stay local-first while rendered audio requires an external AceStep server.
+- `scripts/install-acestep.ps1` and `scripts/install-acestep.bat` as addon-local helpers for checking out and building AceStep into `libs/acestep/`.
 - `ofxGgmlCodeAssistantSession`, typed assistant tool definitions/calls, and streamed assistant-event callbacks so apps can keep lightweight coding-session state without rebuilding the whole GUI example workflow.
 - `ofxGgmlCodeAssistant::runWithSession(...)` as a higher-level coding-assistant entry point with approval callbacks for risky tool proposals such as patch application and verification commands.
 - `ofxGgmlCodingAgent` as a new orchestration layer that keeps coding-session memory, supports a read-only `Plan` mode, and can hand structured edits into workspace apply/verify flows without rebuilding that glue in apps.
