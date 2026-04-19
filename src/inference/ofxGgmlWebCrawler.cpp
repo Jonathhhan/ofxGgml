@@ -270,21 +270,46 @@ std::vector<std::filesystem::path> collectMarkdownFiles(
 	return files;
 }
 
+std::filesystem::path resolveAddonRootFromSourceFile() {
+	std::error_code ec;
+	const std::filesystem::path sourcePath =
+		std::filesystem::weakly_canonical(std::filesystem::path(__FILE__), ec);
+	if (ec) {
+		return {};
+	}
+
+	std::filesystem::path root = sourcePath.parent_path();
+	for (int i = 0; i < 2 && !root.empty(); ++i) {
+		root = root.parent_path();
+	}
+	return root;
+}
+
 std::string resolveMojoExecutable(const std::string & requestedPath) {
 	const std::vector<std::string> candidates = [&]() {
 		std::vector<std::string> values;
 		if (!trimCopy(requestedPath).empty()) {
 			values.push_back(trimCopy(requestedPath));
 		}
+
+		const std::filesystem::path addonRoot = resolveAddonRootFromSourceFile();
 #ifdef _WIN32
 		values.push_back("libs/mojo/bin/mojo.bat");
 		values.push_back("libs/mojo/bin/mojo.cmd");
 		values.push_back("libs/mojo/bin/mojo.exe");
+		if (!addonRoot.empty()) {
+			values.push_back((addonRoot / "libs/mojo/bin/mojo.bat").string());
+			values.push_back((addonRoot / "libs/mojo/bin/mojo.cmd").string());
+			values.push_back((addonRoot / "libs/mojo/bin/mojo.exe").string());
+		}
 		values.push_back("mojo.bat");
 		values.push_back("mojo.cmd");
 		values.push_back("mojo.exe");
 #else
 		values.push_back("libs/mojo/bin/mojo");
+		if (!addonRoot.empty()) {
+			values.push_back((addonRoot / "libs/mojo/bin/mojo").string());
+		}
 		values.push_back("mojo");
 #endif
 		return values;
@@ -547,8 +572,9 @@ ofxGgmlWebCrawlerResult ofxGgmlMojoWebCrawlerBackend::crawl(
 				: request.executablePath);
 	if (executable.empty()) {
 		result.error =
-			"Mojo executable was not found. Set executablePath or install Mojo. "
-			"On Windows, use scripts/install-mojo.ps1 to create the local WSL-backed wrapper.";
+			"Mojo wrapper or executable was not found. Set executablePath or install Mojo. "
+			"On Windows, use scripts/install-mojo.ps1 to create libs/mojo/bin/mojo.bat "
+			"for the local WSL-backed setup.";
 		result.elapsedMs = elapsedMsSince(start);
 		return result;
 	}
