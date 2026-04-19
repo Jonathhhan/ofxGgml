@@ -277,7 +277,11 @@ std::string resolveMojoExecutable(const std::string & requestedPath) {
 			values.push_back(trimCopy(requestedPath));
 		}
 #ifdef _WIN32
+		values.push_back("libs/mojo/bin/mojo.bat");
+		values.push_back("libs/mojo/bin/mojo.cmd");
 		values.push_back("libs/mojo/bin/mojo.exe");
+		values.push_back("mojo.bat");
+		values.push_back("mojo.cmd");
 		values.push_back("mojo.exe");
 #else
 		values.push_back("libs/mojo/bin/mojo");
@@ -543,7 +547,8 @@ ofxGgmlWebCrawlerResult ofxGgmlMojoWebCrawlerBackend::crawl(
 				: request.executablePath);
 	if (executable.empty()) {
 		result.error =
-			"Mojo executable was not found. Set executablePath or install mojo in PATH.";
+			"Mojo executable was not found. Set executablePath or install Mojo. "
+			"On Windows, use scripts/install-mojo.ps1 to create the local WSL-backed wrapper.";
 		result.elapsedMs = elapsedMsSince(start);
 		return result;
 	}

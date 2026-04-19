@@ -13,6 +13,99 @@
 #include <sstream>
 #include <thread>
 
+namespace {
+
+std::string summarizeStructuredScriptResult(
+	const ofxGgmlCodeAssistantStructuredResult & structured) {
+	std::ostringstream out;
+
+	const std::string goal = trim(structured.goalSummary);
+	const std::string approach = trim(structured.approachSummary);
+	if (!goal.empty()) {
+		out << goal << "\n";
+	}
+	if (!approach.empty()) {
+		if (!goal.empty()) {
+			out << "\n";
+		}
+		out << approach << "\n";
+	}
+
+	if (!structured.reviewFindings.empty()) {
+		out << "\nFindings:\n";
+		for (const auto & finding : structured.reviewFindings) {
+			out << "- [P" << finding.priority << "] " << finding.title;
+			if (!trim(finding.filePath).empty()) {
+				out << " (" << finding.filePath;
+				if (finding.line > 0) {
+					out << ":" << finding.line;
+				}
+				out << ")";
+			}
+			out << "\n";
+			if (!trim(finding.description).empty()) {
+				out << "  " << trim(finding.description) << "\n";
+			}
+			if (!trim(finding.fixSuggestion).empty()) {
+				out << "  Fix: " << trim(finding.fixSuggestion) << "\n";
+			}
+		}
+	} else if (!structured.steps.empty()) {
+		out << "\nPlan:\n";
+		for (const auto & step : structured.steps) {
+			if (!trim(step).empty()) {
+				out << "- " << trim(step) << "\n";
+			}
+		}
+	}
+
+	if (!structured.verificationCommands.empty()) {
+		out << "\nVerification:\n";
+		for (const auto & command : structured.verificationCommands) {
+			out << "- " << trim(command.label);
+			if (!trim(command.executable).empty()) {
+				out << ": " << trim(command.executable);
+				for (const auto & arg : command.arguments) {
+					out << " " << arg;
+				}
+			}
+			if (!trim(command.expectedOutcome).empty()) {
+				out << "\n  Expect: " << trim(command.expectedOutcome);
+			}
+			out << "\n";
+		}
+	}
+
+	if (!structured.questions.empty()) {
+		out << "\nOpen questions:\n";
+		for (const auto & question : structured.questions) {
+			if (!trim(question).empty()) {
+				out << "- " << trim(question) << "\n";
+			}
+		}
+	}
+
+	if (!trim(structured.riskAssessment.level).empty() ||
+		!structured.riskAssessment.reasons.empty()) {
+		out << "\nRisk: ";
+		if (!trim(structured.riskAssessment.level).empty()) {
+			out << trim(structured.riskAssessment.level);
+		} else {
+			out << "unspecified";
+		}
+		out << "\n";
+		for (const auto & reason : structured.riskAssessment.reasons) {
+			if (!trim(reason).empty()) {
+				out << "- " << trim(reason) << "\n";
+			}
+		}
+	}
+
+	return trim(out.str());
+}
+
+} // namespace
+
 ofApp::InferenceModePromptSnapshot ofApp::makeInferenceModePromptSnapshot() const {
 	InferenceModePromptSnapshot snapshot;
 	snapshot.chatLanguageIndex = chatLanguageIndex;
@@ -455,6 +548,14 @@ void ofApp::runScriptAssistantRequest(
 				localSessionCopy = scriptCodingAgent.getSession();
 
 				std::string result = agentResult.assistantResult.inference.text;
+				if (trim(result).empty() &&
+					agentResult.assistantResult.inference.success) {
+					result = summarizeStructuredScriptResult(
+						agentResult.assistantResult.structured);
+					if (trim(result).empty()) {
+						result = trim(agentResult.summary);
+					}
+				}
 				if (cancelRequested.load()) {
 					result = "[Generation cancelled]";
 				} else if (!agentResult.assistantResult.inference.success) {
@@ -1606,7 +1707,23 @@ void ofApp::runHierarchicalReview(const std::string & overrideQuery) {
 		: (std::strlen(scriptInput) > 0
 			? std::string(scriptInput)
 			: ofxGgmlCodeReview::defaultReviewQuery());
-	runInference(AiMode::Script, effectiveReviewQuery);
+	ofxGgmlCodeAssistantRequest request =
+		buildScriptAssistantRequest(
+			effectiveReviewQuery,
+			makeInferenceModePromptSnapshot());
+	request.action = ofxGgmlCodeAssistantAction::Review;
+	request.requestStructuredResult = true;
+	request.labelOverride = "Review all files";
+	request.bodyOverride =
+		"Review the loaded workspace hierarchically. Focus on concrete bugs, regressions, risks, and missing tests. "
+		"Prefer evidence-backed findings with file references and concise fixes.";
+	runScriptAssistantRequest(
+		request,
+		request.labelOverride,
+		false,
+		{},
+		nullptr,
+		true);
 }
 
 void ofApp::exportChatHistory(const std::string & path) {

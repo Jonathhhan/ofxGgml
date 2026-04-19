@@ -14,6 +14,9 @@ obj/
 *.ini
 libs/llama/bin/
 libs/whisper/bin/
+libs/acestep/
+libs/mojo/project/
+libs/mojo/bin/
 
 # Generated / cached data
 ofxGgmlGuiExample/bin/*.dll
@@ -22,6 +25,7 @@ ofxGgmlGuiExample/bin/*.exp
 ofxGgmlGuiExample/bin/*.ini
 ofxGgmlGuiExample/bin/*.lib
 ofxGgmlGuiExample/bin/libs/
+ofxGgmlGuiExample/dll/
 ofxGgmlGuiExample/bin/data/generated/
 ofxGgmlGuiExample/bin/data/cache/
 ofxGgmlGuiExample/bin/data/models/

@@ -981,6 +981,12 @@ Use it when an app wants lightweight reference gathering without hardwiring a sp
 
 `ofxGgmlWebCrawler` provides a lightweight optional bridge for website ingestion. The default backend wraps the external `Mojo` CLI crawler, runs a local crawl, and normalizes discovered Markdown files into structured addon result objects.
 
+On Windows, the recommended local setup is the bundled installer script:
+
+`scripts/install-mojo.ps1`
+
+That script installs Mojo into a local WSL-backed environment under `libs/mojo/project` and creates a Windows launcher at `libs/mojo/bin/mojo.bat`, which the crawler now discovers automatically.
+
 The default `Mojo` adapter currently supports:
 
 - start URL
