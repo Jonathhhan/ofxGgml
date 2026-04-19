@@ -512,7 +512,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-acestep.ps1
 scripts\install-acestep.bat
 ```
 
-The installer now auto-detects the remote default branch when possible and falls back across common branch names (`main`, `master`, `dev`, `trunk`) so upstream branch changes fail less often.
+The installer now auto-detects the remote default branch when possible, falls back across common branch names (`main`, `master`, `dev`, `trunk`), and initializes required submodules so upstream branch/layout changes fail less often.
 
 The helper installs into:
 

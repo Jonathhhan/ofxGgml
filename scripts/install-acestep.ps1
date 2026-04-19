@@ -37,7 +37,7 @@ function Invoke-LoggedCommand {
         return
     }
 
-    & $Executable @Arguments
+    & $Executable @Arguments | Out-Host
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
         throw "Command failed with exit code ${exitCode}: $Executable $($Arguments -join ' ')"
@@ -114,7 +114,15 @@ function Clone-RepositoryWithBranchFallback {
     foreach ($candidateBranch in $branchCandidates) {
         try {
             Write-Step "Cloning AceStep source (branch '$candidateBranch')"
-            Invoke-LoggedCommand $GitExecutable @('clone', '--depth', '1', '--branch', $candidateBranch, $RemoteUrl, $CheckoutDir)
+            Invoke-LoggedCommand $GitExecutable @(
+                'clone',
+                '--depth', '1',
+                '--branch', $candidateBranch,
+                '--recurse-submodules',
+                '--shallow-submodules',
+                $RemoteUrl,
+                $CheckoutDir
+            )
             return $candidateBranch
         } catch {
             $attemptErrors.Add($_.Exception.Message)
@@ -159,6 +167,23 @@ function Resolve-ExistingBranch {
     }
 
     return 'main'
+}
+
+function Update-RepositorySubmodules {
+    param(
+        [string]$GitExecutable,
+        [string]$CheckoutDir
+    )
+
+    Write-Step "Updating AceStep submodules"
+    Invoke-LoggedCommand $GitExecutable @('-C', $CheckoutDir, 'submodule', 'sync', '--recursive')
+    Invoke-LoggedCommand $GitExecutable @(
+        '-C', $CheckoutDir,
+        'submodule', 'update',
+        '--init',
+        '--recursive',
+        '--depth', '1'
+    )
 }
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -209,6 +234,8 @@ if (-not (Test-Path -LiteralPath $SourceDir)) {
     Invoke-LoggedCommand $git @('-C', $SourceDir, 'checkout', $resolvedBranch)
     Invoke-LoggedCommand $git @('-C', $SourceDir, 'pull', '--ff-only', 'origin', $resolvedBranch)
 }
+
+Update-RepositorySubmodules -GitExecutable $git -CheckoutDir $SourceDir
 
 $cmakeListsPath = Join-Path $SourceDir 'CMakeLists.txt'
 if (-not $DryRun) {
