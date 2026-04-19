@@ -478,9 +478,20 @@ public:
 private:
 	ofxGgmlInference m_inference;
 	mutable std::mutex m_semanticCacheMutex;
+	mutable std::mutex m_codeMapCacheMutex;
+	mutable std::mutex m_repoInstructionCacheMutex;
 	mutable std::mutex m_toolRegistryMutex;
 	mutable std::string m_cachedWorkspaceRoot;
 	mutable uint64_t m_cachedWorkspaceGeneration = 0;
 	mutable ofxGgmlCodeAssistantSemanticIndex m_cachedSemanticIndex;
+	mutable std::string m_cachedCodeMapWorkspaceRoot;
+	mutable uint64_t m_cachedCodeMapWorkspaceGeneration = 0;
+	mutable ofxGgmlCodeAssistantCodeMap m_cachedCodeMap;
+	mutable std::string m_cachedInstructionWorkspaceRoot;
+	mutable uint64_t m_cachedInstructionWorkspaceGeneration = 0;
+	mutable std::string m_cachedInstructionTargetPath;
+	mutable bool m_cachedInstructionIncludePathSpecific = false;
+	mutable bool m_cachedRepoInstructionContextValid = false;
+	mutable std::string m_cachedRepoInstructionContext;
 	std::vector<ofxGgmlCodeAssistantToolDefinition> m_toolRegistry;
 };

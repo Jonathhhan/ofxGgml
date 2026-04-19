@@ -2406,7 +2406,6 @@ ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
 		: "scope_graph";
 
 	std::unordered_map<std::string, std::vector<std::string>> fileLines;
-	std::unordered_map<std::string, std::vector<std::string>> fileBodies;
 	for (size_t i = 0; i < files.size(); ++i) {
 		const auto & entry = files[i];
 		if (entry.isDirectory) {
@@ -2420,7 +2419,6 @@ ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
 
 		const std::string normalizedFile = normalizeContextFilePath(context, entry.name);
 		fileLines[normalizedFile] = splitLines(content);
-		fileBodies[normalizedFile] = splitLines(content);
 		auto symbols = extractSymbols(content, normalizedFile);
 		for (auto & symbol : symbols) {
 			if (index.hasCompilationDatabase &&
@@ -2445,8 +2443,8 @@ ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
 		if (callerSymbol.kind != "function") {
 			continue;
 		}
-		const auto linesIt = fileBodies.find(callerSymbol.filePath);
-		if (linesIt == fileBodies.end()) {
+		const auto linesIt = fileLines.find(callerSymbol.filePath);
+		if (linesIt == fileLines.end()) {
 			continue;
 		}
 		const auto & lines = linesIt->second;
@@ -2558,6 +2556,13 @@ ofxGgmlCodeAssistantCodeMap ofxGgmlCodeAssistant::buildCodeMap(
 	const auto workspaceInfo = context.scriptSource->getWorkspaceInfo();
 	codeMap.workspaceRoot = workspaceInfo.workspaceRoot;
 	codeMap.workspaceGeneration = workspaceInfo.workspaceGeneration;
+	if (!codeMap.workspaceRoot.empty() && codeMap.workspaceGeneration > 0) {
+		std::lock_guard<std::mutex> cacheLock(m_codeMapCacheMutex);
+		if (m_cachedCodeMapWorkspaceRoot == codeMap.workspaceRoot &&
+			m_cachedCodeMapWorkspaceGeneration == codeMap.workspaceGeneration) {
+			return m_cachedCodeMap;
+		}
+	}
 
 	const auto files = context.scriptSource->getFiles();
 	for (const auto & file : files) {
@@ -2600,6 +2605,12 @@ ofxGgmlCodeAssistantCodeMap ofxGgmlCodeAssistant::buildCodeMap(
 			}
 			return a.scope < b.scope;
 		});
+	if (!codeMap.workspaceRoot.empty() && codeMap.workspaceGeneration > 0) {
+		std::lock_guard<std::mutex> cacheLock(m_codeMapCacheMutex);
+		m_cachedCodeMapWorkspaceRoot = codeMap.workspaceRoot;
+		m_cachedCodeMapWorkspaceGeneration = codeMap.workspaceGeneration;
+		m_cachedCodeMap = codeMap;
+	}
 	return codeMap;
 }
 
@@ -3483,10 +3494,45 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 	}
 	appendTaskMemory(prompt, context, &prepared.includedTaskMemory);
 	if (context.scriptSource != nullptr) {
-		const std::string instructionContext = buildRepoInstructionContext(
-			context.scriptSource,
-			focusedFileName,
-			true);
+		const auto workspaceInfo = context.scriptSource->getWorkspaceInfo();
+		std::string instructionContext;
+		const bool canUseInstructionCache =
+			!workspaceInfo.workspaceRoot.empty() &&
+			workspaceInfo.workspaceGeneration > 0;
+		if (canUseInstructionCache) {
+			const std::string normalizedTarget =
+				normalizePathForMatch(focusedFileName);
+			bool usedCachedInstructionContext = false;
+			{
+				std::lock_guard<std::mutex> cacheLock(m_repoInstructionCacheMutex);
+				if (m_cachedInstructionWorkspaceRoot == workspaceInfo.workspaceRoot &&
+					m_cachedInstructionWorkspaceGeneration == workspaceInfo.workspaceGeneration &&
+					m_cachedInstructionTargetPath == normalizedTarget &&
+					m_cachedInstructionIncludePathSpecific &&
+					m_cachedRepoInstructionContextValid) {
+					instructionContext = m_cachedRepoInstructionContext;
+					usedCachedInstructionContext = true;
+				}
+			}
+			if (!usedCachedInstructionContext) {
+				instructionContext = buildRepoInstructionContext(
+					context.scriptSource,
+					focusedFileName,
+					true);
+				std::lock_guard<std::mutex> cacheLock(m_repoInstructionCacheMutex);
+				m_cachedInstructionWorkspaceRoot = workspaceInfo.workspaceRoot;
+				m_cachedInstructionWorkspaceGeneration = workspaceInfo.workspaceGeneration;
+				m_cachedInstructionTargetPath = normalizedTarget;
+				m_cachedInstructionIncludePathSpecific = true;
+				m_cachedRepoInstructionContextValid = true;
+				m_cachedRepoInstructionContext = instructionContext;
+			}
+		} else {
+			instructionContext = buildRepoInstructionContext(
+				context.scriptSource,
+				focusedFileName,
+				true);
+		}
 		if (!instructionContext.empty()) {
 			prompt << instructionContext;
 		}

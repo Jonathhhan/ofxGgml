@@ -925,6 +925,11 @@ private:
 	bool ensureDiffusionBackendConfigured();
 	bool ensureDiffusionClipBackendConfigured();
 	static int clampSupportedDiffusionImageSize(int value);
+	static constexpr float kDefaultInferenceTemp = 0.7f;
+	static constexpr float kDefaultInferenceTopP = 0.9f;
+	static constexpr float kDefaultInferenceRepeatPenalty = 1.1f;
+	static constexpr size_t kDefaultMaxScriptContextFiles = 50;
+	static constexpr size_t kDefaultMaxFocusedFileSnippetChars = 2000;
 	ofxGgmlInferenceSettings buildCurrentTextInferenceSettings(AiMode mode) const;
 	std::string getPreferredDiffusionReuseImagePath() const;
 	void setDiffusionInitImagePath(const std::string & path, bool promoteTask = true);
@@ -974,6 +979,9 @@ private:
 	ofLogLevel mapGgmlLogLevel(int level) const;
 	void probeLlamaCli(const std::string & customPath = "");
 	void probeCliCapabilities();
+	bool isLlamaCliReady() const;
+	std::string getLlamaCliCommand() const;
+	void killActiveInferenceProcess();
 
 	// -- UI panels --
 	void drawMenuBar();

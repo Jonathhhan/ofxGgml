@@ -1,5 +1,5 @@
 param(
-    [string]$Branch = "main",
+    [string]$Branch = "",
     [string]$RepositoryUrl = "https://github.com/ServeurpersoCom/acestep.cpp.git",
     [string]$SourceDir = "",
     [string]$BuildDir = "",
@@ -38,6 +38,127 @@ function Invoke-LoggedCommand {
     }
 
     & $Executable @Arguments
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "Command failed with exit code ${exitCode}: $Executable $($Arguments -join ' ')"
+    }
+}
+
+function Get-RemoteDefaultBranchOrNull {
+    param(
+        [string]$GitExecutable,
+        [string]$RemoteUrl
+    )
+
+    if ($DryRun) {
+        return $null
+    }
+
+    try {
+        $output = & $GitExecutable 'ls-remote' '--symref' $RemoteUrl 'HEAD' 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            return $null
+        }
+
+        foreach ($line in $output) {
+            if ($line -match '^ref:\s+refs/heads/([^\s]+)\s+HEAD$') {
+                return $Matches[1]
+            }
+        }
+    } catch {
+        return $null
+    }
+
+    return $null
+}
+
+function Get-BranchCandidates {
+    param(
+        [string]$GitExecutable,
+        [string]$RemoteUrl,
+        [string]$RequestedBranch
+    )
+
+    $candidates = New-Object System.Collections.Generic.List[string]
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedBranch)) {
+        $candidates.Add($RequestedBranch)
+        return $candidates
+    }
+
+    $defaultBranch = Get-RemoteDefaultBranchOrNull -GitExecutable $GitExecutable -RemoteUrl $RemoteUrl
+    if (-not [string]::IsNullOrWhiteSpace($defaultBranch)) {
+        $candidates.Add($defaultBranch)
+    }
+
+    foreach ($candidate in @('main', 'master', 'dev', 'trunk')) {
+        if (-not $candidates.Contains($candidate)) {
+            $candidates.Add($candidate)
+        }
+    }
+
+    return $candidates
+}
+
+function Clone-RepositoryWithBranchFallback {
+    param(
+        [string]$GitExecutable,
+        [string]$RemoteUrl,
+        [string]$RequestedBranch,
+        [string]$CheckoutDir
+    )
+
+    $attemptErrors = New-Object System.Collections.Generic.List[string]
+    $branchCandidates = Get-BranchCandidates -GitExecutable $GitExecutable -RemoteUrl $RemoteUrl -RequestedBranch $RequestedBranch
+
+    foreach ($candidateBranch in $branchCandidates) {
+        try {
+            Write-Step "Cloning AceStep source (branch '$candidateBranch')"
+            Invoke-LoggedCommand $GitExecutable @('clone', '--depth', '1', '--branch', $candidateBranch, $RemoteUrl, $CheckoutDir)
+            return $candidateBranch
+        } catch {
+            $attemptErrors.Add($_.Exception.Message)
+            if (-not $DryRun -and (Test-Path -LiteralPath $CheckoutDir)) {
+                Remove-Item -LiteralPath $CheckoutDir -Recurse -Force
+            }
+        }
+    }
+
+    $branchList = $branchCandidates -join ', '
+    $errorList = $attemptErrors -join [Environment]::NewLine
+    throw "Failed to clone AceStep. Tried branches: $branchList`n$errorList"
+}
+
+function Resolve-ExistingBranch {
+    param(
+        [string]$GitExecutable,
+        [string]$RemoteUrl,
+        [string]$RequestedBranch,
+        [string]$CheckoutDir
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedBranch)) {
+        return $RequestedBranch
+    }
+
+    if (-not $DryRun) {
+        try {
+            $currentBranch = (& $GitExecutable '-C' $CheckoutDir 'rev-parse' '--abbrev-ref' 'HEAD').Trim()
+            if ($LASTEXITCODE -eq 0 -and
+                -not [string]::IsNullOrWhiteSpace($currentBranch) -and
+                $currentBranch -ne 'HEAD') {
+                return $currentBranch
+            }
+        } catch {
+        }
+    }
+
+    $defaultBranch = Get-RemoteDefaultBranchOrNull -GitExecutable $GitExecutable -RemoteUrl $RemoteUrl
+    if (-not [string]::IsNullOrWhiteSpace($defaultBranch)) {
+        return $defaultBranch
+    }
+
+    return 'main'
 }
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -80,22 +201,24 @@ if ($Refetch -and (Test-Path -LiteralPath $SourceDir)) {
 }
 
 if (-not (Test-Path -LiteralPath $SourceDir)) {
-    Write-Step "Cloning AceStep source"
-    Invoke-LoggedCommand $git @('clone', '--depth', '1', '--branch', $Branch, $RepositoryUrl, $SourceDir)
+    $resolvedBranch = Clone-RepositoryWithBranchFallback -GitExecutable $git -RemoteUrl $RepositoryUrl -RequestedBranch $Branch -CheckoutDir $SourceDir
 } else {
     Write-Step "Updating existing AceStep source checkout"
-    Invoke-LoggedCommand $git @('-C', $SourceDir, 'fetch', 'origin', $Branch, '--depth', '1')
-    Invoke-LoggedCommand $git @('-C', $SourceDir, 'checkout', $Branch)
-    Invoke-LoggedCommand $git @('-C', $SourceDir, 'pull', '--ff-only', 'origin', $Branch)
+    $resolvedBranch = Resolve-ExistingBranch -GitExecutable $git -RemoteUrl $RepositoryUrl -RequestedBranch $Branch -CheckoutDir $SourceDir
+    Invoke-LoggedCommand $git @('-C', $SourceDir, 'fetch', 'origin', $resolvedBranch, '--depth', '1')
+    Invoke-LoggedCommand $git @('-C', $SourceDir, 'checkout', $resolvedBranch)
+    Invoke-LoggedCommand $git @('-C', $SourceDir, 'pull', '--ff-only', 'origin', $resolvedBranch)
 }
 
 $cmakeListsPath = Join-Path $SourceDir 'CMakeLists.txt'
-if (-not (Test-Path -LiteralPath $cmakeListsPath)) {
-    throw "The AceStep checkout does not contain CMakeLists.txt at $cmakeListsPath"
-}
+if (-not $DryRun) {
+    if (-not (Test-Path -LiteralPath $cmakeListsPath)) {
+        throw "The AceStep checkout does not contain CMakeLists.txt at $cmakeListsPath. The repository layout may have changed, or the checkout did not complete successfully."
+    }
 
-New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
-New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+}
 
 Write-Step "Configuring AceStep"
 Invoke-LoggedCommand $cmake @(
@@ -135,6 +258,9 @@ Write-Host "AceStep install helper complete."
 Write-Host "  source:  $SourceDir"
 Write-Host "  build:   $BuildDir"
 Write-Host "  install: $InstallDir"
+if (-not [string]::IsNullOrWhiteSpace($resolvedBranch)) {
+    Write-Host "  branch:  $resolvedBranch"
+}
 Write-Host "  server url default in ofxGgml: http://127.0.0.1:8085"
 Write-Host ""
 Write-Host "Next steps:"

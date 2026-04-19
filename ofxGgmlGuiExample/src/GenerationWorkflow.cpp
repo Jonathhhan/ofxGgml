@@ -1,6 +1,9 @@
 #include "ofApp.h"
 
 #include "utils/ConsoleHelpers.h"
+#include "utils/ImGuiHelpers.h"
+#include "utils/PathHelpers.h"
+#include "utils/SpeechHelpers.h"
 #include "utils/TextPromptHelpers.h"
 
 #include <algorithm>
@@ -32,7 +35,7 @@ ofApp::InferenceModePromptSnapshot ofApp::makeInferenceModePromptSnapshot() cons
 				? std::string("llama-server")
 				: std::string("llama-server @ ") + serverUrl;
 		}
-		const std::string cliPath = trim(llamaCliCommand);
+		const std::string cliPath = trim(getLlamaCliCommand());
 		return cliPath.empty() ? std::string("llama-completion") : cliPath;
 	}();
 	return snapshot;
@@ -108,8 +111,8 @@ ofxGgmlCodeAssistantContext ofApp::buildScriptAssistantContext(
 	context.projectMemory = &scriptProjectMemory;
 	context.focusedFileIndex = snapshot.script.focusedFileIndex;
 	context.includeRepoContext = snapshot.script.includeRepoContext;
-	context.maxRepoFiles = kMaxScriptContextFiles;
-	context.maxFocusedFileChars = kMaxFocusedFileSnippetChars;
+	context.maxRepoFiles = kDefaultMaxScriptContextFiles;
+	context.maxFocusedFileChars = kDefaultMaxFocusedFileSnippetChars;
 	context.activeMode = "Script";
 	context.selectedBackend = snapshot.script.backendLabel;
 	context.recentTouchedFiles = snapshot.script.recentTouchedFiles;
@@ -256,9 +259,9 @@ void ofApp::runScriptAssistantRequest(
 						}
 						return false;
 					}
-					if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+					if (!isLlamaCliReady()) {
 						probeLlamaCli();
-						if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+						if (!isLlamaCliReady()) {
 							backendError =
 								"Optional CLI fallback is not installed. Build it with scripts/build-llama-cli.sh if you want a local non-server fallback.";
 							if (cliError != nullptr) {
@@ -267,9 +270,10 @@ void ofApp::runScriptAssistantRequest(
 							return false;
 						}
 					}
-					scriptAssistant.getInference().setCompletionExecutable(llamaCliCommand);
+					const std::string cliCommand = getLlamaCliCommand();
+					scriptAssistant.getInference().setCompletionExecutable(cliCommand);
 					scriptAssistant.getInference().probeCompletionCapabilities(true);
-					scriptCodingAgent.setCompletionExecutable(llamaCliCommand);
+					scriptCodingAgent.setCompletionExecutable(cliCommand);
 					return true;
 				};
 
@@ -310,17 +314,17 @@ void ofApp::runScriptAssistantRequest(
 				inferenceSettings.maxTokens = std::clamp(maxTokens, 1, 8192);
 				inferenceSettings.temperature = std::isfinite(temperature)
 					? std::clamp(temperature, 0.0f, 2.0f)
-					: kDefaultTemp;
+					: kDefaultInferenceTemp;
 				inferenceSettings.topP = std::isfinite(topP)
 					? std::clamp(topP, 0.0f, 1.0f)
-					: kDefaultTopP;
+					: kDefaultInferenceTopP;
 				inferenceSettings.topK = std::clamp(topK, 0, 200);
 				inferenceSettings.minP = std::isfinite(minP)
 					? std::clamp(minP, 0.0f, 1.0f)
 					: 0.0f;
 				inferenceSettings.repeatPenalty = std::isfinite(repeatPenalty)
 					? std::clamp(repeatPenalty, 1.0f, 2.0f)
-					: kDefaultRepeatPenalty;
+					: kDefaultInferenceRepeatPenalty;
 				inferenceSettings.contextSize = std::clamp(contextSize, 256, 16384);
 				inferenceSettings.batchSize = std::clamp(batchSize, 32, 4096);
 				inferenceSettings.threads = std::clamp(numThreads, 1, 128);
@@ -590,9 +594,9 @@ void ofApp::runScriptInlineCompletionRequest(
 						}
 						return false;
 					}
-					if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+					if (!isLlamaCliReady()) {
 						probeLlamaCli();
-						if (llamaCliState.load(std::memory_order_relaxed) != 1) {
+						if (!isLlamaCliReady()) {
 							backendError =
 								"Optional CLI fallback is not installed. Build it with scripts/build-llama-cli.sh if you want a local non-server fallback.";
 							if (cliError != nullptr) {
@@ -601,7 +605,7 @@ void ofApp::runScriptInlineCompletionRequest(
 							return false;
 						}
 					}
-					scriptAssistant.getInference().setCompletionExecutable(llamaCliCommand);
+					scriptAssistant.getInference().setCompletionExecutable(getLlamaCliCommand());
 					scriptAssistant.getInference().probeCompletionCapabilities(true);
 					return true;
 				};
@@ -636,17 +640,17 @@ void ofApp::runScriptInlineCompletionRequest(
 				inferenceSettings.maxTokens = std::clamp(maxTokens, 1, 8192);
 				inferenceSettings.temperature = std::isfinite(temperature)
 					? std::clamp(temperature, 0.0f, 2.0f)
-					: kDefaultTemp;
+					: kDefaultInferenceTemp;
 				inferenceSettings.topP = std::isfinite(topP)
 					? std::clamp(topP, 0.0f, 1.0f)
-					: kDefaultTopP;
+					: kDefaultInferenceTopP;
 				inferenceSettings.topK = std::clamp(topK, 0, 200);
 				inferenceSettings.minP = std::isfinite(minP)
 					? std::clamp(minP, 0.0f, 1.0f)
 					: 0.0f;
 				inferenceSettings.repeatPenalty = std::isfinite(repeatPenalty)
 					? std::clamp(repeatPenalty, 1.0f, 2.0f)
-					: kDefaultRepeatPenalty;
+					: kDefaultInferenceRepeatPenalty;
 				inferenceSettings.contextSize = std::clamp(contextSize, 256, 16384);
 				inferenceSettings.batchSize = std::clamp(batchSize, 32, 4096);
 				inferenceSettings.threads = std::clamp(numThreads, 1, 128);
@@ -1036,7 +1040,7 @@ void ofApp::runInference(
 void ofApp::stopGeneration() {
 	if (generating.load()) {
 		cancelRequested.store(true);
-		killInferenceProcess();
+		killActiveInferenceProcess();
 		scriptAssistantApprovalCv.notify_all();
 	}
 	if (workerThread.joinable()) {

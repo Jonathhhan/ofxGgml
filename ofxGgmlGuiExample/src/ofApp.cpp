@@ -955,6 +955,18 @@ void ofApp::probeCliCapabilities() {
 	}
 }
 
+bool ofApp::isLlamaCliReady() const {
+	return llamaCliState.load(std::memory_order_relaxed) == 1;
+}
+
+std::string ofApp::getLlamaCliCommand() const {
+	return llamaCliCommand;
+}
+
+void ofApp::killActiveInferenceProcess() {
+	killInferenceProcess();
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
