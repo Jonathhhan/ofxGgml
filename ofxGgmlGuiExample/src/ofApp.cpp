@@ -58,7 +58,7 @@
 // ---------------------------------------------------------------------------
 
 const char * ofApp::modeLabels[kModeCount] = {
-	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Video Essay", "Vision", "Speech", "TTS", "Diffusion", "CLIP", "MilkDrop"
+	"Chat", "Script", "Summarize", "Write", "Translate", "Custom", "Video Essay", "Vision", "Speech", "TTS", "Diffusion", "CLIP", "MilkDrop", "Easy"
 };
 
 const char * const kTextBackendLabels[] = {
@@ -85,6 +85,138 @@ namespace {
 			}
 		}
 		return sanitized.empty() ? fallback : sanitized;
+	}
+
+	std::vector<std::string> collectGeneratedMontageClipPathsImpl(
+		const std::string & videoEssayRenderPath,
+		const std::string & montageRenderPath,
+		std::string * statusOut) {
+		struct CandidatePath {
+			std::string path;
+			std::string label;
+		};
+
+		const std::vector<CandidatePath> candidates = {
+			{trim(videoEssayRenderPath), "video essay render"},
+			{trim(montageRenderPath), "montage playlist render"}
+		};
+
+		std::vector<std::string> results;
+		std::vector<std::string> notes;
+		std::unordered_set<std::string> seen;
+		for (const auto & candidate : candidates) {
+			if (candidate.path.empty()) {
+				continue;
+			}
+			if (!pathExists(candidate.path)) {
+				notes.push_back("Skipped missing " + candidate.label + ": " + candidate.path);
+				continue;
+			}
+
+			std::error_code ec;
+			const std::filesystem::path canonicalPath =
+				std::filesystem::weakly_canonical(std::filesystem::path(candidate.path), ec);
+			const std::string normalizedPath =
+				(ec ? std::filesystem::path(candidate.path) : canonicalPath)
+					.lexically_normal()
+					.string();
+			if (!seen.insert(ofToLower(normalizedPath)).second) {
+				continue;
+			}
+			results.push_back(normalizedPath);
+		}
+
+		if (statusOut != nullptr) {
+			if (results.empty()) {
+				*statusOut =
+					notes.empty()
+						? std::string("No generated video outputs are available yet. Render a video essay or montage playlist first.")
+						: notes.front();
+			} else {
+				std::ostringstream status;
+				status << "Found " << results.size() << " generated video output";
+				if (results.size() != 1) {
+					status << "s";
+				}
+				status << ".";
+				if (!notes.empty()) {
+					status << " " << notes.front();
+				}
+				*statusOut = status.str();
+			}
+		}
+
+		return results;
+	}
+
+	bool populateMontageClipPlaylistBufferFromGeneratedOutputs(
+		char * clipPathBuffer,
+		size_t clipPathBufferSize,
+		const std::string & videoEssayRenderPath,
+		const std::string & montageRenderPath,
+		std::string * statusOut) {
+		std::string generatedStatus;
+		const std::vector<std::string> generatedClipPaths =
+			collectGeneratedMontageClipPathsImpl(
+				videoEssayRenderPath,
+				montageRenderPath,
+				&generatedStatus);
+		if (generatedClipPaths.empty()) {
+			if (statusOut != nullptr) {
+				*statusOut = generatedStatus;
+			}
+			return false;
+		}
+
+		std::vector<std::string> mergedClipPaths = extractPathList(clipPathBuffer);
+		const size_t existingCount = mergedClipPaths.size();
+		std::unordered_set<std::string> seen;
+		for (const auto & path : mergedClipPaths) {
+			seen.insert(ofToLower(trim(path)));
+		}
+
+		size_t addedCount = 0;
+		for (const auto & path : generatedClipPaths) {
+			if (!seen.insert(ofToLower(path)).second) {
+				continue;
+			}
+			mergedClipPaths.push_back(path);
+			++addedCount;
+		}
+
+		if (addedCount == 0) {
+			if (statusOut != nullptr) {
+				*statusOut = "The generated video outputs are already in the montage clip playlist.";
+			}
+			return true;
+		}
+
+		std::ostringstream packed;
+		for (size_t i = 0; i < mergedClipPaths.size(); ++i) {
+			if (i > 0) {
+				packed << '\n';
+			}
+			packed << mergedClipPaths[i];
+		}
+		copyStringToBuffer(clipPathBuffer, clipPathBufferSize, packed.str());
+
+		if (statusOut != nullptr) {
+			std::ostringstream status;
+			status << "Added " << addedCount << " generated video output";
+			if (addedCount != 1) {
+				status << "s";
+			}
+			status << " to the montage clip playlist";
+			if (existingCount > 0) {
+				status << " while keeping " << existingCount << " existing clip";
+				if (existingCount != 1) {
+					status << "s";
+				}
+			}
+			status << ".";
+			*statusOut = status.str();
+		}
+		return true;
 	}
 
 	struct TokenLiteral {
@@ -1196,19 +1328,28 @@ ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "AI Studio");
 ImGui::Separator();
 ImGui::Spacing();
 ImGui::Text("Mode:");
-ImGui::Spacing();
-const float modeMenuRowHeight = 24.0f;
-
-for (int i = 0; i < kModeCount; i++) {
-bool selected = (static_cast<int>(activeMode) == i);
-if (ImGui::Selectable(modeLabels[i], selected, ImGuiSelectableFlags_None, ImVec2(0, modeMenuRowHeight))) {
-activeMode = static_cast<AiMode>(i);
-	if (useModeTokenBudgets) {
-		maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(i)], 32, 4096);
+ImGui::SetNextItemWidth(-1);
+const int activeModeIndex = std::clamp(
+	static_cast<int>(activeMode),
+	0,
+	kModeCount - 1);
+if (ImGui::BeginCombo("##ModeSel", modeLabels[activeModeIndex])) {
+	for (int i = 0; i < kModeCount; i++) {
+		const bool isSelected = (activeModeIndex == i);
+		if (ImGui::Selectable(modeLabels[i], isSelected)) {
+			activeMode = static_cast<AiMode>(i);
+			if (useModeTokenBudgets) {
+				maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(i)], 32, 4096);
+			}
+			syncTextBackendForActiveMode(false, false);
+		}
+		if (isSelected) {
+			ImGui::SetItemDefaultFocus();
+		}
 	}
-	syncTextBackendForActiveMode(false, false);
+	ImGui::EndCombo();
 }
-}
+ImGui::TextDisabled("Stored backend and token defaults follow the selected mode.");
 
 ImGui::Spacing();
 ImGui::Separator();
@@ -1632,6 +1773,7 @@ ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
 if (ImGui::Begin("##MainPanel", nullptr, flags)) {
 switch (activeMode) {
 case AiMode::Chat:      drawChatPanel();      break;
+case AiMode::Easy:      drawEasyPanel();      break;
 case AiMode::Script:    drawScriptPanel();    break;
 case AiMode::Summarize: drawSummarizePanel(); break;
 	case AiMode::Write:     drawWritePanel();     break;
@@ -1870,6 +2012,38 @@ ImGui::EndChild();
 		"##ScriptIn", scriptInput, sizeof(scriptInput), ImVec2(-1, 50),
 		ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine);
 
+	static const char * kScriptAgentModeLabels[] = {"Build", "Plan"};
+	ImGui::Text("Agent:");
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(140);
+	if (ImGui::BeginCombo(
+		"##ScriptAgentMode",
+		kScriptAgentModeLabels[std::clamp(scriptAgentModeIndex, 0, 1)])) {
+		for (int i = 0; i < 2; ++i) {
+			const bool selected = (scriptAgentModeIndex == i);
+			if (ImGui::Selectable(kScriptAgentModeLabels[i], selected)) {
+				scriptAgentModeIndex = i;
+				autoSaveSession();
+			}
+			if (selected) {
+				ImGui::SetItemDefaultFocus();
+			}
+		}
+		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip(
+			scriptAgentModeIndex == 0
+				? "Build keeps the normal edit-oriented assistant flow and unified-diff bias."
+				: "Plan stays read-only and biases the coding agent toward exploration and planning.");
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled(
+		"%s",
+		scriptAgentModeIndex == 0
+			? "Edit-oriented runtime"
+			: "Read-only planning runtime");
+
 const bool hasSelectedFile =
 	selectedScriptFileIndex >= 0 &&
 	selectedScriptFileIndex < static_cast<int>(scriptSourceFiles.size()) &&
@@ -1925,6 +2099,7 @@ auto buildWorkspaceAllowedFiles = [&]() {
 		std::string resolvedSymbol;
 		bool resolved = false;
 		bool forceWorkspaceContext = false;
+		bool forceGeneralExploration = false;
 	};
 
 	auto stripScriptAtReferences = [](const std::string & rawInput) {
@@ -1985,6 +2160,13 @@ auto buildWorkspaceAllowedFiles = [&]() {
 				} else {
 					item.displayLabel += " -> no recent touched files";
 				}
+			} else if (
+				token.normalizedToken == "general" ||
+				token.normalizedToken == "explore") {
+				item.resolved = true;
+				item.forceWorkspaceContext = true;
+				item.forceGeneralExploration = true;
+				item.displayLabel += " -> broad read-only repo exploration";
 			} else if (
 				token.normalizedToken == "workspace" ||
 				token.normalizedToken == "repo") {
@@ -2222,10 +2404,22 @@ auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 	request.requestUnifiedDiff = requestUnifiedDiff;
 	request.buildErrors = buildErrors;
 	request.allowedFiles = allowedFiles;
+	if (scriptAgentModeIndex == 1) {
+		std::ostringstream planModeBody;
+		planModeBody
+			<< "Work in read-only planning mode. Focus on investigation, intended files, "
+			<< "risks, and verification steps before proposing any concrete edits.";
+		if (!trim(request.bodyOverride).empty()) {
+			planModeBody << "\n\n" << trim(request.bodyOverride);
+		}
+		request.bodyOverride = trim(planModeBody.str());
+		request.requestUnifiedDiff = false;
+	}
 	std::vector<std::string> mergedAllowedFiles = request.allowedFiles;
 	std::vector<std::string> targetSymbols;
 	std::vector<std::string> referenceNotes;
 	bool forceWorkspaceContext = false;
+	bool forceGeneralExploration = false;
 	for (const auto & reference : resolvedReferences) {
 		referenceNotes.push_back(reference.displayLabel);
 		if (!reference.resolvedPath.empty()) {
@@ -2235,6 +2429,8 @@ auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 			targetSymbols.push_back(reference.resolvedSymbol);
 		}
 		forceWorkspaceContext = forceWorkspaceContext || reference.forceWorkspaceContext;
+		forceGeneralExploration =
+			forceGeneralExploration || reference.forceGeneralExploration;
 	}
 	std::sort(mergedAllowedFiles.begin(), mergedAllowedFiles.end());
 	mergedAllowedFiles.erase(
@@ -2258,6 +2454,10 @@ auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 		for (const auto & note : referenceNotes) {
 			referenceBody << "- " << note << "\n";
 		}
+		if (forceGeneralExploration) {
+			referenceBody
+				<< "- treat this as broad repository exploration and planning rather than direct patch application\n";
+		}
 		if (forceWorkspaceContext) {
 			referenceBody << "- prefer full loaded workspace context for this request\n";
 		}
@@ -2272,9 +2472,24 @@ auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 		request.language = scriptLanguages[static_cast<size_t>(selectedLanguageIndex)];
 	}
 
+	ofxGgmlCodeAssistantContext requestContext = buildScriptAssistantContext();
+	if (forceWorkspaceContext) {
+		requestContext.includeRepoContext = true;
+	}
+	if (forceGeneralExploration) {
+		requestContext.activeMode = "Script @general";
+		requestContext.includeRepoContext = true;
+		requestContext.attachScriptSourceDocuments = true;
+		requestContext.maxRepoFiles = std::max<size_t>(requestContext.maxRepoFiles, 120);
+		requestContext.maxFocusedFileChars =
+			std::max<size_t>(requestContext.maxFocusedFileChars, 3200);
+		requestContext.projectMemoryHeading =
+			"Project memory from previous coding requests (use for broad planning and repo exploration):";
+	}
+
 	const auto prepared = scriptAssistant.preparePrompt(
 		request,
-		buildScriptAssistantContext());
+		requestContext);
 	const std::string taskText = prepared.body.empty()
 		? userInput
 		: prepared.body;
@@ -2284,7 +2499,13 @@ auto submitScriptRequest = [&](ofxGgmlCodeAssistantAction action,
 
 	scriptMessages.push_back({"user", requestLabel, ofGetElapsedTimef()});
 	request.userInput = taskText;
-	runScriptAssistantRequest(request, requestLabel, clearInputAfter);
+	runScriptAssistantRequest(
+		request,
+		requestLabel,
+		clearInputAfter,
+		{},
+		&requestContext,
+		forceGeneralExploration);
 };
 
 auto summarizeLocalChanges = [&](const std::string & focusText) {
@@ -2523,6 +2744,7 @@ if (scriptHasAutocompleteToken) {
 	} builtInReferences[] = {
 		{"@focused", "Reference the currently selected file."},
 		{"@recent", "Reference recent touched files."},
+		{"@general", "Broaden into read-only workspace exploration and planning."},
 		{"@workspace", "Bias toward the full loaded workspace."},
 		{"@symbol:", "Search semantic symbol context, for example @symbol:update."}
 	};
@@ -2653,6 +2875,7 @@ if (slashCommand.kind != ScriptSlashCommandKind::None) {
 		{ "/tests", "/tests ", "Plan the highest-value tests." },
 		{ "@focused", "@focused ", "Reference the currently selected file." },
 		{ "@recent", "@recent ", "Reference recent touched files." },
+		{ "@general", "@general ", "Broaden into read-only workspace exploration." },
 		{ "@workspace", "@workspace ", "Bias toward whole-workspace context." },
 		{ "@symbol:", "@symbol:", "Reference a symbol, for example @symbol:update." }
 	};
@@ -2740,6 +2963,7 @@ ImGui::SameLine();
 		scriptAssistantEvents.clear();
 		scriptAssistantToolCalls.clear();
 		scriptAssistantSession = {};
+		scriptCodingAgent.resetSession();
 		lastScriptOutputLikelyCutoff = false;
 		lastScriptOutputTail.clear();
 	}
@@ -4197,6 +4421,22 @@ std::string ofApp::exportMontageClipPlaylistManifest(std::string * errorOut) con
 	return outputPath.string();
 }
 
+std::vector<std::string> ofApp::collectGeneratedMontageClipPaths(std::string * statusOut) const {
+	return collectGeneratedMontageClipPathsImpl(
+		videoEssayLastRenderedVideoPath,
+		montageClipRenderOutputPath,
+		statusOut);
+}
+
+bool ofApp::populateMontageClipPlaylistFromGeneratedOutputs(std::string * statusOut) {
+	return populateMontageClipPlaylistBufferFromGeneratedOutputs(
+		montageClipPaths,
+		sizeof(montageClipPaths),
+		videoEssayLastRenderedVideoPath,
+		montageClipRenderOutputPath,
+		statusOut);
+}
+
 #if OFXGGML_HAS_OFXVLC4
 bool ofApp::ensureVideoEssayVlcPreviewInitialized(std::string * errorOut) {
 	if (videoEssayVlcPreviewInitialized) {
@@ -4663,127 +4903,6 @@ void ofApp::drawMontageVlcPreview() {
 	}
 }
 
-std::vector<std::string> ofApp::collectGeneratedMontageClipPaths(std::string * statusOut) const {
-	struct CandidatePath {
-		std::string path;
-		std::string label;
-	};
-
-	const std::vector<CandidatePath> candidates = {
-		{trim(videoEssayLastRenderedVideoPath), "video essay render"},
-		{trim(montageClipRenderOutputPath), "montage playlist render"}
-	};
-
-	std::vector<std::string> results;
-	std::vector<std::string> notes;
-	std::unordered_set<std::string> seen;
-	for (const auto & candidate : candidates) {
-		if (candidate.path.empty()) {
-			continue;
-		}
-		if (!pathExists(candidate.path)) {
-			notes.push_back("Skipped missing " + candidate.label + ": " + candidate.path);
-			continue;
-		}
-
-		std::error_code ec;
-		const std::filesystem::path canonicalPath =
-			std::filesystem::weakly_canonical(std::filesystem::path(candidate.path), ec);
-		const std::string normalizedPath =
-			(ec ? std::filesystem::path(candidate.path) : canonicalPath)
-				.lexically_normal()
-				.string();
-		if (!seen.insert(ofToLower(normalizedPath)).second) {
-			continue;
-		}
-		results.push_back(normalizedPath);
-	}
-
-	if (statusOut != nullptr) {
-		if (results.empty()) {
-			*statusOut =
-				notes.empty()
-					? std::string("No generated video outputs are available yet. Render a video essay or montage playlist first.")
-					: notes.front();
-		} else {
-			std::ostringstream status;
-			status << "Found " << results.size() << " generated video output";
-			if (results.size() != 1) {
-				status << "s";
-			}
-			status << ".";
-			if (!notes.empty()) {
-				status << " " << notes.front();
-			}
-			*statusOut = status.str();
-		}
-	}
-
-	return results;
-}
-
-bool ofApp::populateMontageClipPlaylistFromGeneratedOutputs(std::string * statusOut) {
-	std::string generatedStatus;
-	const std::vector<std::string> generatedClipPaths =
-		collectGeneratedMontageClipPaths(&generatedStatus);
-	if (generatedClipPaths.empty()) {
-		if (statusOut != nullptr) {
-			*statusOut = generatedStatus;
-		}
-		return false;
-	}
-
-	std::vector<std::string> mergedClipPaths = extractPathList(montageClipPaths);
-	const size_t existingCount = mergedClipPaths.size();
-	std::unordered_set<std::string> seen;
-	for (const auto & path : mergedClipPaths) {
-		seen.insert(ofToLower(trim(path)));
-	}
-
-	size_t addedCount = 0;
-	for (const auto & path : generatedClipPaths) {
-		if (!seen.insert(ofToLower(path)).second) {
-			continue;
-		}
-		mergedClipPaths.push_back(path);
-		++addedCount;
-	}
-
-	if (addedCount == 0) {
-		if (statusOut != nullptr) {
-			*statusOut = "The generated video outputs are already in the montage clip playlist.";
-		}
-		return true;
-	}
-
-	std::ostringstream packed;
-	for (size_t i = 0; i < mergedClipPaths.size(); ++i) {
-		if (i > 0) {
-			packed << '\n';
-		}
-		packed << mergedClipPaths[i];
-	}
-	copyStringToBuffer(montageClipPaths, sizeof(montageClipPaths), packed.str());
-
-	if (statusOut != nullptr) {
-		std::ostringstream status;
-		status << "Added " << addedCount << " generated video output";
-		if (addedCount != 1) {
-			status << "s";
-		}
-		status << " to the montage clip playlist";
-		if (existingCount > 0) {
-			status << " while keeping " << existingCount << " existing clip";
-			if (existingCount != 1) {
-				status << "s";
-			}
-		}
-		status << ".";
-		*statusOut = status.str();
-	}
-	return true;
-}
-
 bool ofApp::ensureMontageClipVlcPreviewInitialized(std::string * errorOut) {
 	if (montageClipVlcInitialized) {
 		return true;
@@ -5091,129 +5210,6 @@ bool ofApp::stopMontageClipVlcRecording(std::string * errorOut) {
 	montageClipVlcError.clear();
 	if (errorOut) {
 		errorOut->clear();
-	}
-	return true;
-}
-#endif
-
-#if !OFXGGML_HAS_OFXVLC4
-std::vector<std::string> ofApp::collectGeneratedMontageClipPaths(std::string * statusOut) const {
-	struct CandidatePath {
-		std::string path;
-		std::string label;
-	};
-
-	const std::vector<CandidatePath> candidates = {
-		{trim(videoEssayLastRenderedVideoPath), "video essay render"},
-		{trim(montageClipRenderOutputPath), "montage playlist render"}
-	};
-
-	std::vector<std::string> results;
-	std::vector<std::string> notes;
-	std::unordered_set<std::string> seen;
-	for (const auto & candidate : candidates) {
-		if (candidate.path.empty()) {
-			continue;
-		}
-		if (!pathExists(candidate.path)) {
-			notes.push_back("Skipped missing " + candidate.label + ": " + candidate.path);
-			continue;
-		}
-
-		std::error_code ec;
-		const std::filesystem::path canonicalPath =
-			std::filesystem::weakly_canonical(std::filesystem::path(candidate.path), ec);
-		const std::string normalizedPath =
-			(ec ? std::filesystem::path(candidate.path) : canonicalPath)
-				.lexically_normal()
-				.string();
-		if (!seen.insert(ofToLower(normalizedPath)).second) {
-			continue;
-		}
-		results.push_back(normalizedPath);
-	}
-
-	if (statusOut != nullptr) {
-		if (results.empty()) {
-			*statusOut =
-				notes.empty()
-					? std::string("No generated video outputs are available yet. Render a video essay or montage playlist first.")
-					: notes.front();
-		} else {
-			std::ostringstream status;
-			status << "Found " << results.size() << " generated video output";
-			if (results.size() != 1) {
-				status << "s";
-			}
-			status << ".";
-			if (!notes.empty()) {
-				status << " " << notes.front();
-			}
-			*statusOut = status.str();
-		}
-	}
-
-	return results;
-}
-
-bool ofApp::populateMontageClipPlaylistFromGeneratedOutputs(std::string * statusOut) {
-	std::string generatedStatus;
-	const std::vector<std::string> generatedClipPaths =
-		collectGeneratedMontageClipPaths(&generatedStatus);
-	if (generatedClipPaths.empty()) {
-		if (statusOut != nullptr) {
-			*statusOut = generatedStatus;
-		}
-		return false;
-	}
-
-	std::vector<std::string> mergedClipPaths = extractPathList(montageClipPaths);
-	const size_t existingCount = mergedClipPaths.size();
-	std::unordered_set<std::string> seen;
-	for (const auto & path : mergedClipPaths) {
-		seen.insert(ofToLower(trim(path)));
-	}
-
-	size_t addedCount = 0;
-	for (const auto & path : generatedClipPaths) {
-		if (!seen.insert(ofToLower(path)).second) {
-			continue;
-		}
-		mergedClipPaths.push_back(path);
-		++addedCount;
-	}
-
-	if (addedCount == 0) {
-		if (statusOut != nullptr) {
-			*statusOut = "The generated video outputs are already in the montage clip playlist.";
-		}
-		return true;
-	}
-
-	std::ostringstream packed;
-	for (size_t i = 0; i < mergedClipPaths.size(); ++i) {
-		if (i > 0) {
-			packed << '\n';
-		}
-		packed << mergedClipPaths[i];
-	}
-	copyStringToBuffer(montageClipPaths, sizeof(montageClipPaths), packed.str());
-
-	if (statusOut != nullptr) {
-		std::ostringstream status;
-		status << "Added " << addedCount << " generated video output";
-		if (addedCount != 1) {
-			status << "s";
-		}
-		status << " to the montage clip playlist";
-		if (existingCount > 0) {
-			status << " while keeping " << existingCount << " existing clip";
-			if (existingCount != 1) {
-				status << "s";
-			}
-		}
-		status << ".";
-		*statusOut = status.str();
 	}
 	return true;
 }

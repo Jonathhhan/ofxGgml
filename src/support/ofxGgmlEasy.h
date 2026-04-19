@@ -1,5 +1,6 @@
 #pragma once
 
+#include "assistants/ofxGgmlCodingAgent.h"
 #include "assistants/ofxGgmlChatAssistant.h"
 #include "assistants/ofxGgmlTextAssistant.h"
 #include "inference/ofxGgmlCitationSearch.h"
@@ -131,6 +132,8 @@ public:
 	const ofxGgmlMilkDropGenerator & getMilkDropGenerator() const;
 	ofxGgmlVideoEssayWorkflow & getVideoEssayWorkflow();
 	const ofxGgmlVideoEssayWorkflow & getVideoEssayWorkflow() const;
+	ofxGgmlCodingAgent & getCodingAgent();
+	const ofxGgmlCodingAgent & getCodingAgent() const;
 
 	ofxGgmlInferenceResult complete(const std::string & prompt) const;
 	ofxGgmlChatAssistantResult chat(
@@ -188,6 +191,10 @@ public:
 		size_t maxCitations = 5) const;
 	ofxGgmlVideoEssayResult planVideoEssay(
 		const ofxGgmlVideoEssayRequest & request) const;
+	ofxGgmlCodingAgentResult runCodingAgent(
+		const ofxGgmlCodingAgentRequest & request,
+		const ofxGgmlCodeAssistantContext & context = {},
+		const ofxGgmlCodingAgentSettings & settings = {});
 	ofxGgmlEasyMontageResult planMontageFromSrt(
 		const std::string & srtPath,
 		const std::string & goal,
@@ -236,6 +243,7 @@ private:
 	ofxGgmlWebCrawlerRequest makeCrawlerRequest(
 		const std::string & startUrl,
 		int maxDepth = -1) const;
+	void syncTextBackends();
 	void syncCrawlerBackend();
 	void syncSpeechBackend();
 
@@ -256,4 +264,5 @@ private:
 	ofxGgmlAceStepBridge m_aceStepBridge;
 	ofxGgmlMilkDropGenerator m_milkDropGenerator;
 	ofxGgmlVideoEssayWorkflow m_videoEssayWorkflow;
+	ofxGgmlCodingAgent m_codingAgent;
 };

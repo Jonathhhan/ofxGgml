@@ -116,6 +116,7 @@ public:
 private:
 	// -- ggml engine --
 	ofxGgml ggml;
+	ofxGgmlEasy easyApi;
 	bool engineReady = false;
 	std::string engineStatus;
 	std::vector<ofxGgmlDeviceInfo> devices;
@@ -145,8 +146,15 @@ private:
 	// -- input buffers --
 	char chatInput[4096] = {};
 	bool chatSpeakReplies = false;
+	char easyPrimaryInput[4096] = {};
+	char easySecondaryInput[2048] = {};
+	int easyActionIndex = 0;
+	bool easyUseCrawler = false;
+	int easyCitationCount = 5;
+	float easyTargetDurationSeconds = 90.0f;
 	char scriptInput[8192] = {};
 	char scriptInlineInstruction[512] = {};
+	int scriptAgentModeIndex = 0;
 	int scriptAutocompleteSelectedIndex = 0;
 	std::string scriptAutocompleteLastToken;
 	char summarizeInput[8192] = {};
@@ -318,6 +326,7 @@ private:
 	std::deque<Message> chatMessages;
 	std::string chatLastAssistantReply;
 	TtsPreviewState chatTtsPreview;
+	std::string easyOutput;
 	std::string scriptOutput;
 	std::string scriptInlineCompletionOutput;
 	std::string scriptInlineCompletionTargetPath;
@@ -704,6 +713,7 @@ private:
 	std::string deferredScriptSourceInternetUrls;
 	ofxGgmlChatAssistant chatAssistant;
 	ofxGgmlCodeAssistant scriptAssistant;
+	ofxGgmlCodingAgent scriptCodingAgent;
 	ofxGgmlWorkspaceAssistant scriptWorkspaceAssistant;
 	ofxGgmlTextAssistant textAssistant;
 	ofxGgmlVisionInference visionInference;
@@ -802,12 +812,15 @@ private:
 		AiMode mode,
 		const ofxGgmlTextAssistantRequest & request,
 		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {});
+	void runEasyModeExample();
 	void runVoiceTranslatorWorkflow(bool useAudioInput);
 	void runScriptAssistantRequest(
 		const ofxGgmlCodeAssistantRequest & request,
 		const std::string & requestLabel,
 		bool clearInputAfter = false,
-		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {});
+		const ofxGgmlRealtimeInfoSettings & realtimeSettings = {},
+		const ofxGgmlCodeAssistantContext * contextOverride = nullptr,
+		bool forcePlanMode = false);
 	void runScriptInlineCompletionRequest(
 		const std::string & targetFilePath,
 		const std::string & prefix,
@@ -861,6 +874,7 @@ private:
 		bool editExisting = false,
 		bool generateVariants = false,
 		bool repairExisting = false);
+	void configureEasyApiFromCurrentUi();
 	bool ensureClipBackendConfigured(
 		const std::string & modelPath,
 		int verbosity,
@@ -923,6 +937,7 @@ private:
 	void drawSidebar();
 	void drawMainPanel();
 	void drawChatPanel();
+	void drawEasyPanel();
 	void drawScriptPanel();
 	void drawScriptSourcePanel();
 	void drawSummarizePanel();

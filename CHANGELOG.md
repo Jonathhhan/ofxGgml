@@ -7,14 +7,16 @@ All notable changes to `ofxGgml` are documented in this file.
 ### Added
 - `ofxGgmlCodeAssistantSession`, typed assistant tool definitions/calls, and streamed assistant-event callbacks so apps can keep lightweight coding-session state without rebuilding the whole GUI example workflow.
 - `ofxGgmlCodeAssistant::runWithSession(...)` as a higher-level coding-assistant entry point with approval callbacks for risky tool proposals such as patch application and verification commands.
+- `ofxGgmlCodingAgent` as a new orchestration layer that keeps coding-session memory, supports a read-only `Plan` mode, and can hand structured edits into workspace apply/verify flows without rebuilding that glue in apps.
 - `ofxGgmlMusicGenerator` as a new local-first music helper for reusable music-prompt generation, ABC notation sketch generation, notation sanitization/validation, file saving, and future pluggable rendered-audio backends.
 - `ofxGgmlEasy` now also exposes music-prompt generation, `Image -> Music` prompt generation, and ABC notation helpers through the same high-level facade used by text, speech, citation, montage, and MilkDrop workflows.
 - `ofxGgmlVideoEssayWorkflow` as a new citation-grounded wrapper for `topic -> outline -> narrated script -> voice cues -> SRT`, built from the existing citation-search and text-assistant layers instead of a separate backend stack.
+- The GUI example now includes a dedicated `Easy` mode that exercises the high-level `ofxGgmlEasy` facade directly for chat, summarize, translate, citation search, `Video Essay`, and coding-agent planning flows against the current backend/model selection.
 
 ### Changed
 - `ofxGgmlCodeAssistant` now derives a first-pass tool plan from structured results, emits prompt/chunk/tool/approval/completion events during runs, and can seed/update task memory directly from a reusable session object.
 - Assistant test coverage now includes session seeding, streamed events, tool proposal generation, and approval gating for risky coding actions.
-- The GUI example Script mode now exposes the newer coding-assistant runtime directly through streamed workflow events, explicit approve/deny handling for risky tool proposals, IBM-style `@` file/symbol references, quick intent chips, and a separate inline-completion lane.
+- The GUI example Script mode now exposes the newer coding-assistant runtime directly through streamed workflow events, explicit approve/deny handling for risky tool proposals, `Build` / `Plan` agent switching, IBM-style `@` references including broad read-oriented `@general`, quick intent chips, and a separate inline-completion lane.
 - The GUI example Vision panel now also exposes a dedicated `Music Video` workflow section that reuses the shared `Music -> Image` state, applies music-video planning defaults, and hands the generated visual concept directly into video planning, diffusion, and edit-plan generation.
 - `ofxGgmlVideoPlanner` now also supports music-video-aware section planning, with optional intro / verse / chorus / bridge style sections, section-level cut-density hints, and section summaries that carry through prompt generation and plan review.
 - The GUI example Vision panel now includes an `Image / Prompt -> Music` workflow that can turn scene descriptions or existing text outputs into reusable music-generation prompts and local `.abc` sketch files, complementing the earlier Diffusion-side `Music -> Image` helper.

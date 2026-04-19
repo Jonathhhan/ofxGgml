@@ -196,13 +196,17 @@ void ofApp::runScriptAssistantRequest(
 	const ofxGgmlCodeAssistantRequest & request,
 	const std::string & requestLabel,
 	bool clearInputAfter,
-	const ofxGgmlRealtimeInfoSettings &) {
+	const ofxGgmlRealtimeInfoSettings &,
+	const ofxGgmlCodeAssistantContext * contextOverride,
+	bool forcePlanMode) {
 	if (generating.load() || !engineReady) return;
 
 	lastScriptRequest = request.userInput;
 	const InferenceModePromptSnapshot promptSnapshot = makeInferenceModePromptSnapshot();
 	const ofxGgmlCodeAssistantContext assistantContext =
-		buildScriptAssistantContext(promptSnapshot);
+		contextOverride != nullptr
+			? *contextOverride
+			: buildScriptAssistantContext(promptSnapshot);
 
 	generating.store(true);
 	cancelRequested.store(false);
@@ -231,7 +235,7 @@ void ofApp::runScriptAssistantRequest(
 	}
 
 	workerThread = std::thread(
-		[this, request, requestLabel, assistantContext]() {
+		[this, request, requestLabel, assistantContext, forcePlanMode]() {
 			try {
 				const std::string modelPath = getSelectedModelPath();
 				std::string localError;
@@ -265,6 +269,7 @@ void ofApp::runScriptAssistantRequest(
 					}
 					scriptAssistant.getInference().setCompletionExecutable(llamaCliCommand);
 					scriptAssistant.getInference().probeCompletionCapabilities(true);
+					scriptCodingAgent.setCompletionExecutable(llamaCliCommand);
 					return true;
 				};
 
@@ -415,24 +420,40 @@ void ofApp::runScriptAssistantRequest(
 					std::lock_guard<std::mutex> lock(outputMutex);
 					localSessionCopy = scriptAssistantSession;
 				}
+				scriptCodingAgent.getSession() = localSessionCopy;
 
 				ofxGgmlCodeAssistantRequest effectiveRequest = request;
 				effectiveRequest.labelOverride = requestLabel;
-				const auto assistantResult = scriptAssistant.runWithSession(
+				ofxGgmlCodingAgentRequest agentRequest;
+				agentRequest.assistantRequest = effectiveRequest;
+				agentRequest.taskLabel = requestLabel;
+
+				ofxGgmlCodingAgentSettings agentSettings;
+				agentSettings.mode =
+					(forcePlanMode || scriptAgentModeIndex != 0)
+						? ofxGgmlCodingAgentMode::Plan
+						: ofxGgmlCodingAgentMode::Build;
+				agentSettings.inferenceSettings = inferenceSettings;
+				agentSettings.autoApply = false;
+				agentSettings.autoVerify = false;
+				agentSettings.requireStructuredResult = true;
+				agentSettings.preferUnifiedDiff =
+					(agentSettings.mode == ofxGgmlCodingAgentMode::Build);
+
+				const auto agentResult = scriptCodingAgent.run(
 					modelPath,
-					effectiveRequest,
+					agentRequest,
 					assistantContext,
-					&localSessionCopy,
-					inferenceSettings,
-					{},
+					agentSettings,
 					approvalCallback,
 					eventCallback,
 					onChunk);
+				localSessionCopy = scriptCodingAgent.getSession();
 
-				std::string result = assistantResult.inference.text;
+				std::string result = agentResult.assistantResult.inference.text;
 				if (cancelRequested.load()) {
 					result = "[Generation cancelled]";
-				} else if (!assistantResult.inference.success) {
+				} else if (!agentResult.assistantResult.inference.success) {
 					std::string streamedSnapshot;
 					{
 						std::lock_guard<std::mutex> lock(streamMutex);
@@ -441,10 +462,11 @@ void ofApp::runScriptAssistantRequest(
 					if (!trim(streamedSnapshot).empty()) {
 						result = streamedSnapshot;
 					} else {
-						const std::string assistantError =
-							assistantResult.inference.error.empty()
+						const std::string assistantError = !agentResult.error.empty()
+							? agentResult.error
+							: (agentResult.assistantResult.inference.error.empty()
 								? "Inference failed."
-								: assistantResult.inference.error;
+								: agentResult.assistantResult.inference.error);
 						result = "[Error] " + assistantError;
 					}
 				}
@@ -462,7 +484,7 @@ void ofApp::runScriptAssistantRequest(
 						pendingScriptAssistantSessionDirty = true;
 						pendingScriptAssistantEvents = std::move(assistantEvents);
 						pendingScriptAssistantToolCalls =
-							assistantResult.proposedToolCalls;
+							agentResult.assistantResult.proposedToolCalls;
 						lastScriptOutputLikelyCutoff = likelyCutoff;
 						const size_t tailChars = std::min<size_t>(result.size(), 600);
 						lastScriptOutputTail =
@@ -1053,6 +1075,13 @@ void ofApp::applyPendingOutput() {
 			if (chatSpeakReplies && !trim(pendingOutput).empty()) {
 				speakLatestChatReply(false);
 			}
+			break;
+		case AiMode::Easy:
+			easyOutput = pendingOutput;
+			fprintf(
+				stderr,
+				"%s\n",
+				formatConsoleLogLine("Easy", "AI", pendingOutput, true).c_str());
 			break;
 		case AiMode::Script:
 			scriptOutput = pendingOutput;

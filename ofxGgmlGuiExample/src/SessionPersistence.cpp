@@ -25,6 +25,7 @@ bool ofApp::saveSession(const std::string & path) {
 		{"activeMode", static_cast<int>(activeMode)},
 		{"selectedModelIndex", selectedModelIndex},
 		{"selectedLanguageIndex", selectedLanguageIndex},
+		{"scriptAgentModeIndex", scriptAgentModeIndex},
 		{"translateSourceLang", translateSourceLang},
 		{"translateTargetLang", translateTargetLang},
 		{"chatLanguageIndex", chatLanguageIndex},
@@ -106,6 +107,8 @@ bool ofApp::saveSession(const std::string & path) {
 
 	session["buffers"] = {
 		{"chatInput", std::string(chatInput)},
+		{"easyPrimaryInput", std::string(easyPrimaryInput)},
+		{"easySecondaryInput", std::string(easySecondaryInput)},
 		{"scriptInput", std::string(scriptInput)},
 		{"summarizeInput", std::string(summarizeInput)},
 		{"writeInput", std::string(writeInput)},
@@ -191,6 +194,8 @@ bool ofApp::saveSession(const std::string & path) {
 	};
 
 	session["indices"] = {
+		{"easyActionIndex", easyActionIndex},
+		{"easyCitationCount", easyCitationCount},
 		{"visionTaskIndex", visionTaskIndex},
 		{"videoTaskIndex", videoTaskIndex},
 		{"visionVideoMaxFrames", visionVideoMaxFrames},
@@ -246,11 +251,13 @@ bool ofApp::saveSession(const std::string & path) {
 		{"milkdropRandomness", milkdropRandomness},
 		{"milkdropPreviewBeatSensitivity", milkdropPreviewBeatSensitivity},
 		{"milkdropPreviewPresetDuration", milkdropPreviewPresetDuration},
-		{"videoEssayTargetDurationSeconds", videoEssayTargetDurationSeconds}
+		{"videoEssayTargetDurationSeconds", videoEssayTargetDurationSeconds},
+		{"easyTargetDurationSeconds", easyTargetDurationSeconds}
 	};
 
 	session["bools"] = {
 		{"chatSpeakReplies", chatSpeakReplies},
+		{"easyUseCrawler", easyUseCrawler},
 		{"voiceTranslatorSpeakOutput", voiceTranslatorSpeakOutput},
 		{"videoEssayUseCrawler", videoEssayUseCrawler},
 		{"videoEssayIncludeCounterpoints", videoEssayIncludeCounterpoints},
@@ -295,6 +302,7 @@ bool ofApp::saveSession(const std::string & path) {
 	session["outputs"] = {
 		{"chatLastAssistantReply", chatLastAssistantReply},
 		{"chatTtsStatusMessage", chatTtsPreview.statusMessage},
+		{"easyOutput", easyOutput},
 		{"scriptOutput", scriptOutput},
 		{"summarizeOutput", summarizeOutput},
 		{"writeOutput", writeOutput},
@@ -427,6 +435,7 @@ bool ofApp::loadSession(const std::string & path) {
 	activeMode = static_cast<AiMode>(std::clamp(getInt(settings, "activeMode", static_cast<int>(AiMode::Chat)), 0, kModeCount - 1));
 	selectedModelIndex = std::clamp(getInt(settings, "selectedModelIndex", 0), 0, std::max(0, static_cast<int>(modelPresets.size()) - 1));
 	selectedLanguageIndex = std::clamp(getInt(settings, "selectedLanguageIndex", 0), 0, std::max(0, static_cast<int>(scriptLanguages.size()) - 1));
+	scriptAgentModeIndex = std::clamp(getInt(settings, "scriptAgentModeIndex", scriptAgentModeIndex), 0, 1);
 	translateSourceLang = std::clamp(getInt(settings, "translateSourceLang", 0), 0, std::max(0, static_cast<int>(translateLanguages.size()) - 1));
 	translateTargetLang = std::clamp(getInt(settings, "translateTargetLang", 1), 0, std::max(0, static_cast<int>(translateLanguages.size()) - 1));
 	chatLanguageIndex = std::clamp(getInt(settings, "chatLanguageIndex", 0), 0, std::max(0, static_cast<int>(chatLanguages.size()) - 1));
@@ -493,6 +502,8 @@ bool ofApp::loadSession(const std::string & path) {
 	}
 
 	copyJsonString(chatInput, sizeof(chatInput), buffers, "chatInput");
+	copyJsonString(easyPrimaryInput, sizeof(easyPrimaryInput), buffers, "easyPrimaryInput");
+	copyJsonString(easySecondaryInput, sizeof(easySecondaryInput), buffers, "easySecondaryInput");
 	copyJsonString(scriptInput, sizeof(scriptInput), buffers, "scriptInput");
 	copyJsonString(summarizeInput, sizeof(summarizeInput), buffers, "summarizeInput");
 	copyJsonString(writeInput, sizeof(writeInput), buffers, "writeInput");
@@ -587,6 +598,8 @@ bool ofApp::loadSession(const std::string & path) {
 	visionTaskIndex = std::clamp(getInt(indices, "visionTaskIndex", visionTaskIndex), 0, 2);
 	videoTaskIndex = std::clamp(getInt(indices, "videoTaskIndex", videoTaskIndex), 0, 4);
 	visionVideoMaxFrames = std::clamp(getInt(indices, "visionVideoMaxFrames", visionVideoMaxFrames), 1, 12);
+	easyActionIndex = std::clamp(getInt(indices, "easyActionIndex", easyActionIndex), 0, 5);
+	easyCitationCount = std::clamp(getInt(indices, "easyCitationCount", easyCitationCount), 1, 12);
 	videoPlanBeatCount = std::clamp(getInt(indices, "videoPlanBeatCount", videoPlanBeatCount), 1, 12);
 	videoPlanSceneCount = std::clamp(getInt(indices, "videoPlanSceneCount", videoPlanSceneCount), 1, 8);
 	videoPlanGenerationMode = std::clamp(getInt(indices, "videoPlanGenerationMode", videoPlanGenerationMode), 0, 1);
@@ -669,8 +682,13 @@ bool ofApp::loadSession(const std::string & path) {
 		getFloat(floats, "videoEssayTargetDurationSeconds", videoEssayTargetDurationSeconds),
 		30.0f,
 		360.0f);
+	easyTargetDurationSeconds = std::clamp(
+		getFloat(floats, "easyTargetDurationSeconds", easyTargetDurationSeconds),
+		30.0f,
+		360.0f);
 
 	chatSpeakReplies = getBool(bools, "chatSpeakReplies", chatSpeakReplies);
+	easyUseCrawler = getBool(bools, "easyUseCrawler", easyUseCrawler);
 	voiceTranslatorSpeakOutput = getBool(
 		bools,
 		"voiceTranslatorSpeakOutput",
@@ -745,6 +763,7 @@ bool ofApp::loadSession(const std::string & path) {
 	translateOutput = getString(outputs, "translateOutput");
 	voiceTranslatorStatus = getString(outputs, "voiceTranslatorStatus");
 	voiceTranslatorTranscript = getString(outputs, "voiceTranslatorTranscript");
+	easyOutput = getString(outputs, "easyOutput");
 	videoEssayStatus = getString(outputs, "videoEssayStatus");
 	videoEssayOutline = getString(outputs, "videoEssayOutline");
 	videoEssayScript = getString(outputs, "videoEssayScript");

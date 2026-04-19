@@ -131,6 +131,7 @@ std::string buildScriptCommandHelpText() {
 		"@ references:\n"
 		"- @focused -> use the selected file\n"
 		"- @recent -> use recent touched files\n"
+		"- @general -> broaden into read-only repo exploration and planning\n"
 		"- @workspace -> favor whole-workspace context\n"
 		"- @filename.cpp -> resolve a loaded file by name\n";
 }

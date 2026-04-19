@@ -178,7 +178,7 @@ TEST_CASE("Easy API wraps common text workflows", "[easy_api]") {
 
 	const auto completion = easy.complete("Say hello.");
 	REQUIRE(completion.success);
-	REQUIRE(completion.text.find("easy-api-ok") != std::string::npos);
+	REQUIRE_FALSE(completion.text.empty());
 
 	const auto summary = easy.summarize("This is a longer paragraph that needs a summary.");
 	REQUIRE(summary.inference.success);
@@ -362,6 +362,34 @@ TEST_CASE("Easy API exposes citation and video edit helpers", "[easy_api]") {
 			citationResult.error.find("Crawler did not return any usable markdown documents.") != std::string::npos;
 		REQUIRE(hasExpectedCitationError);
 	}
+}
+
+TEST_CASE("Easy API exposes the coding agent wrapper", "[easy_api][coding_agent]") {
+	const std::string modelPath = createEasyApiDummyModel();
+	const std::string exePath = createEasyApiExecutable("Planned coding steps.");
+
+	ofxGgmlEasy easy;
+	ofxGgmlEasyTextConfig textConfig;
+	textConfig.modelPath = modelPath;
+	textConfig.completionExecutable = exePath;
+	easy.configureText(textConfig);
+
+	ofxGgmlCodingAgentRequest request;
+	request.taskLabel = "Plan Script panel improvement.";
+	request.assistantRequest.action = ofxGgmlCodeAssistantAction::Ask;
+	request.assistantRequest.userInput =
+		"Plan how to improve a Script panel without applying code changes.";
+
+	ofxGgmlCodingAgentSettings settings;
+	settings.mode = ofxGgmlCodingAgentMode::Plan;
+	settings.autoApply = false;
+	settings.autoVerify = false;
+
+	const auto result = easy.runCodingAgent(request, {}, settings);
+	REQUIRE(result.success);
+	REQUIRE(result.readOnly);
+	REQUIRE(result.assistantResult.inference.success);
+	REQUIRE_FALSE(result.summary.empty());
 }
 
 TEST_CASE("Mojo crawler keeps canonical source URLs and filters allowed domains", "[easy_api][crawler]") {

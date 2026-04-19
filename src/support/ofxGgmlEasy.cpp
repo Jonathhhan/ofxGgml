@@ -47,16 +47,23 @@ void applyInferenceExecutables(
 } // namespace
 
 ofxGgmlEasy::ofxGgmlEasy() {
+	syncTextBackends();
 	syncCrawlerBackend();
 	syncSpeechBackend();
 }
 
 void ofxGgmlEasy::configureText(const ofxGgmlEasyTextConfig & config) {
 	m_textConfig = config;
+	syncTextBackends();
+}
+
+void ofxGgmlEasy::syncTextBackends() {
 	applyInferenceExecutables(m_inference, m_textConfig);
 	applyInferenceExecutables(m_citationSearch.getInference(), m_textConfig);
 	m_chatAssistant.setCompletionExecutable(m_textConfig.completionExecutable);
 	m_textAssistant.setCompletionExecutable(m_textConfig.completionExecutable);
+	m_codingAgent.setCompletionExecutable(m_textConfig.completionExecutable);
+	m_codingAgent.setEmbeddingExecutable(m_textConfig.embeddingExecutable);
 	m_mediaPromptGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
 	m_musicGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
 	m_milkDropGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
@@ -199,6 +206,14 @@ ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::getVideoEssayWorkflow() {
 
 const ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::getVideoEssayWorkflow() const {
 	return m_videoEssayWorkflow;
+}
+
+ofxGgmlCodingAgent & ofxGgmlEasy::getCodingAgent() {
+	return m_codingAgent;
+}
+
+const ofxGgmlCodingAgent & ofxGgmlEasy::getCodingAgent() const {
+	return m_codingAgent;
 }
 
 ofxGgmlInferenceSettings ofxGgmlEasy::makeTextSettings() const {
@@ -572,6 +587,72 @@ ofxGgmlVideoEssayResult ofxGgmlEasy::planVideoEssay(
 		effectiveRequest.sourceSettings.requestCitations = true;
 	}
 	return m_videoEssayWorkflow.run(effectiveRequest);
+}
+
+ofxGgmlCodingAgentResult ofxGgmlEasy::runCodingAgent(
+	const ofxGgmlCodingAgentRequest & request,
+	const ofxGgmlCodeAssistantContext & context,
+	const ofxGgmlCodingAgentSettings & settings) {
+	ofxGgmlCodingAgentResult result;
+	if (m_textConfig.modelPath.empty()) {
+		result.error =
+			"Easy API text model is not configured. Call configureText(...) first.";
+		result.summary = result.error;
+		return result;
+	}
+
+	ofxGgmlCodingAgentSettings effectiveSettings = settings;
+	const ofxGgmlInferenceSettings baseSettings = makeTextSettings();
+	const ofxGgmlInferenceSettings defaultSettings;
+	if (effectiveSettings.inferenceSettings.maxTokens <= 0) {
+		effectiveSettings.inferenceSettings.maxTokens = baseSettings.maxTokens;
+	}
+	if (effectiveSettings.inferenceSettings.temperature == defaultSettings.temperature) {
+		effectiveSettings.inferenceSettings.temperature = baseSettings.temperature;
+	}
+	if (effectiveSettings.inferenceSettings.topP == defaultSettings.topP) {
+		effectiveSettings.inferenceSettings.topP = baseSettings.topP;
+	}
+	if (effectiveSettings.inferenceSettings.topK == defaultSettings.topK) {
+		effectiveSettings.inferenceSettings.topK = baseSettings.topK;
+	}
+	if (effectiveSettings.inferenceSettings.minP == defaultSettings.minP) {
+		effectiveSettings.inferenceSettings.minP = baseSettings.minP;
+	}
+	if (effectiveSettings.inferenceSettings.repeatPenalty == defaultSettings.repeatPenalty) {
+		effectiveSettings.inferenceSettings.repeatPenalty = baseSettings.repeatPenalty;
+	}
+	if (effectiveSettings.inferenceSettings.contextSize <= 0) {
+		effectiveSettings.inferenceSettings.contextSize = baseSettings.contextSize;
+	}
+	if (effectiveSettings.inferenceSettings.batchSize <= 0) {
+		effectiveSettings.inferenceSettings.batchSize = baseSettings.batchSize;
+	}
+	if (effectiveSettings.inferenceSettings.threads <= 0) {
+		effectiveSettings.inferenceSettings.threads = baseSettings.threads;
+	}
+	if (effectiveSettings.inferenceSettings.gpuLayers == defaultSettings.gpuLayers) {
+		effectiveSettings.inferenceSettings.gpuLayers = baseSettings.gpuLayers;
+	}
+	if (effectiveSettings.inferenceSettings.seed == defaultSettings.seed) {
+		effectiveSettings.inferenceSettings.seed = baseSettings.seed;
+	}
+	if (effectiveSettings.inferenceSettings.useServerBackend ==
+		defaultSettings.useServerBackend) {
+		effectiveSettings.inferenceSettings.useServerBackend =
+			baseSettings.useServerBackend;
+	}
+	if (effectiveSettings.inferenceSettings.serverUrl.empty()) {
+		effectiveSettings.inferenceSettings.serverUrl = baseSettings.serverUrl;
+	}
+	if (effectiveSettings.inferenceSettings.serverModel.empty()) {
+		effectiveSettings.inferenceSettings.serverModel = baseSettings.serverModel;
+	}
+	return m_codingAgent.run(
+		m_textConfig.modelPath,
+		request,
+		context,
+		effectiveSettings);
 }
 
 ofxGgmlEasyMontageResult ofxGgmlEasy::planMontageFromSrt(

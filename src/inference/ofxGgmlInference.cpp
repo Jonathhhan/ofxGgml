@@ -2095,22 +2095,24 @@ std::vector<ofxGgmlEmbeddingResult> ofxGgmlInference::embedBatch(
 
 	if (settings.useServerBackend && !settings.serverUrl.empty()) {
 		const size_t maxConcurrent =
-			recommendedServerEmbeddingConcurrency(texts.size());
+			std::max<size_t>(1, recommendedServerEmbeddingConcurrency(texts.size()));
+		std::atomic<size_t> nextIndex(0);
 		std::vector<std::thread> workers;
 		workers.reserve(maxConcurrent);
-
-		for (size_t startIdx = 0; startIdx < texts.size(); startIdx += maxConcurrent) {
-			workers.clear();
-			const size_t endIdx = std::min(startIdx + maxConcurrent, texts.size());
-			for (size_t i = startIdx; i < endIdx; ++i) {
-				workers.emplace_back([&, i]() {
+		for (size_t workerIndex = 0; workerIndex < maxConcurrent; ++workerIndex) {
+			workers.emplace_back([&]() {
+				while (true) {
+					const size_t i = nextIndex.fetch_add(1, std::memory_order_relaxed);
+					if (i >= texts.size()) {
+						return;
+					}
 					results[i] = embed(modelPath, texts[i], settings);
-				});
-			}
-			for (auto & worker : workers) {
-				if (worker.joinable()) {
-					worker.join();
 				}
+			});
+		}
+		for (auto & worker : workers) {
+			if (worker.joinable()) {
+				worker.join();
 			}
 		}
 	} else {

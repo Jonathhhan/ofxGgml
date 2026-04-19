@@ -64,7 +64,8 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlChatAssistant` for reusable chat prompts, response-language control, and UI-thin conversation flows
 - `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
 - `ofxGgmlCodeAssistant` now also exposes lightweight assistant sessions, a typed tool registry, approval callbacks for risky proposals, and streamed assistant events so apps can build safer IDE-style coding flows without reimplementing orchestration
-- the GUI example Script mode now surfaces that assistant runtime directly with `@` references, quick slash/intents chips, streamed tool/approval status, and explicit approve/deny handling for risky proposals
+- `ofxGgmlCodingAgent` as a thin orchestration layer on top of the code and workspace assistants, with persistent session memory, a read-only `Plan` mode, optional patch application, and verification-aware coding runs
+- the GUI example Script mode now surfaces that assistant runtime directly with `Build` / `Plan` agent switching, `@` references including read-oriented `@general`, quick slash/intents chips, streamed tool/approval status, and explicit approve/deny handling for risky proposals
 - `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, shadow-workspace safe apply, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
 - coding workflows now carry lightweight task memory such as active mode, selected backend, recent files, and last failure reason so retries and follow-up prompts stay more grounded
 - structured coding prompts now push a clearer inspect -> patch -> verify loop, stronger self-check instructions, and recovery from weak unstructured model replies
@@ -75,6 +76,7 @@ This addon is released under the [MIT License](LICENSE).
 - async graph submission and explicit synchronization for frame-friendly compute
 - Windows build scripts that refresh Visual Studio linking automatically
 - GUI example for local chat, review, and script-assisted workflows built mostly on addon helpers
+  - GUI example `Easy` mode now demonstrates the high-level `ofxGgmlEasy` facade directly, including one-click chat, summarize, translate, citation search, `Video Essay`, and coding-agent `Plan` flows using the currently selected backend/model
   - GUI example Translate mode with auto-detect source language, natural vs. literal translation shortcuts, detect-and-translate flow, and more reliable prompt/input handoff buttons
   - GUI example Chat and Translate modes now each keep a dedicated lightweight TTS preview lane, so spoken replies and translated voice output can be played, restarted, and stopped inline without bouncing through the main TTS panel
   - GUI example `Video Essay` mode now also supports optional `ofxVlc4` preview/render handoff, so a source video plus the generated essay SRT can be previewed live and texture-recorded into a muxed narration render without leaving the example
@@ -184,6 +186,8 @@ to the process DLL search path at startup, so development builds do not need dup
 If you want a shorter setup path than wiring `ofxGgmlInference`, `ofxGgmlTextAssistant`, `ofxGgmlVisionInference`, and `ofxGgmlSpeechInference` manually, use `ofxGgmlEasy`.
 
 `ofxGgmlEasy` keeps one owned crawler/citation path internally. Configuration changes made through `configureText()`, `configureWebCrawler()`, `getWebCrawler()`, or `getCitationSearch()` are reused by later `crawlWebsite()` and `findCitations()` calls instead of being rebuilt on a separate temporary helper.
+
+For coding workflows that need more than a single prompt, `ofxGgmlCodingAgent` now sits between `ofxGgmlCodeAssistant` and `ofxGgmlWorkspaceAssistant`. It keeps a reusable coding session, can stay read-only in `Plan` mode, and can optionally apply and verify structured edits in one run.
 
 Minimal text setup:
 

@@ -141,6 +141,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/support/ofxGgmlScriptSource.cpp
         ../src/support/ofxGgmlProcessSecurity.cpp
         ../src/assistants/ofxGgmlCodeAssistant.cpp
+        ../src/assistants/ofxGgmlCodingAgent.cpp
         ../src/assistants/ofxGgmlWorkspaceAssistant.cpp
         ../src/assistants/ofxGgmlTextAssistant.cpp
         ../src/assistants/ofxGgmlCodeReview.cpp)
@@ -183,6 +184,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         test_milkdrop_generator.cpp
         test_chat_assistant.cpp
         test_code_assistant.cpp
+        test_coding_agent.cpp
         test_text_assistant.cpp
         test_workspace_assistant.cpp
         test_code_review.cpp

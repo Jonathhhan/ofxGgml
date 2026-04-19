@@ -38,6 +38,7 @@
 #include "assistants/ofxGgmlChatAssistant.h"
 #include "inference/ofxGgmlWebCrawler.h"
 #include "assistants/ofxGgmlCodeAssistant.h"
+#include "assistants/ofxGgmlCodingAgent.h"
 #include "assistants/ofxGgmlWorkspaceAssistant.h"
 #include "assistants/ofxGgmlTextAssistant.h"
 #include "assistants/ofxGgmlCodeReview.h"

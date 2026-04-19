@@ -3730,22 +3730,34 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runWithSession(
 	std::function<bool(const std::string &)> onChunk) const {
 	ofxGgmlCodeAssistantResult result;
 	ofxGgmlCodeAssistantContext effectiveContext = context;
+	const auto currentSessionRevision = [&]() {
+		return session != nullptr ? session->revision : 0;
+	};
+	const auto makeEvent =
+		[&](ofxGgmlCodeAssistantEventKind kind, const std::string & message) {
+			ofxGgmlCodeAssistantEvent event;
+			event.kind = kind;
+			event.requestLabel = trimCopy(request.labelOverride);
+			event.message = message;
+			event.sessionRevision = currentSessionRevision();
+			return event;
+		};
+	const auto emitEvent =
+		[&](ofxGgmlCodeAssistantEventKind kind, const std::string & message) {
+			return emitAssistantEvent(eventCallback, makeEvent(kind, message));
+		};
 	if (session != nullptr) {
 		seedContextFromSession(&effectiveContext, *session);
-		ofxGgmlCodeAssistantEvent sessionEvent;
-		sessionEvent.kind = ofxGgmlCodeAssistantEventKind::SessionStarted;
-		sessionEvent.requestLabel = trimCopy(request.labelOverride);
-		sessionEvent.message = "Assistant session started.";
-		sessionEvent.sessionRevision = session->revision;
-		(void)emitAssistantEvent(eventCallback, sessionEvent);
+		(void)emitEvent(
+			ofxGgmlCodeAssistantEventKind::SessionStarted,
+			"Assistant session started.");
 	}
 
 	result.prepared = preparePrompt(request, effectiveContext);
-	ofxGgmlCodeAssistantEvent preparedEvent;
-	preparedEvent.kind = ofxGgmlCodeAssistantEventKind::PromptPrepared;
+	ofxGgmlCodeAssistantEvent preparedEvent = makeEvent(
+		ofxGgmlCodeAssistantEventKind::PromptPrepared,
+		"Prepared coding prompt.");
 	preparedEvent.requestLabel = result.prepared.requestLabel;
-	preparedEvent.message = "Prepared coding prompt.";
-	preparedEvent.sessionRevision = session != nullptr ? session->revision : 0;
 	(void)emitAssistantEvent(eventCallback, preparedEvent);
 
 	std::vector<ofxGgmlPromptSource> sources;
@@ -3764,11 +3776,11 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runWithSession(
 	}
 
 	auto streamCallback = [&](const std::string & chunk) {
-		ofxGgmlCodeAssistantEvent event;
-		event.kind = ofxGgmlCodeAssistantEventKind::OutputChunk;
+		ofxGgmlCodeAssistantEvent event = makeEvent(
+			ofxGgmlCodeAssistantEventKind::OutputChunk,
+			std::string());
 		event.requestLabel = result.prepared.requestLabel;
 		event.chunkText = chunk;
-		event.sessionRevision = session != nullptr ? session->revision : 0;
 		const bool keepStreaming = emitAssistantEvent(eventCallback, event);
 		if (!keepStreaming) {
 			return false;
@@ -3849,22 +3861,20 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runWithSession(
 		result.structured,
 		getToolRegistry());
 
-	ofxGgmlCodeAssistantEvent structuredEvent;
-	structuredEvent.kind = ofxGgmlCodeAssistantEventKind::StructuredResultReady;
+	ofxGgmlCodeAssistantEvent structuredEvent = makeEvent(
+		ofxGgmlCodeAssistantEventKind::StructuredResultReady,
+		result.structured.detectedStructuredOutput
+			? "Structured coding result parsed."
+			: "Inference returned without structured tags.");
 	structuredEvent.requestLabel = result.prepared.requestLabel;
-	structuredEvent.message = result.structured.detectedStructuredOutput
-		? "Structured coding result parsed."
-		: "Inference returned without structured tags.";
-	structuredEvent.sessionRevision = session != nullptr ? session->revision : 0;
 	(void)emitAssistantEvent(eventCallback, structuredEvent);
 
 	for (auto & toolCall : result.proposedToolCalls) {
-		ofxGgmlCodeAssistantEvent toolEvent;
-		toolEvent.kind = ofxGgmlCodeAssistantEventKind::ToolProposed;
+		ofxGgmlCodeAssistantEvent toolEvent = makeEvent(
+			ofxGgmlCodeAssistantEventKind::ToolProposed,
+			toolCall.summary);
 		toolEvent.requestLabel = result.prepared.requestLabel;
-		toolEvent.message = toolCall.summary;
 		toolEvent.toolCall = toolCall;
-		toolEvent.sessionRevision = session != nullptr ? session->revision : 0;
 		(void)emitAssistantEvent(eventCallback, toolEvent);
 
 		if (!toolCall.requiresApproval || !approvalCallback) {
@@ -3902,16 +3912,16 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runWithSession(
 		result.sessionRevision = session->revision;
 	}
 
-	ofxGgmlCodeAssistantEvent completedEvent;
-	completedEvent.kind = result.inference.success
-		? ofxGgmlCodeAssistantEventKind::Completed
-		: ofxGgmlCodeAssistantEventKind::Error;
+	ofxGgmlCodeAssistantEvent completedEvent = makeEvent(
+		result.inference.success
+			? ofxGgmlCodeAssistantEventKind::Completed
+			: ofxGgmlCodeAssistantEventKind::Error,
+		result.inference.success
+			? "Assistant run completed."
+			: (trimCopy(result.inference.error).empty()
+				? "Assistant run failed."
+				: result.inference.error));
 	completedEvent.requestLabel = result.prepared.requestLabel;
-	completedEvent.message = result.inference.success
-		? "Assistant run completed."
-		: (trimCopy(result.inference.error).empty()
-			? "Assistant run failed."
-			: result.inference.error);
 	completedEvent.sessionRevision = result.sessionRevision;
 	(void)emitAssistantEvent(eventCallback, completedEvent);
 	return result;
