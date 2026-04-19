@@ -1,6 +1,10 @@
 # All variables and this file are optional, if they are not present the PG and the
 # makefiles will try to parse the correct values from the file system.
 #
+# Variables that specify exclusions can use % as a wildcard to specify that anything in
+# that position will match. A partial path can also be specified to, for example, exclude
+# a whole folder from the parsed paths from the file system.
+#
 # Variables can be specified using = or +=
 # = will clear the contents of that variable both specified from the file or the ones parsed
 # from the file system.
@@ -22,8 +26,23 @@ common:
 	ADDON_INCLUDES += libs/ggml/include
 	# Exclude bundled ggml source from the oF build - it is compiled
 	# separately via CMake (scripts/build-ggml.sh).
+	ADDON_SOURCES_EXCLUDE += build/%
 	ADDON_SOURCES_EXCLUDE += libs/ggml/src/%
 	ADDON_SOURCES_EXCLUDE += libs/ggml/build/%
+	ADDON_SOURCES_EXCLUDE += libs/acestep/%
+	ADDON_SOURCES_EXCLUDE += libs/mojo/%
+	ADDON_SOURCES_EXCLUDE += libs/llama/bin/%
+	ADDON_SOURCES_EXCLUDE += libs/whisper/bin/%
+	ADDON_INCLUDES_EXCLUDE += build/%
+	ADDON_INCLUDES_EXCLUDE += libs/acestep/%
+	ADDON_INCLUDES_EXCLUDE += libs/mojo/%
+	ADDON_INCLUDES_EXCLUDE += libs/llama/bin/%
+	ADDON_INCLUDES_EXCLUDE += libs/whisper/bin/%
+	ADDON_LIBS_EXCLUDE += build/%
+	ADDON_LIBS_EXCLUDE += libs/acestep/%
+	ADDON_LIBS_EXCLUDE += libs/mojo/%
+	ADDON_LIBS_EXCLUDE += libs/llama/bin/%
+	ADDON_LIBS_EXCLUDE += libs/whisper/bin/%
 linux64:
 	# @DIFFUSION_LIBS_START linux64
 	ADDON_LIBS += libs/ggml/build/src/libggml.a

@@ -876,6 +876,7 @@ private:
 		const std::string & heading,
 		bool enableAutoLiveContext = false) const;
 	void runHierarchicalReview(const std::string & overrideQuery = std::string());
+	void applyScriptReviewPreset();
 	ofxGgmlHoloscanVisionRequestTemplate makeHoloscanVisionRequestTemplate() const;
 	void runVisionInference();
 	void runVideoInference();

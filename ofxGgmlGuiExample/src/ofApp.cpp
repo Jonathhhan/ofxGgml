@@ -3049,25 +3049,7 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Review Preset", ImVec2(110, 0))) {
-		if (!modelPresets.empty()) {
-			selectedModelIndex = std::clamp(
-				taskDefaultModelIndices[static_cast<int>(AiMode::Script)],
-				0, static_cast<int>(modelPresets.size()) - 1);
-			detectModelLayers();
-			if (detectedModelLayers > 0) {
-				gpuLayers = detectedModelLayers;
-			}
-		}
-		maxTokens = std::clamp(maxTokens, 512, 768);
-		contextSize = std::clamp(contextSize, 4096, 6144);
-		batchSize = 256;
-		temperature = 0.2f;
-		topP = 0.9f;
-		topK = std::max(topK, 50);
-		minP = std::max(minP, 0.05f);
-		repeatPenalty = 1.03f;
-		autoContinueCutoff = true;
-		usePromptCache = true;
+		applyScriptReviewPreset();
 	}
 	if (ImGui::IsItemHovered()) {
 		showWrappedTooltip("Switch to the recommended Script model and review-tuned generation settings.");
@@ -7106,6 +7088,29 @@ std::string ofApp::getSelectedModelPath() const {
 	cachedModelPath = resolveModelPathHint(preset.filename);
 	cachedModelPathIndex = selectedModelIndex;
 	return cachedModelPath;
+}
+
+void ofApp::applyScriptReviewPreset() {
+	if (!modelPresets.empty()) {
+		selectedModelIndex = std::clamp(
+			taskDefaultModelIndices[static_cast<int>(AiMode::Script)],
+			0,
+			static_cast<int>(modelPresets.size()) - 1);
+		detectModelLayers();
+		if (detectedModelLayers > 0) {
+			gpuLayers = detectedModelLayers;
+		}
+	}
+	maxTokens = std::clamp(maxTokens, 512, 768);
+	contextSize = std::clamp(contextSize, 4096, 6144);
+	batchSize = 256;
+	temperature = 0.2f;
+	topP = 0.9f;
+	topK = std::max(topK, 50);
+	minP = std::max(minP, 0.05f);
+	repeatPenalty = 1.03f;
+	autoContinueCutoff = true;
+	usePromptCache = true;
 }
 
 void ofApp::detectModelLayers() {

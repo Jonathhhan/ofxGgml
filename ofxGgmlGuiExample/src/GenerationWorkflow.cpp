@@ -1702,6 +1702,7 @@ void ofApp::drawLogWindow() {
 }
 
 void ofApp::runHierarchicalReview(const std::string & overrideQuery) {
+	applyScriptReviewPreset();
 	const std::string effectiveReviewQuery = !trim(overrideQuery).empty()
 		? trim(overrideQuery)
 		: (std::strlen(scriptInput) > 0

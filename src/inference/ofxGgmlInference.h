@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ofMain.h"
+#include "ofThread.h"
+#include "ofThreadChannel.h"
 #include "core/ofxGgmlResult.h"
 
 #include <cstddef>
