@@ -2,6 +2,7 @@
 
 #include "core/ofxGgmlTypes.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 
@@ -122,6 +123,37 @@ inline std::string formatFlops(double flopsPerSecond, int decimals = 2) {
 /// Format a generic operations-per-second value.
 inline std::string formatOpsPerSecond(double opsPerSecond, int decimals = 2) {
 	return formatRate(opsPerSecond, "ops/s", decimals);
+}
+
+/// Trim whitespace from both ends of a string (copy version).
+inline std::string trim(const std::string & s) {
+	size_t start = 0;
+	while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start]))) {
+		++start;
+	}
+	size_t end = s.size();
+	while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) {
+		--end;
+	}
+	return s.substr(start, end - start);
+}
+
+/// Convert string to lowercase (copy version).
+inline std::string toLower(const std::string & s) {
+	std::string out = s;
+	std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+		return static_cast<char>(std::tolower(c));
+	});
+	return out;
+}
+
+/// Convert string to uppercase (copy version).
+inline std::string toUpper(const std::string & s) {
+	std::string out = s;
+	std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+		return static_cast<char>(std::toupper(c));
+	});
+	return out;
 }
 
 } // namespace ofxGgmlHelpers

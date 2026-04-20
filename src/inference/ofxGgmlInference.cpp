@@ -2,6 +2,7 @@
 #include "ofxGgmlInferenceSourceInternals.h"
 #include "ofxGgmlInferenceServerInternals.h"
 #include "ofxGgmlInferenceTextCleanup.h"
+#include "core/ofxGgmlHelpers.h"
 #include "core/ofxGgmlWindowsUtf8.h"
 #include "core/ofxGgmlMetrics.h"
 #include "support/ofxGgmlProcessSecurity.h"
@@ -50,15 +51,7 @@
 
 namespace {
 
-static std::string trim(const std::string & s) {
-	size_t b = 0;
-	while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b])))
-		++b;
-	size_t e = s.size();
-	while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
-		--e;
-	return s.substr(b, e - b);
-}
+using ofxGgmlHelpers::trim;
 
 static std::string defaultPromptCachePathForModel(const std::string & modelPath) {
 	if (modelPath.empty()) return {};

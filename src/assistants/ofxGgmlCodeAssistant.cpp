@@ -1,4 +1,5 @@
 #include "ofxGgmlCodeAssistant.h"
+#include "core/ofxGgmlHelpers.h"
 
 #include <algorithm>
 #include <cctype>
@@ -14,27 +15,8 @@
 
 namespace {
 
-std::string trimCopy(const std::string & s) {
-	size_t start = 0;
-	while (start < s.size() &&
-		std::isspace(static_cast<unsigned char>(s[start]))) {
-		++start;
-	}
-	size_t end = s.size();
-	while (end > start &&
-		std::isspace(static_cast<unsigned char>(s[end - 1]))) {
-		--end;
-	}
-	return s.substr(start, end - start);
-}
-
-std::string toLowerCopy(const std::string & s) {
-	std::string out = s;
-	std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
-		return static_cast<char>(std::tolower(c));
-	});
-	return out;
-}
+using ofxGgmlHelpers::trim;
+using ofxGgmlHelpers::toLower;
 
 std::string truncateWithMarker(const std::string & text, size_t maxChars) {
 	if (maxChars == 0 || text.size() <= maxChars) {
@@ -61,7 +43,7 @@ std::vector<std::string> splitPipeFields(const std::string & text) {
 	std::string current;
 	std::istringstream stream(text);
 	while (std::getline(stream, current, '|')) {
-		fields.push_back(trimCopy(current));
+		fields.push_back(trim(current));
 	}
 	return fields;
 }
@@ -94,7 +76,7 @@ std::vector<std::string> tokenizeIdentifier(const std::string & text) {
 
 	auto flushCurrent = [&]() {
 		if (current.size() >= 2) {
-			std::string lowered = toLowerCopy(current);
+			std::string lowered = toLower(current);
 			if (seen.insert(lowered).second) {
 				tokens.push_back(std::move(lowered));
 			}
@@ -154,13 +136,13 @@ std::string joinStrings(
 std::string normalizePathForMatch(const std::string & value) {
 	std::string normalized = std::filesystem::path(value).generic_string();
 	std::replace(normalized.begin(), normalized.end(), '\\', '/');
-	return toLowerCopy(normalized);
+	return toLower(normalized);
 }
 
 std::string normalizeLineEndings(const std::string & text);
 
 void addUniqueString(std::vector<std::string> * values, const std::string & value) {
-	if (values == nullptr || trimCopy(value).empty()) {
+	if (values == nullptr || trim(value).empty()) {
 		return;
 	}
 	if (std::find(values->begin(), values->end(), value) == values->end()) {
@@ -190,7 +172,7 @@ std::vector<std::string> splitCommaSeparatedValues(const std::string & text) {
 			continue;
 		}
 		if (c == ',' && !inQuotes) {
-			const std::string trimmed = trimCopy(current);
+			const std::string trimmed = trim(current);
 			if (!trimmed.empty()) {
 				values.push_back(trimmed);
 			}
@@ -199,7 +181,7 @@ std::vector<std::string> splitCommaSeparatedValues(const std::string & text) {
 		}
 		current.push_back(c);
 	}
-	const std::string trimmed = trimCopy(current);
+	const std::string trimmed = trim(current);
 	if (!trimmed.empty()) {
 		values.push_back(trimmed);
 	}
@@ -207,7 +189,7 @@ std::vector<std::string> splitCommaSeparatedValues(const std::string & text) {
 }
 
 std::string stripMatchingQuotes(const std::string & text) {
-	const std::string trimmed = trimCopy(text);
+	const std::string trimmed = trim(text);
 	if (trimmed.size() >= 2 &&
 		((trimmed.front() == '"' && trimmed.back() == '"') ||
 		 (trimmed.front() == '\'' && trimmed.back() == '\''))) {
@@ -228,11 +210,11 @@ std::vector<std::string> parseInstructionApplyToGlobs(const std::string & conten
 	}
 	const std::string frontMatter = normalized.substr(4, fenceEnd - 4);
 	for (const auto & rawLine : splitLines(frontMatter)) {
-		const std::string line = trimCopy(rawLine);
+		const std::string line = trim(rawLine);
 		if (line.rfind("applyTo:", 0) != 0) {
 			continue;
 		}
-		std::string value = trimCopy(line.substr(std::string("applyTo:").size()));
+		std::string value = trim(line.substr(std::string("applyTo:").size()));
 		if (value.empty()) {
 			continue;
 		}
@@ -257,13 +239,13 @@ std::vector<std::string> parseInstructionApplyToGlobs(const std::string & conten
 std::string stripInstructionFrontMatter(const std::string & content) {
 	const std::string normalized = normalizeLineEndings(content);
 	if (normalized.rfind("---\n", 0) != 0) {
-		return trimCopy(normalized);
+		return trim(normalized);
 	}
 	const size_t fenceEnd = normalized.find("\n---\n", 4);
 	if (fenceEnd == std::string::npos) {
-		return trimCopy(normalized);
+		return trim(normalized);
 	}
-	return trimCopy(normalized.substr(fenceEnd + 5));
+	return trim(normalized.substr(fenceEnd + 5));
 }
 
 bool globMatchesPathRecursive(
@@ -337,7 +319,7 @@ std::vector<RepoInstructionSnippet> collectRepoInstructionSnippets(
 
 	int bestAgentPriority = -1;
 	if (scriptSource->getSourceType() == ofxGgmlScriptSourceType::LocalFolder &&
-		!trimCopy(scriptSource->getLocalFolderPath()).empty()) {
+		!trim(scriptSource->getLocalFolderPath()).empty()) {
 		const std::filesystem::path workspaceRoot(scriptSource->getLocalFolderPath());
 		auto relativePathFromRoot = [&](const std::filesystem::path & path) {
 			std::error_code ec;
@@ -364,7 +346,7 @@ std::vector<RepoInstructionSnippet> collectRepoInstructionSnippets(
 			std::string content = truncateWithMarker(
 				stripInstructionFrontMatter(readFileText(path)),
 				900);
-			if (trimCopy(content).empty()) {
+			if (trim(content).empty()) {
 				return;
 			}
 
@@ -414,7 +396,7 @@ std::vector<RepoInstructionSnippet> collectRepoInstructionSnippets(
 				std::string content = truncateWithMarker(
 					stripInstructionFrontMatter(readFileText(it->path())),
 					900);
-				if (trimCopy(content).empty()) {
+				if (trim(content).empty()) {
 					continue;
 				}
 				const auto globs = parseInstructionApplyToGlobs(content);
@@ -478,7 +460,7 @@ std::vector<RepoInstructionSnippet> collectRepoInstructionSnippets(
 			continue;
 		}
 		content = truncateWithMarker(stripInstructionFrontMatter(content), 900);
-		if (trimCopy(content).empty()) {
+		if (trim(content).empty()) {
 			continue;
 		}
 
@@ -571,7 +553,7 @@ std::string buildRepoInstructionContext(
 }
 
 std::string inferCodeMapRole(const std::string & scope) {
-	const std::string lowered = toLowerCopy(scope);
+	const std::string lowered = toLower(scope);
 	if (lowered.find("assistants") != std::string::npos) {
 		return "assistant workflow";
 	}
@@ -620,7 +602,7 @@ void appendBoundedHistory(
 	if (history == nullptr) {
 		return;
 	}
-	const std::string trimmed = trimCopy(value);
+	const std::string trimmed = trim(value);
 	if (trimmed.empty()) {
 		return;
 	}
@@ -654,9 +636,9 @@ std::string summarizeVerificationCommands(
 	std::vector<std::string> labels;
 	labels.reserve(commands.size());
 	for (const auto & command : commands) {
-		std::string label = trimCopy(command.label);
+		std::string label = trim(command.label);
 		if (label.empty()) {
-			label = trimCopy(command.executable);
+			label = trim(command.executable);
 		}
 		if (!label.empty()) {
 			labels.push_back(label);
@@ -673,7 +655,7 @@ std::string summarizeTouchedFiles(
 	std::vector<std::string> labels;
 	labels.reserve(files.size());
 	for (const auto & file : files) {
-		if (!trimCopy(file.filePath).empty()) {
+		if (!trim(file.filePath).empty()) {
 			labels.push_back(file.filePath);
 		}
 	}
@@ -771,7 +753,7 @@ bool isAllWhitespace(const std::string & text) {
 }
 
 std::string stripCodeFenceBlock(const std::string & text) {
-	const std::string normalized = trimCopy(normalizeLineEndings(text));
+	const std::string normalized = trim(normalizeLineEndings(text));
 	if (normalized.rfind("```", 0) != 0) {
 		return normalized;
 	}
@@ -794,7 +776,7 @@ std::string sanitizeInlineCompletionText(
 	const std::string & rawText) {
 	std::string cleaned = stripCodeFenceBlock(rawText);
 	if (cleaned.rfind("Completion:", 0) == 0) {
-		cleaned = trimCopy(cleaned.substr(std::string("Completion:").size()));
+		cleaned = trim(cleaned.substr(std::string("Completion:").size()));
 	}
 	cleaned = normalizeLineEndings(cleaned);
 	if (request.singleLine) {
@@ -802,7 +784,7 @@ std::string sanitizeInlineCompletionText(
 		if (newline != std::string::npos) {
 			cleaned.resize(newline);
 		}
-		return trimCopy(cleaned);
+		return trim(cleaned);
 	}
 
 	const std::string indent = leadingWhitespace(currentLinePrefix(request.prefix));
@@ -819,7 +801,7 @@ std::string sanitizeInlineCompletionText(
 		}
 		out << line;
 	}
-	return trimCopy(out.str());
+	return trim(out.str());
 }
 
 std::string patchKindToString(ofxGgmlCodeAssistantPatchKind kind) {
@@ -837,7 +819,7 @@ std::string patchKindToString(ofxGgmlCodeAssistantPatchKind kind) {
 }
 
 ofxGgmlCodeAssistantPatchKind parsePatchKind(const std::string & text) {
-	const std::string lowered = toLowerCopy(trimCopy(text));
+	const std::string lowered = toLower(trim(text));
 	if (lowered == "replace") {
 		return ofxGgmlCodeAssistantPatchKind::ReplaceTextOp;
 	}
@@ -857,8 +839,8 @@ bool isLikelyCallerLine(
 		return false;
 	}
 
-	const std::string lowered = toLowerCopy(trimmedLine);
-	const std::string loweredName = toLowerCopy(symbolName);
+	const std::string lowered = toLower(trimmedLine);
+	const std::string loweredName = toLower(symbolName);
 	const size_t pos = lowered.find(loweredName);
 	if (pos == std::string::npos) {
 		return false;
@@ -911,7 +893,7 @@ struct CompileCommandsIndex {
 bool hasExtension(
 	const std::string & path,
 	const std::initializer_list<const char *> & extensions) {
-	const std::string ext = toLowerCopy(std::filesystem::path(path).extension().string());
+	const std::string ext = toLower(std::filesystem::path(path).extension().string());
 	for (const auto * candidate : extensions) {
 		if (ext == candidate) {
 			return true;
@@ -994,7 +976,7 @@ ofxGgmlCodeAssistantSourceRange estimateIndentRange(
 	}
 
 	for (size_t i = startIndex + 1; i < lines.size(); ++i) {
-		const std::string trimmed = trimCopy(lines[i]);
+		const std::string trimmed = trim(lines[i]);
 		if (trimmed.empty()) {
 			continue;
 		}
@@ -1025,7 +1007,7 @@ std::string readTextFile(const std::filesystem::path & path) {
 
 std::optional<std::filesystem::path> findCompilationDatabasePath(
 	const std::string & rootPath) {
-	if (trimCopy(rootPath).empty()) {
+	if (trim(rootPath).empty()) {
 		return std::nullopt;
 	}
 
@@ -1083,7 +1065,7 @@ std::vector<std::string> extractInvokedNames(const std::string & line) {
 	for (std::sregex_iterator it(line.begin(), line.end(), invokePattern), end;
 		it != end; ++it) {
 		const std::string name = (*it)[1].str();
-		const std::string lowered = toLowerCopy(name);
+		const std::string lowered = toLower(name);
 		if (lowered == "if" || lowered == "for" || lowered == "while" ||
 			lowered == "switch" || lowered == "return" || lowered == "sizeof" ||
 			lowered == "catch") {
@@ -1173,7 +1155,7 @@ std::vector<std::string> extractTouchedFilesFromUnifiedDiff(
 		if (rawLine.rfind("+++ ", 0) != 0 && rawLine.rfind("--- ", 0) != 0) {
 			continue;
 		}
-		std::string path = trimCopy(rawLine.substr(4));
+		std::string path = trim(rawLine.substr(4));
 		if (path == "/dev/null" || path.empty()) {
 			continue;
 		}
@@ -1246,7 +1228,7 @@ bool pathMatchesContextEntry(
 std::optional<size_t> findContextFileIndex(
 	const ofxGgmlCodeAssistantContext & context,
 	const std::string & requestedPath) {
-	if (context.scriptSource == nullptr || trimCopy(requestedPath).empty()) {
+	if (context.scriptSource == nullptr || trim(requestedPath).empty()) {
 		return std::nullopt;
 	}
 	const auto files = context.scriptSource->getFiles();
@@ -1283,24 +1265,24 @@ std::vector<PromptFileSnippet> collectLikelyEditTargetSnippets(
 
 	std::vector<Candidate> candidates;
 	for (const auto & allowedFile : request.allowedFiles) {
-		if (!trimCopy(allowedFile).empty()) {
+		if (!trim(allowedFile).empty()) {
 			candidates.push_back({allowedFile, "allowed edit target"});
 		}
 	}
 	for (const auto & error : ofxGgmlCodeAssistant::parseBuildErrors(request.buildErrors)) {
-		if (!trimCopy(error.filePath).empty()) {
+		if (!trim(error.filePath).empty()) {
 			std::string reason = "compiler-reported failure";
 			if (error.line > 0) {
 				reason += " near line " + std::to_string(error.line);
 			}
-			if (!trimCopy(error.code).empty()) {
+			if (!trim(error.code).empty()) {
 				reason += " [" + error.code + "]";
 			}
 			candidates.push_back({error.filePath, reason});
 		}
 	}
 	for (const auto & recentFile : context.recentTouchedFiles) {
-		if (!trimCopy(recentFile).empty()) {
+		if (!trim(recentFile).empty()) {
 			candidates.push_back({recentFile, "recently touched file"});
 		}
 	}
@@ -1322,7 +1304,7 @@ std::vector<PromptFileSnippet> collectLikelyEditTargetSnippets(
 		const auto existing = seen.find(normalizedName);
 		if (existing != seen.end()) {
 			auto & existingSnippet = snippets[existing->second];
-			if (!trimCopy(candidate.reason).empty() &&
+			if (!trim(candidate.reason).empty() &&
 				existingSnippet.reason.find(candidate.reason) == std::string::npos) {
 				if (!existingSnippet.reason.empty()) {
 					existingSnippet.reason += "; ";
@@ -1370,7 +1352,7 @@ void appendLikelyEditTargetSnippets(
 	prompt << "Likely edit target snippets:\n";
 	for (const auto & snippet : snippets) {
 		prompt << "- " << snippet.filePath;
-		if (!trimCopy(snippet.reason).empty()) {
+		if (!trim(snippet.reason).empty()) {
 			prompt << " (" << snippet.reason << ")";
 		}
 		prompt << "\n" << snippet.content << "\n";
@@ -1516,10 +1498,10 @@ void appendTaskMemory(
 	if (includedTaskMemory != nullptr) {
 		*includedTaskMemory = false;
 	}
-	const bool hasActiveMode = !trimCopy(context.activeMode).empty();
-	const bool hasSelectedBackend = !trimCopy(context.selectedBackend).empty();
+	const bool hasActiveMode = !trim(context.activeMode).empty();
+	const bool hasSelectedBackend = !trim(context.selectedBackend).empty();
 	const bool hasRecentFiles = !context.recentTouchedFiles.empty();
-	const bool hasFailureReason = !trimCopy(context.lastFailureReason).empty();
+	const bool hasFailureReason = !trim(context.lastFailureReason).empty();
 	if (!hasActiveMode && !hasSelectedBackend &&
 		!hasRecentFiles && !hasFailureReason) {
 		return;
@@ -1538,7 +1520,7 @@ void appendTaskMemory(
 	if (hasRecentFiles) {
 		prompt << "- recently touched files:\n";
 		for (const auto & file : context.recentTouchedFiles) {
-			if (!trimCopy(file).empty()) {
+			if (!trim(file).empty()) {
 				prompt << "  - " << normalizeRelativeFilePath(file) << "\n";
 			}
 		}
@@ -1588,7 +1570,7 @@ void appendRequestConstraints(
 		prompt << "\n";
 	}
 
-	if (!trimCopy(request.buildErrors).empty()) {
+	if (!trim(request.buildErrors).empty()) {
 		prompt << "Build or test failure details:\n"
 			<< request.buildErrors << "\n\n";
 		const auto parsedErrors =
@@ -1827,9 +1809,9 @@ std::string ofxGgmlCodeAssistant::defaultActionBody(
 	bool hasFocusedFile,
 	const std::string & lastTask,
 	const std::string & lastOutput) {
-	const std::string trimmedInput = trimCopy(userInput);
-	const std::string trimmedTask = trimCopy(lastTask);
-	const std::string trimmedOutput = trimCopy(lastOutput);
+	const std::string trimmedInput = trim(userInput);
+	const std::string trimmedTask = trim(lastTask);
+	const std::string trimmedOutput = trim(lastOutput);
 
 	auto withExtraInstructions = [&](const std::string & defaultForFile,
 		const std::string & prefixForInput) {
@@ -1961,8 +1943,8 @@ std::string ofxGgmlCodeAssistant::defaultActionLabel(
 	ofxGgmlCodeAssistantAction action,
 	const std::string & userInput,
 	const std::string & focusedFileName) {
-	const std::string trimmedInput = trimCopy(userInput);
-	const bool hasFocusedFile = !trimCopy(focusedFileName).empty();
+	const std::string trimmedInput = trim(userInput);
+	const bool hasFocusedFile = !trim(focusedFileName).empty();
 
 	auto appendInstructions = [&](std::string label) {
 		if (!trimmedInput.empty()) {
@@ -2045,7 +2027,7 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::extractSymbols(
 	std::vector<std::pair<int, std::string>> lexicalScopes;
 	int braceDepth = 0;
 	for (size_t i = 0; i < lines.size(); ++i) {
-		const std::string line = trimCopy(lines[i]);
+		const std::string line = trim(lines[i]);
 		if (line.empty()) {
 			int openCount = static_cast<int>(std::count(lines[i].begin(), lines[i].end(), '{'));
 			int closeCount = static_cast<int>(std::count(lines[i].begin(), lines[i].end(), '}'));
@@ -2082,7 +2064,7 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::extractSymbols(
 			symbol.range = estimateBraceRange(lines, i);
 		} else if (std::regex_search(line, match, cppFunction) && match.size() >= 3) {
 			symbol.kind = "function";
-			const std::string qualifier = trimCopy(match[1].str());
+			const std::string qualifier = trim(match[1].str());
 			symbol.name = match[2].str();
 			if (!qualifier.empty()) {
 				const std::string normalizedQualifier =
@@ -2172,11 +2154,11 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::retrieveSymbols(
 	}
 
 	for (auto & symbol : index.symbols) {
-		const std::string lowerName = toLowerCopy(symbol.name);
-		const std::string lowerQualified = toLowerCopy(symbol.qualifiedName);
-		const std::string lowerContainer = toLowerCopy(symbol.containerName);
-		const std::string lowerSig = toLowerCopy(symbol.signature);
-		const std::string lowerFile = toLowerCopy(symbol.filePath);
+		const std::string lowerName = toLower(symbol.name);
+		const std::string lowerQualified = toLower(symbol.qualifiedName);
+		const std::string lowerContainer = toLower(symbol.containerName);
+		const std::string lowerSig = toLower(symbol.signature);
+		const std::string lowerFile = toLower(symbol.filePath);
 		const auto nameTokens = tokenizeIdentifier(symbol.name);
 		const auto qualifiedTokens = tokenizeIdentifier(symbol.qualifiedName);
 		const auto containerTokens = tokenizeIdentifier(symbol.containerName);
@@ -2272,7 +2254,7 @@ ofxGgmlCodeAssistantSymbolContext ofxGgmlCodeAssistant::buildSymbolContext(
 	const ofxGgmlCodeAssistantSymbolQuery & query,
 	const ofxGgmlCodeAssistantContext & context) const {
 	ofxGgmlCodeAssistantSymbolContext symbolContext;
-	symbolContext.query = !trimCopy(query.query).empty()
+	symbolContext.query = !trim(query.query).empty()
 		? query.query
 		: joinStrings(query.targetSymbols, ", ");
 	symbolContext.includesCallers = query.includeCallers;
@@ -2288,7 +2270,7 @@ ofxGgmlCodeAssistantSymbolContext ofxGgmlCodeAssistant::buildSymbolContext(
 		std::vector<std::string> lowered;
 		lowered.reserve(query.targetSymbols.size());
 		for (const auto & symbol : query.targetSymbols) {
-			lowered.push_back(toLowerCopy(symbol));
+			lowered.push_back(toLower(symbol));
 		}
 		return lowered;
 	}();
@@ -2298,7 +2280,7 @@ ofxGgmlCodeAssistantSymbolContext ofxGgmlCodeAssistant::buildSymbolContext(
 			break;
 		}
 		if (!preferredSymbols.empty()) {
-			const std::string loweredName = toLowerCopy(symbol.name);
+			const std::string loweredName = toLower(symbol.name);
 			if (std::find(preferredSymbols.begin(), preferredSymbols.end(),
 					loweredName) == preferredSymbols.end()) {
 				bool containsPreferred = false;
@@ -2347,7 +2329,7 @@ ofxGgmlCodeAssistantSymbolContext ofxGgmlCodeAssistant::buildSymbolContext(
 				break;
 			}
 			for (const auto & preferred : preferredSymbols) {
-				if (toLowerCopy(caller.preview).find(preferred) != std::string::npos) {
+				if (toLower(caller.preview).find(preferred) != std::string::npos) {
 					symbolContext.relatedReferences.push_back(caller);
 					break;
 				}
@@ -2431,9 +2413,9 @@ ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
 
 	std::unordered_map<std::string, std::vector<size_t>> symbolsByName;
 	for (size_t i = 0; i < index.symbols.size(); ++i) {
-		symbolsByName[toLowerCopy(index.symbols[i].name)].push_back(i);
+		symbolsByName[toLower(index.symbols[i].name)].push_back(i);
 		if (!index.symbols[i].qualifiedName.empty()) {
-			symbolsByName[toLowerCopy(index.symbols[i].qualifiedName)].push_back(i);
+			symbolsByName[toLower(index.symbols[i].qualifiedName)].push_back(i);
 		}
 	}
 
@@ -2454,12 +2436,12 @@ ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
 			: callerSymbol.line;
 		for (int lineNumber = startLine; lineNumber <= endLine &&
 			lineNumber <= static_cast<int>(lines.size()); ++lineNumber) {
-			const std::string trimmed = trimCopy(lines[static_cast<size_t>(lineNumber - 1)]);
+			const std::string trimmed = trim(lines[static_cast<size_t>(lineNumber - 1)]);
 			if (trimmed.empty()) {
 				continue;
 			}
 			for (const auto & invoked : extractInvokedNames(trimmed)) {
-				const auto targetIt = symbolsByName.find(toLowerCopy(invoked));
+				const auto targetIt = symbolsByName.find(toLower(invoked));
 				if (targetIt == symbolsByName.end()) {
 					continue;
 				}
@@ -2516,12 +2498,12 @@ ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
 				}
 
 				ofxGgmlCodeAssistantSymbolReference reference;
-				reference.kind = isLikelyCallerLine(trimCopy(lines[lineIndex]), symbol.name)
+				reference.kind = isLikelyCallerLine(trim(lines[lineIndex]), symbol.name)
 					? "caller"
 					: "reference";
 				reference.filePath = fileEntry.first;
 				reference.line = currentLine;
-				reference.preview = trimCopy(lines[lineIndex]);
+				reference.preview = trim(lines[lineIndex]);
 				reference.targetSymbol = symbol.qualifiedName;
 				reference.range.startLine = currentLine;
 				reference.range.startColumn = 1;
@@ -2848,7 +2830,7 @@ ofxGgmlCodeAssistantRiskAssessment ofxGgmlCodeAssistant::assessRisk(
 	}
 
 	float score = assessment.score;
-	if (!structured.patchOperations.empty() || !trimCopy(structured.unifiedDiff).empty()) {
+	if (!structured.patchOperations.empty() || !trim(structured.unifiedDiff).empty()) {
 		score += 0.10f;
 	}
 	if (touchedFiles.size() > 1) {
@@ -2875,7 +2857,7 @@ ofxGgmlCodeAssistantRiskAssessment ofxGgmlCodeAssistant::assessRisk(
 		score += 0.10f;
 		addUniqueString(&assessment.reasons, "Test coverage has not been extended yet.");
 	}
-	if (!trimCopy(request.buildErrors).empty()) {
+	if (!trim(request.buildErrors).empty()) {
 		score += 0.15f;
 		addUniqueString(&assessment.reasons, "The task starts from an active build or test failure.");
 	}
@@ -2940,7 +2922,7 @@ std::string ofxGgmlCodeAssistant::buildStructuredResponseInstructions() {
 
 std::string ofxGgmlCodeAssistant::buildUnifiedDiffFromStructuredResult(
 	const ofxGgmlCodeAssistantStructuredResult & structured) {
-	if (!trimCopy(structured.unifiedDiff).empty()) {
+	if (!trim(structured.unifiedDiff).empty()) {
 		return structured.unifiedDiff;
 	}
 
@@ -2961,7 +2943,7 @@ std::vector<ofxGgmlCodeAssistantBuildError> ofxGgmlCodeAssistant::parseBuildErro
 		R"(^(.+)\((\d+)(?:,(\d+))?\):\s*(fatal error|error|warning)\s+([A-Za-z]+\d+):\s*(.+)$)");
 
 	for (const auto & rawLine : splitLines(text)) {
-		const std::string line = trimCopy(rawLine);
+		const std::string line = trim(rawLine);
 		if (line.empty()) {
 			continue;
 		}
@@ -2999,7 +2981,7 @@ std::vector<ofxGgmlCodeAssistantBuildError> ofxGgmlCodeAssistant::parseBuildErro
 			continue;
 		}
 
-		const std::string locationPart = trimCopy(line.substr(0, severityPos));
+		const std::string locationPart = trim(line.substr(0, severityPos));
 		const std::size_t lastColon = locationPart.rfind(':');
 		if (lastColon == std::string::npos) {
 			continue;
@@ -3015,16 +2997,16 @@ std::vector<ofxGgmlCodeAssistantBuildError> ofxGgmlCodeAssistant::parseBuildErro
 		std::string lineText;
 		std::string columnText;
 		std::string filePath;
-		const std::string tailText = trimCopy(locationPart.substr(lastColon + 1));
+		const std::string tailText = trim(locationPart.substr(lastColon + 1));
 		if (!isDigits(tailText)) {
 			continue;
 		}
 
-		const std::string beforeLast = trimCopy(locationPart.substr(0, lastColon));
+		const std::string beforeLast = trim(locationPart.substr(0, lastColon));
 		const std::size_t secondLastColon = beforeLast.rfind(':');
 		if (secondLastColon != std::string::npos) {
-			const std::string maybeLine = trimCopy(beforeLast.substr(secondLastColon + 1));
-			const std::string maybeFile = trimCopy(beforeLast.substr(0, secondLastColon));
+			const std::string maybeLine = trim(beforeLast.substr(secondLastColon + 1));
+			const std::string maybeFile = trim(beforeLast.substr(0, secondLastColon));
 			if (isDigits(maybeLine) && !maybeFile.empty()) {
 				filePath = maybeFile;
 				lineText = maybeLine;
@@ -3039,13 +3021,13 @@ std::vector<ofxGgmlCodeAssistantBuildError> ofxGgmlCodeAssistant::parseBuildErro
 			continue;
 		}
 
-		error.filePath = trimCopy(filePath);
+		error.filePath = trim(filePath);
 		error.line = std::stoi(lineText);
 		if (isDigits(columnText)) {
 			error.column = std::stoi(columnText);
 		}
 		error.code = severity;
-		error.message = trimCopy(line.substr(severityPos + severityToken.size()));
+		error.message = trim(line.substr(severityPos + severityToken.size()));
 		errors.push_back(std::move(error));
 	}
 
@@ -3058,16 +3040,16 @@ void ofxGgmlCodeAssistant::seedContextFromSession(
 	if (context == nullptr) {
 		return;
 	}
-	if (trimCopy(context->activeMode).empty()) {
+	if (trim(context->activeMode).empty()) {
 		context->activeMode = session.activeMode;
 	}
-	if (trimCopy(context->selectedBackend).empty()) {
+	if (trim(context->selectedBackend).empty()) {
 		context->selectedBackend = session.selectedBackend;
 	}
 	if (context->recentTouchedFiles.empty()) {
 		context->recentTouchedFiles = session.recentTouchedFiles;
 	}
-	if (trimCopy(context->lastFailureReason).empty()) {
+	if (trim(context->lastFailureReason).empty()) {
 		context->lastFailureReason = session.lastFailureReason;
 	}
 }
@@ -3081,19 +3063,19 @@ void ofxGgmlCodeAssistant::updateSessionFromResult(
 		return;
 	}
 
-	if (!trimCopy(context.activeMode).empty()) {
+	if (!trim(context.activeMode).empty()) {
 		session->activeMode = context.activeMode;
 	}
-	if (!trimCopy(context.selectedBackend).empty()) {
+	if (!trim(context.selectedBackend).empty()) {
 		session->selectedBackend = context.selectedBackend;
 	}
-	if (!trimCopy(result.prepared.focusedFileName).empty()) {
+	if (!trim(result.prepared.focusedFileName).empty()) {
 		session->focusedFilePath = result.prepared.focusedFileName;
 	}
 
 	std::vector<std::string> touchedFiles;
 	for (const auto & fileIntent : result.structured.filesToTouch) {
-		if (!trimCopy(fileIntent.filePath).empty()) {
+		if (!trim(fileIntent.filePath).empty()) {
 			touchedFiles.push_back(fileIntent.filePath);
 		}
 	}
@@ -3105,20 +3087,20 @@ void ofxGgmlCodeAssistant::updateSessionFromResult(
 
 	appendBoundedHistory(
 		&session->recentPrompts,
-		trimCopy(request.userInput).empty()
+		trim(request.userInput).empty()
 			? result.prepared.body
 			: request.userInput,
 		session->maxHistoryEntries);
 	appendBoundedHistory(
 		&session->recentSummaries,
-		!trimCopy(result.structured.goalSummary).empty()
+		!trim(result.structured.goalSummary).empty()
 			? result.structured.goalSummary
 			: result.prepared.requestLabel,
 		session->maxHistoryEntries);
 
 	session->lastFailureReason = result.inference.success
 		? std::string()
-		: trimCopy(result.inference.error);
+		: trim(result.inference.error);
 	session->revision += 1;
 }
 
@@ -3131,13 +3113,13 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 	std::string currentReviewerPersona;
 
 	for (const auto & rawLine : splitLines(text)) {
-		const std::string line = trimCopy(rawLine);
+		const std::string line = trim(rawLine);
 		if (line.empty()) {
 			continue;
 		}
 
 		auto consumeValue = [&](const std::string & prefix) {
-			return trimCopy(line.substr(prefix.size()));
+			return trim(line.substr(prefix.size()));
 		};
 
 		if (line.rfind("GOAL:", 0) == 0) {
@@ -3242,7 +3224,7 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 				} else {
 					command.executable = fields[0];
 				}
-				if (trimCopy(command.executable).empty()) {
+				if (trim(command.executable).empty()) {
 					command.executable = command.label;
 				}
 				structured.verificationCommands.push_back(std::move(command));
@@ -3261,7 +3243,7 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 		}
 		if (line.rfind("RETRY:", 0) == 0 && currentCommand != nullptr) {
 			currentCommand->retryOnFailure =
-				toLowerCopy(consumeValue("RETRY:")) == "true";
+				toLower(consumeValue("RETRY:")) == "true";
 			structured.detectedStructuredOutput = true;
 			continue;
 		}
@@ -3348,7 +3330,7 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 			continue;
 		}
 		if (line.rfind("RISK-LEVEL:", 0) == 0) {
-			structured.riskAssessment.level = toLowerCopy(
+			structured.riskAssessment.level = toLower(
 				consumeValue("RISK-LEVEL:"));
 			structured.detectedStructuredOutput = true;
 			continue;
@@ -3371,7 +3353,7 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 	if (!structured.reviewFindings.empty()) {
 		std::map<std::string, size_t> reviewerIndices;
 		for (const auto & finding : structured.reviewFindings) {
-			if (trimCopy(finding.reviewerPersona).empty()) {
+			if (trim(finding.reviewerPersona).empty()) {
 				continue;
 			}
 			auto it = reviewerIndices.find(finding.reviewerPersona);
@@ -3402,21 +3384,21 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 		structured.filesToTouch.push_back(std::move(intent));
 	};
 	for (const auto & patch : structured.patchOperations) {
-		std::string reason = trimCopy(patch.summary);
+		std::string reason = trim(patch.summary);
 		if (reason.empty()) {
 			reason = patchKindToString(patch.kind) + " patch";
 		}
 		addFileIntent(patch.filePath, reason);
 	}
 	for (const auto & finding : structured.reviewFindings) {
-		std::string reason = trimCopy(finding.title);
+		std::string reason = trim(finding.title);
 		if (reason.empty()) {
 			reason = "review finding";
 		}
 		addFileIntent(finding.filePath, reason);
 	}
 	for (const auto & test : structured.testSuggestions) {
-		std::string reason = trimCopy(test.rationale);
+		std::string reason = trim(test.rationale);
 		if (reason.empty()) {
 			reason = "suggested test coverage";
 		}
@@ -3425,7 +3407,7 @@ ofxGgmlCodeAssistantStructuredResult ofxGgmlCodeAssistant::parseStructuredResult
 	for (const auto & diffFile : extractTouchedFilesFromUnifiedDiff(structured.unifiedDiff)) {
 		addFileIntent(diffFile, "unified diff");
 	}
-	if (trimCopy(structured.riskAssessment.level).empty()) {
+	if (trim(structured.riskAssessment.level).empty()) {
 		structured.riskAssessment.level =
 			riskLevelForScore(structured.riskAssessment.score);
 	}
@@ -3445,7 +3427,7 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 		&focusedFileName,
 		&focusedFileContent);
 
-	prepared.body = trimCopy(request.bodyOverride);
+	prepared.body = trim(request.bodyOverride);
 	if (prepared.body.empty()) {
 		prepared.body = defaultActionBody(
 			request.action,
@@ -3455,7 +3437,7 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 			request.lastOutput);
 	}
 
-	prepared.requestLabel = trimCopy(request.labelOverride);
+	prepared.requestLabel = trim(request.labelOverride);
 	if (prepared.requestLabel.empty()) {
 		prepared.requestLabel = defaultActionLabel(
 			request.action,
@@ -3471,7 +3453,7 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 	prepared.requestedUnifiedDiff = request.requestUnifiedDiff;
 
 	ofxGgmlCodeAssistantSymbolQuery symbolQuery = request.symbolQuery;
-	if (trimCopy(symbolQuery.query).empty()) {
+	if (trim(symbolQuery.query).empty()) {
 		symbolQuery.query = prepared.body;
 	}
 	prepared.retrievedSymbolContext = buildSymbolContext(symbolQuery, context);
@@ -3485,7 +3467,7 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 	}
 
 	std::ostringstream prompt;
-	if (!trimCopy(request.language.systemPrompt).empty()) {
+	if (!trim(request.language.systemPrompt).empty()) {
 		prompt << request.language.systemPrompt << "\n";
 	}
 	if (context.projectMemory != nullptr) {
@@ -3712,7 +3694,7 @@ std::vector<ofxGgmlCodeAssistantToolCall> buildProposedToolCalls(
 	}
 
 	if (!structured.patchOperations.empty() ||
-		!trimCopy(structured.unifiedDiff).empty()) {
+		!trim(structured.unifiedDiff).empty()) {
 		appendToolCallIfEnabled(
 			&calls,
 			registry,
@@ -3737,7 +3719,7 @@ std::vector<ofxGgmlCodeAssistantToolCall> buildProposedToolCalls(
 			registry,
 			"review_changes",
 			"Inspect findings, risks, and suggested follow-up work.",
-			trimCopy(structured.riskAssessment.level));
+			trim(structured.riskAssessment.level));
 	}
 
 	return calls;
@@ -3783,7 +3765,7 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runWithSession(
 		[&](ofxGgmlCodeAssistantEventKind kind, const std::string & message) {
 			ofxGgmlCodeAssistantEvent event;
 			event.kind = kind;
-			event.requestLabel = trimCopy(request.labelOverride);
+			event.requestLabel = trim(request.labelOverride);
 			event.message = message;
 			event.sessionRevision = currentSessionRevision();
 			return event;
@@ -3854,7 +3836,7 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runWithSession(
 	if (request.requestStructuredResult &&
 		!result.structured.detectedStructuredOutput &&
 		result.inference.success &&
-		!trimCopy(result.inference.text).empty()) {
+		!trim(result.inference.text).empty()) {
 		const ofxGgmlInferenceResult recovery = m_inference.generate(
 			modelPath,
 			buildStructuredRecoveryPrompt(result.prepared, result.inference.text),
@@ -3964,7 +3946,7 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runWithSession(
 			: ofxGgmlCodeAssistantEventKind::Error,
 		result.inference.success
 			? "Assistant run completed."
-			: (trimCopy(result.inference.error).empty()
+			: (trim(result.inference.error).empty()
 				? "Assistant run failed."
 				: result.inference.error));
 	completedEvent.requestLabel = result.prepared.requestLabel;
@@ -4009,13 +3991,13 @@ ofxGgmlCodeAssistantInlineCompletionPreparedPrompt
 ofxGgmlCodeAssistant::prepareInlineCompletion(
 	const ofxGgmlCodeAssistantInlineCompletionRequest & request) const {
 	ofxGgmlCodeAssistantInlineCompletionPreparedPrompt prepared;
-	prepared.label = trimCopy(request.filePath);
+	prepared.label = trim(request.filePath);
 	if (prepared.label.empty()) {
 		prepared.label = "Inline completion";
 	}
 
 	std::ostringstream prompt;
-	if (!trimCopy(request.language.systemPrompt).empty()) {
+	if (!trim(request.language.systemPrompt).empty()) {
 		prompt << request.language.systemPrompt << "\n";
 	}
 	prompt << "You are completing code at the current cursor position.\n";
@@ -4026,10 +4008,10 @@ ofxGgmlCodeAssistant::prepareInlineCompletion(
 	if (request.singleLine) {
 		prompt << "Keep the completion to a single line.\n";
 	}
-	if (!trimCopy(request.filePath).empty()) {
+	if (!trim(request.filePath).empty()) {
 		prompt << "File: " << request.filePath << "\n";
 	}
-	if (!trimCopy(request.instruction).empty()) {
+	if (!trim(request.instruction).empty()) {
 		prompt << "Instruction: " << request.instruction << "\n";
 	}
 	const std::string indent = leadingWhitespace(currentLinePrefix(request.prefix));
