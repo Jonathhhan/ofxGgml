@@ -62,6 +62,26 @@ inline std::string lowerCopy(const std::string & value) {
 	return lowered;
 }
 
+inline std::string summarizeModelLoadFailure(
+	const std::string & rawOutput,
+	const std::string & modelPath) {
+	const std::string trimmedOutput = trimCopy(rawOutput);
+	const std::string loweredOutput = lowerCopy(trimmedOutput);
+	const std::string fileName = std::filesystem::path(modelPath).filename().string();
+	const std::string loweredFileName = lowerCopy(fileName);
+
+	if (loweredOutput.find("bad magic") != std::string::npos ||
+		loweredOutput.find("model file is broken") != std::string::npos) {
+		if (loweredFileName.find("outetts") != std::string::npos) {
+			return "The selected TTS model file was rejected by chatllm.cpp. "
+				"It may be corrupted, not a real GGUF binary, or incompatible with the current runtime build.";
+		}
+		return "The selected TTS model file was rejected as an invalid or incompatible GGUF by chatllm.cpp.";
+	}
+
+	return trimmedOutput;
+}
+
 inline bool hasPathSeparator(const std::string & value) {
 	return value.find('\\') != std::string::npos ||
 		value.find('/') != std::string::npos;
@@ -134,6 +154,16 @@ inline std::string preferredLocalExecutablePath() {
 	return (exeDir / ".." / ".." / "libs" / "chatllm" / "bin" / executableName)
 		.lexically_normal()
 		.string();
+}
+
+inline bool isPreferredLocalExecutablePath(const std::string & executableHint) {
+	const std::string trimmed = trimCopy(executableHint);
+	if (trimmed.empty()) {
+		return false;
+	}
+	const std::filesystem::path lhs = std::filesystem::path(trimmed).lexically_normal();
+	const std::filesystem::path rhs = std::filesystem::path(preferredLocalExecutablePath()).lexically_normal();
+	return lhs == rhs;
 }
 
 inline std::string findFirstExistingExecutable(
@@ -525,8 +555,14 @@ inline std::shared_ptr<ofxGgmlTtsBackend> createBackend(
 			if (isExplicitExecutablePath(options.executablePath)) {
 				std::error_code execEc;
 				if (!std::filesystem::exists(std::filesystem::path(executable), execEc) || execEc) {
-					result.error =
-						"chatllm.cpp executable not found: " + trimCopy(options.executablePath);
+					if (isPreferredLocalExecutablePath(options.executablePath)) {
+						result.error =
+							"chatllm.cpp executable was not found in the addon-local runtime. "
+							"Build it with scripts/build-chatllm.ps1 or set Executable to a working chatllm.cpp binary.";
+					} else {
+						result.error =
+							"chatllm.cpp executable not found: " + trimCopy(options.executablePath);
+					}
 					return result;
 				}
 			}
@@ -604,7 +640,7 @@ inline std::shared_ptr<ofxGgmlTtsBackend> createBackend(
 				std::filesystem::exists(std::filesystem::path(outputPath), existsEc) &&
 				!existsEc;
 			if (exitCode != 0 || !hasOutputFile) {
-				result.error = trimCopy(rawOutput);
+				result.error = summarizeModelLoadFailure(rawOutput, modelPath);
 				if (result.error.empty()) {
 					if (exitCode != 0) {
 						result.error =

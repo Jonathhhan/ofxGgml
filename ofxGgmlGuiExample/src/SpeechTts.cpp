@@ -467,18 +467,12 @@ void ofApp::drawSpeechPanel() {
 }
 
 void ofApp::drawTtsPanel() {
-	drawPanelHeader("TTS", "local text-to-speech via chatllm.cpp-backed OuteTTS models");
+	drawPanelHeader("TTS", "local text-to-speech via chatllm.cpp with user-selected models");
 	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
 
 	const bool loadedTtsProfiles = ensureTtsProfilesLoaded();
 	if (loadedTtsProfiles && !ttsProfiles.empty()) {
 		applyTtsProfileDefaults(getSelectedTtsProfile(), true);
-	}
-	if (trim(ttsExecutablePath).empty()) {
-		copyStringToBuffer(
-			ttsExecutablePath,
-			sizeof(ttsExecutablePath),
-			ofxGgmlChatLlmTtsAdapters::preferredLocalExecutablePath());
 	}
 
 	const ofxGgmlTtsModelProfile activeProfile = getSelectedTtsProfile();
@@ -515,6 +509,17 @@ void ofApp::drawTtsPanel() {
 			autoSaveSession();
 		}
 	}
+	ImGui::SameLine();
+	if (ImGui::Button("Use local##TtsExe", ImVec2(110, 0))) {
+		copyStringToBuffer(
+			ttsExecutablePath,
+			sizeof(ttsExecutablePath),
+			ofxGgmlChatLlmTtsAdapters::preferredLocalExecutablePath());
+		autoSaveSession();
+	}
+	ImGui::TextDisabled(
+		"Leave Executable blank to auto-discover chatllm.cpp. Preferred local path: %s",
+		ofxGgmlChatLlmTtsAdapters::preferredLocalExecutablePath().c_str());
 	ImGui::TextDisabled("Resolved executable: %s", resolveConfiguredTtsExecutable().c_str());
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);

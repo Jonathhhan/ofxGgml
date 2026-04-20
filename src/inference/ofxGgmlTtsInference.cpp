@@ -53,28 +53,28 @@ ofxGgmlTtsInference::ofxGgmlTtsInference()
 std::vector<ofxGgmlTtsModelProfile> ofxGgmlTtsInference::defaultProfiles() {
 	return {
 		{
-			"ChatLLM OuteTTS 1.0 1B",
-			"OuteTTS / chatllm.cpp",
-			"OuteAI/Llama-OuteTTS-1.0-1B",
+			"ChatLLM TTS (manual model)",
+			"Manual model path / chatllm.cpp",
 			"",
 			"",
 			"",
 			"",
 			"",
-			true,
+			"",
+			false,
 			false,
 			false
 		},
 		{
-			"ChatLLM OuteTTS 1.0 0.6B",
-			"OuteTTS / chatllm.cpp",
-			"OuteAI/OuteTTS-1.0-0.6B",
+			"Custom chatllm.cpp TTS model",
+			"Custom / manual path",
 			"",
 			"",
 			"",
 			"",
 			"",
-			true,
+			"",
+			false,
 			false,
 			false
 		}

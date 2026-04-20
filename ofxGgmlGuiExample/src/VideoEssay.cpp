@@ -3,6 +3,14 @@
 #include "utils/ImGuiHelpers.h"
 #include "utils/PathHelpers.h"
 
+#if OFXGGML_HAS_OFXSTABLEDIFFUSION
+#include "ofxStableDiffusionVideoWorkflowHelpers.h"
+#endif
+
+#include <cctype>
+#include <filesystem>
+#include <sstream>
+
 namespace {
 
 const char * const kVideoEssayToneLabels[] = {
@@ -34,6 +42,44 @@ const char * const kLongVideoPacingLabels[] = {
 	"Aggressive escalation",
 	"Punchy short-form"
 };
+
+const char * const kLongVideoRenderPresetLabels[] = {
+	"Fast preview",
+	"Low VRAM",
+	"Balanced",
+	"Quality",
+	"Batch storyboard"
+};
+
+const char * const kLongVideoRenderModeLabels[] = {
+	"Standard",
+	"Loop",
+	"Ping-pong",
+	"Boomerang"
+};
+
+std::string sanitizeVideoFilenameStem(
+	const std::string & text,
+	const std::string & fallback = "segment") {
+	std::string sanitized;
+	sanitized.reserve(text.size());
+	for (const unsigned char c : text) {
+		if (std::isalnum(c)) {
+			sanitized.push_back(static_cast<char>(std::tolower(c)));
+		} else if (c == '-' || c == '_') {
+			sanitized.push_back(static_cast<char>(c));
+		} else if (std::isspace(c) || c == '.' || c == ',') {
+			sanitized.push_back('_');
+		}
+	}
+	while (!sanitized.empty() && sanitized.front() == '_') {
+		sanitized.erase(sanitized.begin());
+	}
+	while (!sanitized.empty() && sanitized.back() == '_') {
+		sanitized.pop_back();
+	}
+	return sanitized.empty() ? fallback : sanitized;
+}
 
 struct TtsPreviewUiLabels {
 	const char * comboLabel;
@@ -1037,6 +1083,218 @@ void ofApp::drawLongVideoPanel() {
 		}
 	}
 
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+	ImGui::Text("Render Video");
+#if OFXGGML_HAS_OFXSTABLEDIFFUSION
+	ImGui::TextWrapped(
+		"Render the current project as source-image-based video with the local ofxStableDiffusion backend. "
+		"Use a source frame plus one planned segment prompt, or fall back to the project brief if you have not planned segments yet.");
+
+	const std::string selectedRenderModelLabel = getSelectedVideoRenderModelLabel();
+	if (!selectedRenderModelLabel.empty()) {
+		ImGui::TextDisabled("Render model: %s", selectedRenderModelLabel.c_str());
+	}
+	ImGui::TextDisabled(
+		"Backend: ofxStableDiffusion | current runtime path is image-to-video, not native text-to-video.");
+
+	longVideoRenderSelectedChunkIndex = std::clamp(
+		longVideoRenderSelectedChunkIndex,
+		0,
+		std::max(0, static_cast<int>(longVideoChunks.size()) - 1));
+
+	if (!longVideoChunks.empty()) {
+		std::string selectedChunkLabel = "Project brief fallback";
+		if (longVideoRenderSelectedChunkIndex >= 0 &&
+			longVideoRenderSelectedChunkIndex < static_cast<int>(longVideoChunks.size())) {
+			const auto & selectedChunk =
+				longVideoChunks[static_cast<size_t>(longVideoRenderSelectedChunkIndex)];
+			selectedChunkLabel = selectedChunk.id + " - " + selectedChunk.title;
+		}
+		if (ImGui::BeginCombo("Segment", selectedChunkLabel.c_str())) {
+			for (int i = 0; i < static_cast<int>(longVideoChunks.size()); ++i) {
+				const auto & chunk = longVideoChunks[static_cast<size_t>(i)];
+				const std::string label = chunk.id + " - " + chunk.title;
+				const bool selected = (longVideoRenderSelectedChunkIndex == i);
+				if (ImGui::Selectable(label.c_str(), selected)) {
+					longVideoRenderSelectedChunkIndex = i;
+					autoSaveSession();
+				}
+				if (selected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
+
+	ImGui::SetNextItemWidth(220);
+	if (ImGui::Combo(
+		"Render preset",
+		&longVideoRenderPresetIndex,
+		kLongVideoRenderPresetLabels,
+		IM_ARRAYSIZE(kLongVideoRenderPresetLabels))) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(180);
+	if (ImGui::Combo(
+		"Motion mode",
+		&longVideoRenderModeIndex,
+		kLongVideoRenderModeLabels,
+		IM_ARRAYSIZE(kLongVideoRenderModeLabels))) {
+		autoSaveSession();
+	}
+
+	ImGui::InputText(
+		"Source image",
+		longVideoRenderSourceImagePath,
+		sizeof(longVideoRenderSourceImagePath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Browse...##LongVideoRenderSource", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select source image for video render", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(
+				longVideoRenderSourceImagePath,
+				sizeof(longVideoRenderSourceImagePath),
+				result.getPath());
+			autoSaveSession();
+		}
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(visionImagePath).empty());
+	if (ImGui::SmallButton("Use Vision image##LongVideoRender")) {
+		copyStringToBuffer(
+			longVideoRenderSourceImagePath,
+			sizeof(longVideoRenderSourceImagePath),
+			visionImagePath);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(diffusionInitImagePath).empty());
+	if (ImGui::SmallButton("Use Image init##LongVideoRender")) {
+		copyStringToBuffer(
+			longVideoRenderSourceImagePath,
+			sizeof(longVideoRenderSourceImagePath),
+			diffusionInitImagePath);
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(getPreferredDiffusionReuseImagePath().empty());
+	if (ImGui::SmallButton("Use last Image output##LongVideoRender")) {
+		copyStringToBuffer(
+			longVideoRenderSourceImagePath,
+			sizeof(longVideoRenderSourceImagePath),
+			getPreferredDiffusionReuseImagePath());
+		autoSaveSession();
+	}
+	ImGui::EndDisabled();
+
+	ImGui::InputText(
+		"End image (optional)",
+		longVideoRenderEndImagePath,
+		sizeof(longVideoRenderEndImagePath));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Browse...##LongVideoRenderEnd", ImVec2(110, 0))) {
+		ofFileDialogResult result = ofSystemLoadDialog("Select optional end image for video render", false);
+		if (result.bSuccess) {
+			copyStringToBuffer(
+				longVideoRenderEndImagePath,
+				sizeof(longVideoRenderEndImagePath),
+				result.getPath());
+			autoSaveSession();
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Clear##LongVideoRenderEnd")) {
+		longVideoRenderEndImagePath[0] = '\0';
+		autoSaveSession();
+	}
+
+	drawDiffusionImagePreview(
+		"Source preview",
+		trim(longVideoRenderSourceImagePath),
+		longVideoRenderSourcePreviewImage,
+		longVideoRenderSourcePreviewError,
+		"##LongVideoRenderSourcePreview");
+	if (!trim(longVideoRenderEndImagePath).empty()) {
+		drawDiffusionImagePreview(
+			"End preview",
+			trim(longVideoRenderEndImagePath),
+			longVideoRenderEndPreviewImage,
+			longVideoRenderEndPreviewError,
+			"##LongVideoRenderEndPreview");
+	}
+
+	ImGui::InputText(
+		"Output dir",
+		longVideoRenderOutputDir,
+		sizeof(longVideoRenderOutputDir));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Use data/generated##LongVideoRender")) {
+		copyStringToBuffer(
+			longVideoRenderOutputDir,
+			sizeof(longVideoRenderOutputDir),
+			ofToDataPath("generated/video", true));
+		autoSaveSession();
+	}
+	ImGui::InputText(
+		"Output prefix",
+		longVideoRenderOutputPrefix,
+		sizeof(longVideoRenderOutputPrefix));
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+
+	const bool canRenderLongVideo =
+		!generating.load() &&
+		!trim(longVideoRenderSourceImagePath).empty();
+	ImGui::BeginDisabled(!canRenderLongVideo);
+	if (ImGui::Button("Render Segment", ImVec2(170, 0))) {
+		runLongVideoRenderGeneration();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(trim(longVideoRenderManifestJson).empty());
+	if (ImGui::SmallButton("Copy render manifest##LongVideo")) {
+		copyToClipboard(longVideoRenderManifestJson);
+	}
+	ImGui::EndDisabled();
+
+	if (!longVideoRenderStatus.empty()) {
+		ImGui::TextWrapped("%s", longVideoRenderStatus.c_str());
+	}
+	if (!longVideoRenderOutputDirectory.empty()) {
+		ImGui::TextDisabled("Frames: %s", longVideoRenderOutputDirectory.c_str());
+	}
+	if (!longVideoRenderMetadataPath.empty()) {
+		ImGui::TextDisabled("Clip metadata: %s", longVideoRenderMetadataPath.c_str());
+	}
+	if (!longVideoRenderManifestPath.empty()) {
+		ImGui::TextDisabled("Render manifest: %s", longVideoRenderManifestPath.c_str());
+	}
+	if (!longVideoRenderManifestJson.empty()) {
+		ImGui::BeginChild("##LongVideoRenderManifest", ImVec2(0, 120), true);
+		ImGui::TextWrapped("%s", longVideoRenderManifestJson.c_str());
+		ImGui::EndChild();
+	}
+#else
+	ImGui::TextWrapped(
+		"Add ofxStableDiffusion to the generated example project to enable local source-image video rendering here.");
+#endif
+
 	if (!longVideoManifestJson.empty()) {
 		ImGui::Spacing();
 		ImGui::Text("Manifest");
@@ -1078,6 +1336,15 @@ void ofApp::runLongVideoPlanning() {
 	const std::string structureHint = longVideoStructureHintForIndex(longVideoStructureIndex);
 	const std::string pacingProfile = longVideoPacingProfileForIndex(longVideoPacingIndex);
 	const bool favorLoopableEnding = longVideoFavorLoopableEnding;
+	const std::string renderModelPath = getSelectedVideoRenderModelPath();
+	const std::string renderModelName = getSelectedVideoRenderModelLabel();
+	std::string renderModelUrl;
+	if (!videoRenderPresets.empty() &&
+		selectedVideoRenderPresetIndex >= 0 &&
+		selectedVideoRenderPresetIndex < static_cast<int>(videoRenderPresets.size())) {
+		renderModelUrl =
+			videoRenderPresets[static_cast<size_t>(selectedVideoRenderPresetIndex)].url;
+	}
 
 	generating.store(true);
 	cancelRequested.store(false);
@@ -1112,7 +1379,10 @@ void ofApp::runLongVideoPlanning() {
 		usePromptInheritance,
 		structureHint,
 		pacingProfile,
-		favorLoopableEnding]() {
+		favorLoopableEnding,
+		renderModelName,
+		renderModelPath,
+		renderModelUrl]() {
 		try {
 			ofxGgmlLongVideoPlanRequest request;
 			request.modelPath = modelPath;
@@ -1131,6 +1401,10 @@ void ofApp::runLongVideoPlanning() {
 			request.structureHint = structureHint;
 			request.pacingProfile = pacingProfile;
 			request.favorLoopableEnding = favorLoopableEnding;
+			request.renderBackend = "ofxStableDiffusion";
+			request.renderModelName = renderModelName;
+			request.renderModelPath = renderModelPath;
+			request.renderModelUrl = renderModelUrl;
 			request.inferenceSettings = inferenceSettings;
 
 			const ofxGgmlLongVideoPlanResult result = easyApi.planLongVideo(request);
@@ -1173,4 +1447,387 @@ void ofApp::runLongVideoPlanning() {
 
 		generating.store(false);
 	});
+}
+
+void ofApp::runLongVideoRenderGeneration() {
+	if (generating.load()) {
+		return;
+	}
+
+#if !OFXGGML_HAS_OFXSTABLEDIFFUSION
+	longVideoRenderStatus =
+		"[Error] Video rendering needs ofxStableDiffusion in this build.";
+	return;
+#else
+	if (!ensureDiffusionBackendConfigured() || !stableDiffusionEngine) {
+		longVideoRenderStatus =
+			"[Error] ofxStableDiffusion is not attached in this build.";
+		return;
+	}
+
+	const std::string sourceImagePath = trim(longVideoRenderSourceImagePath);
+	if (sourceImagePath.empty()) {
+		longVideoRenderStatus = "[Error] Select a source image first.";
+		return;
+	}
+
+	const std::string renderModelPath = trim(getSelectedVideoRenderModelPath());
+	const std::string renderModelLabel = getSelectedVideoRenderModelLabel();
+	if (renderModelPath.empty()) {
+		longVideoRenderStatus =
+			"[Error] Select or load a Video Render Model first.";
+		return;
+	}
+
+	const std::string outputDirText = trim(longVideoRenderOutputDir);
+	const std::string outputDir = outputDirText.empty()
+		? ofToDataPath("generated/video", true)
+		: outputDirText;
+	const std::string outputPrefix = sanitizeVideoFilenameStem(
+		trim(longVideoRenderOutputPrefix),
+		"video_segment");
+	const int presetIndex = std::clamp(longVideoRenderPresetIndex, 0, 4);
+	const int modeIndex = std::clamp(longVideoRenderModeIndex, 0, 3);
+	const int chunkIndex = std::clamp(
+		longVideoRenderSelectedChunkIndex,
+		0,
+		std::max(0, static_cast<int>(longVideoChunks.size()) - 1));
+	const std::string endImagePath = trim(longVideoRenderEndImagePath);
+	const std::string vaePath = trim(diffusionVaePath);
+	const std::string projectBrief = trim(longVideoConcept);
+	const std::string visualDirection = trim(longVideoStyle);
+	const std::string avoidText = trim(longVideoNegativeStyle);
+	const std::string continuityGoal = trim(longVideoContinuityGoal);
+
+	ofxGgmlLongVideoPlanChunk selectedChunk;
+	if (!longVideoChunks.empty() &&
+		chunkIndex >= 0 &&
+		chunkIndex < static_cast<int>(longVideoChunks.size())) {
+		selectedChunk = longVideoChunks[static_cast<size_t>(chunkIndex)];
+	} else {
+		selectedChunk.index = 0;
+		selectedChunk.id = "project_brief";
+		selectedChunk.title = "Project Brief";
+		selectedChunk.prompt = projectBrief;
+		selectedChunk.negativePrompt = avoidText;
+		selectedChunk.sectionGoal = continuityGoal;
+		selectedChunk.continuityNote = continuityGoal;
+		selectedChunk.width = std::clamp(longVideoWidth, 128, 1920);
+		selectedChunk.height = std::clamp(longVideoHeight, 128, 1920);
+		selectedChunk.fps = std::clamp(longVideoFps, 1, 60);
+		selectedChunk.frameCount = std::clamp(longVideoFramesPerChunk, 8, 240);
+		selectedChunk.seed = static_cast<int64_t>(longVideoSeed);
+	}
+
+	const std::string chunkPrompt = trim(selectedChunk.prompt).empty()
+		? projectBrief
+		: trim(selectedChunk.prompt);
+	if (chunkPrompt.empty()) {
+		longVideoRenderStatus =
+			"[Error] Render prompt is empty. Plan the video first or add a project brief.";
+		return;
+	}
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::LongVideo;
+	generatingStatus = "Rendering video segment...";
+	longVideoRenderStatus = "Rendering video segment...";
+	longVideoRenderOutputDirectory.clear();
+	longVideoRenderMetadataPath.clear();
+	longVideoRenderManifestPath.clear();
+	longVideoRenderManifestJson.clear();
+	generationStartTime = ofGetElapsedTimef();
+
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput = "Preparing source images and video render request...";
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	workerThread = std::thread([this,
+		sourceImagePath,
+		endImagePath,
+		renderModelPath,
+		outputDir,
+		outputPrefix,
+		presetIndex,
+		modeIndex,
+		selectedChunk,
+		chunkPrompt,
+		projectBrief,
+		visualDirection,
+		avoidText,
+		continuityGoal,
+		vaePath,
+		renderModelLabel]() {
+		auto clearPendingRender = [this]() {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingLongVideoRenderDirty = true;
+			pendingLongVideoRenderStatus.clear();
+			pendingLongVideoRenderOutputDirectory.clear();
+			pendingLongVideoRenderMetadataPath.clear();
+			pendingLongVideoRenderManifestPath.clear();
+			pendingLongVideoRenderManifestJson.clear();
+		};
+
+		try {
+			std::error_code fileEc;
+			if (!std::filesystem::exists(sourceImagePath, fileEc) || fileEc) {
+				clearPendingRender();
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingLongVideoRenderStatus =
+						"[Error] Source image was not found: " + sourceImagePath;
+				}
+				generating.store(false);
+				return;
+			}
+			fileEc.clear();
+			if (!std::filesystem::exists(renderModelPath, fileEc) || fileEc) {
+				clearPendingRender();
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingLongVideoRenderStatus =
+						"[Error] Video render model was not found: " + renderModelPath;
+				}
+				generating.store(false);
+				return;
+			}
+
+			ofImage sourceImage;
+			if (!sourceImage.load(sourceImagePath)) {
+				clearPendingRender();
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingLongVideoRenderStatus =
+						"[Error] Failed to load source image: " + sourceImagePath;
+				}
+				generating.store(false);
+				return;
+			}
+
+			ofImage endImage;
+			if (!endImagePath.empty() && !endImage.load(endImagePath)) {
+				clearPendingRender();
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingLongVideoRenderStatus =
+						"[Error] Failed to load end image: " + endImagePath;
+				}
+				generating.store(false);
+				return;
+			}
+
+			ofxStableDiffusionContextSettings context =
+				stableDiffusionEngine->getContextSettings();
+			context.modelPath = renderModelPath;
+			context.diffusionModelPath.clear();
+			context.clipLPath.clear();
+			context.clipGPath.clear();
+			context.t5xxlPath.clear();
+			context.vaePath = vaePath;
+			stableDiffusionEngine->configureContext(context);
+
+			ofxStableDiffusionVideoRequest request;
+			request.prompt = chunkPrompt;
+			if (!visualDirection.empty()) {
+				request.prompt += "\n\nVisual direction: " + visualDirection;
+			}
+			if (!trim(selectedChunk.sectionGoal).empty()) {
+				request.prompt += "\nSection goal: " + trim(selectedChunk.sectionGoal);
+			}
+			if (!trim(selectedChunk.continuityNote).empty()) {
+				request.prompt += "\nContinuity note: " + trim(selectedChunk.continuityNote);
+			}
+			if (!continuityGoal.empty()) {
+				request.prompt += "\nProject continuity goal: " + continuityGoal;
+			}
+			request.negativePrompt = trim(selectedChunk.negativePrompt).empty()
+				? avoidText
+				: trim(selectedChunk.negativePrompt);
+			request.width = std::max(128, selectedChunk.width);
+			request.height = std::max(128, selectedChunk.height);
+			request.frameCount = std::max(8, selectedChunk.frameCount);
+			request.fps = std::max(1, selectedChunk.fps);
+			request.seed = selectedChunk.seed;
+			request.initImage = {
+				static_cast<uint32_t>(sourceImage.getWidth()),
+				static_cast<uint32_t>(sourceImage.getHeight()),
+				static_cast<uint32_t>(sourceImage.getPixels().getNumChannels()),
+				const_cast<unsigned char *>(sourceImage.getPixels().getData())
+			};
+			if (!endImagePath.empty()) {
+				request.endImage = {
+					static_cast<uint32_t>(endImage.getWidth()),
+					static_cast<uint32_t>(endImage.getPixels().getHeight()),
+					static_cast<uint32_t>(endImage.getPixels().getNumChannels()),
+					const_cast<unsigned char *>(endImage.getPixels().getData())
+				};
+			}
+
+			switch (modeIndex) {
+			case 1: request.mode = ofxStableDiffusionVideoMode::Loop; break;
+			case 2: request.mode = ofxStableDiffusionVideoMode::PingPong; break;
+			case 3: request.mode = ofxStableDiffusionVideoMode::Boomerang; break;
+			default:
+				request.mode = ofxStableDiffusionVideoMode::Standard;
+				break;
+			}
+
+			const auto preset =
+				static_cast<ofxStableDiffusionVideoWorkflowPreset>(presetIndex);
+			ofxStableDiffusionApplyVideoWorkflowPreset(&request, preset);
+
+			const auto validation =
+				ofxStableDiffusionValidateVideoPromptWorkflow(request);
+			if (!validation.ok) {
+				std::ostringstream errorText;
+				for (size_t i = 0; i < validation.errors.size(); ++i) {
+					if (i > 0) {
+						errorText << " ";
+					}
+					errorText << validation.errors[i];
+				}
+				clearPendingRender();
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingLongVideoRenderStatus =
+						"[Error] " + errorText.str();
+				}
+				generating.store(false);
+				return;
+			}
+
+			const std::string chunkStem = sanitizeVideoFilenameStem(
+				trim(selectedChunk.id).empty() ? selectedChunk.title : selectedChunk.id,
+				"segment");
+			const std::filesystem::path renderDirectory =
+				std::filesystem::path(outputDir) / chunkStem;
+			std::filesystem::create_directories(renderDirectory);
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput =
+					"Rendering " + chunkStem + " with " +
+					ofxStableDiffusionVideoWorkflowPresetLabel(preset) + " preset...";
+			}
+
+			stableDiffusionEngine->generateVideo(request);
+			while (stableDiffusionEngine->isGenerating()) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			}
+
+			const ofxStableDiffusionResult result =
+				stableDiffusionEngine->getLastResult();
+			if (!result.success || !result.hasVideo()) {
+				const std::string backendError = trim(stableDiffusionEngine->getLastError());
+				const std::string effectiveError =
+					!backendError.empty() ? backendError : result.error;
+				std::ostringstream errorText;
+				if (!effectiveError.empty()) {
+					errorText << effectiveError;
+				} else {
+					errorText << "Video render backend returned no video.";
+				}
+				if (!renderModelLabel.empty()) {
+					errorText << " Model: " << renderModelLabel << ".";
+				}
+				errorText << " Path: " << renderModelPath << ".";
+				clearPendingRender();
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingLongVideoRenderStatus = "[Error] " + errorText.str();
+				}
+				generating.store(false);
+				return;
+			}
+
+			const std::string framePrefix = outputPrefix + "_" + chunkStem;
+			const std::string metadataFilename = "metadata.json";
+			if (!stableDiffusionEngine->saveVideoFramesWithMetadata(
+					renderDirectory.string(),
+					framePrefix,
+					metadataFilename)) {
+				clearPendingRender();
+				{
+					std::lock_guard<std::mutex> lock(outputMutex);
+					pendingLongVideoRenderStatus =
+						"[Error] Video frames rendered, but saving the frame sequence failed.";
+				}
+				generating.store(false);
+				return;
+			}
+
+			const std::filesystem::path metadataPath =
+				renderDirectory / metadataFilename;
+			const std::filesystem::path manifestPath =
+				renderDirectory / "render-manifest.json";
+			ofJson manifest = ofxStableDiffusionBuildVideoRenderManifest(
+				request,
+				result.video,
+				preset,
+				renderDirectory.string(),
+				metadataPath.string());
+			manifest["project_brief"] = projectBrief;
+			manifest["visual_direction"] = visualDirection;
+			manifest["avoid"] = avoidText;
+			manifest["continuity_goal"] = continuityGoal;
+			manifest["render_model"]["path"] = renderModelPath;
+			manifest["render_model"]["label"] = renderModelLabel;
+			manifest["source_image"] = sourceImagePath;
+			manifest["end_image"] = endImagePath;
+			manifest["chunk"] = {
+				{"id", selectedChunk.id},
+				{"title", selectedChunk.title},
+				{"section_goal", selectedChunk.sectionGoal},
+				{"continuity_note", selectedChunk.continuityNote},
+				{"transition_hint", selectedChunk.transitionHint},
+				{"target_duration_seconds", selectedChunk.targetDurationSeconds},
+				{"progression_weight", selectedChunk.progressionWeight}
+			};
+			ofSavePrettyJson(manifestPath.string(), manifest);
+
+			std::ostringstream status;
+			status << "Rendered "
+				<< (trim(selectedChunk.title).empty() ? chunkStem : trim(selectedChunk.title))
+				<< " as "
+				<< static_cast<int>(result.video.frames.size())
+				<< " frames at "
+				<< request.fps
+				<< " fps using "
+				<< ofxStableDiffusionVideoWorkflowPresetLabel(preset)
+				<< ".";
+
+			{
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingLongVideoRenderDirty = true;
+				pendingLongVideoRenderStatus = status.str();
+				pendingLongVideoRenderOutputDirectory = renderDirectory.string();
+				pendingLongVideoRenderMetadataPath = metadataPath.string();
+				pendingLongVideoRenderManifestPath = manifestPath.string();
+				pendingLongVideoRenderManifestJson = manifest.dump(2);
+			}
+		} catch (const std::exception & e) {
+			clearPendingRender();
+			{
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingLongVideoRenderStatus =
+					std::string("[Error] Video render exception: ") + e.what();
+			}
+		} catch (...) {
+			clearPendingRender();
+			{
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingLongVideoRenderStatus =
+					"[Error] Unknown video render exception.";
+			}
+		}
+
+		generating.store(false);
+	});
+#endif
 }
