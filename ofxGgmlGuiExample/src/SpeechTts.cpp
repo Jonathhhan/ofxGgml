@@ -1005,30 +1005,34 @@ void ofApp::drawTtsPanel() {
 		ImGui::TextDisabled("Voice cloning remains backend-specific. For chatllm, keep using the clone/reference fields below.");
 	}
 
-	ImGui::Separator();
-	ImGui::TextDisabled("Chat voice");
-	ImGui::Checkbox("Use different voice for chat replies", &chatUseCustomTtsVoice);
-	if (ImGui::IsItemDeactivatedAfterEdit()) {
-		autoSaveSession();
-	}
-	if (chatUseCustomTtsVoice) {
+	const auto drawVoiceOverrideFields = [&](const char * title,
+		char * modelBuffer,
+		const size_t modelBufferSize,
+		char * speakerBuffer,
+		const size_t speakerBufferSize,
+		const char * comboLabel,
+		const char * comboEmptyLabel,
+		const char * modelLabel,
+		const char * speakerLabel,
+		const char * copyCurrentButtonLabel) {
+		ImGui::TextDisabled("%s", title);
 		if (activeProfileUsesPiper && !availablePiperVoices.empty()) {
-			std::string selectedChatVoiceLabel = ofFilePath::getBaseName(trim(chatTtsModelPath));
+			std::string selectedVoiceLabel = ofFilePath::getBaseName(trim(modelBuffer));
 			for (const auto & voice : availablePiperVoices) {
-				if (ofToLower(voice.modelPath) == ofToLower(trim(chatTtsModelPath))) {
-					selectedChatVoiceLabel = voice.label;
+				if (ofToLower(voice.modelPath) == ofToLower(trim(modelBuffer))) {
+					selectedVoiceLabel = voice.label;
 					break;
 				}
 			}
-			if (selectedChatVoiceLabel.empty()) {
-				selectedChatVoiceLabel = "Select chat voice";
+			if (selectedVoiceLabel.empty()) {
+				selectedVoiceLabel = comboEmptyLabel;
 			}
-			if (ImGui::BeginCombo("Chat Piper voice", selectedChatVoiceLabel.c_str())) {
+			if (ImGui::BeginCombo(comboLabel, selectedVoiceLabel.c_str())) {
 				for (const auto & voice : availablePiperVoices) {
 					const bool selected =
-						(ofToLower(voice.modelPath) == ofToLower(trim(chatTtsModelPath)));
+						(ofToLower(voice.modelPath) == ofToLower(trim(modelBuffer)));
 					if (ImGui::Selectable(voice.label.c_str(), selected)) {
-						copyStringToBuffer(chatTtsModelPath, sizeof(chatTtsModelPath), voice.modelPath);
+						copyStringToBuffer(modelBuffer, modelBufferSize, voice.modelPath);
 						autoSaveSession();
 					}
 					if (selected) {
@@ -1037,21 +1041,120 @@ void ofApp::drawTtsPanel() {
 				}
 				ImGui::EndCombo();
 			}
-			if (ImGui::SmallButton("Use current TTS voice for chat")) {
-				copyStringToBuffer(chatTtsModelPath, sizeof(chatTtsModelPath), trim(ttsModelPath));
+		}
+		ImGui::SetNextItemWidth(compactModeFieldWidth);
+		ImGui::InputText(modelLabel, modelBuffer, modelBufferSize);
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
+			autoSaveSession();
+		}
+		ImGui::SetNextItemWidth(compactModeFieldWidth);
+		ImGui::InputText(speakerLabel, speakerBuffer, speakerBufferSize);
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
+			autoSaveSession();
+		}
+		if (ImGui::SmallButton(copyCurrentButtonLabel)) {
+			copyStringToBuffer(modelBuffer, modelBufferSize, trim(ttsModelPath));
+			copyStringToBuffer(speakerBuffer, speakerBufferSize, trim(ttsSpeakerPath));
+			autoSaveSession();
+		}
+	};
+
+	ImGui::Separator();
+	ImGui::TextDisabled("Voice routing");
+	if (ImGui::Checkbox("Use different voice for chat replies", &chatUseCustomTtsVoice)) {
+		if (!chatUseCustomTtsVoice) {
+			chatUseSecondaryTtsVoice = false;
+			chatAlternateTtsVoices = false;
+			chatUseSecondaryTtsVoiceNext = false;
+		}
+		autoSaveSession();
+	}
+	if (chatUseCustomTtsVoice) {
+		drawVoiceOverrideFields(
+			"Chat voice A",
+			chatTtsModelPath,
+			sizeof(chatTtsModelPath),
+			chatTtsSpeakerPath,
+			sizeof(chatTtsSpeakerPath),
+			"Chat voice A##Piper",
+			"Select chat voice A",
+			"Chat voice A model path",
+			"Chat voice A speaker/profile",
+			"Use current TTS voice for chat A");
+		if (ImGui::Checkbox("Enable second chat voice", &chatUseSecondaryTtsVoice)) {
+			if (!chatUseSecondaryTtsVoice) {
+				chatAlternateTtsVoices = false;
+				chatUseSecondaryTtsVoiceNext = false;
+			}
+			autoSaveSession();
+		}
+		if (chatUseSecondaryTtsVoice) {
+			drawVoiceOverrideFields(
+				"Chat voice B",
+				chatSecondaryTtsModelPath,
+				sizeof(chatSecondaryTtsModelPath),
+				chatSecondaryTtsSpeakerPath,
+				sizeof(chatSecondaryTtsSpeakerPath),
+				"Chat voice B##Piper",
+				"Select chat voice B",
+				"Chat voice B model path",
+				"Chat voice B speaker/profile",
+				"Use current TTS voice for chat B");
+			if (ImGui::Checkbox("Alternate between chat voices A and B", &chatAlternateTtsVoices)) {
 				autoSaveSession();
 			}
 		}
-		ImGui::SetNextItemWidth(compactModeFieldWidth);
-		ImGui::InputText("Chat model path", chatTtsModelPath, sizeof(chatTtsModelPath));
-		if (ImGui::IsItemDeactivatedAfterEdit()) {
-			autoSaveSession();
-		}
-		ImGui::SetNextItemWidth(compactModeFieldWidth);
-		ImGui::InputText("Chat speaker/profile", chatTtsSpeakerPath, sizeof(chatTtsSpeakerPath));
-		if (ImGui::IsItemDeactivatedAfterEdit()) {
-			autoSaveSession();
-		}
+	}
+
+	if (ImGui::Checkbox("Use different voice for summaries", &summarizeUseCustomTtsVoice)) {
+		autoSaveSession();
+	}
+	if (summarizeUseCustomTtsVoice) {
+		drawVoiceOverrideFields(
+			"Summary voice",
+			summarizeTtsModelPath,
+			sizeof(summarizeTtsModelPath),
+			summarizeTtsSpeakerPath,
+			sizeof(summarizeTtsSpeakerPath),
+			"Summary voice##Piper",
+			"Select summary voice",
+			"Summary model path",
+			"Summary speaker/profile",
+			"Use current TTS voice for summaries");
+	}
+
+	if (ImGui::Checkbox("Use different voice for translated output", &translateUseCustomTtsVoice)) {
+		autoSaveSession();
+	}
+	if (translateUseCustomTtsVoice) {
+		drawVoiceOverrideFields(
+			"Translated output voice",
+			translateTtsModelPath,
+			sizeof(translateTtsModelPath),
+			translateTtsSpeakerPath,
+			sizeof(translateTtsSpeakerPath),
+			"Translated voice##Piper",
+			"Select translated voice",
+			"Translated voice model path",
+			"Translated voice speaker/profile",
+			"Use current TTS voice for translated output");
+	}
+
+	if (ImGui::Checkbox("Use different voice for video essay narration", &videoEssayUseCustomTtsVoice)) {
+		autoSaveSession();
+	}
+	if (videoEssayUseCustomTtsVoice) {
+		drawVoiceOverrideFields(
+			"Video essay voice",
+			videoEssayTtsModelPath,
+			sizeof(videoEssayTtsModelPath),
+			videoEssayTtsSpeakerPath,
+			sizeof(videoEssayTtsSpeakerPath),
+			"Video essay voice##Piper",
+			"Select video essay voice",
+			"Video essay model path",
+			"Video essay speaker/profile",
+			"Use current TTS voice for video essay");
 	}
 
 	ImGui::InputTextMultiline(

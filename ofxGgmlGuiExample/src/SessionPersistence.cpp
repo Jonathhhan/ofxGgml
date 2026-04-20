@@ -119,16 +119,26 @@ bool ofApp::saveSession(const std::string & path) {
 
 	session["buffers"] = {
 		{"chatInput", std::string(chatInput)},
+		{"chatTtsModelPath", std::string(chatTtsModelPath)},
+		{"chatTtsSpeakerPath", std::string(chatTtsSpeakerPath)},
+		{"chatSecondaryTtsModelPath", std::string(chatSecondaryTtsModelPath)},
+		{"chatSecondaryTtsSpeakerPath", std::string(chatSecondaryTtsSpeakerPath)},
+		{"summarizeTtsModelPath", std::string(summarizeTtsModelPath)},
+		{"summarizeTtsSpeakerPath", std::string(summarizeTtsSpeakerPath)},
 		{"easyPrimaryInput", std::string(easyPrimaryInput)},
 		{"easySecondaryInput", std::string(easySecondaryInput)},
 		{"scriptInput", std::string(scriptInput)},
 		{"summarizeInput", std::string(summarizeInput)},
 		{"writeInput", std::string(writeInput)},
 		{"translateInput", std::string(translateInput)},
+		{"translateTtsModelPath", std::string(translateTtsModelPath)},
+		{"translateTtsSpeakerPath", std::string(translateTtsSpeakerPath)},
 		{"voiceTranslatorAudioPath", std::string(voiceTranslatorAudioPath)},
 		{"videoEssayTopic", std::string(videoEssayTopic)},
 		{"videoEssaySeedUrl", std::string(videoEssaySeedUrl)},
 		{"videoEssaySourceVideoPath", std::string(videoEssaySourceVideoPath)},
+		{"videoEssayTtsModelPath", std::string(videoEssayTtsModelPath)},
+		{"videoEssayTtsSpeakerPath", std::string(videoEssayTtsSpeakerPath)},
 		{"longVideoConcept", std::string(longVideoConcept)},
 		{"longVideoStyle", std::string(longVideoStyle)},
 		{"longVideoNegativeStyle", std::string(longVideoNegativeStyle)},
@@ -174,8 +184,6 @@ bool ofApp::saveSession(const std::string & path) {
 		{"ttsExecutablePath", std::string(ttsExecutablePath)},
 		{"ttsModelPath", std::string(ttsModelPath)},
 		{"ttsSpeakerPath", std::string(ttsSpeakerPath)},
-		{"chatTtsModelPath", std::string(chatTtsModelPath)},
-		{"chatTtsSpeakerPath", std::string(chatTtsSpeakerPath)},
 		{"ttsSpeakerReferencePath", std::string(ttsSpeakerReferencePath)},
 		{"ttsOutputPath", std::string(ttsOutputPath)},
 		{"ttsPromptAudioPath", std::string(ttsPromptAudioPath)},
@@ -284,11 +292,16 @@ bool ofApp::saveSession(const std::string & path) {
 	session["bools"] = {
 		{"chatSpeakReplies", chatSpeakReplies},
 		{"chatUseCustomTtsVoice", chatUseCustomTtsVoice},
+		{"chatUseSecondaryTtsVoice", chatUseSecondaryTtsVoice},
+		{"chatAlternateTtsVoices", chatAlternateTtsVoices},
 		{"summarizeSpeakOutput", summarizeSpeakOutput},
+		{"summarizeUseCustomTtsVoice", summarizeUseCustomTtsVoice},
 		{"easyUseCrawler", easyUseCrawler},
+		{"translateUseCustomTtsVoice", translateUseCustomTtsVoice},
 		{"voiceTranslatorSpeakOutput", voiceTranslatorSpeakOutput},
 		{"videoEssayUseCrawler", videoEssayUseCrawler},
 		{"videoEssayIncludeCounterpoints", videoEssayIncludeCounterpoints},
+		{"videoEssayUseCustomTtsVoice", videoEssayUseCustomTtsVoice},
 		{"longVideoUsePromptInheritance", longVideoUsePromptInheritance},
 		{"longVideoFavorLoopableEnding", longVideoFavorLoopableEnding},
 		{"musicToImageIncludeLyrics", musicToImageIncludeLyrics},
@@ -576,12 +589,44 @@ bool ofApp::loadSession(const std::string & path) {
 	}
 
 	copyJsonString(chatInput, sizeof(chatInput), buffers, "chatInput");
+	copyJsonString(chatTtsModelPath, sizeof(chatTtsModelPath), buffers, "chatTtsModelPath");
+	copyJsonString(chatTtsSpeakerPath, sizeof(chatTtsSpeakerPath), buffers, "chatTtsSpeakerPath");
+	copyJsonString(
+		chatSecondaryTtsModelPath,
+		sizeof(chatSecondaryTtsModelPath),
+		buffers,
+		"chatSecondaryTtsModelPath");
+	copyJsonString(
+		chatSecondaryTtsSpeakerPath,
+		sizeof(chatSecondaryTtsSpeakerPath),
+		buffers,
+		"chatSecondaryTtsSpeakerPath");
+	copyJsonString(
+		summarizeTtsModelPath,
+		sizeof(summarizeTtsModelPath),
+		buffers,
+		"summarizeTtsModelPath");
+	copyJsonString(
+		summarizeTtsSpeakerPath,
+		sizeof(summarizeTtsSpeakerPath),
+		buffers,
+		"summarizeTtsSpeakerPath");
 	copyJsonString(easyPrimaryInput, sizeof(easyPrimaryInput), buffers, "easyPrimaryInput");
 	copyJsonString(easySecondaryInput, sizeof(easySecondaryInput), buffers, "easySecondaryInput");
 	copyJsonString(scriptInput, sizeof(scriptInput), buffers, "scriptInput");
 	copyJsonString(summarizeInput, sizeof(summarizeInput), buffers, "summarizeInput");
 	copyJsonString(writeInput, sizeof(writeInput), buffers, "writeInput");
 	copyJsonString(translateInput, sizeof(translateInput), buffers, "translateInput");
+	copyJsonString(
+		translateTtsModelPath,
+		sizeof(translateTtsModelPath),
+		buffers,
+		"translateTtsModelPath");
+	copyJsonString(
+		translateTtsSpeakerPath,
+		sizeof(translateTtsSpeakerPath),
+		buffers,
+		"translateTtsSpeakerPath");
 	copyJsonString(
 		voiceTranslatorAudioPath,
 		sizeof(voiceTranslatorAudioPath),
@@ -594,6 +639,16 @@ bool ofApp::loadSession(const std::string & path) {
 		sizeof(videoEssaySourceVideoPath),
 		buffers,
 		"videoEssaySourceVideoPath");
+	copyJsonString(
+		videoEssayTtsModelPath,
+		sizeof(videoEssayTtsModelPath),
+		buffers,
+		"videoEssayTtsModelPath");
+	copyJsonString(
+		videoEssayTtsSpeakerPath,
+		sizeof(videoEssayTtsSpeakerPath),
+		buffers,
+		"videoEssayTtsSpeakerPath");
 	copyJsonString(longVideoConcept, sizeof(longVideoConcept), buffers, "longVideoConcept");
 	copyJsonString(longVideoStyle, sizeof(longVideoStyle), buffers, "longVideoStyle");
 	copyJsonString(
@@ -667,8 +722,6 @@ bool ofApp::loadSession(const std::string & path) {
 	copyJsonString(ttsExecutablePath, sizeof(ttsExecutablePath), buffers, "ttsExecutablePath");
 	copyJsonString(ttsModelPath, sizeof(ttsModelPath), buffers, "ttsModelPath");
 	copyJsonString(ttsSpeakerPath, sizeof(ttsSpeakerPath), buffers, "ttsSpeakerPath");
-	copyJsonString(chatTtsModelPath, sizeof(chatTtsModelPath), buffers, "chatTtsModelPath");
-	copyJsonString(chatTtsSpeakerPath, sizeof(chatTtsSpeakerPath), buffers, "chatTtsSpeakerPath");
 	copyJsonString(ttsSpeakerReferencePath, sizeof(ttsSpeakerReferencePath), buffers, "ttsSpeakerReferencePath");
 	copyJsonString(ttsOutputPath, sizeof(ttsOutputPath), buffers, "ttsOutputPath");
 	copyJsonString(ttsPromptAudioPath, sizeof(ttsPromptAudioPath), buffers, "ttsPromptAudioPath");
@@ -810,8 +863,24 @@ bool ofApp::loadSession(const std::string & path) {
 
 	chatSpeakReplies = getBool(bools, "chatSpeakReplies", chatSpeakReplies);
 	chatUseCustomTtsVoice = getBool(bools, "chatUseCustomTtsVoice", chatUseCustomTtsVoice);
+	chatUseSecondaryTtsVoice = getBool(
+		bools,
+		"chatUseSecondaryTtsVoice",
+		chatUseSecondaryTtsVoice);
+	chatAlternateTtsVoices = getBool(
+		bools,
+		"chatAlternateTtsVoices",
+		chatAlternateTtsVoices);
 	summarizeSpeakOutput = getBool(bools, "summarizeSpeakOutput", summarizeSpeakOutput);
+	summarizeUseCustomTtsVoice = getBool(
+		bools,
+		"summarizeUseCustomTtsVoice",
+		summarizeUseCustomTtsVoice);
 	easyUseCrawler = getBool(bools, "easyUseCrawler", easyUseCrawler);
+	translateUseCustomTtsVoice = getBool(
+		bools,
+		"translateUseCustomTtsVoice",
+		translateUseCustomTtsVoice);
 	voiceTranslatorSpeakOutput = getBool(
 		bools,
 		"voiceTranslatorSpeakOutput",
@@ -821,6 +890,10 @@ bool ofApp::loadSession(const std::string & path) {
 		bools,
 		"videoEssayIncludeCounterpoints",
 		videoEssayIncludeCounterpoints);
+	videoEssayUseCustomTtsVoice = getBool(
+		bools,
+		"videoEssayUseCustomTtsVoice",
+		videoEssayUseCustomTtsVoice);
 	longVideoUsePromptInheritance = getBool(
 		bools,
 		"longVideoUsePromptInheritance",

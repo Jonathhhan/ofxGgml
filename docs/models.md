@@ -20,6 +20,12 @@ Always check the backend section below first.
 
 Status: first-class backend option in this addon
 
+Maintained upstream:
+
+- `https://github.com/OHF-Voice/piper1-gpl`
+
+The older `rhasspy/piper` repository is archived.
+
 ### What works conceptually
 
 The Piper path is for direct Piper voice models, not converted `chatllm.cpp` artifacts.

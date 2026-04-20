@@ -6676,15 +6676,38 @@ void ofApp::speakLatestChatReply(bool mirrorIntoTtsInput) {
 	}
 	chatTtsPreview.request.pending = true;
 	chatTtsPreview.statusMessage = "Synthesizing latest chat reply...";
-	const std::string chatModelPath = chatUseCustomTtsVoice
+	const std::string primaryModelPath = chatUseCustomTtsVoice
 		? trim(chatTtsModelPath)
 		: std::string();
-	const std::string chatSpeakerPath = chatUseCustomTtsVoice
+	const std::string primarySpeakerPath = chatUseCustomTtsVoice
 		? trim(chatTtsSpeakerPath)
 		: std::string();
+	const std::string secondaryModelPath =
+		(chatUseCustomTtsVoice && chatUseSecondaryTtsVoice)
+			? trim(chatSecondaryTtsModelPath)
+			: std::string();
+	const std::string secondarySpeakerPath =
+		(chatUseCustomTtsVoice && chatUseSecondaryTtsVoice)
+			? trim(chatSecondaryTtsSpeakerPath)
+			: std::string();
+	const bool primaryAvailable = !primaryModelPath.empty() || !primarySpeakerPath.empty();
+	const bool secondaryAvailable = !secondaryModelPath.empty() || !secondarySpeakerPath.empty();
+	bool useSecondaryVoice = false;
+	if (chatAlternateTtsVoices && primaryAvailable && secondaryAvailable) {
+		useSecondaryVoice = chatUseSecondaryTtsVoiceNext;
+		chatUseSecondaryTtsVoiceNext = !chatUseSecondaryTtsVoiceNext;
+	} else if (!primaryAvailable && secondaryAvailable) {
+		useSecondaryVoice = true;
+	}
+	const std::string chatModelPath = useSecondaryVoice
+		? secondaryModelPath
+		: primaryModelPath;
+	const std::string chatSpeakerPath = useSecondaryVoice
+		? secondarySpeakerPath
+		: primarySpeakerPath;
 	runTtsInferenceForText(
 		reply,
-		"Synthesized chat reply",
+		useSecondaryVoice ? "Synthesized chat reply (voice B)" : "Synthesized chat reply",
 		mirrorIntoTtsInput,
 		chatModelPath,
 		chatSpeakerPath);
@@ -6698,7 +6721,12 @@ void ofApp::speakLatestSummary(bool mirrorIntoTtsInput) {
 	}
 	summarizeTtsPreview.request.pending = true;
 	summarizeTtsPreview.statusMessage = "Synthesizing current summary...";
-	runTtsInferenceForText(summary, "Synthesized summary", mirrorIntoTtsInput);
+	runTtsInferenceForText(
+		summary,
+		"Synthesized summary",
+		mirrorIntoTtsInput,
+		summarizeUseCustomTtsVoice ? trim(summarizeTtsModelPath) : std::string(),
+		summarizeUseCustomTtsVoice ? trim(summarizeTtsSpeakerPath) : std::string());
 }
 
 void ofApp::speakTranslatedReply(bool mirrorIntoTtsInput) {
@@ -6709,7 +6737,12 @@ void ofApp::speakTranslatedReply(bool mirrorIntoTtsInput) {
 	}
 	translateTtsPreview.request.pending = true;
 	translateTtsPreview.statusMessage = "Synthesizing translated voice output...";
-	runTtsInferenceForText(translatedText, "Translated voice output", mirrorIntoTtsInput);
+	runTtsInferenceForText(
+		translatedText,
+		"Translated voice output",
+		mirrorIntoTtsInput,
+		translateUseCustomTtsVoice ? trim(translateTtsModelPath) : std::string(),
+		translateUseCustomTtsVoice ? trim(translateTtsSpeakerPath) : std::string());
 }
 
 void ofApp::speakVideoEssayReply(bool mirrorIntoTtsInput) {
@@ -6720,7 +6753,12 @@ void ofApp::speakVideoEssayReply(bool mirrorIntoTtsInput) {
 	}
 	videoEssayTtsPreview.request.pending = true;
 	videoEssayTtsPreview.statusMessage = "Synthesizing video essay voiceover...";
-	runTtsInferenceForText(narration, "Video essay narration", mirrorIntoTtsInput);
+	runTtsInferenceForText(
+		narration,
+		"Video essay narration",
+		mirrorIntoTtsInput,
+		videoEssayUseCustomTtsVoice ? trim(videoEssayTtsModelPath) : std::string(),
+		videoEssayUseCustomTtsVoice ? trim(videoEssayTtsSpeakerPath) : std::string());
 }
 
 bool ofApp::ensureChatTtsAudioLoaded(int artifactIndex, bool autoplay) {

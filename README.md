@@ -848,6 +848,12 @@ Use it when an app wants local speech generation without baking one TTS runtime 
 
 The first built-in TTS profile is now Piper. Leave `Executable` blank to auto-discover the addon-local launcher at `libs/piper/bin/piper.bat` first, then fall back to `piper` on `PATH`.
 
+The maintained upstream Piper repository is now:
+
+- `https://github.com/OHF-Voice/piper1-gpl`
+
+The older `rhasspy/piper` repository is archived, so prefer the maintained `OHF-Voice` upstream for documentation and project status.
+
 On Windows, you can install the local Piper runtime and a recommended starter voice with:
 
 ```powershell

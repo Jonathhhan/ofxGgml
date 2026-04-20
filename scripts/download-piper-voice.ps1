@@ -82,6 +82,7 @@ if (-not $DryRun) {
 
 Write-Host ""
 Write-Host "Piper voice download complete."
+Write-Host "  upstream: https://github.com/OHF-Voice/piper1-gpl"
 Write-Host "  voice:  $VoiceName"
 Write-Host "  model:  $voiceOnnxPath"
 Write-Host "  config: $voiceJsonPath"

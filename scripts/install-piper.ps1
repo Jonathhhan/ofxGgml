@@ -160,6 +160,7 @@ if (-not $SkipVoiceDownload) {
 
 Write-Host ""
 Write-Host "Piper install helper complete."
+Write-Host "  upstream: https://github.com/OHF-Voice/piper1-gpl"
 Write-Host "  python:  $python"
 Write-Host "  runtime: $RuntimeRoot"
 Write-Host "  venv:    $venvPython"

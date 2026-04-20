@@ -227,7 +227,14 @@ private:
 	bool chatUseCustomTtsVoice = false;
 	char chatTtsModelPath[1024] = {};
 	char chatTtsSpeakerPath[1024] = {};
+	bool chatUseSecondaryTtsVoice = false;
+	bool chatAlternateTtsVoices = false;
+	char chatSecondaryTtsModelPath[1024] = {};
+	char chatSecondaryTtsSpeakerPath[1024] = {};
 	bool summarizeSpeakOutput = false;
+	bool summarizeUseCustomTtsVoice = false;
+	char summarizeTtsModelPath[1024] = {};
+	char summarizeTtsSpeakerPath[1024] = {};
 	char easyPrimaryInput[4096] = {};
 	char easySecondaryInput[2048] = {};
 	int easyActionIndex = 0;
@@ -244,6 +251,9 @@ private:
 	char translateInput[4096] = {};
 	int translateSourceLang = 0;
 	int translateTargetLang = 1;
+	bool translateUseCustomTtsVoice = false;
+	char translateTtsModelPath[1024] = {};
+	char translateTtsSpeakerPath[1024] = {};
 	char voiceTranslatorAudioPath[1024] = {};
 	bool voiceTranslatorSpeakOutput = true;
 	char videoEssayTopic[1024] = {};
@@ -251,6 +261,9 @@ private:
 	char videoEssaySourceVideoPath[1024] = {};
 	bool videoEssayUseCrawler = false;
 	bool videoEssayIncludeCounterpoints = true;
+	bool videoEssayUseCustomTtsVoice = false;
+	char videoEssayTtsModelPath[1024] = {};
+	char videoEssayTtsSpeakerPath[1024] = {};
 	int videoEssayCitationCount = 5;
 	float videoEssayTargetDurationSeconds = 90.0f;
 	int videoEssayToneIndex = 0;
@@ -440,6 +453,7 @@ private:
 	std::deque<Message> chatMessages;
 	std::string chatLastAssistantReply;
 	TtsPreviewState chatTtsPreview;
+	bool chatUseSecondaryTtsVoiceNext = false;
 	TtsPreviewState ttsPanelPreview;
 	std::string easyOutput;
 	std::string scriptOutput;
