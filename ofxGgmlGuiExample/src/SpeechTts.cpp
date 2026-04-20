@@ -492,7 +492,7 @@ void ofApp::drawTtsPanel() {
 			autoSaveSession();
 		}
 		if (!activeProfile.modelRepoHint.empty()) {
-			ImGui::TextDisabled("Recommended repo: %s", activeProfile.modelRepoHint.c_str());
+			ImGui::TextDisabled("Preset repo: %s", activeProfile.modelRepoHint.c_str());
 		}
 	}
 

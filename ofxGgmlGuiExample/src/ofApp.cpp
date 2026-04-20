@@ -998,8 +998,13 @@ applyLogLevel(logLevel);
 
 // Initialize presets.
 loadModelPresets(modelPresets, taskDefaultModelIndices);
+loadVideoRenderPresets(videoRenderPresets, recommendedVideoRenderPresetIndex);
 selectedModelIndex = std::clamp(selectedModelIndex, 0,
 	std::max(0, static_cast<int>(modelPresets.size()) - 1));
+selectedVideoRenderPresetIndex = std::clamp(
+	selectedVideoRenderPresetIndex,
+	0,
+	std::max(0, static_cast<int>(videoRenderPresets.size()) - 1));
 scriptLanguages = ofxGgmlCodeAssistant::defaultLanguagePresets();
 chatLanguages = ofxGgmlChatAssistant::defaultResponseLanguages();
 translateLanguages = ofxGgmlTextAssistant::defaultTranslateLanguages();
@@ -1070,7 +1075,7 @@ applyTheme(themeIndex);
 }
 
 void ofApp::update() {
-  if (holoscanBridgeRunning) {
+    if (holoscanBridgeRunning) {
 		holoscanBridge.update();
 		const auto finishedResults = holoscanBridge.consumeFinishedResults();
 		if (!finishedResults.empty()) {
@@ -1200,9 +1205,10 @@ if (deferredAutoLoadSessionPending && deferredAutoLoadSessionArmed) {
 			speechExecutable,
 			sizeof(speechExecutable),
 			localSpeechCliExecutable);
+		}
 	}
-}
-applyPendingOutput();
+	reapFinishedWorkerThread();
+	applyPendingOutput();
 }
 
 void ofApp::draw() {
@@ -1270,9 +1276,10 @@ void ofApp::exit() {
 	speechInputStreamConfigured = false;
 	stopLocalTextServer(false);
 	stopLocalSpeechServer(false);
-stopGeneration();
-ggml.close();
-gui.exit();
+	stopLocalAceStepServer(false);
+	stopGeneration(true);
+	ggml.close();
+	gui.exit();
 }
 
 void ofApp::keyPressed(int key) {
@@ -1405,7 +1412,7 @@ ImGui::Separator();
 ImGui::Spacing();
 
 // Model preset selector.
-ImGui::Text("Model:");
+ImGui::Text(activeMode == AiMode::LongVideo ? "Planner model:" : "Model:");
 ImGui::SetNextItemWidth(-1);
 const bool useServerBackend =
 	(textInferenceBackend == TextInferenceBackend::LlamaServer);
@@ -1440,8 +1447,8 @@ if (!modelPresets.empty()) {
 	const int recommendedIdx = std::clamp(
 		taskDefaultModelIndices[static_cast<int>(activeMode)],
 		0, static_cast<int>(modelPresets.size()) - 1);
-	ImGui::BeginDisabled(recommendedIdx == selectedModelIndex);
-	if (ImGui::Button("Use recommended", ImVec2(-1, 0))) {
+		ImGui::BeginDisabled(recommendedIdx == selectedModelIndex);
+		if (ImGui::Button("Use preset", ImVec2(-1, 0))) {
 		selectedModelIndex = recommendedIdx;
 		customModelPath[0] = '\0';
 		detectModelLayers();
@@ -2022,6 +2029,95 @@ if (activeMode == AiMode::LongVideo) {
 		"Favor loopable ending##VideoSidebar",
 		&longVideoFavorLoopableEnding)) {
 		autoSaveSession();
+	}
+
+	ImGui::Spacing();
+		ImGui::Text("Video Render Model");
+		ImGui::TextDisabled("Presets are optional. Any local model path you choose takes priority.");
+		if (!videoRenderPresets.empty()) {
+		ImGui::SetNextItemWidth(-1);
+		if (ImGui::BeginCombo(
+				"##VideoRenderPreset",
+				videoRenderPresets[static_cast<size_t>(selectedVideoRenderPresetIndex)].name.c_str())) {
+			for (int i = 0; i < static_cast<int>(videoRenderPresets.size()); ++i) {
+				const bool isSelected = (selectedVideoRenderPresetIndex == i);
+				const auto & preset = videoRenderPresets[static_cast<size_t>(i)];
+				std::string label = preset.name;
+				if (!preset.family.empty()) {
+					label += "  [" + preset.family + "]";
+				}
+				if (ImGui::Selectable(label.c_str(), isSelected)) {
+					selectedVideoRenderPresetIndex = i;
+					autoSaveSession();
+				}
+				if (ImGui::IsItemHovered()) {
+					showWrappedTooltipf(
+						"%s\nBackend: %s\nBest for: %s\nFile: %s",
+						preset.description.c_str(),
+						preset.backend.c_str(),
+						preset.bestFor.c_str(),
+						preset.filename.c_str());
+				}
+				if (isSelected) ImGui::SetItemDefaultFocus();
+			}
+			ImGui::EndCombo();
+		}
+
+		ImGui::BeginDisabled(recommendedVideoRenderPresetIndex == selectedVideoRenderPresetIndex);
+		if (ImGui::Button("Use preset render model", ImVec2(-1, 0))) {
+			selectedVideoRenderPresetIndex = recommendedVideoRenderPresetIndex;
+			customVideoRenderModelPath[0] = '\0';
+			autoSaveSession();
+		}
+		ImGui::EndDisabled();
+
+		ImGui::InputTextWithHint(
+			"##CustomVideoRenderModelPath",
+			"Any local video model path (optional override)",
+			customVideoRenderModelPath,
+			sizeof(customVideoRenderModelPath));
+		if (ImGui::Button("Browse video model...", ImVec2(-1, 0))) {
+			ofFileDialogResult result = ofSystemLoadDialog("Select video render model", false);
+			if (result.bSuccess) {
+				copyStringToBuffer(
+					customVideoRenderModelPath,
+					sizeof(customVideoRenderModelPath),
+					result.getPath());
+				autoSaveSession();
+			}
+		}
+		if (!trim(customVideoRenderModelPath).empty()) {
+			if (ImGui::Button("Clear video model override", ImVec2(-1, 0))) {
+				customVideoRenderModelPath[0] = '\0';
+				autoSaveSession();
+			}
+		}
+
+		const auto & selectedRenderPreset =
+			videoRenderPresets[static_cast<size_t>(selectedVideoRenderPresetIndex)];
+		const std::string selectedRenderModelPath = getSelectedVideoRenderModelPath();
+		if (!selectedRenderModelPath.empty()) {
+			const std::string selectedFileName =
+				ofFilePath::getFileName(selectedRenderModelPath);
+			std::error_code renderModelEc;
+			if (std::filesystem::exists(selectedRenderModelPath, renderModelEc) &&
+				!renderModelEc) {
+				ImGui::TextDisabled("Local video model: %s", selectedFileName.c_str());
+			} else {
+				ImGui::TextDisabled("Suggested video model: %s", selectedFileName.c_str());
+			}
+			if (ImGui::IsItemHovered()) {
+				showWrappedTooltip(selectedRenderModelPath);
+			}
+		}
+		if (!selectedRenderPreset.family.empty()) {
+			ImGui::TextDisabled("Family: %s", selectedRenderPreset.family.c_str());
+		}
+		if (!selectedRenderPreset.url.empty()) {
+			if (ImGui::Button("Download video model in browser", ImVec2(-1, 0))) {
+				ofLaunchBrowser(selectedRenderPreset.url);
+			}
+		}
 	}
 }
 
@@ -7367,13 +7463,48 @@ std::string ofApp::getSelectedModelPath() const {
 	}
 	if (modelPresets.empty()) return "";
 	if (selectedModelIndex < 0 || selectedModelIndex >= static_cast<int>(modelPresets.size())) return "";
-	if (cachedModelPathIndex == selectedModelIndex && !cachedModelPath.empty()) {
+	if (cachedModelPathIndex == selectedModelIndex &&
+		!cachedModelPath.empty() &&
+		pathExists(cachedModelPath)) {
 		return cachedModelPath;
 	}
 	const auto & preset = modelPresets[static_cast<size_t>(selectedModelIndex)];
 	cachedModelPath = resolveModelPathHint(preset.filename);
 	cachedModelPathIndex = selectedModelIndex;
 	return cachedModelPath;
+}
+
+std::string ofApp::getSelectedVideoRenderModelPath() const {
+	const std::string customPath = trim(customVideoRenderModelPath);
+	if (!customPath.empty()) {
+		return customPath;
+	}
+	if (videoRenderPresets.empty()) return "";
+	if (selectedVideoRenderPresetIndex < 0 ||
+		selectedVideoRenderPresetIndex >= static_cast<int>(videoRenderPresets.size())) return "";
+	if (cachedVideoRenderModelPathIndex == selectedVideoRenderPresetIndex &&
+		!cachedVideoRenderModelPath.empty() &&
+		pathExists(cachedVideoRenderModelPath)) {
+		return cachedVideoRenderModelPath;
+	}
+	const auto & preset = videoRenderPresets[static_cast<size_t>(selectedVideoRenderPresetIndex)];
+	cachedVideoRenderModelPath = resolveModelPathHint(preset.filename);
+	cachedVideoRenderModelPathIndex = selectedVideoRenderPresetIndex;
+	return cachedVideoRenderModelPath;
+}
+
+std::string ofApp::getSelectedVideoRenderModelLabel() const {
+	const std::string customPath = trim(customVideoRenderModelPath);
+	if (!customPath.empty()) {
+		const std::string fileName = ofFilePath::getFileName(customPath);
+		return fileName.empty() ? std::string("Custom video model") : fileName;
+	}
+	if (videoRenderPresets.empty() ||
+		selectedVideoRenderPresetIndex < 0 ||
+		selectedVideoRenderPresetIndex >= static_cast<int>(videoRenderPresets.size())) {
+		return std::string();
+	}
+	return videoRenderPresets[static_cast<size_t>(selectedVideoRenderPresetIndex)].name;
 }
 
 void ofApp::applyScriptReviewPreset() {
@@ -7418,4 +7549,3 @@ void ofApp::detectModelLayers() {
 			"Detected " + ofToString(detectedModelLayers) + " layers from GGUF metadata.");
 	}
 }
-#include "GenerationWorkflow.cpp"

@@ -11,6 +11,7 @@
 #include "panels/StatusBar.h"
 #include "managers/TextServerManager.h"
 #include "managers/SpeechServerManager.h"
+#include "managers/AceStepServerManager.h"
 
 #include <atomic>
 #include <array>
@@ -138,6 +139,7 @@ private:
 	// -- Server Managers --
 	TextServerManager textServerManager;
 	SpeechServerManager speechServerManager;
+	AceStepServerManager aceStepServerManager;
 
 	// -- mode --
 	AiMode activeMode = AiMode::Chat;
@@ -189,6 +191,13 @@ private:
 	int longVideoSeed = -1;
 	bool longVideoUsePromptInheritance = true;
 	bool longVideoFavorLoopableEnding = false;
+	char longVideoRenderSourceImagePath[1024] = {};
+	char longVideoRenderEndImagePath[1024] = {};
+	char longVideoRenderOutputDir[1024] = {};
+	char longVideoRenderOutputPrefix[128] = "video-segment";
+	int longVideoRenderPresetIndex = 2;
+	int longVideoRenderModeIndex = 0;
+	int longVideoRenderSelectedChunkIndex = 0;
 	char customInput[4096] = {};
 	char customSystemPrompt[2048] = {};
 	char sourceUrlsInput[2048] = {};
@@ -344,6 +353,9 @@ private:
 	bool speechServerManagedByApp = false;
 	ServerStatusState speechServerStatus = ServerStatusState::Unknown;
 	std::string speechServerStatusMessage;
+	bool aceStepServerManagedByApp = false;
+	ServerStatusState aceStepServerStatus = ServerStatusState::Unknown;
+	std::string aceStepServerStatusMessage;
 
 	// -- conversation / output --
 	std::deque<Message> chatMessages;
@@ -421,6 +433,12 @@ private:
 	ofImage diffusionOutputPreviewImage;
 	std::string diffusionOutputPreviewLoadedPath;
 	std::string diffusionOutputPreviewError;
+	ofImage longVideoRenderSourcePreviewImage;
+	std::string longVideoRenderSourcePreviewLoadedPath;
+	std::string longVideoRenderSourcePreviewError;
+	ofImage longVideoRenderEndPreviewImage;
+	std::string longVideoRenderEndPreviewLoadedPath;
+	std::string longVideoRenderEndPreviewError;
 	ofImage imageSearchPreviewImage;
 	std::string imageSearchPreviewLoadedPath;
 	std::string imageSearchPreviewError;
@@ -596,6 +614,11 @@ private:
 	std::string longVideoStatus;
 	std::string longVideoContinuityBible;
 	std::string longVideoManifestJson;
+	std::string longVideoRenderStatus;
+	std::string longVideoRenderOutputDirectory;
+	std::string longVideoRenderMetadataPath;
+	std::string longVideoRenderManifestPath;
+	std::string longVideoRenderManifestJson;
 	std::vector<ofxGgmlLongVideoPlanChunk> longVideoChunks;
 	std::string pendingVideoEssayStatus;
 	std::string pendingVideoEssayOutline;
@@ -618,6 +641,12 @@ private:
 	std::string pendingLongVideoManifestJson;
 	std::vector<ofxGgmlLongVideoPlanChunk> pendingLongVideoChunks;
 	bool pendingLongVideoDirty = false;
+	std::string pendingLongVideoRenderStatus;
+	std::string pendingLongVideoRenderOutputDirectory;
+	std::string pendingLongVideoRenderMetadataPath;
+	std::string pendingLongVideoRenderManifestPath;
+	std::string pendingLongVideoRenderManifestJson;
+	bool pendingLongVideoRenderDirty = false;
 	std::vector<ofxGgmlSampledVideoFrame> visionSampledVideoFrames;
 	std::vector<ofxGgmlSampledVideoFrame> pendingVisionSampledVideoFrames;
 	std::string pendingMontageSummary;
@@ -705,9 +734,15 @@ private:
 	std::vector<ModelPreset> modelPresets;
 	int selectedModelIndex = 0;
 	char customModelPath[1024] = {};
+	std::vector<VideoRenderPreset> videoRenderPresets;
+	int selectedVideoRenderPresetIndex = 0;
+	int recommendedVideoRenderPresetIndex = 0;
+	char customVideoRenderModelPath[1024] = {};
 	std::array<int, kModeCount> taskDefaultModelIndices = {};
 	mutable int cachedModelPathIndex = -1;
 	mutable std::string cachedModelPath;
+	mutable int cachedVideoRenderModelPathIndex = -1;
+	mutable std::string cachedVideoRenderModelPath;
 
 	// -- script language presets --
 	std::vector<ofxGgmlCodeLanguagePreset> scriptLanguages;
@@ -914,6 +949,7 @@ private:
 	void runCitationSearch();
 	void runVideoEssayWorkflow();
 	void runLongVideoPlanning();
+	void runLongVideoRenderGeneration();
 	void runClipInference();
 	void runMilkDropGeneration(
 		bool editExisting = false,
@@ -949,7 +985,8 @@ private:
 	std::string getSelectedModelPath() const;
 	void detectModelLayers();
 	void applyPendingOutput();
-	void stopGeneration();
+	void stopGeneration(bool waitForCompletion = false);
+	void reapFinishedWorkerThread();
 	void applyLogLevel(ofLogLevel level);
 	bool shouldLog(ofLogLevel level) const;
 	void logWithLevel(ofLogLevel level, const std::string & message);
@@ -978,12 +1015,21 @@ private:
 	bool isManagedSpeechServerRunning();
 	void startLocalSpeechServer();
 	void stopLocalSpeechServer(bool logResult = true);
+	std::string effectiveAceStepServerUrl(const std::string & configuredUrl) const;
+	std::string findLocalAceStepServerExecutable(bool refresh = false);
+	std::string findLocalAceStepModelsDirectory(bool refresh = false);
+	bool isManagedAceStepServerRunning();
+	bool ensureAceStepServerReady(bool logResult = false, bool allowLaunch = true);
+	void startLocalAceStepServer();
+	void stopLocalAceStepServer(bool logResult = true);
 	ofLogLevel mapGgmlLogLevel(int level) const;
 	void probeLlamaCli(const std::string & customPath = "");
 	void probeCliCapabilities();
 	bool isLlamaCliReady() const;
 	std::string getLlamaCliCommand() const;
 	void killActiveInferenceProcess();
+	std::string getSelectedVideoRenderModelPath() const;
+	std::string getSelectedVideoRenderModelLabel() const;
 
 	// -- UI panels --
 	void drawMenuBar();

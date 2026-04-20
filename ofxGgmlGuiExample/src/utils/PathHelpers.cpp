@@ -2,10 +2,12 @@
 #include "ImGuiHelpers.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <regex>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -33,6 +35,38 @@ std::filesystem::path normalizeExistingPath(const std::filesystem::path & path) 
 
 std::filesystem::path currentExecutableDir() {
 	return std::filesystem::path(ofFilePath::getCurrentExeDir()).lexically_normal();
+}
+
+std::string normalizedModelKey(const std::string & value) {
+	std::string normalized;
+	normalized.reserve(value.size());
+	for (const unsigned char c : value) {
+		if (std::isalnum(c)) {
+			normalized.push_back(static_cast<char>(std::tolower(c)));
+		}
+	}
+	return normalized;
+}
+
+std::vector<std::string> tokenizeModelName(const std::string & value) {
+	std::vector<std::string> tokens;
+	std::string current;
+	current.reserve(value.size());
+	auto flush = [&]() {
+		if (current.size() >= 2) {
+			tokens.push_back(current);
+		}
+		current.clear();
+	};
+	for (const unsigned char c : value) {
+		if (std::isalnum(c)) {
+			current.push_back(static_cast<char>(std::tolower(c)));
+		} else {
+			flush();
+		}
+	}
+	flush();
+	return tokens;
 }
 
 #ifdef _WIN32
@@ -97,9 +131,13 @@ std::string resolveModelPathHint(const std::string & modelFileHint) {
 		return {};
 	}
 
+	const std::vector<std::filesystem::path> modelRoots = {
+		std::filesystem::path(sharedModelsDir()),
+		std::filesystem::path(bundledModelsDir())
+	};
 	const std::vector<std::filesystem::path> candidates = {
-		std::filesystem::path(sharedModelsDir()) / trimmedFileHint,
-		std::filesystem::path(bundledModelsDir()) / trimmedFileHint
+		modelRoots[0] / trimmedFileHint,
+		modelRoots[1] / trimmedFileHint
 	};
 
 	for (const auto & candidate : candidates) {

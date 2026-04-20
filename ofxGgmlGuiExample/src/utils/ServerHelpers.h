@@ -12,3 +12,6 @@ std::string serverBaseUrlFromConfiguredUrl(const std::string & configuredUrl);
 
 // Normalize a configured speech server URL to a base URL
 std::string speechServerBaseUrlFromConfiguredUrl(const std::string & configuredUrl);
+
+// Normalize a configured AceStep server URL to a base URL
+std::string aceStepServerBaseUrlFromConfiguredUrl(const std::string & configuredUrl);

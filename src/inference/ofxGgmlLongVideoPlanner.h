@@ -24,6 +24,10 @@ struct ofxGgmlLongVideoPlanRequest {
 	int64_t seed = -1;
 	bool usePromptInheritance = true;
 	bool favorLoopableEnding = false;
+	std::string renderBackend = "ofxStableDiffusion";
+	std::string renderModelName;
+	std::string renderModelPath;
+	std::string renderModelUrl;
 	ofxGgmlInferenceSettings inferenceSettings;
 	ofxGgmlPromptSourceSettings sourceSettings;
 };

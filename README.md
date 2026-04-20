@@ -81,7 +81,7 @@ This addon is released under the [MIT License](LICENSE).
 - Windows build scripts that refresh Visual Studio linking automatically
 - GUI example for local chat, review, and script-assisted workflows built mostly on addon helpers
   - GUI example `Easy` mode now demonstrates the high-level `ofxGgmlEasy` facade directly, including one-click chat, summarize, translate, citation search, `Video Essay`, and coding-agent `Plan` flows using the currently selected backend/model
-  - GUI example sidebar loading is now more centralized: `Video` has its own recommended catalog model, text modes can override the selected preset with any local GGUF path, and `Image` mode now keeps diffusion model / VAE / init / mask loading together in one shared sidebar section
+    - GUI example sidebar loading is now more centralized: `Video` now separates its text planner model from a dedicated video-render model preset/override lane, text modes can override the selected preset with any local GGUF path, and `Image` mode now keeps diffusion model / VAE / init / mask loading together in one shared sidebar section
   - GUI example Vision mode now also includes a small `Holoscan Bridge` section for live frame submission and inline preview.
     - The native Holoscan runtime path is Linux-only for now; Windows and other platforms stay on the addon fallback lane until that runtime is validated there.
   - GUI example Translate mode with auto-detect source language, natural vs. literal translation shortcuts, detect-and-translate flow, and more reliable prompt/input handoff buttons
@@ -92,6 +92,7 @@ This addon is released under the [MIT License](LICENSE).
   - GUI example Montage mode can now preview restructured subtitle cues live, copy generated SRT/VTT exports, and keep a playback-facing subtitle track ready for external preview layers such as `ofxVlc4`
   - when the GUI example is regenerated with `ofxVlc4` enabled in `addons.make`, Montage mode can also load the active subtitle track directly into an optional `ofxVlc4` preview with subtitle delay / scale controls
   - that same Montage area can now also collect clip paths into a small playlist manifest, preview the sequence through an optional second `ofxVlc4` lane, and record the playlist back out to a video file with optional audio mux
+  - `ofxVlc4` is no longer included in the default `ofxGgmlGuiExample/addons.make`; add it back manually only if you want those optional VLC preview and texture-record export lanes
 - GUI example Summarize mode now includes a dedicated citation-research section that can extract quoted evidence from loaded URLs or crawl a seed website before building a cited summary
 - GUI example Diffusion mode now includes a `Music -> Image` helper that can turn a music caption plus optional lyrics/transcript into a reusable visual prompt for the existing diffusion flow
 - GUI example Vision mode now also includes a dedicated `Music Video` workflow section that can turn song text into a visual concept, apply music-video planning defaults, and hand the result directly into video planning, diffusion, and edit-plan generation
@@ -183,7 +184,9 @@ That keeps large GGUF / Whisper model files out of per-example `bin/data/models`
 
 In the current GUI example:
 
-- `Video` mode now has a dedicated recommended text-model preset in the shared catalog instead of relying on a generic text default
+  - `Video` mode now keeps planner and render model selection separate:
+  - the shared catalog still provides an optional text planner preset for chunk/continuity planning
+  - the sidebar also exposes a dedicated `Video Render Model` section with its own optional video-generation presets, custom local model override, and download link
 - the shared sidebar can override the selected text-model preset with any local GGUF file through `Browse GGUF...`
 - `Image` mode keeps diffusion asset loading centralized in the sidebar under `Image Assets`, including diffusion model, optional VAE, init image, and inpaint mask image
 
@@ -835,7 +838,15 @@ The Speech panel now supports a simple microphone workflow directly in the GUI:
 
 `ofxGgmlTtsInference` adds a parallel addon-level text-to-speech layer for synthesis workflows that should stay separate from Whisper-style speech transcription. The initial scaffold is backend-agnostic and now ships with a ready-to-attach `chatllm.cpp` adapter for OuteTTS models, including speaker-profile paths and the sampler controls that matter for llama-backed TTS models.
 
-Use it when an app wants local speech generation without baking a specific TTS runtime into its UI layer. The bridge exposes `Synthesize`, `Clone Voice`, and `Continue Speech` task labels, ships with starter OuteTTS profile hints, and can attach a runtime callback through `createChatLlmTtsBridgeBackend(...)`, `createOuteTtsBridgeBackend(...)`, or `createTtsBridgeBackend(...)`. The GUI example now seeds the `Executable` field to the addon-local `libs/chatllm/bin/chatllm(.exe)` path by default and falls back to normal executable search if you change it.
+Use it when an app wants local speech generation without baking a specific TTS runtime into its UI layer. The bridge exposes `Synthesize`, `Clone Voice`, and `Continue Speech` task labels, ships with starter OuteTTS profile hints, and can attach a runtime callback through `createChatLlmTtsBridgeBackend(...)`, `createOuteTtsBridgeBackend(...)`, or `createTtsBridgeBackend(...)`. The GUI example now treats `Executable` as an optional override: leave it blank to auto-discover `chatllm.cpp`, or point it at a specific runtime if you have one already. The preferred addon-local runtime path is still `libs/chatllm/bin/chatllm(.exe)`.
+
+On Windows, you can populate that runtime path with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-chatllm.ps1
+```
+
+That helper clones `foldl/chatllm.cpp`, builds the local runtime outside the addon tree under `%LOCALAPPDATA%\ofxGgml\chatllm-runtime`, then copies only the final executable and nearby DLLs into `libs/chatllm/bin`.
 
 ## Diffusion Helpers
 

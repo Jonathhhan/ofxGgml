@@ -354,6 +354,7 @@ void ofApp::drawVisionPanel() {
 		"Use a llama-server instance that is already running with a multimodal GGUF model. "
 		"This panel sends OpenAI-compatible image requests with local files encoded as data URLs, and can also route sampled video frames through the same server.");
 
+	if (ImGui::CollapsingHeader("Setup & Source", ImGuiTreeNodeFlags_DefaultOpen)) {
 	if (!visionProfiles.empty()) {
 		std::vector<const char *> profileNames;
 		profileNames.reserve(visionProfiles.size());
@@ -379,24 +380,19 @@ void ofApp::drawVisionPanel() {
 				profile.modelFileHint);
 		ImGui::TextDisabled("Architecture: %s", profile.architecture.c_str());
 		if (!profile.modelRepoHint.empty()) {
-			ImGui::TextDisabled("Recommended server model: %s", profile.modelRepoHint.c_str());
-		}
-		if (isEuRestrictedVisionProfile(profile)) {
-			ImGui::TextColored(
-				ImVec4(0.95f, 0.65f, 0.25f, 1.0f),
-				"EU note: this Meta model is gated and currently unavailable for download from the EU on Hugging Face.");
+			ImGui::TextDisabled("Preset server model: %s", profile.modelRepoHint.c_str());
 		}
 		if (!profile.modelFileHint.empty()) {
-			ImGui::TextDisabled("Recommended file: %s", profile.modelFileHint.c_str());
+			ImGui::TextDisabled("Preset file: %s", profile.modelFileHint.c_str());
 		}
 		if (!recommendedModelPath.empty()) {
-			ImGui::TextDisabled("Recommended local path: %s", recommendedModelPath.c_str());
+			ImGui::TextDisabled("Preset local path: %s", recommendedModelPath.c_str());
 			ImGui::TextDisabled(
 				pathExists(recommendedModelPath)
-					? "Recommended model is already present."
-					: "Recommended model is not downloaded yet.");
+					? "Preset model is already present."
+					: "Preset model is not downloaded yet.");
 			ImGui::BeginDisabled(trim(visionModelPath) == recommendedModelPath);
-			if (ImGui::SmallButton("Use recommended path##Vision")) {
+			if (ImGui::SmallButton("Use preset path##Vision")) {
 				const std::string previousVisionModelPath = trim(visionModelPath);
 				copyStringToBuffer(
 					visionModelPath,
@@ -409,7 +405,7 @@ void ofApp::drawVisionPanel() {
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
-				showWrappedTooltip("Sets the model path to the profile's recommended file under the shared addon models/ folder.");
+				showWrappedTooltip("Sets the model path to the profile's preset file under the shared addon models/ folder.");
 			}
 			ImGui::SameLine();
 			ImGui::BeginDisabled(recommendedDownloadUrl.empty());
@@ -421,12 +417,10 @@ void ofApp::drawVisionPanel() {
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
-				if (isEuRestrictedVisionProfile(profile)) {
-					showWrappedTooltip("Opens the model page in your browser. Meta currently blocks this download in the EU.");
-				} else if (opensModelPage) {
-					showWrappedTooltip("Opens the recommended model page in your browser so you can pick the exact GGUF file.");
+				if (opensModelPage) {
+					showWrappedTooltip("Opens the preset model page in your browser so you can pick the exact GGUF file.");
 				} else {
-					showWrappedTooltip("Opens the recommended multimodal model in your browser.");
+					showWrappedTooltip("Opens the preset multimodal model in your browser.");
 				}
 			}
 		}
@@ -434,9 +428,9 @@ void ofApp::drawVisionPanel() {
 			ImGui::TextDisabled("Note: some variants also need a matching mmproj file on the server side.");
 		}
 		ImGui::TextDisabled(
-			"OCR: %s | Multi-image: %s",
-			profile.supportsOcr ? "supported" : "not ideal",
-			profile.supportsMultipleImages ? "supported" : "single-image oriented");
+			"Task-fit hints | OCR: %s | Multi-image: %s",
+			profile.supportsOcr ? "usual fit" : "manual / backend-dependent",
+			profile.supportsMultipleImages ? "usual fit" : "single-image oriented");
 	}
 
 	const bool visionProfileMayRequireMmproj =
@@ -493,11 +487,9 @@ void ofApp::drawVisionPanel() {
 		}
 	}
 	drawVisionImagePreview(trim(visionImagePath));
-	drawImageSearchPanel("Use Vision prompt", trim(visionPrompt));
-	drawImageToMusicSection();
-	drawAceStepMusicSection();
-	drawMusicVideoWorkflowSection();
+	}
 
+	if (ImGui::CollapsingHeader("Image Analysis", ImGuiTreeNodeFlags_DefaultOpen)) {
 	static const char * visionTaskLabels[] = { "Describe", "OCR", "Ask" };
 	ImGui::SetNextItemWidth(180);
 	ImGui::Combo("Task", &visionTaskIndex, visionTaskLabels, 3);
@@ -548,7 +540,9 @@ void ofApp::drawVisionPanel() {
 		visionSystemPrompt,
 		sizeof(visionSystemPrompt),
 		ImVec2(-1, 70));
+	}
 
+	if (ImGui::CollapsingHeader("Video Workflow")) {
 	ImGui::Separator();
 	ImGui::TextDisabled("Optional video workflow");
 	if (ImGui::Button("Action Analysis", ImVec2(130, 0))) {
@@ -1112,25 +1106,25 @@ void ofApp::drawVisionPanel() {
 		}
 #if OFXGGML_HAS_OFXVLC4
 		ImGui::Separator();
-		ImGui::TextDisabled("Direct ofxVlc4 preview");
+		ImGui::TextDisabled("Optional VLC subtitle preview");
 		ImGui::TextWrapped(
-			"When the example is regenerated with ofxVlc4, the active source-timed or montage-timed subtitle track can be previewed directly here.");
-		if (ImGui::Button("Load in ofxVlc4 preview", ImVec2(190, 0))) {
+			"Load the active source-timed or montage-timed subtitle track into the optional VLC preview lane.");
+		if (ImGui::Button("Load in VLC preview", ImVec2(190, 0))) {
 			std::string error;
 			if (loadMontageVlcPreview(&error)) {
 				montagePreviewStatusMessage =
-					"Loaded active subtitle track into the optional ofxVlc4 preview.";
+					"Loaded active subtitle track into the optional VLC preview.";
 			} else {
 				montagePreviewStatusMessage =
-					error.empty() ? std::string("Failed to load the optional ofxVlc4 preview.") : error;
+					error.empty() ? std::string("Failed to load the optional VLC preview.") : error;
 			}
 			autoSaveSession();
 		}
 		ImGui::SameLine();
 		ImGui::BeginDisabled(!montageVlcPreviewInitialized);
-		if (ImGui::Button("Close ofxVlc4 preview", ImVec2(190, 0))) {
+		if (ImGui::Button("Close VLC preview", ImVec2(190, 0))) {
 			closeMontageVlcPreview();
-			montagePreviewStatusMessage = "Closed the optional ofxVlc4 preview.";
+			montagePreviewStatusMessage = "Closed the optional VLC preview.";
 			autoSaveSession();
 		}
 		ImGui::EndDisabled();
@@ -1140,13 +1134,13 @@ void ofApp::drawVisionPanel() {
 #else
 		ImGui::Separator();
 		ImGui::TextDisabled(
-			"Regenerate this example with ofxVlc4 in addons.make to enable direct subtitle-slave preview here.");
+			"Optional VLC subtitle preview is unavailable in this build. Add ofxVlc4 back to addons.make only if you want it.");
 #endif
 	}
 	ImGui::Separator();
 	ImGui::TextDisabled("Clip playlist export");
 	ImGui::TextWrapped(
-		"Collect rendered or generated clip paths, export a small playlist manifest, preview the sequence through ofxVlc4, and optionally record it back out to a final video.");
+		"Collect rendered or generated clip paths, export a small playlist manifest, and optionally preview or record the sequence through the separate VLC lane.");
 	ImGui::InputTextMultiline(
 		"Clip paths (one per line)",
 		montageClipPaths,
@@ -1252,11 +1246,11 @@ void ofApp::drawVisionPanel() {
 		autoSaveSession();
 	}
 	ImGui::SameLine();
-	if (ImGui::Button("Load clip playlist in ofxVlc4", ImVec2(220, 0))) {
+	if (ImGui::Button("Load clip playlist in VLC", ImVec2(220, 0))) {
 		std::string error;
 		if (loadMontageClipVlcPreview(&error)) {
 			montageClipPlaylistStatusMessage =
-				"Loaded the montage clip playlist into the optional ofxVlc4 preview.";
+				"Loaded the montage clip playlist into the optional VLC preview.";
 		} else {
 			montageClipPlaylistStatusMessage =
 				error.empty() ? std::string("Failed to load the montage clip playlist preview.") : error;
@@ -1302,7 +1296,7 @@ void ofApp::drawVisionPanel() {
 	}
 #else
 	ImGui::TextDisabled(
-		"Regenerate this example with ofxVlc4 in addons.make to enable clip-playlist preview and render export here.");
+		"Optional VLC playlist preview / recording is unavailable in this build. Add ofxVlc4 back to addons.make only if you want that extra lane.");
 #endif
 	if (!montageClipPlaylistStatusMessage.empty()) {
 		ImGui::TextDisabled("%s", montageClipPlaylistStatusMessage.c_str());
@@ -1773,7 +1767,9 @@ void ofApp::drawVisionPanel() {
 		trim(videoSidecarUrl).empty()) {
 		ImGui::TextDisabled("Action and Emotion can run through the current vision server, but improve with a temporal sidecar.");
 	}
+	}
 
+	if (ImGui::CollapsingHeader("Run & Output", ImGuiTreeNodeFlags_DefaultOpen)) {
 	ImGui::BeginDisabled(generating.load() || std::strlen(visionImagePath) == 0);
 	if (ImGui::Button("Run Vision", ImVec2(140, 0))) {
 		runVisionInference();
@@ -1844,6 +1840,14 @@ void ofApp::drawVisionPanel() {
 			ImGui::TextWrapped("%s", visionOutput.c_str());
 		}
 		ImGui::EndChild();
+	}
+	}
+
+	if (ImGui::CollapsingHeader("Creative Extensions")) {
+		drawImageSearchPanel("Use Vision prompt", trim(visionPrompt));
+		drawImageToMusicSection();
+		drawAceStepMusicSection();
+		drawMusicVideoWorkflowSection();
 	}
 }
 
@@ -2084,16 +2088,21 @@ void ofApp::drawAceStepMusicSection() {
 		"The bridge keeps prompt prep local-first, then hands prompt, lyrics, BPM, key, and duration to the AceStep API.");
 	ImGui::TextDisabled(
 		"No AceStep install is needed for local music-prompt or ABC-sketch generation. "
-		"You only need AceStep when you want rendered audio tracks or audio understanding.");
-	if (ImGui::SmallButton("Check AceStep server")) {
-		const std::string serverUrl = trim(aceStepServerUrl);
-		const ofxGgmlAceStepHealthResult health = aceStepBridge.healthCheck(serverUrl);
-		if (health.success) {
+		"You only need AceStep when you want rendered audio tracks or audio understanding. "
+		"When the server URL is local, the app can auto-start ace-server.exe for you.");
+	if (ImGui::SmallButton("Check / Start AceStep server")) {
+		const std::string serverUrl = effectiveAceStepServerUrl(aceStepServerUrl);
+		if (ensureAceStepServerReady(false, true)) {
+			const ofxGgmlAceStepHealthResult health = aceStepBridge.healthCheck(serverUrl);
 			const ofxGgmlAceStepPropsResult props = aceStepBridge.fetchProps(serverUrl);
 			std::ostringstream status;
 			status << "AceStep server is reachable";
 			if (!trim(health.status).empty()) {
 				status << " (" << trim(health.status) << ")";
+			}
+			status << " at " << serverUrl;
+			if (aceStepServerManagedByApp) {
+				status << " [managed locally]";
 			}
 			if (props.success) {
 				status << ". /lm: "
@@ -2107,11 +2116,22 @@ void ofApp::drawAceStepMusicSection() {
 			aceStepStatus = status.str() + ".";
 			aceStepUsedServerUrl = health.usedServerUrl;
 		} else {
-			aceStepStatus =
-				"[Setup] AceStep server is not reachable. Run scripts\\install-acestep.ps1 to install a local backend under libs\\acestep, then start its server and point this URL at it.";
-			aceStepUsedServerUrl = health.usedServerUrl;
+			aceStepStatus = "[Setup] " + aceStepServerStatusMessage;
+			aceStepUsedServerUrl = serverUrl;
 		}
 	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(findLocalAceStepServerExecutable().empty() || findLocalAceStepModelsDirectory().empty() || isManagedAceStepServerRunning());
+	if (ImGui::SmallButton("Start local AceStep")) {
+		startLocalAceStepServer();
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!isManagedAceStepServerRunning());
+	if (ImGui::SmallButton("Stop local AceStep")) {
+		stopLocalAceStepServer(true);
+	}
+	ImGui::EndDisabled();
 	ImGui::SameLine();
 	if (ImGui::SmallButton("Copy install command##AceStep")) {
 		copyToClipboard(
@@ -2121,6 +2141,29 @@ void ofApp::drawAceStepMusicSection() {
 	}
 	ImGui::SameLine();
 	ImGui::TextDisabled("Installer: scripts\\install-acestep.ps1");
+
+	const std::string localAceStepExe = findLocalAceStepServerExecutable();
+	const std::string localAceStepModels = findLocalAceStepModelsDirectory();
+	if (!localAceStepExe.empty()) {
+		ImGui::TextDisabled("Local AceStep exe: %s", ofFilePath::getFileName(localAceStepExe).c_str());
+		if (ImGui::IsItemHovered()) {
+			showWrappedTooltip(localAceStepExe);
+		}
+	} else {
+		ImGui::TextDisabled("Local AceStep exe: not found");
+	}
+	if (!localAceStepModels.empty()) {
+		ImGui::TextDisabled("Local AceStep models: %s", localAceStepModels.c_str());
+	} else {
+		ImGui::TextDisabled("Local AceStep models: not found");
+	}
+	if (!aceStepServerStatusMessage.empty()) {
+		const ImVec4 statusColor =
+			aceStepServerStatus == ServerStatusState::Reachable
+				? ImVec4(0.55f, 0.9f, 0.6f, 1.0f)
+				: ImVec4(0.95f, 0.45f, 0.4f, 1.0f);
+		ImGui::TextColored(statusColor, "%s", aceStepServerStatusMessage.c_str());
+	}
 
 	ImGui::SetNextItemWidth(260);
 	ImGui::InputText(
@@ -2696,6 +2739,10 @@ void ofApp::runAceStepMusicGeneration() {
 		aceStepStatus = "[Error] Enter a music prompt first.";
 		return;
 	}
+	if (!ensureAceStepServerReady(true, true)) {
+		aceStepStatus = "[Error] " + aceStepServerStatusMessage;
+		return;
+	}
 
 	cancelRequested.store(false);
 	generating.store(true);
@@ -2719,7 +2766,7 @@ void ofApp::runAceStepMusicGeneration() {
 	request.wavOutput = aceStepUseWav;
 	request.outputDir = trim(aceStepOutputDir);
 	request.outputPrefix = trim(aceStepOutputPrefix);
-	const std::string serverUrl = trim(aceStepServerUrl);
+	const std::string serverUrl = effectiveAceStepServerUrl(aceStepServerUrl);
 
 	workerThread = std::thread([this, request, serverUrl]() {
 		std::string statusText;
@@ -2773,6 +2820,10 @@ void ofApp::runAceStepAudioUnderstanding() {
 		aceStepStatus = "[Error] Select an audio file first.";
 		return;
 	}
+	if (!ensureAceStepServerReady(true, true)) {
+		aceStepStatus = "[Error] " + aceStepServerStatusMessage;
+		return;
+	}
 
 	cancelRequested.store(false);
 	generating.store(true);
@@ -2798,7 +2849,7 @@ void ofApp::runAceStepAudioUnderstanding() {
 		!trim(request.requestTemplate.lyrics).empty() ||
 		request.requestTemplate.bpm > 0 ||
 		!trim(request.requestTemplate.keyscale).empty();
-	const std::string serverUrl = trim(aceStepServerUrl);
+	const std::string serverUrl = effectiveAceStepServerUrl(aceStepServerUrl);
 
 	workerThread = std::thread([this, request, serverUrl]() {
 		std::string statusText;

@@ -27,7 +27,7 @@ enum class AiMode {
 };
 
 // ---------------------------------------------------------------------------
-// ModelPreset — a recommended model with download metadata.
+// ModelPreset — an optional preset with download metadata.
 // ---------------------------------------------------------------------------
 
 struct ModelPreset {
@@ -37,6 +37,16 @@ struct ModelPreset {
 	std::string description;
 	std::string sizeMB;       // human-readable, e.g. "~600 MB"
 	std::string bestFor;      // e.g. "chat, general"
+};
+
+struct VideoRenderPreset {
+	std::string name;
+	std::string filename;
+	std::string url;
+	std::string description;
+	std::string backend;
+	std::string family;
+	std::string bestFor;
 };
 
 // ---------------------------------------------------------------------------
@@ -57,6 +67,11 @@ constexpr int kModeCount = 15;
 void loadModelPresets(
 	std::vector<ModelPreset> & modelPresets,
 	std::array<int, kModeCount> & taskDefaultModelIndices,
+	const char * catalogPath = nullptr);
+
+void loadVideoRenderPresets(
+	std::vector<VideoRenderPreset> & presets,
+	int & recommendedIndex,
 	const char * catalogPath = nullptr);
 
 void loadPromptTemplates(std::vector<PromptTemplate> & promptTemplates);

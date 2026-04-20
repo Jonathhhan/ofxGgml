@@ -178,27 +178,6 @@ void ofApp::drawDiffusionPanel() {
 		diffusionProfiles.empty()
 			? ofxGgmlImageGenerationModelProfile{}
 			: diffusionProfiles[static_cast<size_t>(selectedDiffusionProfileIndex)];
-	const auto profileSupportsTask =
-		[](const ofxGgmlImageGenerationModelProfile & profile,
-			ofxGgmlImageGenerationTask task) {
-			switch (task) {
-			case ofxGgmlImageGenerationTask::ImageToImage:
-				return profile.supportsImageToImage;
-			case ofxGgmlImageGenerationTask::InstructImage:
-				return profile.supportsInstructImage;
-			case ofxGgmlImageGenerationTask::Variation:
-				return profile.supportsVariation;
-			case ofxGgmlImageGenerationTask::Restyle:
-				return profile.supportsRestyle;
-			case ofxGgmlImageGenerationTask::Inpaint:
-				return profile.supportsInpaint;
-			case ofxGgmlImageGenerationTask::Upscale:
-				return profile.supportsUpscale;
-			case ofxGgmlImageGenerationTask::TextToImage:
-			default:
-				return true;
-			}
-		};
 	const auto activeTask =
 		static_cast<ofxGgmlImageGenerationTask>(std::clamp(diffusionTaskIndex, 0, 6));
 	const bool needsInitImage =
@@ -252,12 +231,6 @@ void ofApp::drawDiffusionPanel() {
 			const auto & profile =
 				diffusionProfiles[static_cast<size_t>(selectedDiffusionProfileIndex)];
 			applyDiffusionProfileDefaults(profile, false);
-			const auto selectedTask =
-				static_cast<ofxGgmlImageGenerationTask>(
-					std::clamp(diffusionTaskIndex, 0, 6));
-			if (!profileSupportsTask(profile, selectedTask)) {
-				diffusionTaskIndex = static_cast<int>(ofxGgmlImageGenerationTask::TextToImage);
-			}
 		}
 
 		const std::string recommendedModelPath =
@@ -266,19 +239,19 @@ void ofApp::drawDiffusionPanel() {
 			suggestedModelDownloadUrl(activeProfile.modelRepoHint, activeProfile.modelFileHint);
 		ImGui::TextDisabled("Architecture: %s", activeProfile.architecture.c_str());
 		if (!activeProfile.modelRepoHint.empty()) {
-			ImGui::TextDisabled("Recommended repo: %s", activeProfile.modelRepoHint.c_str());
+			ImGui::TextDisabled("Preset repo: %s", activeProfile.modelRepoHint.c_str());
 		}
 		if (!activeProfile.modelFileHint.empty()) {
-			ImGui::TextDisabled("Recommended file: %s", activeProfile.modelFileHint.c_str());
+			ImGui::TextDisabled("Preset file: %s", activeProfile.modelFileHint.c_str());
 		}
 		if (!recommendedModelPath.empty()) {
-			ImGui::TextDisabled("Recommended local path: %s", recommendedModelPath.c_str());
+			ImGui::TextDisabled("Preset local path: %s", recommendedModelPath.c_str());
 			ImGui::TextDisabled(
 				pathExists(recommendedModelPath)
-					? "Recommended model is already present."
-					: "Recommended model is not downloaded yet.");
+					? "Preset model is already present."
+					: "Preset model is not downloaded yet.");
 			ImGui::BeginDisabled(trim(diffusionModelPath) == recommendedModelPath);
-			if (ImGui::SmallButton("Use recommended path##Diffusion")) {
+			if (ImGui::SmallButton("Use preset path##Diffusion")) {
 				copyStringToBuffer(
 					diffusionModelPath,
 					sizeof(diffusionModelPath),
@@ -286,7 +259,7 @@ void ofApp::drawDiffusionPanel() {
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
-				showWrappedTooltip("Sets the diffusion model path to the profile's recommended file under the shared addon models/ folder.");
+				showWrappedTooltip("Sets the diffusion model path to the profile's preset file under the shared addon models/ folder.");
 			}
 			ImGui::SameLine();
 			ImGui::BeginDisabled(recommendedDownloadUrl.empty());
@@ -295,17 +268,17 @@ void ofApp::drawDiffusionPanel() {
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) {
-				showWrappedTooltip("Opens the recommended diffusion model in your browser.");
+				showWrappedTooltip("Opens the preset diffusion model in your browser.");
 			}
 		}
 		ImGui::TextDisabled(
-			"Img2Img: %s | Instruct: %s | Variation: %s | Restyle: %s | Inpaint: %s | Upscale: %s",
-			activeProfile.supportsImageToImage ? "supported" : "not supported",
-			activeProfile.supportsInstructImage ? "supported" : "not supported",
-			activeProfile.supportsVariation ? "supported" : "not supported",
-			activeProfile.supportsRestyle ? "supported" : "not supported",
-			activeProfile.supportsInpaint ? "supported" : "not supported",
-			activeProfile.supportsUpscale ? "supported" : "not supported");
+			"Task-fit hints | Img2Img: %s | Instruct: %s | Variation: %s | Restyle: %s | Inpaint: %s | Upscale: %s",
+			activeProfile.supportsImageToImage ? "usual fit" : "manual / backend-dependent",
+			activeProfile.supportsInstructImage ? "usual fit" : "manual / backend-dependent",
+			activeProfile.supportsVariation ? "usual fit" : "manual / backend-dependent",
+			activeProfile.supportsRestyle ? "usual fit" : "manual / backend-dependent",
+			activeProfile.supportsInpaint ? "usual fit" : "manual / backend-dependent",
+			activeProfile.supportsUpscale ? "usual fit" : "manual / backend-dependent");
 	}
 
 	if (ImGui::Button("Text to Image", ImVec2(120, 0))) {
@@ -542,9 +515,6 @@ void ofApp::drawDiffusionPanel() {
 	} else if (!bridgeConfigured) {
 		diffusionRunDisabledReason =
 			"Diffusion backend bridge is present but not configured.";
-	} else if (!profileSupportsTask(activeProfile, activeTask)) {
-		diffusionRunDisabledReason =
-			"The selected diffusion profile does not support the chosen task.";
 	} else if (!hasRunnableText) {
 		diffusionRunDisabledReason =
 			activeTask == ofxGgmlImageGenerationTask::InstructImage
@@ -906,27 +876,6 @@ void ofApp::runDiffusionInference() {
 			const auto task = static_cast<ofxGgmlImageGenerationTask>(taskIndex);
 			const auto selectionMode =
 				static_cast<ofxGgmlImageSelectionMode>(selectionModeIndex);
-			const auto supportsTask =
-				[](const ofxGgmlImageGenerationModelProfile & profile,
-					ofxGgmlImageGenerationTask taskValue) {
-					switch (taskValue) {
-					case ofxGgmlImageGenerationTask::ImageToImage:
-						return profile.supportsImageToImage;
-					case ofxGgmlImageGenerationTask::InstructImage:
-						return profile.supportsInstructImage;
-					case ofxGgmlImageGenerationTask::Variation:
-						return profile.supportsVariation;
-					case ofxGgmlImageGenerationTask::Restyle:
-						return profile.supportsRestyle;
-					case ofxGgmlImageGenerationTask::Inpaint:
-						return profile.supportsInpaint;
-					case ofxGgmlImageGenerationTask::Upscale:
-						return profile.supportsUpscale;
-					case ofxGgmlImageGenerationTask::TextToImage:
-					default:
-						return true;
-					}
-				};
 			const bool needsPromptText =
 				task != ofxGgmlImageGenerationTask::Upscale &&
 				task != ofxGgmlImageGenerationTask::Variation;
@@ -962,13 +911,6 @@ void ofApp::runDiffusionInference() {
 			if (needsMaskImage && maskImagePath.empty()) {
 				clearPendingDiffusionArtifacts();
 				setPending("[Error] Select a mask image for inpaint mode.");
-				generating.store(false);
-				return;
-			}
-
-			if (!supportsTask(profileBase, task)) {
-				clearPendingDiffusionArtifacts();
-				setPending("[Error] The selected diffusion profile does not support the chosen task.");
 				generating.store(false);
 				return;
 			}

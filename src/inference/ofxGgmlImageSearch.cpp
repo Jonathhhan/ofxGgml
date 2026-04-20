@@ -119,9 +119,16 @@ ofxGgmlImageSearchResult ofxGgmlWikimediaImageSearchBackend::search(
 		<< "&pithumbsize=" << thumbWidth
 		<< "&format=json"
 		<< "&formatversion=2"
-		<< "&origin=*";
+		<< "&utf8=1";
 
-	const ofHttpResponse response = ofLoadURL(url.str());
+	ofHttpRequest httpRequest(url.str(), "wikimedia-image-search", false, true, false);
+	httpRequest.method = ofHttpRequest::GET;
+	httpRequest.headers["Accept"] = "application/json";
+	httpRequest.headers["User-Agent"] =
+		"ofxGgml/1.0 (openFrameworks desktop image search; https://openframeworks.cc/)";
+	httpRequest.timeoutSeconds = 20;
+	ofURLFileLoader loader;
+	const ofHttpResponse response = loader.handleRequest(httpRequest);
 	result.elapsedMs = elapsedMsSince(start);
 	if (response.status != 200) {
 		result.error =

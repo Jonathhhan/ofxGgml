@@ -1,5 +1,4 @@
 ofxGgml
 ofxImGui
-ofxStableDiffusion
-ofxVlc4
 ofxProjectM
+ofxStableDiffusion

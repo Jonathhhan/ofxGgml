@@ -600,15 +600,15 @@ void ofApp::drawVideoEssayPanel() {
 #if OFXGGML_HAS_OFXVLC4
 	if (!trim(videoEssaySrtText).empty()) {
 		ImGui::Spacing();
-		ImGui::Text("ofxVlc4 Preview / Render");
+		ImGui::Text("Optional VLC Preview / Record");
 		ImGui::TextWrapped(
-			"Preview the narrated essay subtitles against a source video, then record the VLC texture and mux it with the generated voiceover.");
+			"Optionally preview the narrated essay subtitles against a source video, then record the VLC texture and mux it with the generated voiceover.");
 		ImGui::BeginDisabled(trim(videoEssaySourceVideoPath).empty());
 		if (ImGui::Button("Load in ofxVlc4 preview##VideoEssay", ImVec2(190, 0))) {
 			std::string error;
 			if (loadVideoEssayVlcPreview(&error)) {
 				videoEssayVlcPreviewStatusMessage =
-					"Loaded the video essay subtitles into the optional ofxVlc4 preview.";
+					"Loaded the video essay subtitles into the optional VLC preview.";
 			} else {
 				videoEssayVlcPreviewStatusMessage =
 					error.empty() ? std::string("Failed to load the video essay VLC preview.") : error;
@@ -668,7 +668,7 @@ void ofApp::drawVideoEssayPanel() {
 	if (!trim(videoEssaySrtText).empty()) {
 		ImGui::Spacing();
 		ImGui::TextDisabled(
-			"Regenerate this example with ofxVlc4 in addons.make to enable direct video essay preview and render export here.");
+			"Optional VLC preview / recording is unavailable in this build. Add ofxVlc4 back to addons.make only if you want that extra playback lane.");
 	}
 #endif
 
@@ -875,7 +875,7 @@ void ofApp::runVideoEssayWorkflow() {
 }
 
 void ofApp::drawLongVideoPanel() {
-	drawPanelHeader("Video", "plan chunked video prompts with continuity and shot progression");
+	drawPanelHeader("Video", "plan and render chunked video segments with continuity and shot progression");
 	ImGui::TextWrapped(
 		"Use this mode for trailers, shorts, music videos, ads, mood loops, or longer sequences. "
 		"It builds a continuity bible, segment prompts, and a reusable manifest from one brief.");
@@ -1262,7 +1262,7 @@ void ofApp::drawLongVideoPanel() {
 		!generating.load() &&
 		!trim(longVideoRenderSourceImagePath).empty();
 	ImGui::BeginDisabled(!canRenderLongVideo);
-	if (ImGui::Button("Render Segment", ImVec2(170, 0))) {
+	if (ImGui::Button("Render Video Segment", ImVec2(170, 0))) {
 		runLongVideoRenderGeneration();
 	}
 	ImGui::EndDisabled();
@@ -1475,7 +1475,7 @@ void ofApp::runLongVideoRenderGeneration() {
 	const std::string renderModelLabel = getSelectedVideoRenderModelLabel();
 	if (renderModelPath.empty()) {
 		longVideoRenderStatus =
-			"[Error] Select or load a Video Render Model first.";
+			"[Error] Select a preset render model or browse to any local video model path first.";
 		return;
 	}
 
@@ -1764,6 +1764,10 @@ void ofApp::runLongVideoRenderGeneration() {
 
 			const std::filesystem::path metadataPath =
 				renderDirectory / metadataFilename;
+			const std::filesystem::path webmPath =
+				renderDirectory / (framePrefix + ".webm");
+			const bool savedWebm =
+				stableDiffusionEngine->saveVideoWebm(webmPath.string());
 			const std::filesystem::path manifestPath =
 				renderDirectory / "render-manifest.json";
 			ofJson manifest = ofxStableDiffusionBuildVideoRenderManifest(
@@ -1780,6 +1784,12 @@ void ofApp::runLongVideoRenderGeneration() {
 			manifest["render_model"]["label"] = renderModelLabel;
 			manifest["source_image"] = sourceImagePath;
 			manifest["end_image"] = endImagePath;
+			manifest["exports"] = {
+				{"frame_directory", renderDirectory.string()},
+				{"metadata_path", metadataPath.string()},
+				{"webm_path", savedWebm ? webmPath.string() : ""},
+				{"webm_saved", savedWebm}
+			};
 			manifest["chunk"] = {
 				{"id", selectedChunk.id},
 				{"title", selectedChunk.title},
@@ -1801,6 +1811,11 @@ void ofApp::runLongVideoRenderGeneration() {
 				<< " fps using "
 				<< ofxStableDiffusionVideoWorkflowPresetLabel(preset)
 				<< ".";
+			if (savedWebm) {
+				status << " WebM: " << webmPath.string() << ".";
+			} else {
+				status << " WebM export was unavailable or failed in the current native build.";
+			}
 
 			{
 				std::lock_guard<std::mutex> lock(outputMutex);

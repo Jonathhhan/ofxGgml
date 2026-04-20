@@ -3,9 +3,47 @@
 #include "utils/ImGuiHelpers.h"
 #include "utils/PathHelpers.h"
 
+#include <cctype>
 #include <unordered_set>
 
 namespace {
+
+std::string trimCopyLocal(const std::string & text) {
+	size_t start = 0;
+	while (start < text.size() &&
+		std::isspace(static_cast<unsigned char>(text[start]))) {
+		++start;
+	}
+	size_t end = text.size();
+	while (end > start &&
+		std::isspace(static_cast<unsigned char>(text[end - 1]))) {
+		--end;
+	}
+	return text.substr(start, end - start);
+}
+
+std::string parseUrlHostLocal(const std::string & rawUrl) {
+	const std::string trimmed = trimCopyLocal(rawUrl);
+	const size_t schemePos = trimmed.find("://");
+	if (schemePos == std::string::npos) {
+		return {};
+	}
+	const size_t hostStart = schemePos + 3;
+	size_t hostEnd = trimmed.find_first_of("/?#", hostStart);
+	if (hostEnd == std::string::npos) {
+		hostEnd = trimmed.size();
+	}
+	std::string hostPort = trimmed.substr(hostStart, hostEnd - hostStart);
+	const size_t atPos = hostPort.rfind('@');
+	if (atPos != std::string::npos) {
+		hostPort = hostPort.substr(atPos + 1);
+	}
+	const size_t colonPos = hostPort.find(':');
+	if (colonPos != std::string::npos) {
+		hostPort = hostPort.substr(0, colonPos);
+	}
+	return trimCopyLocal(hostPort);
+}
 
 struct CitationSourceRow {
 	int sourceIndex = -1;
@@ -41,7 +79,7 @@ void ofApp::drawCitationSearchSection(
 	ImGui::Separator();
 	ImGui::Text("Citation Research");
 	ImGui::TextDisabled(
-		"Extract source-backed quotes about a topic from loaded URLs or by crawling a website first.");
+		"Extract source-backed quotes about a topic from loaded URLs, a crawler URL, or topic-only web search.");
 
 	if (hasDeferredCitationTopic) {
 		copyStringToBuffer(
@@ -110,7 +148,7 @@ void ofApp::drawCitationSearchSection(
 	const bool canRun =
 		!generating.load() &&
 		hasTopic &&
-		((citationUseCrawler && hasCrawlerUrl) || (!citationUseCrawler && hasLoadedUrls));
+		(citationUseCrawler ? hasCrawlerUrl : true);
 
 	ImGui::BeginDisabled(!canRun);
 	if (ImGui::Button("Scrape Citations", ImVec2(160, 0))) {
@@ -151,6 +189,10 @@ void ofApp::drawCitationSearchSection(
 				ImGui::TextWrapped("Note: %s", item.note.c_str());
 			}
 			if (!item.sourceUri.empty()) {
+				const std::string host = parseUrlHostLocal(item.sourceUri);
+				if (!host.empty()) {
+					ImGui::TextDisabled("Domain: %s", host.c_str());
+				}
 				if (ImGui::SmallButton("Open Source")) {
 					ofLaunchBrowser(item.sourceUri);
 				}
@@ -185,6 +227,10 @@ void ofApp::drawCitationSearchSection(
 				}
 				ImGui::TextWrapped("%s", label.c_str());
 				if (!trim(row.sourceUri).empty()) {
+					const std::string host = parseUrlHostLocal(row.sourceUri);
+					if (!host.empty()) {
+						ImGui::TextDisabled("Domain: %s", host.c_str());
+					}
 					ImGui::TextDisabled("%s", row.sourceUri.c_str());
 				}
 				ImGui::Spacing();
@@ -212,7 +258,7 @@ void ofApp::runCitationSearch() {
 	const bool useCrawler = citationUseCrawler;
 	const std::string crawlUrl = trim(citationSeedUrl);
 	const auto loadedUrls = splitStoredScriptSourceUrls(sourceUrlsInput);
-	if ((useCrawler && crawlUrl.empty()) || (!useCrawler && loadedUrls.empty())) {
+	if (useCrawler && crawlUrl.empty()) {
 		return;
 	}
 
@@ -223,14 +269,18 @@ void ofApp::runCitationSearch() {
 	activeGenerationMode = requestMode;
 	generatingStatus = useCrawler
 		? "Crawling website and extracting citations..."
-		: "Extracting citations from loaded URLs...";
+		: (loadedUrls.empty()
+			? "Searching topic sources and extracting citations..."
+			: "Extracting citations from loaded URLs...");
 	generationStartTime = ofGetElapsedTimef();
 
 	{
 		std::lock_guard<std::mutex> lock(streamMutex);
 		streamingOutput = useCrawler
 			? "Crawling sources and extracting citation candidates..."
-			: "Reading loaded URLs and extracting citation candidates...";
+			: (loadedUrls.empty()
+				? "Finding web sources for the topic and extracting citation candidates..."
+				: "Reading loaded URLs and extracting citation candidates...");
 	}
 
 	if (workerThread.joinable()) {
@@ -264,7 +314,7 @@ void ofApp::runCitationSearch() {
 
 			std::ostringstream text;
 			if (result.success) {
-				if (!result.summary.empty()) {
+				if (!result.summary.empty() && !result.citations.empty()) {
 					text << result.summary << "\n\n";
 				}
 				for (size_t i = 0; i < result.citations.size(); ++i) {

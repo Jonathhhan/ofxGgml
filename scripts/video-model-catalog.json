@@ -1,0 +1,45 @@
+{
+  "models": [
+    {
+      "preset": 1,
+      "name": "Wan 2.2 TI2V 5B Q8_0",
+      "filename": "Wan2.2-TI2V-5B-Q8_0.gguf",
+      "url": "https://huggingface.co/models?search=Wan2.2%20TI2V%205B%20GGUF",
+      "backend": "ofxStableDiffusion",
+      "family": "WANTI2V",
+      "best_for": "text-plus-image video, current Wan 2.2 flow",
+      "description": "Optional current Wan 2.2 render preset."
+    },
+    {
+      "preset": 2,
+      "name": "Wan 2.2 I2V 14B Q4_0",
+      "filename": "Wan2.2-I2V-A14B-Q4_0.gguf",
+      "url": "https://huggingface.co/models?search=Wan2.2%20I2V%2014B%20GGUF",
+      "backend": "ofxStableDiffusion",
+      "family": "WANI2V",
+      "best_for": "general image-to-video, cinematic motion",
+      "description": "Optional Wan 2.2 image-to-video preset."
+    },
+    {
+      "preset": 3,
+      "name": "Wan 2.1 FLF2V 14B Q4_0",
+      "filename": "wan2.1-flf2v-14b-Q4_0.gguf",
+      "url": "https://huggingface.co/models?search=wan%202.1%20flf2v%20gguf",
+      "backend": "ofxStableDiffusion",
+      "family": "WANFLF2V",
+      "best_for": "continuity shots, transition control",
+      "description": "Optional first-last-frame preset for continuity-preserving shot transitions."
+    },
+    {
+      "preset": 4,
+      "name": "Wan VACE 14B Q4_0",
+      "filename": "wan-vace-14b-Q4_0.gguf",
+      "url": "https://huggingface.co/models?search=wan%20vace%20gguf",
+      "backend": "ofxStableDiffusion",
+      "family": "WANVACE",
+      "best_for": "conditioned motion, higher control",
+      "description": "Optional conditioning-heavy preset for tighter motion guidance."
+    }
+  ],
+  "recommended": 1
+}

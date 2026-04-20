@@ -84,7 +84,7 @@ void loadModelPresets(
 					preset.bestFor = model.value("best_for", "");
 					preset.description = model.value("description", preset.bestFor);
 					if (preset.description.empty()) {
-						preset.description = "Recommended model";
+						preset.description = "Optional preset";
 					}
 					if (preset.name.empty() || preset.filename.empty() || preset.url.empty()) {
 						continue;
@@ -122,6 +122,114 @@ void loadModelPresets(
 			ofLogWarning("ModelPresets") << "Failed to load model-catalog.json: " << e.what();
 		} catch (...) {
 			ofLogWarning("ModelPresets") << "Failed to load model-catalog.json: unknown parse error";
+		}
+	}
+
+	if (!loaded) {
+		setFallbackPresets();
+	}
+}
+
+void loadVideoRenderPresets(
+	std::vector<VideoRenderPreset> & presets,
+	int & recommendedIndex,
+	const char * catalogPath) {
+
+	presets.clear();
+	recommendedIndex = 0;
+
+	auto setFallbackPresets = [&]() {
+		presets = {
+			{
+				"Wan 2.1 I2V 14B Q4_0",
+				"wan2.1-i2v-14b-Q4_0.gguf",
+				"https://huggingface.co/models?search=wan%202.1%20i2v%20gguf",
+				"Optional preset for planned image-to-video segment rendering.",
+				"ofxStableDiffusion",
+				"WANI2V",
+				"general image-to-video, cinematic motion"
+			},
+			{
+				"Wan 2.1 TI2V 5B Q4_0",
+				"wan2.1-ti2v-5b-Q4_0.gguf",
+				"https://huggingface.co/models?search=wan%202.1%20ti2v%20gguf",
+				"Text-and-image-to-video variant with stronger stylized prompt control.",
+				"ofxStableDiffusion",
+				"WANTI2V",
+				"text-driven video, stylized motion"
+			},
+			{
+				"Wan 2.1 FLF2V 14B Q4_0",
+				"wan2.1-flf2v-14b-Q4_0.gguf",
+				"https://huggingface.co/models?search=wan%202.1%20flf2v%20gguf",
+				"First-last-frame variant for continuity-preserving shot transitions.",
+				"ofxStableDiffusion",
+				"WANFLF2V",
+				"continuity shots, transition control"
+			},
+			{
+				"Wan VACE 14B Q4_0",
+				"wan-vace-14b-Q4_0.gguf",
+				"https://huggingface.co/models?search=wan%20vace%20gguf",
+				"Conditioning-heavy video model for tighter control over motion guidance.",
+				"ofxStableDiffusion",
+				"WANVACE",
+				"conditioned motion, higher control"
+			}
+		};
+		recommendedIndex = 0;
+	};
+
+	std::error_code ec;
+	std::filesystem::path resolvedCatalogPath;
+
+	if (catalogPath && *catalogPath != '\0') {
+		resolvedCatalogPath = catalogPath;
+	} else {
+		auto srcPath = std::filesystem::path(__FILE__).parent_path();
+		auto addonRoot = std::filesystem::weakly_canonical(srcPath / ".." / ".." / "..", ec);
+		if (!ec) {
+			resolvedCatalogPath = addonRoot / "scripts" / "video-model-catalog.json";
+		}
+	}
+
+	bool loaded = false;
+	if (std::filesystem::exists(resolvedCatalogPath, ec) && !ec) {
+		try {
+			std::ifstream in(resolvedCatalogPath);
+			ofJson json;
+			in >> json;
+			if (json.contains("models") && json["models"].is_array()) {
+				for (const auto & model : json["models"]) {
+					VideoRenderPreset preset;
+					preset.name = model.value("name", "");
+					preset.filename = model.value("filename", "");
+					preset.url = model.value("url", "");
+					preset.description = model.value("description", "");
+					preset.backend = model.value("backend", "ofxStableDiffusion");
+					preset.family = model.value("family", "");
+					preset.bestFor = model.value("best_for", "");
+					if (preset.name.empty() || preset.filename.empty()) {
+						continue;
+					}
+					if (preset.description.empty()) {
+						preset.description = "Optional video render preset";
+					}
+					presets.push_back(std::move(preset));
+				}
+			}
+			if (!presets.empty()) {
+				const int idxOneBased = json.value("recommended", 1);
+				recommendedIndex = std::clamp(
+					idxOneBased - 1,
+					0,
+					static_cast<int>(presets.size()) - 1);
+			}
+			loaded = !presets.empty();
+		} catch (const std::exception & e) {
+			ofLogWarning("ModelPresets") << "Failed to load video-model-catalog.json: " << e.what();
+		} catch (...) {
+			ofLogWarning("ModelPresets") << "Failed to load video-model-catalog.json: unknown parse error";
 		}
 	}
 

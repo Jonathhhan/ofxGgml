@@ -80,6 +80,36 @@ std::string normalizePrefix(const ofxGgmlAceStepRequest & request) {
 		: sanitizeFileStem(caption);
 }
 
+std::string aceStepServerRootFromUrl(const std::string & url) {
+	std::string normalized = trimCopy(url);
+	while (!normalized.empty() && normalized.back() == '/') {
+		normalized.pop_back();
+	}
+
+	const std::vector<std::string> suffixes = {
+		"/lm",
+		"/synth",
+		"/understand",
+		"/health",
+		"/props",
+		"/job"
+	};
+	for (const auto & suffix : suffixes) {
+		if (normalized.size() > suffix.size() &&
+			normalized.compare(
+				normalized.size() - suffix.size(),
+				suffix.size(),
+				suffix) == 0) {
+			normalized.erase(normalized.size() - suffix.size());
+			break;
+		}
+	}
+	while (!normalized.empty() && normalized.back() == '/') {
+		normalized.pop_back();
+	}
+	return normalized;
+}
+
 std::string detectAudioExtension(const std::string & contentType, bool wavRequested) {
 	if (contentType.find("wav") != std::string::npos || wavRequested) {
 		return ".wav";
@@ -152,7 +182,463 @@ size_t curlWriteToVector(void * contents, size_t size, size_t nmemb, void * user
 	return totalSize;
 }
 
-ofxGgmlAceStepHealthResult performHealthRequest(const std::string & url) {
+bool performStringRequest(
+	const std::string & url,
+	const char * method,
+	const std::string * requestBody,
+	const std::vector<std::string> & requestHeaders,
+	long timeoutSeconds,
+	std::string & responseBody,
+	long & httpCode,
+	std::string & contentType,
+	std::string & error) {
+	CURL * curl = curl_easy_init();
+	if (!curl) {
+		error = "failed to initialize curl";
+		return false;
+	}
+
+	curl_slist * headers = nullptr;
+	for (const auto & header : requestHeaders) {
+		headers = curl_slist_append(headers, header.c_str());
+	}
+
+	CURLcode performCode = CURLE_OK;
+	try {
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteToString);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
+		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds);
+		if (headers) {
+			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+		}
+		if (requestBody) {
+			curl_easy_setopt(curl, CURLOPT_POSTFIELDS, requestBody->c_str());
+			curl_easy_setopt(
+				curl,
+				CURLOPT_POSTFIELDSIZE,
+				static_cast<long>(requestBody->size()));
+		}
+		performCode = curl_easy_perform(curl);
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+		char * responseContentType = nullptr;
+		curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &responseContentType);
+		if (responseContentType) {
+			contentType = responseContentType;
+		}
+	} catch (...) {
+		performCode = CURLE_ABORTED_BY_CALLBACK;
+	}
+
+	if (headers) {
+		curl_slist_free_all(headers);
+	}
+	curl_easy_cleanup(curl);
+
+	if (performCode != CURLE_OK) {
+		error = curl_easy_strerror(performCode);
+		return false;
+	}
+	return true;
+}
+
+bool performBinaryRequest(
+	const std::string & url,
+	const char * method,
+	const std::string * requestBody,
+	const std::vector<std::string> & requestHeaders,
+	long timeoutSeconds,
+	std::vector<unsigned char> & responseBytes,
+	long & httpCode,
+	std::string & contentType,
+	std::string & error) {
+	CURL * curl = curl_easy_init();
+	if (!curl) {
+		error = "failed to initialize curl";
+		return false;
+	}
+
+	curl_slist * headers = nullptr;
+	for (const auto & header : requestHeaders) {
+		headers = curl_slist_append(headers, header.c_str());
+	}
+
+	CURLcode performCode = CURLE_OK;
+	try {
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteToVector);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBytes);
+		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds);
+		if (headers) {
+			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+		}
+		if (requestBody) {
+			curl_easy_setopt(curl, CURLOPT_POSTFIELDS, requestBody->c_str());
+			curl_easy_setopt(
+				curl,
+				CURLOPT_POSTFIELDSIZE,
+				static_cast<long>(requestBody->size()));
+		}
+		performCode = curl_easy_perform(curl);
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+		char * responseContentType = nullptr;
+		curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &responseContentType);
+		if (responseContentType) {
+			contentType = responseContentType;
+		}
+	} catch (...) {
+		performCode = CURLE_ABORTED_BY_CALLBACK;
+	}
+
+	if (headers) {
+		curl_slist_free_all(headers);
+	}
+	curl_easy_cleanup(curl);
+
+	if (performCode != CURLE_OK) {
+		error = curl_easy_strerror(performCode);
+		return false;
+	}
+	return true;
+}
+
+bool parseAsyncJobId(const std::string & responseBody, std::string & jobId) {
+	const ofJson parsed = ofJson::parse(responseBody, nullptr, false);
+	if (!parsed.is_object()) {
+		return false;
+	}
+	if (!parsed.contains("id") || !parsed["id"].is_string()) {
+		return false;
+	}
+	jobId = trimCopy(parsed["id"].get<std::string>());
+	return !jobId.empty();
+}
+
+bool parseJobStatusPayload(
+	const std::string & responseBody,
+	std::string & status,
+	std::string & errorMessage) {
+	const ofJson parsed = ofJson::parse(responseBody, nullptr, false);
+	if (!parsed.is_object()) {
+		return false;
+	}
+	if (parsed.contains("status") && parsed["status"].is_string()) {
+		status = trimCopy(parsed["status"].get<std::string>());
+	}
+	if (parsed.contains("error") && parsed["error"].is_string()) {
+		errorMessage = trimCopy(parsed["error"].get<std::string>());
+	}
+	return !status.empty() || !errorMessage.empty();
+}
+
+std::string extractLikelyJsonPayload(const std::string & responseBody) {
+	const std::string trimmed = trimCopy(responseBody);
+	if (trimmed.empty()) {
+		return {};
+	}
+	if (trimmed.rfind("```", 0) == 0) {
+		const size_t firstNewline = trimmed.find('\n');
+		const size_t closingFence = trimmed.rfind("```");
+		if (firstNewline != std::string::npos &&
+			closingFence != std::string::npos &&
+			closingFence > firstNewline) {
+			return trimCopy(trimmed.substr(
+				firstNewline + 1,
+				closingFence - firstNewline - 1));
+		}
+	}
+
+	const size_t firstObject = trimmed.find('{');
+	const size_t firstArray = trimmed.find('[');
+	size_t firstJson = std::string::npos;
+	if (firstObject == std::string::npos) {
+		firstJson = firstArray;
+	} else if (firstArray == std::string::npos) {
+		firstJson = firstObject;
+	} else {
+		firstJson = std::min(firstObject, firstArray);
+	}
+	if (firstJson == std::string::npos) {
+		return trimmed;
+	}
+
+	const size_t lastObject = trimmed.rfind('}');
+	const size_t lastArray = trimmed.rfind(']');
+	const size_t lastJson = std::max(
+		lastObject == std::string::npos ? size_t(0) : lastObject,
+		lastArray == std::string::npos ? size_t(0) : lastArray);
+	if (lastJson < firstJson) {
+		return trimmed.substr(firstJson);
+	}
+	return trimCopy(trimmed.substr(firstJson, lastJson - firstJson + 1));
+}
+
+ofJson parseAceStepJsonPayload(const std::string & responseBody) {
+	ofJson parsed = ofJson::parse(responseBody, nullptr, false);
+	if (!parsed.is_discarded()) {
+		return parsed;
+	}
+	const std::string extracted = extractLikelyJsonPayload(responseBody);
+	if (extracted != trimCopy(responseBody)) {
+		parsed = ofJson::parse(extracted, nullptr, false);
+		if (!parsed.is_discarded()) {
+			return parsed;
+		}
+	}
+	return ofJson();
+}
+
+bool buildSynthRequestJsonValue(
+	const ofJson & parsed,
+	ofJson & synthRequest,
+	std::string & error) {
+	if (parsed.is_discarded() || parsed.is_null()) {
+		error = "AceStep /lm result returned invalid JSON";
+		return false;
+	}
+	if (parsed.is_array()) {
+		if (parsed.empty() || !parsed.front().is_object()) {
+			error = "AceStep /lm result did not contain a usable request payload";
+			return false;
+		}
+		synthRequest = parsed.front();
+		return true;
+	}
+	if (parsed.is_object()) {
+		static const std::vector<std::string> nestedKeys = {
+			"result",
+			"request",
+			"requests",
+			"data",
+			"payload"
+		};
+		for (const auto & key : nestedKeys) {
+			if (!parsed.contains(key)) {
+				continue;
+			}
+			const ofJson & nested = parsed[key];
+			if (nested.is_object()) {
+				synthRequest = nested;
+				return true;
+			}
+			if (nested.is_array()) {
+				if (nested.empty() || !nested.front().is_object()) {
+					error = "AceStep /lm result did not contain a usable request payload";
+					return false;
+				}
+				synthRequest = nested.front();
+				return true;
+			}
+			if (nested.is_string()) {
+				const ofJson reparsed = parseAceStepJsonPayload(
+					trimCopy(nested.get<std::string>()));
+				if (!reparsed.is_discarded() &&
+					buildSynthRequestJsonValue(reparsed, synthRequest, error)) {
+					return true;
+				}
+			}
+		}
+		synthRequest = parsed;
+		return true;
+	}
+	if (parsed.is_string()) {
+		const ofJson reparsed = parseAceStepJsonPayload(
+			trimCopy(parsed.get<std::string>()));
+		if (!reparsed.is_discarded() &&
+			buildSynthRequestJsonValue(reparsed, synthRequest, error)) {
+			return true;
+		}
+	}
+	error = "AceStep /lm result did not contain a usable request payload";
+	return false;
+}
+
+std::string buildSynthRequestBodyFromLmResult(
+	const std::string & lmResponseBody,
+	std::string & error) {
+	const ofJson parsed = parseAceStepJsonPayload(lmResponseBody);
+	ofJson synthRequest;
+	if (!buildSynthRequestJsonValue(parsed, synthRequest, error)) {
+		if (!trimCopy(lmResponseBody).empty()) {
+			error += ": " + trimCopy(extractLikelyJsonPayload(lmResponseBody));
+		}
+		return {};
+	}
+	return synthRequest.dump();
+}
+
+bool fetchAceStepJobStringResult(
+	const std::string & baseUrl,
+	const std::string & jobId,
+	long timeoutSeconds,
+	std::string & resultBody,
+	std::string & error) {
+	const std::string statusUrl = baseUrl + "/job?id=" + jobId;
+	const std::vector<std::string> headers = { "Accept: application/json" };
+	const auto deadline = std::chrono::steady_clock::now() +
+		std::chrono::seconds(timeoutSeconds);
+	while (std::chrono::steady_clock::now() < deadline) {
+		std::string statusBody;
+		long httpCode = 0;
+		std::string contentType;
+		std::string requestError;
+		if (!performStringRequest(
+				statusUrl,
+				"GET",
+				nullptr,
+				headers,
+				30L,
+				statusBody,
+				httpCode,
+				contentType,
+				requestError)) {
+			error = "AceStep /job status request failed: " + requestError;
+			return false;
+		}
+		if (httpCode < 200 || httpCode >= 300) {
+			error = "AceStep /job status returned HTTP " + std::to_string(httpCode);
+			if (!trimCopy(statusBody).empty()) {
+				error += ": " + trimCopy(statusBody);
+			}
+			return false;
+		}
+
+		std::string status;
+		std::string statusError;
+		if (!parseJobStatusPayload(statusBody, status, statusError)) {
+			error = "AceStep /job status returned invalid JSON";
+			return false;
+		}
+		if (status == "done") {
+			const std::string resultUrl = statusUrl + "&result=1";
+			long resultCode = 0;
+			std::string resultType;
+			std::string resultError;
+			if (!performStringRequest(
+					resultUrl,
+					"GET",
+					nullptr,
+					headers,
+					timeoutSeconds,
+					resultBody,
+					resultCode,
+					resultType,
+					resultError)) {
+				error = "AceStep /job result request failed: " + resultError;
+				return false;
+			}
+			if (resultCode < 200 || resultCode >= 300) {
+				error = "AceStep /job result returned HTTP " + std::to_string(resultCode);
+				if (!trimCopy(resultBody).empty()) {
+					error += ": " + trimCopy(resultBody);
+				}
+				return false;
+			}
+			return true;
+		}
+		if (status == "failed" || status == "cancelled") {
+			error = statusError.empty()
+				? "AceStep job " + status + "."
+				: "AceStep job " + status + ": " + statusError;
+			return false;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(250));
+	}
+	error = "AceStep job timed out before producing a result.";
+	return false;
+}
+
+bool fetchAceStepJobBinaryResult(
+	const std::string & baseUrl,
+	const std::string & jobId,
+	long timeoutSeconds,
+	std::vector<unsigned char> & resultBytes,
+	std::string & contentType,
+	std::string & error) {
+	const std::string statusUrl = baseUrl + "/job?id=" + jobId;
+	const std::vector<std::string> statusHeaders = { "Accept: application/json" };
+	const auto deadline = std::chrono::steady_clock::now() +
+		std::chrono::seconds(timeoutSeconds);
+	while (std::chrono::steady_clock::now() < deadline) {
+		std::string statusBody;
+		long httpCode = 0;
+		std::string statusType;
+		std::string requestError;
+		if (!performStringRequest(
+				statusUrl,
+				"GET",
+				nullptr,
+				statusHeaders,
+				30L,
+				statusBody,
+				httpCode,
+				statusType,
+				requestError)) {
+			error = "AceStep /job status request failed: " + requestError;
+			return false;
+		}
+		if (httpCode < 200 || httpCode >= 300) {
+			error = "AceStep /job status returned HTTP " + std::to_string(httpCode);
+			if (!trimCopy(statusBody).empty()) {
+				error += ": " + trimCopy(statusBody);
+			}
+			return false;
+		}
+
+		std::string status;
+		std::string statusError;
+		if (!parseJobStatusPayload(statusBody, status, statusError)) {
+			error = "AceStep /job status returned invalid JSON";
+			return false;
+		}
+		if (status == "done") {
+			const std::string resultUrl = statusUrl + "&result=1";
+			long resultCode = 0;
+			std::string resultError;
+			const std::vector<std::string> resultHeaders = { "Accept: */*" };
+			if (!performBinaryRequest(
+					resultUrl,
+					"GET",
+					nullptr,
+					resultHeaders,
+					timeoutSeconds,
+					resultBytes,
+					resultCode,
+					contentType,
+					resultError)) {
+				error = "AceStep /job result request failed: " + resultError;
+				return false;
+			}
+			if (resultCode < 200 || resultCode >= 300) {
+				error = "AceStep /job result returned HTTP " + std::to_string(resultCode);
+				if (!resultBytes.empty()) {
+					error += ": " + trimCopy(std::string(
+						resultBytes.begin(),
+						resultBytes.end()));
+				}
+				return false;
+			}
+			return true;
+		}
+		if (status == "failed" || status == "cancelled") {
+			error = statusError.empty()
+				? "AceStep job " + status + "."
+				: "AceStep job " + status + ": " + statusError;
+			return false;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(250));
+	}
+	error = "AceStep job timed out before producing a result.";
+	return false;
+}
+
+ofxGgmlAceStepHealthResult performHealthRequest(
+	const std::string & url,
+	long timeoutMs) {
 	ofxGgmlAceStepHealthResult result;
 	result.usedServerUrl = url;
 	const auto start = std::chrono::steady_clock::now();
@@ -173,7 +659,9 @@ ofxGgmlAceStepHealthResult performHealthRequest(const std::string & url) {
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteToString);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
 		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+		curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+		curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, std::min<long>(timeoutMs, 500L));
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, std::max<long>(timeoutMs, 500L));
 		headers = curl_slist_append(headers, "Accept: application/json");
 		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 		performCode = curl_easy_perform(curl);
@@ -303,43 +791,26 @@ ofxGgmlAceStepGenerateResult performGenerateRequest(
 	result.requestJson = requestBody;
 	const auto start = std::chrono::steady_clock::now();
 
-	CURL * curl = curl_easy_init();
-	if (!curl) {
-		result.error = "failed to initialize curl for AceStep generation";
-		return result;
-	}
-
-	long httpCode = 0;
-	curl_slist * headers = nullptr;
-	CURLcode performCode = CURLE_OK;
-
-	headers = curl_slist_append(headers, "Accept: application/json");
-	headers = curl_slist_append(headers, "Content-Type: application/json");
-
 	std::string lmResponseBody;
-	try {
-		curl_easy_setopt(curl, CURLOPT_URL, lmUrl.c_str());
-		curl_easy_setopt(curl, CURLOPT_POST, 1L);
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, requestBody.c_str());
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(requestBody.size()));
-		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteToString);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &lmResponseBody);
-		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 240L);
-		performCode = curl_easy_perform(curl);
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-	} catch (...) {
-		performCode = CURLE_ABORTED_BY_CALLBACK;
-	}
-
-	if (performCode != CURLE_OK) {
-		result.error = std::string("AceStep /lm request failed: ") +
-			curl_easy_strerror(performCode);
-		if (headers) {
-			curl_slist_free_all(headers);
-		}
-		curl_easy_cleanup(curl);
+	long httpCode = 0;
+	std::string contentType;
+	std::string requestError;
+	const std::vector<std::string> headers = {
+		"Accept: application/json",
+		"Content-Type: application/json"
+	};
+	const std::string baseUrl = aceStepServerRootFromUrl(lmUrl);
+	if (!performStringRequest(
+			lmUrl,
+			"POST",
+			&requestBody,
+			headers,
+			240L,
+			lmResponseBody,
+			httpCode,
+			contentType,
+			requestError)) {
+		result.error = "AceStep /lm request failed: " + requestError;
 		return result;
 	}
 	if (httpCode < 200 || httpCode >= 300) {
@@ -347,54 +818,52 @@ ofxGgmlAceStepGenerateResult performGenerateRequest(
 		if (!trimCopy(lmResponseBody).empty()) {
 			result.error += ": " + trimCopy(lmResponseBody);
 		}
-		if (headers) {
-			curl_slist_free_all(headers);
-		}
-		curl_easy_cleanup(curl);
 		return result;
+	}
+	std::string lmJobId;
+	if (parseAsyncJobId(lmResponseBody, lmJobId)) {
+		std::string jobError;
+		if (!fetchAceStepJobStringResult(
+				baseUrl,
+				lmJobId,
+				600L,
+				lmResponseBody,
+				jobError)) {
+			result.error = jobError;
+			return result;
+		}
 	}
 
 	result.enrichedRequestsJson = lmResponseBody;
+	std::string synthRequestError;
+	const std::string synthRequestBody =
+		buildSynthRequestBodyFromLmResult(lmResponseBody, synthRequestError);
+	if (synthRequestBody.empty()) {
+		result.error = synthRequestError;
+		return result;
+	}
 
 	std::vector<unsigned char> synthResponseBytes;
 	std::string synthContentType;
-	curl_easy_reset(curl);
 	httpCode = 0;
-	performCode = CURLE_OK;
-	try {
-		curl_easy_setopt(curl, CURLOPT_URL, synthUrl.c_str());
-		curl_easy_setopt(curl, CURLOPT_POST, 1L);
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, lmResponseBody.c_str());
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(lmResponseBody.size()));
-		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteToVector);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &synthResponseBytes);
-		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 600L);
-		performCode = curl_easy_perform(curl);
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-		char * responseContentType = nullptr;
-		curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &responseContentType);
-		if (responseContentType) {
-			synthContentType = responseContentType;
-		}
-	} catch (...) {
-		performCode = CURLE_ABORTED_BY_CALLBACK;
+	requestError.clear();
+	if (!performBinaryRequest(
+			synthUrl,
+			"POST",
+			&synthRequestBody,
+			headers,
+			600L,
+			synthResponseBytes,
+			httpCode,
+			synthContentType,
+			requestError)) {
+		result.error = "AceStep /synth request failed: " + requestError;
+		return result;
 	}
-
-	if (headers) {
-		curl_slist_free_all(headers);
-	}
-	curl_easy_cleanup(curl);
 
 	result.elapsedMs = std::chrono::duration<float, std::milli>(
 		std::chrono::steady_clock::now() - start).count();
 
-	if (performCode != CURLE_OK) {
-		result.error = std::string("AceStep /synth request failed: ") +
-			curl_easy_strerror(performCode);
-		return result;
-	}
 	if (httpCode < 200 || httpCode >= 300) {
 		result.error = "AceStep /synth returned HTTP " + std::to_string(httpCode);
 		if (!synthResponseBytes.empty()) {
@@ -403,6 +872,24 @@ ofxGgmlAceStepGenerateResult performGenerateRequest(
 				synthResponseBytes.end()));
 		}
 		return result;
+	}
+	std::string synthEnvelope(
+		synthResponseBytes.begin(),
+		synthResponseBytes.end());
+	std::string synthJobId;
+	if (parseAsyncJobId(synthEnvelope, synthJobId)) {
+		synthResponseBytes.clear();
+		std::string jobError;
+		if (!fetchAceStepJobBinaryResult(
+				baseUrl,
+				synthJobId,
+				1200L,
+				synthResponseBytes,
+				synthContentType,
+				jobError)) {
+			result.error = jobError;
+			return result;
+		}
 	}
 	if (synthResponseBytes.empty()) {
 		result.error = "AceStep /synth returned empty audio output";
@@ -455,18 +942,19 @@ ofxGgmlAceStepUnderstandResult performUnderstandRequest(
 	result.usedServerUrl = url;
 	const auto start = std::chrono::steady_clock::now();
 
+	std::string responseBody;
+	long httpCode = 0;
+	std::string contentType;
+
 	CURL * curl = curl_easy_init();
 	if (!curl) {
 		result.error = "failed to initialize curl for AceStep understand request";
 		return result;
 	}
 
-	std::string responseBody;
-	long httpCode = 0;
-	CURLcode performCode = CURLE_OK;
 	curl_mime * mime = nullptr;
 	curl_slist * headers = nullptr;
-
+	CURLcode performCode = CURLE_OK;
 	try {
 		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteToString);
@@ -496,6 +984,11 @@ ofxGgmlAceStepUnderstandResult performUnderstandRequest(
 		curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
 		performCode = curl_easy_perform(curl);
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+		char * responseContentType = nullptr;
+		curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &responseContentType);
+		if (responseContentType) {
+			contentType = responseContentType;
+		}
 	} catch (...) {
 		performCode = CURLE_ABORTED_BY_CALLBACK;
 	}
@@ -524,8 +1017,26 @@ ofxGgmlAceStepUnderstandResult performUnderstandRequest(
 		}
 		return result;
 	}
+	std::string understandJobId;
+	if (parseAsyncJobId(responseBody, understandJobId)) {
+		std::string jobError;
+		const std::string baseUrl = aceStepServerRootFromUrl(url);
+		if (!fetchAceStepJobStringResult(
+				baseUrl,
+				understandJobId,
+				1200L,
+				responseBody,
+				jobError)) {
+			result.error = jobError;
+			return result;
+		}
+		result.rawJson = responseBody;
+	}
 
-	const ofJson parsed = ofJson::parse(responseBody, nullptr, false);
+	ofJson parsed = ofJson::parse(responseBody, nullptr, false);
+	if (parsed.is_array() && !parsed.empty() && parsed[0].is_object()) {
+		parsed = parsed[0];
+	}
 	if (parsed.is_discarded() || !parsed.is_object()) {
 		result.error = "AceStep /understand returned invalid JSON";
 		return result;
@@ -667,7 +1178,8 @@ std::string ofxGgmlAceStepBridge::summarizeUnderstandResult(
 }
 
 ofxGgmlAceStepHealthResult ofxGgmlAceStepBridge::healthCheck(
-	const std::string & serverUrl) const {
+	const std::string & serverUrl,
+	long timeoutMs) const {
 	const std::string url = normalizeServerUrl(
 		serverUrl.empty() ? m_serverUrl : serverUrl,
 		"/health");
@@ -677,7 +1189,7 @@ ofxGgmlAceStepHealthResult ofxGgmlAceStepBridge::healthCheck(
 	result.error = "AceStep health requests require openFrameworks runtime";
 	return result;
 #else
-	return performHealthRequest(url);
+	return performHealthRequest(url, timeoutMs);
 #endif
 }
 

@@ -24,6 +24,7 @@ bool ofApp::saveSession(const std::string & path) {
 	session["settings"] = {
 		{"activeMode", static_cast<int>(activeMode)},
 		{"selectedModelIndex", selectedModelIndex},
+		{"selectedVideoRenderPresetIndex", selectedVideoRenderPresetIndex},
 		{"selectedLanguageIndex", selectedLanguageIndex},
 		{"scriptAgentModeIndex", scriptAgentModeIndex},
 		{"translateSourceLang", translateSourceLang},
@@ -71,7 +72,10 @@ bool ofApp::saveSession(const std::string & path) {
 		{"longVideoHeight", longVideoHeight},
 		{"longVideoFps", longVideoFps},
 		{"longVideoFramesPerChunk", longVideoFramesPerChunk},
-		{"longVideoSeed", longVideoSeed}
+		{"longVideoSeed", longVideoSeed},
+		{"longVideoRenderPresetIndex", longVideoRenderPresetIndex},
+		{"longVideoRenderModeIndex", longVideoRenderModeIndex},
+		{"longVideoRenderSelectedChunkIndex", longVideoRenderSelectedChunkIndex}
 	};
 	session["settings"]["modeMaxTokens"] = ofJson::array();
 	for (int i = 0; i < kModeCount; ++i) {
@@ -129,6 +133,10 @@ bool ofApp::saveSession(const std::string & path) {
 		{"longVideoStyle", std::string(longVideoStyle)},
 		{"longVideoNegativeStyle", std::string(longVideoNegativeStyle)},
 		{"longVideoContinuityGoal", std::string(longVideoContinuityGoal)},
+		{"longVideoRenderSourceImagePath", std::string(longVideoRenderSourceImagePath)},
+		{"longVideoRenderEndImagePath", std::string(longVideoRenderEndImagePath)},
+		{"longVideoRenderOutputDir", std::string(longVideoRenderOutputDir)},
+		{"longVideoRenderOutputPrefix", std::string(longVideoRenderOutputPrefix)},
 		{"customInput", std::string(customInput)},
 		{"customSystemPrompt", std::string(customSystemPrompt)},
 		{"sourceUrlsInput", std::string(sourceUrlsInput)},
@@ -137,6 +145,7 @@ bool ofApp::saveSession(const std::string & path) {
 		{"textServerUrl", std::string(textServerUrl)},
 		{"textServerModel", std::string(textServerModel)},
 		{"customModelPath", std::string(customModelPath)},
+		{"customVideoRenderModelPath", std::string(customVideoRenderModelPath)},
 		{"visionPrompt", std::string(visionPrompt)},
 		{"visionImagePath", std::string(visionImagePath)},
 		{"visionVideoPath", std::string(visionVideoPath)},
@@ -343,6 +352,11 @@ bool ofApp::saveSession(const std::string & path) {
 		{"longVideoStatus", longVideoStatus},
 		{"longVideoContinuityBible", longVideoContinuityBible},
 		{"longVideoManifestJson", longVideoManifestJson},
+		{"longVideoRenderStatus", longVideoRenderStatus},
+		{"longVideoRenderOutputDirectory", longVideoRenderOutputDirectory},
+		{"longVideoRenderMetadataPath", longVideoRenderMetadataPath},
+		{"longVideoRenderManifestPath", longVideoRenderManifestPath},
+		{"longVideoRenderManifestJson", longVideoRenderManifestJson},
 		{"customOutput", customOutput},
 		{"citationOutput", citationOutput},
 		{"visionOutput", visionOutput},
@@ -454,6 +468,10 @@ bool ofApp::loadSession(const std::string & path) {
 
 	activeMode = static_cast<AiMode>(std::clamp(getInt(settings, "activeMode", static_cast<int>(AiMode::Chat)), 0, kModeCount - 1));
 	selectedModelIndex = std::clamp(getInt(settings, "selectedModelIndex", 0), 0, std::max(0, static_cast<int>(modelPresets.size()) - 1));
+	selectedVideoRenderPresetIndex = std::clamp(
+		getInt(settings, "selectedVideoRenderPresetIndex", 0),
+		0,
+		std::max(0, static_cast<int>(videoRenderPresets.size()) - 1));
 	selectedLanguageIndex = std::clamp(getInt(settings, "selectedLanguageIndex", 0), 0, std::max(0, static_cast<int>(scriptLanguages.size()) - 1));
 	scriptAgentModeIndex = std::clamp(getInt(settings, "scriptAgentModeIndex", scriptAgentModeIndex), 0, 1);
 	translateSourceLang = std::clamp(getInt(settings, "translateSourceLang", 0), 0, std::max(0, static_cast<int>(translateLanguages.size()) - 1));
@@ -530,6 +548,17 @@ bool ofApp::loadSession(const std::string & path) {
 		8,
 		240);
 	longVideoSeed = getInt(settings, "longVideoSeed", longVideoSeed);
+	longVideoRenderPresetIndex = std::clamp(
+		getInt(settings, "longVideoRenderPresetIndex", longVideoRenderPresetIndex),
+		0,
+		4);
+	longVideoRenderModeIndex = std::clamp(
+		getInt(settings, "longVideoRenderModeIndex", longVideoRenderModeIndex),
+		0,
+		3);
+	longVideoRenderSelectedChunkIndex = std::max(
+		0,
+		getInt(settings, "longVideoRenderSelectedChunkIndex", longVideoRenderSelectedChunkIndex));
 	if (settings.contains("modeMaxTokens") && settings["modeMaxTokens"].is_array()) {
 		for (size_t i = 0; i < std::min<size_t>(settings["modeMaxTokens"].size(), kModeCount); ++i) {
 			modeMaxTokens[i] = std::clamp(settings["modeMaxTokens"][i].get<int>(), 32, 4096);
@@ -572,6 +601,26 @@ bool ofApp::loadSession(const std::string & path) {
 		sizeof(longVideoContinuityGoal),
 		buffers,
 		"longVideoContinuityGoal");
+	copyJsonString(
+		longVideoRenderSourceImagePath,
+		sizeof(longVideoRenderSourceImagePath),
+		buffers,
+		"longVideoRenderSourceImagePath");
+	copyJsonString(
+		longVideoRenderEndImagePath,
+		sizeof(longVideoRenderEndImagePath),
+		buffers,
+		"longVideoRenderEndImagePath");
+	copyJsonString(
+		longVideoRenderOutputDir,
+		sizeof(longVideoRenderOutputDir),
+		buffers,
+		"longVideoRenderOutputDir");
+	copyJsonString(
+		longVideoRenderOutputPrefix,
+		sizeof(longVideoRenderOutputPrefix),
+		buffers,
+		"longVideoRenderOutputPrefix");
 	copyJsonString(customInput, sizeof(customInput), buffers, "customInput");
 	copyJsonString(customSystemPrompt, sizeof(customSystemPrompt), buffers, "customSystemPrompt");
 	copyJsonString(sourceUrlsInput, sizeof(sourceUrlsInput), buffers, "sourceUrlsInput");
@@ -580,6 +629,11 @@ bool ofApp::loadSession(const std::string & path) {
 	copyJsonString(textServerUrl, sizeof(textServerUrl), buffers, "textServerUrl");
 	copyJsonString(textServerModel, sizeof(textServerModel), buffers, "textServerModel");
 	copyJsonString(customModelPath, sizeof(customModelPath), buffers, "customModelPath");
+	copyJsonString(
+		customVideoRenderModelPath,
+		sizeof(customVideoRenderModelPath),
+		buffers,
+		"customVideoRenderModelPath");
 	copyJsonString(visionPrompt, sizeof(visionPrompt), buffers, "visionPrompt");
 	copyJsonString(visionImagePath, sizeof(visionImagePath), buffers, "visionImagePath");
 	copyJsonString(visionVideoPath, sizeof(visionVideoPath), buffers, "visionVideoPath");
@@ -849,6 +903,11 @@ bool ofApp::loadSession(const std::string & path) {
 	longVideoStatus = getString(outputs, "longVideoStatus");
 	longVideoContinuityBible = getString(outputs, "longVideoContinuityBible");
 	longVideoManifestJson = getString(outputs, "longVideoManifestJson");
+	longVideoRenderStatus = getString(outputs, "longVideoRenderStatus");
+	longVideoRenderOutputDirectory = getString(outputs, "longVideoRenderOutputDirectory");
+	longVideoRenderMetadataPath = getString(outputs, "longVideoRenderMetadataPath");
+	longVideoRenderManifestPath = getString(outputs, "longVideoRenderManifestPath");
+	longVideoRenderManifestJson = getString(outputs, "longVideoRenderManifestJson");
 	customOutput = getString(outputs, "customOutput");
 	citationOutput = getString(outputs, "citationOutput");
 	visionOutput = getString(outputs, "visionOutput");

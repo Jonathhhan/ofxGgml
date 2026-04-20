@@ -100,7 +100,8 @@ public:
 	const std::string & getServerUrl() const;
 
 	ofxGgmlAceStepHealthResult healthCheck(
-		const std::string & serverUrl = "") const;
+		const std::string & serverUrl = "",
+		long timeoutMs = 1500L) const;
 	ofxGgmlAceStepPropsResult fetchProps(
 		const std::string & serverUrl = "") const;
 	ofxGgmlAceStepGenerateResult generate(

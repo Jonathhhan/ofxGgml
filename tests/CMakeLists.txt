@@ -183,6 +183,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         test_long_video_planner.cpp
         test_video_essay_workflow.cpp
         test_acestep_bridge.cpp
+        test_citation_search.cpp
         test_milkdrop_generator.cpp
         test_chat_assistant.cpp
         test_code_assistant.cpp

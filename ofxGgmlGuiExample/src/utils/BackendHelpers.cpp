@@ -36,6 +36,20 @@ std::pair<std::string, int> parseSpeechServerHostPort(const std::string & config
 	return {"127.0.0.1", 8081};
 }
 
+std::pair<std::string, int> parseAceStepServerHostPort(const std::string & configuredUrl) {
+	const std::string baseUrl = aceStepServerBaseUrlFromConfiguredUrl(configuredUrl);
+	static const std::regex hostPortRe(R"(^https?://([^/:]+)(?::(\d+))?.*$)", std::regex::icase);
+	std::smatch match;
+	if (std::regex_match(baseUrl, match, hostPortRe)) {
+		const std::string host = match[1].str();
+		const int port = (match.size() >= 3 && match[2].matched)
+			? std::max(1, std::stoi(match[2].str()))
+			: 8085;
+		return {host, port};
+	}
+	return {"127.0.0.1", 8085};
+}
+
 bool shouldManageLocalTextServer(const std::string & configuredUrl) {
 	const auto [host, port] = parseServerHostPort(configuredUrl);
 	(void)port;
@@ -55,6 +69,20 @@ bool shouldManageLocalSpeechServer(const std::string & configuredUrl) {
 		return false;
 	}
 	const auto [host, port] = parseSpeechServerHostPort(configuredUrl);
+	(void)port;
+	std::string normalizedHost = trim(host);
+	std::transform(
+		normalizedHost.begin(),
+		normalizedHost.end(),
+		normalizedHost.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return normalizedHost.empty() ||
+		normalizedHost == "127.0.0.1" ||
+		normalizedHost == "localhost";
+}
+
+bool shouldManageLocalAceStepServer(const std::string & configuredUrl) {
+	const auto [host, port] = parseAceStepServerHostPort(configuredUrl);
 	(void)port;
 	std::string normalizedHost = trim(host);
 	std::transform(

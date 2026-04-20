@@ -37,6 +37,12 @@ struct ofxGgmlCitationSearchResult {
 	ofxGgmlWebCrawlerResult crawlerResult;
 };
 
+namespace ofxGgmlCitationSearchInternal {
+
+std::string cleanCrawlerMarkdownForCitations(const std::string & rawMarkdown);
+
+} // namespace ofxGgmlCitationSearchInternal
+
 class ofxGgmlCitationSearch {
 public:
 	ofxGgmlCitationSearch();

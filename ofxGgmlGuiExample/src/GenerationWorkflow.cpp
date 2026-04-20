@@ -1138,20 +1138,31 @@ void ofApp::runInference(
 		});
 }
 
-void ofApp::stopGeneration() {
+void ofApp::reapFinishedWorkerThread() {
+	if (!generating.load() && workerThread.joinable()) {
+		workerThread.join();
+	}
+}
+
+void ofApp::stopGeneration(bool waitForCompletion) {
 	if (generating.load()) {
 		cancelRequested.store(true);
 		killActiveInferenceProcess();
 		scriptAssistantApprovalCv.notify_all();
+		generatingStatus = "Cancelling generation...";
 	}
-	if (workerThread.joinable()) {
+	if (waitForCompletion && workerThread.joinable()) {
 		workerThread.join();
 	}
 	{
 		std::lock_guard<std::mutex> lock(streamMutex);
 		streamingOutput.clear();
 	}
-	generating.store(false);
+	if (waitForCompletion) {
+		generating.store(false);
+	} else if (!generating.load()) {
+		reapFinishedWorkerThread();
+	}
 }
 
 void ofApp::applyPendingOutput() {
@@ -1519,6 +1530,17 @@ void ofApp::applyPendingOutput() {
 			"%s\n",
 			formatConsoleLogLine("Video", "AI", longVideoStatus, true).c_str());
 	}
+	if (pendingLongVideoRenderDirty) {
+		longVideoRenderStatus = pendingLongVideoRenderStatus;
+		longVideoRenderOutputDirectory = pendingLongVideoRenderOutputDirectory;
+		longVideoRenderMetadataPath = pendingLongVideoRenderMetadataPath;
+		longVideoRenderManifestPath = pendingLongVideoRenderManifestPath;
+		longVideoRenderManifestJson = pendingLongVideoRenderManifestJson;
+		fprintf(
+			stderr,
+			"%s\n",
+			formatConsoleLogLine("Video", "AI", longVideoRenderStatus, true).c_str());
+	}
 	if (pendingVoiceTranslatorDirty) {
 		voiceTranslatorStatus = pendingVoiceTranslatorStatus;
 		voiceTranslatorTranscript = pendingVoiceTranslatorTranscript;
@@ -1628,6 +1650,12 @@ void ofApp::applyPendingOutput() {
 	pendingLongVideoManifestJson.clear();
 	pendingLongVideoChunks.clear();
 	pendingLongVideoDirty = false;
+	pendingLongVideoRenderStatus.clear();
+	pendingLongVideoRenderOutputDirectory.clear();
+	pendingLongVideoRenderMetadataPath.clear();
+	pendingLongVideoRenderManifestPath.clear();
+	pendingLongVideoRenderManifestJson.clear();
+	pendingLongVideoRenderDirty = false;
 	pendingVoiceTranslatorStatus.clear();
 	pendingVoiceTranslatorTranscript.clear();
 	pendingVoiceTranslatorDirty = false;

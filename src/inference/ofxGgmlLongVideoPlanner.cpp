@@ -368,6 +368,12 @@ std::string ofxGgmlLongVideoPlanner::buildManifestJson(
 	root["fps"] = request.fps;
 	root["frames_per_chunk"] = request.framesPerChunk;
 	root["seed"] = request.seed;
+	root["render_backend"] = request.renderBackend;
+	root["render_model"] = {
+		{"name", request.renderModelName},
+		{"path", request.renderModelPath},
+		{"url", request.renderModelUrl}
+	};
 	root["continuity_bible"] = continuityBible;
 
 	ofJson chunkArray = ofJson::array();

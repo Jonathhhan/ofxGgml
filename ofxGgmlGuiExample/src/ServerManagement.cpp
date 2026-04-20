@@ -15,11 +15,17 @@
 #include "utils/ScriptCommandHelpers.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <thread>
 
 namespace {
 constexpr size_t kMaxLogMessages = 500;
 const char * const kDefaultTextServerUrl = "http://127.0.0.1:8080";
+const char * const kDefaultAceStepServerUrl = "http://127.0.0.1:8085";
+constexpr long kAceStepQuickHealthTimeoutMs = 900L;
+constexpr int kAceStepStartupProbeAttempts = 8;
+constexpr int kAceStepStartupProbeSleepMs = 150;
 }
 
 void ofApp::applyLogLevel(ofLogLevel level) {
@@ -410,5 +416,174 @@ void ofApp::stopLocalSpeechServer(bool logResult) {
 
 	if (logResult) {
 		logWithLevel(OF_LOG_NOTICE, speechServerStatusMessage);
+	}
+}
+
+std::string ofApp::effectiveAceStepServerUrl(const std::string & configuredUrl) const {
+	return aceStepServerBaseUrlFromConfiguredUrl(configuredUrl);
+}
+
+std::string ofApp::findLocalAceStepServerExecutable(bool refresh) {
+	return aceStepServerManager.findLocalExecutable(refresh);
+}
+
+std::string ofApp::findLocalAceStepModelsDirectory(bool refresh) {
+	return aceStepServerManager.findLocalModelsDirectory(refresh);
+}
+
+bool ofApp::isManagedAceStepServerRunning() {
+	const bool running = aceStepServerManager.isRunning();
+	aceStepServerManagedByApp = aceStepServerManager.isManagedByApp();
+	return running;
+}
+
+bool ofApp::ensureAceStepServerReady(bool logResult, bool allowLaunch) {
+	const std::string configuredUrl = effectiveAceStepServerUrl(aceStepServerUrl);
+	const ofxGgmlAceStepHealthResult health =
+		aceStepBridge.healthCheck(configuredUrl, kAceStepQuickHealthTimeoutMs);
+	if (health.success) {
+		aceStepServerStatus = ServerStatusState::Reachable;
+		aceStepServerStatusMessage = "AceStep server reachable at " + configuredUrl + ".";
+		aceStepServerManagedByApp = aceStepServerManager.isManagedByApp();
+		if (logResult) {
+			logWithLevel(OF_LOG_NOTICE, aceStepServerStatusMessage);
+		}
+		return true;
+	}
+
+	aceStepServerStatus = ServerStatusState::Unreachable;
+	aceStepServerStatusMessage = health.error.empty()
+		? "AceStep server not reachable at " + configuredUrl + "."
+		: "AceStep server not reachable at " + configuredUrl + ". " + health.error;
+	aceStepServerManagedByApp = aceStepServerManager.isManagedByApp();
+
+	if (!allowLaunch || !shouldManageLocalAceStepServer(configuredUrl)) {
+		if (logResult) {
+			logWithLevel(OF_LOG_WARNING, aceStepServerStatusMessage);
+		}
+		return false;
+	}
+
+	if (!findLocalAceStepServerExecutable().empty() &&
+		findLocalAceStepModelsDirectory().empty()) {
+		aceStepServerStatus = ServerStatusState::Unreachable;
+		aceStepServerStatusMessage =
+			"Local AceStep server executable was found, but no GGUF AceStep models directory is available.";
+		if (logResult) {
+			logWithLevel(OF_LOG_WARNING, aceStepServerStatusMessage);
+		}
+		return false;
+	}
+
+	if (!isManagedAceStepServerRunning()) {
+		startLocalAceStepServer();
+	}
+
+	for (int attempt = 0; attempt < kAceStepStartupProbeAttempts; ++attempt) {
+		std::this_thread::sleep_for(
+			std::chrono::milliseconds(kAceStepStartupProbeSleepMs));
+		if (!isManagedAceStepServerRunning()) {
+			aceStepServerStatus = ServerStatusState::Unreachable;
+			const std::string genericStartedMessage =
+				"Local AceStep server started. The app will probe it automatically.";
+			if (!aceStepServerStatusMessage.empty() &&
+				aceStepServerStatusMessage != genericStartedMessage) {
+				if (logResult) {
+					logWithLevel(OF_LOG_WARNING, aceStepServerStatusMessage);
+				}
+				return false;
+			}
+			aceStepServerStatusMessage =
+				"Local AceStep server stopped before it became reachable at " +
+				configuredUrl + ".";
+			if (logResult) {
+				logWithLevel(OF_LOG_WARNING, aceStepServerStatusMessage);
+			}
+			return false;
+		}
+		const ofxGgmlAceStepHealthResult probe =
+			aceStepBridge.healthCheck(
+				configuredUrl,
+				kAceStepQuickHealthTimeoutMs);
+		if (probe.success) {
+			aceStepServerStatus = ServerStatusState::Reachable;
+			aceStepServerStatusMessage = "AceStep server reachable at " + configuredUrl + ".";
+			aceStepServerManagedByApp = aceStepServerManager.isManagedByApp();
+			if (logResult) {
+				logWithLevel(OF_LOG_NOTICE, aceStepServerStatusMessage);
+			}
+			return true;
+		}
+		if (!probe.error.empty()) {
+			aceStepServerStatusMessage =
+				"AceStep server not reachable at " + configuredUrl + ". " + probe.error;
+		}
+	}
+
+	if (isManagedAceStepServerRunning()) {
+		aceStepServerStatus = ServerStatusState::Unknown;
+		aceStepServerStatusMessage =
+			"Local AceStep server is still starting at " + configuredUrl +
+			". Try again in a moment.";
+	}
+
+	if (logResult) {
+		logWithLevel(OF_LOG_WARNING, aceStepServerStatusMessage);
+	}
+	return false;
+}
+
+void ofApp::startLocalAceStepServer() {
+	if (isManagedAceStepServerRunning()) {
+		logWithLevel(OF_LOG_NOTICE, "Local AceStep server is already running.");
+		return;
+	}
+
+	const std::string configuredUrl = effectiveAceStepServerUrl(aceStepServerUrl);
+	const std::string serverExe = findLocalAceStepServerExecutable(true);
+	if (serverExe.empty()) {
+		aceStepServerStatus = ServerStatusState::Unreachable;
+		aceStepServerStatusMessage = "Local AceStep server executable not found.";
+		logWithLevel(OF_LOG_ERROR, aceStepServerStatusMessage);
+		return;
+	}
+
+	const std::string modelsDir = findLocalAceStepModelsDirectory(true);
+	if (modelsDir.empty()) {
+		aceStepServerStatus = ServerStatusState::Unreachable;
+		aceStepServerStatusMessage =
+			"No local GGUF AceStep models directory was found. Put the downloaded GGUF models in libs/acestep/bin/models or a shared models/acestep folder first.";
+		logWithLevel(OF_LOG_ERROR, aceStepServerStatusMessage);
+		return;
+	}
+
+	aceStepServerManager.startLocalServer(
+		configuredUrl,
+		modelsDir,
+		aceStepServerManager.findLocalAdaptersDirectory(true));
+
+	aceStepServerManagedByApp = aceStepServerManager.isManagedByApp();
+	aceStepServerStatus = aceStepServerManager.getStatus();
+	aceStepServerStatusMessage = aceStepServerManager.getStatusMessage();
+
+	if (aceStepServerManagedByApp) {
+		const auto [host, port] = parseAceStepServerHostPort(configuredUrl);
+		logWithLevel(
+			OF_LOG_NOTICE,
+			"Started local AceStep server on " + host + ":" + ofToString(port) +
+			" using models from " + modelsDir + ".");
+	} else if (!aceStepServerStatusMessage.empty()) {
+		logWithLevel(OF_LOG_ERROR, aceStepServerStatusMessage);
+	}
+}
+
+void ofApp::stopLocalAceStepServer(bool logResult) {
+	aceStepServerManager.stopLocalServer(logResult);
+	aceStepServerManagedByApp = aceStepServerManager.isManagedByApp();
+	aceStepServerStatus = aceStepServerManager.getStatus();
+	aceStepServerStatusMessage = aceStepServerManager.getStatusMessage();
+
+	if (logResult && !aceStepServerStatusMessage.empty()) {
+		logWithLevel(OF_LOG_NOTICE, aceStepServerStatusMessage);
 	}
 }

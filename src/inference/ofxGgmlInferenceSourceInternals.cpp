@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <iomanip>
 #include <regex>
 #include <sstream>
@@ -296,6 +297,29 @@ std::string urlEncode(const std::string & value) {
 	return escaped.str();
 }
 
+std::string urlDecode(const std::string & value) {
+	std::string decoded;
+	decoded.reserve(value.size());
+	for (size_t i = 0; i < value.size(); ++i) {
+		if (value[i] == '%' && i + 2 < value.size()) {
+			const std::string hex = value.substr(i + 1, 2);
+			char * end = nullptr;
+			const long ch = std::strtol(hex.c_str(), &end, 16);
+			if (end && *end == '\0') {
+				decoded.push_back(static_cast<char>(ch));
+				i += 2;
+				continue;
+			}
+		}
+		if (value[i] == '+') {
+			decoded.push_back(' ');
+		} else {
+			decoded.push_back(value[i]);
+		}
+	}
+	return decoded;
+}
+
 bool looksLikeWeatherQuery(const std::string & text) {
 	std::string lowered = text;
 	std::transform(lowered.begin(), lowered.end(), lowered.begin(),
@@ -415,6 +439,58 @@ ofxGgmlPromptSource fetchSearchSnippetSource(
 		sourceSettings.maxCharsPerSource,
 		&source.wasTruncated);
 	return source;
+}
+
+std::vector<std::string> fetchSearchResultUrls(
+	const std::string & query,
+	size_t maxResults = 8) {
+	std::vector<std::string> urls;
+	if (trimCopy(query).empty() || maxResults == 0) {
+		return urls;
+	}
+
+	const std::string searchUrl = "https://lite.duckduckgo.com/lite/?q=" + urlEncode(query);
+	const ofHttpResponse response = ofLoadURL(searchUrl);
+	if (response.status < 200 || response.status >= 300) {
+		return urls;
+	}
+
+	const std::string body = response.data.getText();
+	static const std::regex hrefRe(R"(href=\"([^\"]+)\")", std::regex::icase);
+	std::unordered_set<std::string> seen;
+	for (std::sregex_iterator it(body.begin(), body.end(), hrefRe), end; it != end; ++it) {
+		std::string href = trimCopy((*it)[1].str());
+		if (href.empty()) {
+			continue;
+		}
+		href = decodeBasicHtmlEntities(href);
+		if (href.rfind("//", 0) == 0) {
+			href = "https:" + href;
+		}
+		const size_t uddgPos = href.find("uddg=");
+		if (uddgPos != std::string::npos) {
+			const size_t valueStart = uddgPos + 5;
+			size_t valueEnd = href.find('&', valueStart);
+			if (valueEnd == std::string::npos) {
+				valueEnd = href.size();
+			}
+			href = urlDecode(href.substr(valueStart, valueEnd - valueStart));
+		}
+		if (!isLikelyWebUri(href)) {
+			continue;
+		}
+		if (href.find("duckduckgo.com") != std::string::npos) {
+			continue;
+		}
+		if (!seen.insert(href).second) {
+			continue;
+		}
+		urls.push_back(std::move(href));
+		if (urls.size() >= maxResults) {
+			break;
+		}
+	}
+	return urls;
 }
 
 std::string cleanRssText(const std::string & text) {
@@ -734,6 +810,17 @@ std::vector<ofxGgmlPromptSource> fetchRealtimeSources(
 	}
 
 	if (realtimeSettings.allowGenericSearch) {
+		const auto resultUrls = fetchSearchResultUrls(
+			query,
+			std::min<size_t>(
+				std::max<size_t>(realtimeSettings.maxSources * 4, 12),
+				24));
+		if (!resultUrls.empty()) {
+			sources = fetchUrlSources(resultUrls, sourceSettings);
+			if (!sources.empty()) {
+				return sources;
+			}
+		}
 		ofxGgmlPromptSource snippet = fetchSearchSnippetSource(query, sourceSettings);
 		if (!trimCopy(snippet.content).empty()) {
 			sources.push_back(std::move(snippet));

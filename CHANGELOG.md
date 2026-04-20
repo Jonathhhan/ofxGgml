@@ -5,6 +5,7 @@ All notable changes to `ofxGgml` are documented in this file.
 ## [Unreleased]
 
 ### Added
+- `scripts/build-chatllm.ps1` and `scripts/build-chatllm.bat` as addon-local helpers for building the optional `chatllm.cpp` TTS runtime while keeping only the final executable and DLLs under `libs/chatllm/bin`.
 - The GUI example AceStep panel now includes an explicit server setup check plus a one-click install-command helper, making it clearer that prompt/ABC workflows stay local-first while rendered audio requires an external AceStep server.
 - `scripts/install-acestep.ps1` and `scripts/install-acestep.bat` as addon-local helpers for checking out and building AceStep while keeping only the final runtime binaries under `libs/acestep/bin`.
 - The AceStep installer now validates external command failures properly, auto-detects or falls back across common branch names, initializes required submodules such as `ggml`, and reports checkout-layout issues more clearly when upstream changes break the expected build root.
@@ -20,6 +21,8 @@ All notable changes to `ofxGgml` are documented in this file.
 - `ofxGgmlVideoEssayWorkflow` now also exposes request validation plus a reusable JSON manifest for downstream render/export tools, so source-backed essay planning can travel more cleanly into `ofxVlc4`, diffusion, or external clip renderers.
 
 ### Changed
+- The GUI example no longer includes `ofxVlc4` in its default `addons.make`; VLC preview / texture-record lanes remain available as an explicit opt-in companion path instead of a default dependency.
+- The GUI example TTS lane now treats `Executable` as an optional override instead of force-seeding a missing addon-local `chatllm.exe`, so blank/default setups fall back to normal runtime discovery and stale saved defaults produce a clearer install hint.
 - The AceStep installer now defaults its checkout/build cache to `%LOCALAPPDATA%\ofxGgml\acestep`, prunes source/build artifacts after a successful install unless `-KeepArtifacts` is requested, and leaves the addon tree with only the small runtime binaries that the GUI/example uses.
 - The Mojo installer now keeps its WSL-backed project/venv outside the addon tree under `%LOCALAPPDATA%\ofxGgml\mojo\project` while still creating the discovered launcher at `libs/mojo/bin/mojo.bat`, reducing project-generator breakage from local runtime folders inside the addon.
 - `ofxGgmlCodeAssistant` now derives a first-pass tool plan from structured results, emits prompt/chunk/tool/approval/completion events during runs, and can seed/update task memory directly from a reusable session object.
@@ -34,7 +37,7 @@ All notable changes to `ofxGgml` are documented in this file.
   - `Video Essay` can now also reuse the existing optional `ofxVlc4` lane in the GUI example for source-video subtitle preview plus texture-recorded render export, including muxing the generated narration track into the final essay video when voiceover audio is available.
   - Montage now also exposes a clip-playlist export lane in the GUI example, including JSON manifest export, optional `ofxVlc4` playlist preview, and texture-recorded playlist renders with optional external-audio mux.
   - Montage clip-playlist export can now auto-collect generated video outputs such as essay renders or previous playlist renders, merge them into the current clip list, and defer recording until the `ofxVlc4` preview texture is actually ready.
-  - The GUI example sidebar now centralizes local model and asset loading more cleanly: `Video` gets its own recommended catalog model, text-mode model selection supports a direct custom GGUF override, and `Image` mode now uses a shared sidebar `Image Assets` section for diffusion model, optional VAE, init image, and mask image loading instead of duplicating those file pickers in the panel body.
+  - The GUI example sidebar now centralizes local model and asset loading more cleanly: `Video` keeps its text planner model separate from a dedicated recommended video-render model plus custom override/download lane, text-mode model selection supports a direct custom GGUF override, and `Image` mode now uses a shared sidebar `Image Assets` section for diffusion model, optional VAE, init image, and mask image loading instead of duplicating those file pickers in the panel body.
   - `ofxGgmlInference::generateBatch(...)` now honors `allowParallelProcessing` directly and uses a small worker-pool style server-batch fallback instead of repeatedly spawning per-chunk thread bursts.
   - Chat and Translate now share the same lightweight TTS-preview pattern in the GUI example, with dedicated inline playback controls and a small shared preview/request state instead of duplicated per-mode wiring.
 
