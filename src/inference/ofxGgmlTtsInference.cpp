@@ -47,16 +47,17 @@ ofxGgmlTtsResult ofxGgmlTtsBridgeBackend::synthesize(
 }
 
 ofxGgmlTtsInference::ofxGgmlTtsInference()
-	: m_backend(createChatLlmTtsBridgeBackend()) {
+	: m_backend(createPiperTtsBridgeBackend()) {
 }
 
 std::vector<ofxGgmlTtsModelProfile> ofxGgmlTtsInference::defaultProfiles() {
 	return {
 		{
-			"ChatLLM TTS (manual model)",
-			"Manual model path / chatllm.cpp",
-			"",
-			"",
+			"piper",
+			"Piper Voice (.onnx)",
+			"Piper / ONNX voice (+ matching .onnx.json)",
+			"OHF-Voice Piper voices (for example en_US-lessac-medium)",
+			"piper/en_US-lessac-medium.onnx",
 			"",
 			"",
 			"",
@@ -66,17 +67,32 @@ std::vector<ofxGgmlTtsModelProfile> ofxGgmlTtsInference::defaultProfiles() {
 			false
 		},
 		{
-			"Custom chatllm.cpp TTS model",
-			"Custom / manual path",
+			"chatllm",
+			"ChatLLM OuteTTS (converted model)",
+			"chatllm.cpp / converted OuteTTS (+ DAC codec)",
+			"OuteAI/Llama-OuteTTS-1.0-1B or OuteAI/OuteTTS-1.0-0.6B; convert with chatllm.cpp convert.py",
+			"outetts.bin",
 			"",
 			"",
 			"",
 			"",
-			"",
-			"",
-			false,
+			true,
 			false,
 			false
+		},
+		{
+			"chatllm",
+			"ChatLLM OuteTTS (speaker.json clone voice)",
+			"chatllm.cpp / converted OuteTTS (+ DAC codec)",
+			"OuteAI/Llama-OuteTTS-1.0-1B or OuteAI/OuteTTS-1.0-0.6B; convert with chatllm.cpp convert.py",
+			"outetts.bin",
+			"",
+			"",
+			"speaker.json",
+			"",
+			true,
+			false,
+			true
 		}
 	};
 }
@@ -115,8 +131,15 @@ ofxGgmlTtsInference::createOuteTtsBridgeBackend(
 		displayName);
 }
 
+std::shared_ptr<ofxGgmlTtsBackend>
+ofxGgmlTtsInference::createPiperTtsBridgeBackend(
+	ofxGgmlTtsBridgeBackend::SynthesizeFunction synthesizeFunction,
+	const std::string & displayName) {
+	return createTtsBridgeBackend(std::move(synthesizeFunction), displayName);
+}
+
 void ofxGgmlTtsInference::setBackend(std::shared_ptr<ofxGgmlTtsBackend> backend) {
-	m_backend = backend ? std::move(backend) : createChatLlmTtsBridgeBackend();
+	m_backend = backend ? std::move(backend) : createPiperTtsBridgeBackend();
 }
 
 std::shared_ptr<ofxGgmlTtsBackend> ofxGgmlTtsInference::getBackend() const {
@@ -125,6 +148,6 @@ std::shared_ptr<ofxGgmlTtsBackend> ofxGgmlTtsInference::getBackend() const {
 
 ofxGgmlTtsResult ofxGgmlTtsInference::synthesize(
 	const ofxGgmlTtsRequest & request) const {
-	const auto backend = m_backend ? m_backend : createChatLlmTtsBridgeBackend();
+	const auto backend = m_backend ? m_backend : createPiperTtsBridgeBackend();
 	return backend->synthesize(request);
 }

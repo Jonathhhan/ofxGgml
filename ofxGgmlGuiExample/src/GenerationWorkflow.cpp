@@ -1254,6 +1254,9 @@ void ofApp::applyPendingOutput() {
 				stderr,
 				"%s\n",
 				formatConsoleLogLine("Summarize", "AI", pendingOutput, true).c_str());
+			if (summarizeSpeakOutput && !trim(pendingOutput).empty()) {
+				speakLatestSummary(false);
+			}
 			break;
 		case AiMode::Write:
 			writeOutput = pendingOutput;
@@ -1345,6 +1348,13 @@ void ofApp::applyPendingOutput() {
 			ttsResolvedSpeakerPath = pendingTtsResolvedSpeakerPath;
 			ttsAudioFiles = pendingTtsAudioFiles;
 			ttsMetadata = pendingTtsMetadata;
+			ttsPanelPreview.audioFiles = pendingTtsAudioFiles;
+			ttsPanelPreview.selectedAudioIndex = 0;
+			ttsPanelPreview.loadedAudioPath.clear();
+			ttsPanelPreview.statusMessage = pendingOutput;
+			if (!ttsPanelPreview.audioFiles.empty()) {
+				ensureTtsPanelAudioLoaded(0, false);
+			}
 			if (chatTtsPreview.request.pending) {
 				chatTtsPreview.audioFiles = pendingTtsAudioFiles;
 				chatTtsPreview.selectedAudioIndex = 0;
@@ -1353,6 +1363,16 @@ void ofApp::applyPendingOutput() {
 				chatTtsPreview.request.clear();
 				if (!chatTtsPreview.audioFiles.empty()) {
 					ensureChatTtsAudioLoaded(0, true);
+				}
+			}
+			if (summarizeTtsPreview.request.pending) {
+				summarizeTtsPreview.audioFiles = pendingTtsAudioFiles;
+				summarizeTtsPreview.selectedAudioIndex = 0;
+				summarizeTtsPreview.loadedAudioPath.clear();
+				summarizeTtsPreview.statusMessage = pendingOutput;
+				summarizeTtsPreview.request.clear();
+				if (!summarizeTtsPreview.audioFiles.empty()) {
+					ensureSummaryTtsAudioLoaded(0, true);
 				}
 			}
 			if (translateTtsPreview.request.pending) {

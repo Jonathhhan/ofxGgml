@@ -174,6 +174,8 @@ bool ofApp::saveSession(const std::string & path) {
 		{"ttsExecutablePath", std::string(ttsExecutablePath)},
 		{"ttsModelPath", std::string(ttsModelPath)},
 		{"ttsSpeakerPath", std::string(ttsSpeakerPath)},
+		{"chatTtsModelPath", std::string(chatTtsModelPath)},
+		{"chatTtsSpeakerPath", std::string(chatTtsSpeakerPath)},
 		{"ttsSpeakerReferencePath", std::string(ttsSpeakerReferencePath)},
 		{"ttsOutputPath", std::string(ttsOutputPath)},
 		{"ttsPromptAudioPath", std::string(ttsPromptAudioPath)},
@@ -281,6 +283,8 @@ bool ofApp::saveSession(const std::string & path) {
 
 	session["bools"] = {
 		{"chatSpeakReplies", chatSpeakReplies},
+		{"chatUseCustomTtsVoice", chatUseCustomTtsVoice},
+		{"summarizeSpeakOutput", summarizeSpeakOutput},
 		{"easyUseCrawler", easyUseCrawler},
 		{"voiceTranslatorSpeakOutput", voiceTranslatorSpeakOutput},
 		{"videoEssayUseCrawler", videoEssayUseCrawler},
@@ -328,6 +332,7 @@ bool ofApp::saveSession(const std::string & path) {
 	session["outputs"] = {
 		{"chatLastAssistantReply", chatLastAssistantReply},
 		{"chatTtsStatusMessage", chatTtsPreview.statusMessage},
+		{"summarizeTtsStatusMessage", summarizeTtsPreview.statusMessage},
 		{"easyOutput", easyOutput},
 		{"scriptOutput", scriptOutput},
 		{"summarizeOutput", summarizeOutput},
@@ -662,6 +667,8 @@ bool ofApp::loadSession(const std::string & path) {
 	copyJsonString(ttsExecutablePath, sizeof(ttsExecutablePath), buffers, "ttsExecutablePath");
 	copyJsonString(ttsModelPath, sizeof(ttsModelPath), buffers, "ttsModelPath");
 	copyJsonString(ttsSpeakerPath, sizeof(ttsSpeakerPath), buffers, "ttsSpeakerPath");
+	copyJsonString(chatTtsModelPath, sizeof(chatTtsModelPath), buffers, "chatTtsModelPath");
+	copyJsonString(chatTtsSpeakerPath, sizeof(chatTtsSpeakerPath), buffers, "chatTtsSpeakerPath");
 	copyJsonString(ttsSpeakerReferencePath, sizeof(ttsSpeakerReferencePath), buffers, "ttsSpeakerReferencePath");
 	copyJsonString(ttsOutputPath, sizeof(ttsOutputPath), buffers, "ttsOutputPath");
 	copyJsonString(ttsPromptAudioPath, sizeof(ttsPromptAudioPath), buffers, "ttsPromptAudioPath");
@@ -802,6 +809,8 @@ bool ofApp::loadSession(const std::string & path) {
 		360.0f);
 
 	chatSpeakReplies = getBool(bools, "chatSpeakReplies", chatSpeakReplies);
+	chatUseCustomTtsVoice = getBool(bools, "chatUseCustomTtsVoice", chatUseCustomTtsVoice);
+	summarizeSpeakOutput = getBool(bools, "summarizeSpeakOutput", summarizeSpeakOutput);
 	easyUseCrawler = getBool(bools, "easyUseCrawler", easyUseCrawler);
 	voiceTranslatorSpeakOutput = getBool(
 		bools,
@@ -928,6 +937,7 @@ bool ofApp::loadSession(const std::string & path) {
 	speechSegmentCount = getInt(outputs, "speechSegmentCount", speechSegmentCount);
 	chatLastAssistantReply = getString(outputs, "chatLastAssistantReply");
 	chatTtsPreview.statusMessage = getString(outputs, "chatTtsStatusMessage");
+	summarizeTtsPreview.statusMessage = getString(outputs, "summarizeTtsStatusMessage");
 	ttsOutput = getString(outputs, "ttsOutput");
 	diffusionOutput = getString(outputs, "diffusionOutput");
 	musicToImagePromptOutput = getString(outputs, "musicToImagePromptOutput");

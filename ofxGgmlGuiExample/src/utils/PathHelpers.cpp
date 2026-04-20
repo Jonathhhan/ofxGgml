@@ -180,6 +180,7 @@ void configureCentralRuntimeSearchPaths() {
 		addonRoot / "libs" / "llama" / "bin",
 		addonRoot / "libs" / "whisper" / "bin",
 		addonRoot / "libs" / "chatllm" / "bin",
+		addonRoot / "libs" / "piper" / "bin",
 		addonRoot / "libs" / "ggml" / "build" / "src" / "Release",
 		addonRoot / "libs" / "ggml" / "build" / "src" / "ggml-cuda" / "Release",
 		addonRoot / "libs" / "ggml" / "build" / "src" / "ggml-vulkan" / "Release",

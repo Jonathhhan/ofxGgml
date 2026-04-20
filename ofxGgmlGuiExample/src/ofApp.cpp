@@ -239,26 +239,13 @@ namespace {
 };
 
 void stopPreviewAudioPlayback(
-	ofSoundPlayer & player,
-	bool & playbackPaused,
-	std::string & loadedAudioPath,
+	TtsPreviewState & previewState,
 	bool clearLoadedPath) {
-	if (player.isLoaded()) {
-		player.stop();
-		player.unload();
-	}
-	playbackPaused = false;
-	if (clearLoadedPath) {
-		loadedAudioPath.clear();
-	}
+	previewState.stopPlayback(clearLoadedPath);
 }
 
 bool ensurePreviewAudioLoaded(
-	std::vector<ofxGgmlTtsAudioArtifact> & audioFiles,
-	int & selectedAudioIndex,
-	std::string & loadedAudioPath,
-	bool & playbackPaused,
-	ofSoundPlayer & player,
+	TtsPreviewState & previewState,
 	std::string & statusMessage,
 	const std::string & unavailableMessage,
 	const std::string & emptyPathMessage,
@@ -268,19 +255,20 @@ bool ensurePreviewAudioLoaded(
 	const std::string & playingMessage,
 	int artifactIndex,
 	bool autoplay) {
+	auto & audioFiles = previewState.audioFiles;
 	if (audioFiles.empty()) {
 		statusMessage = unavailableMessage;
 		return false;
 	}
 
 	const int clampedIndex = std::clamp(
-		artifactIndex < 0 ? selectedAudioIndex : artifactIndex,
+		artifactIndex < 0 ? previewState.selectedAudioIndex : artifactIndex,
 		0,
 		std::max(0, static_cast<int>(audioFiles.size()) - 1));
-	selectedAudioIndex = clampedIndex;
+	previewState.selectedAudioIndex = clampedIndex;
 
 	const std::string audioPath =
-		trim(audioFiles[static_cast<size_t>(selectedAudioIndex)].path);
+		trim(audioFiles[static_cast<size_t>(previewState.selectedAudioIndex)].path);
 	if (audioPath.empty()) {
 		statusMessage = emptyPathMessage;
 		return false;
@@ -290,21 +278,34 @@ bool ensurePreviewAudioLoaded(
 		return false;
 	}
 
-	if (loadedAudioPath != audioPath || !player.isLoaded()) {
-		stopPreviewAudioPlayback(player, playbackPaused, loadedAudioPath, false);
-		if (!player.load(audioPath, false)) {
+	if (previewState.loadedAudioPath != audioPath || !previewState.isAudioLoaded()) {
+		LoadedWavAudio loadedAudio;
+		std::string loadError;
+		if (!loadWavFile(audioPath, loadedAudio, &loadError)) {
 			statusMessage = loadFailurePrefix + audioPath;
+			if (!trim(loadError).empty()) {
+				statusMessage += " (" + trim(loadError) + ")";
+			}
 			return false;
 		}
-		player.setLoop(false);
-		player.setMultiPlay(false);
-		loadedAudioPath = audioPath;
+		if (loadedAudio.empty()) {
+			statusMessage = loadFailurePrefix + audioPath + " (decoded audio was empty)";
+			return false;
+		}
+
+		std::lock_guard<std::mutex> lock(previewState.playbackMutex);
+		previewState.loadedAudioPath = audioPath;
+		previewState.playbackSamples = std::move(loadedAudio.samples);
+		previewState.playbackSampleRate = loadedAudio.sampleRate;
+		previewState.playbackChannels = loadedAudio.channels;
+		previewState.playbackPositionFrames = 0.0;
+		previewState.playbackLoaded = true;
+		previewState.playbackPaused = false;
+		previewState.playbackActive = false;
 	}
 
-	playbackPaused = false;
 	if (autoplay) {
-		player.stop();
-		player.play();
+		previewState.restartPlayback();
 		statusMessage = playingMessage;
 	} else {
 		statusMessage = readyMessage;
@@ -1266,6 +1267,8 @@ void ofApp::exit() {
 	milkdropPreviewInitialized = false;
 #endif
 	stopChatTtsPlayback(true);
+	stopTtsPanelPlayback(true);
+	stopSummaryTtsPlayback(true);
 	stopTranslateTtsPlayback(true);
 	stopVideoEssayTtsPlayback(true);
 	stopSpeechRecording(false);
@@ -1273,7 +1276,12 @@ void ofApp::exit() {
 		speechInputStream.stop();
 		speechInputStream.close();
 	}
+	if (ttsOutputStream.getSoundStream() != nullptr) {
+		ttsOutputStream.stop();
+		ttsOutputStream.close();
+	}
 	speechInputStreamConfigured = false;
+	ttsOutputStreamConfigured = false;
 	stopLocalTextServer(false);
 	stopLocalSpeechServer(false);
 	stopLocalAceStepServer(false);
@@ -1315,8 +1323,9 @@ ImGui::Separator();
 if (ImGui::MenuItem("Clear All Output")) {
 chatMessages.clear();
 scriptMessages.clear();
-scriptOutput.clear();
+	scriptOutput.clear();
   summarizeOutput.clear();
+  summarizeTtsPreview.clearPreviewArtifacts();
   writeOutput.clear();
   translateOutput.clear();
   voiceTranslatorStatus.clear();
@@ -1344,6 +1353,8 @@ visionSampledVideoFrames.clear();
 	ttsResolvedSpeakerPath.clear();
 	ttsAudioFiles.clear();
 	ttsMetadata.clear();
+	stopTtsPanelPlayback(true);
+	stopSummaryTtsPlayback(true);
 	stopTranslateTtsPlayback(true);
 	diffusionBackendName.clear();
 diffusionElapsedMs = 0.0f;
@@ -6104,7 +6115,9 @@ void ofApp::runVoiceTranslatorWorkflow(bool useAudioInput) {
 		: 0.05f;
 	const bool requestStreamAudio = ttsStreamAudio;
 	const bool requestNormalizeText = ttsNormalizeText;
-	const auto ttsBackend = createConfiguredTtsBackend(trim(ttsExecutablePath));
+	const auto ttsBackend = createConfiguredTtsBackend(
+		ttsProfileBase,
+		trim(ttsExecutablePath));
 	const ofxGgmlInferenceSettings translateSettings =
 		buildCurrentTextInferenceSettings(AiMode::Translate);
 	const std::string modelPath = getSelectedModelPath();
@@ -6433,7 +6446,9 @@ void ofApp::runVoiceTranslatorWorkflow(bool useAudioInput) {
 void ofApp::runTtsInferenceForText(
 	const std::string & textValue,
 	const std::string & statusLabel,
-	bool mirrorIntoTtsInput) {
+	bool mirrorIntoTtsInput,
+	const std::string & modelPathOverride,
+	const std::string & speakerPathOverride) {
 	if (generating.load()) return;
 
 	ensureTtsProfilesLoaded();
@@ -6459,8 +6474,12 @@ void ofApp::runTtsInferenceForText(
 	const ofxGgmlTtsModelProfile profileBase = getSelectedTtsProfile();
 	const std::string text = trim(textValue);
 	const std::string executablePath = trim(ttsExecutablePath);
-	const std::string modelPath = trim(ttsModelPath);
-	const std::string speakerPath = trim(ttsSpeakerPath);
+	const std::string modelPath = trim(modelPathOverride).empty()
+		? trim(ttsModelPath)
+		: trim(modelPathOverride);
+	const std::string speakerPath = trim(speakerPathOverride).empty()
+		? trim(ttsSpeakerPath)
+		: trim(speakerPathOverride);
 	const std::string speakerReferencePath = trim(ttsSpeakerReferencePath);
 	const std::string outputPath = trim(ttsOutputPath);
 	const std::string promptAudioPath = trim(ttsPromptAudioPath);
@@ -6484,7 +6503,7 @@ void ofApp::runTtsInferenceForText(
 		: 0.05f;
 	const bool requestStreamAudio = ttsStreamAudio;
 	const bool requestNormalizeText = ttsNormalizeText;
-	const auto backend = createConfiguredTtsBackend(executablePath);
+	const auto backend = createConfiguredTtsBackend(profileBase, executablePath);
 	const std::string backendLabel =
 		backend ? backend->backendName() : std::string("TTS backend");
 
@@ -6604,6 +6623,15 @@ void ofApp::runTtsInferenceForText(
 				} else if (!effectiveOutputPath.empty()) {
 					summary << "\n\nRequested output: " << effectiveOutputPath;
 				}
+				if (!result.metadata.empty()) {
+					summary << "\n\nMetadata:";
+					for (const auto & entry : result.metadata) {
+						if (trim(entry.first).empty() || trim(entry.second).empty()) {
+							continue;
+						}
+						summary << "\n- " << entry.first << ": " << entry.second;
+					}
+				}
 				if (!result.rawOutput.empty()) {
 					summary << "\n\n" << result.rawOutput;
 				}
@@ -6648,7 +6676,29 @@ void ofApp::speakLatestChatReply(bool mirrorIntoTtsInput) {
 	}
 	chatTtsPreview.request.pending = true;
 	chatTtsPreview.statusMessage = "Synthesizing latest chat reply...";
-	runTtsInferenceForText(reply, "Synthesized chat reply", mirrorIntoTtsInput);
+	const std::string chatModelPath = chatUseCustomTtsVoice
+		? trim(chatTtsModelPath)
+		: std::string();
+	const std::string chatSpeakerPath = chatUseCustomTtsVoice
+		? trim(chatTtsSpeakerPath)
+		: std::string();
+	runTtsInferenceForText(
+		reply,
+		"Synthesized chat reply",
+		mirrorIntoTtsInput,
+		chatModelPath,
+		chatSpeakerPath);
+}
+
+void ofApp::speakLatestSummary(bool mirrorIntoTtsInput) {
+	const std::string summary = trim(summarizeOutput);
+	if (summary.empty()) {
+		summarizeTtsPreview.statusMessage = "No summary is available to synthesize yet.";
+		return;
+	}
+	summarizeTtsPreview.request.pending = true;
+	summarizeTtsPreview.statusMessage = "Synthesizing current summary...";
+	runTtsInferenceForText(summary, "Synthesized summary", mirrorIntoTtsInput);
 }
 
 void ofApp::speakTranslatedReply(bool mirrorIntoTtsInput) {
@@ -6674,12 +6724,12 @@ void ofApp::speakVideoEssayReply(bool mirrorIntoTtsInput) {
 }
 
 bool ofApp::ensureChatTtsAudioLoaded(int artifactIndex, bool autoplay) {
+	if (!ensureTtsOutputStreamReady()) {
+		chatTtsPreview.statusMessage = "Failed to open the audio output stream for chat preview playback.";
+		return false;
+	}
 	return ensurePreviewAudioLoaded(
-		chatTtsPreview.audioFiles,
-		chatTtsPreview.selectedAudioIndex,
-		chatTtsPreview.loadedAudioPath,
-		chatTtsPreview.playbackPaused,
-		chatTtsPreview.player,
+		chatTtsPreview,
 		chatTtsPreview.statusMessage,
 		"No synthesized chat audio is available yet.",
 		"The selected chat audio artifact has no file path.",
@@ -6692,20 +6742,63 @@ bool ofApp::ensureChatTtsAudioLoaded(int artifactIndex, bool autoplay) {
 }
 
 void ofApp::stopChatTtsPlayback(bool clearLoadedPath) {
-	stopPreviewAudioPlayback(
-		chatTtsPreview.player,
-		chatTtsPreview.playbackPaused,
-		chatTtsPreview.loadedAudioPath,
-		clearLoadedPath);
+	stopPreviewAudioPlayback(chatTtsPreview, clearLoadedPath);
+}
+
+bool ofApp::ensureTtsPanelAudioLoaded(int artifactIndex, bool autoplay) {
+	if (!ensureTtsOutputStreamReady()) {
+		ttsPanelPreview.statusMessage =
+			"Failed to open the audio output stream for TTS playback.";
+		return false;
+	}
+	return ensurePreviewAudioLoaded(
+		ttsPanelPreview,
+		ttsPanelPreview.statusMessage,
+		"No synthesized TTS audio is available yet.",
+		"The selected TTS audio artifact has no file path.",
+		"TTS audio file is missing: ",
+		"Failed to load TTS audio preview: ",
+		"Ready to play synthesized TTS output.",
+		"Playing synthesized TTS output.",
+		artifactIndex,
+		autoplay);
+}
+
+void ofApp::stopTtsPanelPlayback(bool clearLoadedPath) {
+	stopPreviewAudioPlayback(ttsPanelPreview, clearLoadedPath);
+}
+
+bool ofApp::ensureSummaryTtsAudioLoaded(int artifactIndex, bool autoplay) {
+	if (!ensureTtsOutputStreamReady()) {
+		summarizeTtsPreview.statusMessage =
+			"Failed to open the audio output stream for summary preview playback.";
+		return false;
+	}
+	return ensurePreviewAudioLoaded(
+		summarizeTtsPreview,
+		summarizeTtsPreview.statusMessage,
+		"No synthesized summary audio is available yet.",
+		"The selected summary audio artifact has no file path.",
+		"Summary audio file is missing: ",
+		"Failed to load summary audio preview: ",
+		"Ready to play synthesized summary.",
+		"Playing synthesized summary.",
+		artifactIndex,
+		autoplay);
+}
+
+void ofApp::stopSummaryTtsPlayback(bool clearLoadedPath) {
+	stopPreviewAudioPlayback(summarizeTtsPreview, clearLoadedPath);
 }
 
 bool ofApp::ensureTranslateTtsAudioLoaded(int artifactIndex, bool autoplay) {
+	if (!ensureTtsOutputStreamReady()) {
+		translateTtsPreview.statusMessage =
+			"Failed to open the audio output stream for translated voice preview playback.";
+		return false;
+	}
 	return ensurePreviewAudioLoaded(
-		translateTtsPreview.audioFiles,
-		translateTtsPreview.selectedAudioIndex,
-		translateTtsPreview.loadedAudioPath,
-		translateTtsPreview.playbackPaused,
-		translateTtsPreview.player,
+		translateTtsPreview,
 		translateTtsPreview.statusMessage,
 		"No translated voice audio is available yet.",
 		"The selected translated voice artifact has no file path.",
@@ -6718,20 +6811,17 @@ bool ofApp::ensureTranslateTtsAudioLoaded(int artifactIndex, bool autoplay) {
 }
 
 void ofApp::stopTranslateTtsPlayback(bool clearLoadedPath) {
-	stopPreviewAudioPlayback(
-		translateTtsPreview.player,
-		translateTtsPreview.playbackPaused,
-		translateTtsPreview.loadedAudioPath,
-		clearLoadedPath);
+	stopPreviewAudioPlayback(translateTtsPreview, clearLoadedPath);
 }
 
 bool ofApp::ensureVideoEssayTtsAudioLoaded(int artifactIndex, bool autoplay) {
+	if (!ensureTtsOutputStreamReady()) {
+		videoEssayTtsPreview.statusMessage =
+			"Failed to open the audio output stream for video essay voiceover playback.";
+		return false;
+	}
 	return ensurePreviewAudioLoaded(
-		videoEssayTtsPreview.audioFiles,
-		videoEssayTtsPreview.selectedAudioIndex,
-		videoEssayTtsPreview.loadedAudioPath,
-		videoEssayTtsPreview.playbackPaused,
-		videoEssayTtsPreview.player,
+		videoEssayTtsPreview,
 		videoEssayTtsPreview.statusMessage,
 		"No video essay voiceover audio is available yet.",
 		"The selected video essay voiceover artifact has no file path.",
@@ -6744,11 +6834,7 @@ bool ofApp::ensureVideoEssayTtsAudioLoaded(int artifactIndex, bool autoplay) {
 }
 
 void ofApp::stopVideoEssayTtsPlayback(bool clearLoadedPath) {
-	stopPreviewAudioPlayback(
-		videoEssayTtsPreview.player,
-		videoEssayTtsPreview.playbackPaused,
-		videoEssayTtsPreview.loadedAudioPath,
-		clearLoadedPath);
+	stopPreviewAudioPlayback(videoEssayTtsPreview, clearLoadedPath);
 }
 
 bool ofApp::runRealInference(AiMode mode, const std::string & prompt, std::string & output, std::string & error,

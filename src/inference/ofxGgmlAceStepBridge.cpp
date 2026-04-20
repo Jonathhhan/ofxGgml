@@ -192,6 +192,11 @@ bool performStringRequest(
 	long & httpCode,
 	std::string & contentType,
 	std::string & error) {
+	responseBody.clear();
+	httpCode = 0;
+	contentType.clear();
+	error.clear();
+
 	CURL * curl = curl_easy_init();
 	if (!curl) {
 		error = "failed to initialize curl";
@@ -254,6 +259,11 @@ bool performBinaryRequest(
 	long & httpCode,
 	std::string & contentType,
 	std::string & error) {
+	responseBytes.clear();
+	httpCode = 0;
+	contentType.clear();
+	error.clear();
+
 	CURL * curl = curl_easy_init();
 	if (!curl) {
 		error = "failed to initialize curl";

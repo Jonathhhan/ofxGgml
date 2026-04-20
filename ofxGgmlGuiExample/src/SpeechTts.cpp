@@ -5,8 +5,270 @@
 #include "utils/PathHelpers.h"
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
+#include <filesystem>
+#include <unordered_set>
 #include <vector>
+
+namespace {
+
+struct PiperVoiceOption {
+	std::string label;
+	std::string modelPath;
+};
+
+struct TtsPreviewUiLabels {
+	const char * comboLabel;
+	const char * pauseLabel;
+	const char * resumeLabel;
+	const char * playLabel;
+	const char * restartLabel;
+	const char * stopLabel;
+	const char * filePrefix;
+	const char * pausedStatus;
+	const char * playingStatus;
+	const char * restartedStatus;
+	const char * stoppedStatus;
+};
+
+std::string normalizedTtsBackendId(const ofxGgmlTtsModelProfile & profile) {
+	const std::string backendId = trim(profile.backendId);
+	return backendId.empty() ? std::string("chatllm") : backendId;
+}
+
+bool usesPiperTtsBackend(const ofxGgmlTtsModelProfile & profile) {
+	return normalizedTtsBackendId(profile) == "piper";
+}
+
+bool usesChatLlmTtsBackend(const ofxGgmlTtsModelProfile & profile) {
+	return normalizedTtsBackendId(profile) == "chatllm";
+}
+
+bool pathLooksLikeChatLlmExecutable(const std::string & value) {
+	return ofxGgmlPiperTtsAdapters::looksLikeChatLlmExecutable(value);
+}
+
+std::string summarizeArtifactLabel(const std::string & path, int fallbackIndex) {
+	std::string label = ofFilePath::getBaseName(path);
+	return label.empty() ? ("Audio " + std::to_string(fallbackIndex + 1)) : label;
+}
+
+std::vector<PiperVoiceOption> discoverPiperVoices(const std::string & preferredModelPath) {
+	std::vector<PiperVoiceOption> voices;
+	std::vector<std::filesystem::path> roots;
+	std::unordered_set<std::string> seenRoots;
+	std::unordered_set<std::string> seenModels;
+
+	const auto appendRoot = [&](const std::filesystem::path & root) {
+		if (root.empty()) {
+			return;
+		}
+		std::error_code ec;
+		const std::filesystem::path normalized =
+			std::filesystem::weakly_canonical(root, ec);
+		const std::string key = (ec ? root : normalized).lexically_normal().string();
+		if (!key.empty() && seenRoots.insert(ofToLower(key)).second) {
+			roots.push_back(ec ? root : normalized);
+		}
+	};
+
+	const std::string trimmedPreferred = trim(preferredModelPath);
+	if (!trimmedPreferred.empty()) {
+		appendRoot(std::filesystem::path(trimmedPreferred).parent_path());
+	}
+	appendRoot(std::filesystem::path(ofToDataPath("models", true)));
+	appendRoot(std::filesystem::path(ofToDataPath("models/piper", true)));
+	appendRoot(std::filesystem::path(ofToDataPath("models/piper-voices", true)));
+
+	for (const auto & root : roots) {
+		std::error_code existsEc;
+		if (!std::filesystem::exists(root, existsEc) || existsEc) {
+			continue;
+		}
+
+		std::error_code iterEc;
+		for (std::filesystem::recursive_directory_iterator it(root, iterEc), end;
+			!iterEc && it != end;
+			it.increment(iterEc)) {
+			if (iterEc || !it->is_regular_file()) {
+				continue;
+			}
+			const std::filesystem::path modelPath = it->path();
+			if (ofToLower(modelPath.extension().string()) != ".onnx") {
+				continue;
+			}
+			const std::string configPath = modelPath.string() + ".json";
+			std::error_code configEc;
+			if (!std::filesystem::exists(configPath, configEc) || configEc) {
+				continue;
+			}
+
+			const std::string normalizedModel =
+				modelPath.lexically_normal().string();
+			if (!seenModels.insert(ofToLower(normalizedModel)).second) {
+				continue;
+			}
+
+			PiperVoiceOption option;
+			option.modelPath = normalizedModel;
+			option.label = modelPath.stem().string();
+			const std::string relativeLabel = std::filesystem::relative(modelPath, root, configEc).string();
+			if (!configEc && !trim(relativeLabel).empty()) {
+				option.label = relativeLabel;
+			}
+			voices.push_back(option);
+		}
+	}
+
+	std::sort(
+		voices.begin(),
+		voices.end(),
+		[](const PiperVoiceOption & a, const PiperVoiceOption & b) {
+			return ofToLower(a.label) < ofToLower(b.label);
+		});
+	return voices;
+}
+
+template <typename EnsureLoadedFn, typename StopPlaybackFn>
+void drawTtsPreviewControls(
+	const bool generating,
+	TtsPreviewState & previewState,
+	const TtsPreviewUiLabels & labels,
+	EnsureLoadedFn && ensureLoaded,
+	StopPlaybackFn && stopPlayback) {
+	auto & audioFiles = previewState.audioFiles;
+	if (audioFiles.empty()) {
+		return;
+	}
+
+	previewState.selectedAudioIndex = std::clamp(
+		previewState.selectedAudioIndex,
+		0,
+		std::max(0, static_cast<int>(audioFiles.size()) - 1));
+	if (audioFiles.size() > 1) {
+		const std::string previewLabel = summarizeArtifactLabel(
+			audioFiles[static_cast<size_t>(previewState.selectedAudioIndex)].path,
+			previewState.selectedAudioIndex);
+		if (ImGui::BeginCombo(labels.comboLabel, previewLabel.c_str())) {
+			for (int i = 0; i < static_cast<int>(audioFiles.size()); ++i) {
+				const std::string itemLabel =
+					summarizeArtifactLabel(audioFiles[static_cast<size_t>(i)].path, i);
+				const bool selected = (previewState.selectedAudioIndex == i);
+				if (ImGui::Selectable(itemLabel.c_str(), selected)) {
+					previewState.selectedAudioIndex = i;
+					ensureLoaded(previewState.selectedAudioIndex, false);
+				}
+				if (selected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
+
+	const bool canPreviewAudio = !generating && !audioFiles.empty();
+	ImGui::BeginDisabled(!canPreviewAudio);
+	const bool audioLoaded = previewState.isAudioLoaded();
+	const bool audioPlaying = previewState.isAudioPlaying();
+	const char * playPauseLabel = audioPlaying
+		? labels.pauseLabel
+		: (previewState.isPlaybackPaused() ? labels.resumeLabel : labels.playLabel);
+	if (ImGui::SmallButton(playPauseLabel)) {
+		if (!audioLoaded) {
+			ensureLoaded(previewState.selectedAudioIndex, true);
+		} else if (audioPlaying) {
+			previewState.pausePlayback();
+			previewState.statusMessage = labels.pausedStatus;
+		} else {
+			previewState.resumePlayback();
+			previewState.statusMessage = labels.playingStatus;
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton(labels.restartLabel)) {
+		if (ensureLoaded(previewState.selectedAudioIndex, false)) {
+			previewState.restartPlayback();
+			previewState.statusMessage = labels.restartedStatus;
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton(labels.stopLabel)) {
+		stopPlayback(false);
+		previewState.statusMessage = labels.stoppedStatus;
+	}
+	ImGui::EndDisabled();
+	ImGui::TextDisabled(
+		"%s %s",
+		labels.filePrefix,
+		audioFiles[static_cast<size_t>(previewState.selectedAudioIndex)].path.c_str());
+}
+
+void mixPreviewStateIntoOutput(TtsPreviewState & previewState, ofSoundBuffer & output) {
+	std::lock_guard<std::mutex> lock(previewState.playbackMutex);
+	if (!previewState.playbackLoaded ||
+		previewState.playbackPaused ||
+		!previewState.playbackActive ||
+		previewState.playbackChannels <= 0 ||
+		previewState.playbackSampleRate <= 0 ||
+		previewState.playbackSamples.empty()) {
+		return;
+	}
+
+	const size_t outputChannels = std::max<size_t>(1, output.getNumChannels());
+	const size_t outputFrames = output.getNumFrames();
+	const size_t sourceChannels = static_cast<size_t>(previewState.playbackChannels);
+	const size_t sourceFrames =
+		previewState.playbackSamples.size() / sourceChannels;
+	if (sourceFrames == 0) {
+		previewState.playbackLoaded = false;
+		previewState.playbackActive = false;
+		previewState.playbackPaused = false;
+		return;
+	}
+
+	const double outputSampleRate = static_cast<double>(
+		std::max<size_t>(1, static_cast<size_t>(output.getSampleRate())));
+	const double sourceToOutputStep =
+		static_cast<double>(previewState.playbackSampleRate) /
+		outputSampleRate;
+	double position = previewState.playbackPositionFrames;
+
+	for (size_t frame = 0; frame < outputFrames; ++frame) {
+		if (position >= static_cast<double>(sourceFrames)) {
+			previewState.playbackPositionFrames = static_cast<double>(sourceFrames);
+			previewState.playbackActive = false;
+			previewState.playbackPaused = false;
+			return;
+		}
+
+		const size_t sourceFrame0 = static_cast<size_t>(position);
+		const size_t sourceFrame1 = std::min(sourceFrame0 + 1, sourceFrames - 1);
+		const float interpolation =
+			static_cast<float>(position - static_cast<double>(sourceFrame0));
+		for (size_t channel = 0; channel < outputChannels; ++channel) {
+			const size_t sourceChannel =
+				(sourceChannels == 1) ? 0 : std::min(channel, sourceChannels - 1);
+			const float sample0 =
+				previewState.playbackSamples[sourceFrame0 * sourceChannels + sourceChannel];
+			const float sample1 =
+				previewState.playbackSamples[sourceFrame1 * sourceChannels + sourceChannel];
+			const float mixedSample =
+				sample0 + ((sample1 - sample0) * interpolation);
+			output[frame * outputChannels + channel] += mixedSample;
+		}
+		position += sourceToOutputStep;
+	}
+
+	previewState.playbackPositionFrames = position;
+	if (position >= static_cast<double>(sourceFrames)) {
+		previewState.playbackPositionFrames = static_cast<double>(sourceFrames);
+		previewState.playbackActive = false;
+		previewState.playbackPaused = false;
+	}
+}
+
+} // namespace
 
 ofxGgmlLiveSpeechSettings ofApp::makeLiveSpeechSettings() const {
 	ofxGgmlLiveSpeechSettings settings;
@@ -74,6 +336,18 @@ void ofApp::audioIn(ofSoundBuffer & input) {
 	}
 }
 
+void ofApp::audioOut(ofSoundBuffer & output) {
+	std::fill(output.getBuffer().begin(), output.getBuffer().end(), 0.0f);
+	mixPreviewStateIntoOutput(ttsPanelPreview, output);
+	mixPreviewStateIntoOutput(chatTtsPreview, output);
+	mixPreviewStateIntoOutput(summarizeTtsPreview, output);
+	mixPreviewStateIntoOutput(translateTtsPreview, output);
+	mixPreviewStateIntoOutput(videoEssayTtsPreview, output);
+	for (float & sample : output.getBuffer()) {
+		sample = std::clamp(sample, -1.0f, 1.0f);
+	}
+}
+
 bool ofApp::ensureSpeechInputStreamReady() {
 	const bool configMatches =
 		speechInputStreamConfigured &&
@@ -105,6 +379,32 @@ bool ofApp::ensureSpeechInputStreamReady() {
 	speechInputStreamConfigSampleRate = speechInputSampleRate;
 	speechInputStreamConfigChannels = speechInputChannels;
 	speechInputStreamConfigBufferSize = speechInputBufferSize;
+	return true;
+}
+
+bool ofApp::ensureTtsOutputStreamReady() {
+	if (ttsOutputStreamConfigured && ttsOutputStream.getSoundStream() != nullptr) {
+		return true;
+	}
+
+	if (ttsOutputStream.getSoundStream() != nullptr) {
+		ttsOutputStream.stop();
+		ttsOutputStream.close();
+	}
+
+	ofSoundStreamSettings settings;
+	settings.setOutListener(this);
+	settings.sampleRate = ttsOutputSampleRate;
+	settings.numInputChannels = 0;
+	settings.numOutputChannels = ttsOutputChannels;
+	settings.bufferSize = ttsOutputBufferSize;
+	settings.numBuffers = 4;
+	if (!ttsOutputStream.setup(settings)) {
+		ttsOutputStreamConfigured = false;
+		return false;
+	}
+
+	ttsOutputStreamConfigured = true;
 	return true;
 }
 
@@ -226,15 +526,27 @@ void ofApp::applyTtsProfileDefaults(
 	}
 }
 
-std::string ofApp::resolveConfiguredTtsExecutable() const {
+std::string ofApp::resolveConfiguredTtsExecutable(
+	const ofxGgmlTtsModelProfile & profile) const {
+	if (usesPiperTtsBackend(profile)) {
+		return ofxGgmlPiperTtsAdapters::resolvePiperExecutable(trim(ttsExecutablePath));
+	}
 	return ofxGgmlChatLlmTtsAdapters::resolveChatLlmExecutable(trim(ttsExecutablePath));
 }
 
 std::shared_ptr<ofxGgmlTtsBackend> ofApp::createConfiguredTtsBackend(
+	const ofxGgmlTtsModelProfile & profile,
 	const std::string & executableHint) const {
-	ofxGgmlChatLlmTtsAdapters::RuntimeOptions runtimeOptions;
-	runtimeOptions.executablePath =
+	const std::string configuredHint =
 		executableHint.empty() ? trim(ttsExecutablePath) : executableHint;
+	if (usesPiperTtsBackend(profile)) {
+		ofxGgmlPiperTtsAdapters::RuntimeOptions runtimeOptions;
+		runtimeOptions.executablePath = configuredHint;
+		return ofxGgmlPiperTtsAdapters::createBackend(runtimeOptions, "Piper TTS");
+	}
+
+	ofxGgmlChatLlmTtsAdapters::RuntimeOptions runtimeOptions;
+	runtimeOptions.executablePath = configuredHint;
 	return ofxGgmlChatLlmTtsAdapters::createBackend(runtimeOptions, "ChatLLM TTS");
 }
 
@@ -467,7 +779,7 @@ void ofApp::drawSpeechPanel() {
 }
 
 void ofApp::drawTtsPanel() {
-	drawPanelHeader("TTS", "local text-to-speech via chatllm.cpp with user-selected models");
+	drawPanelHeader("TTS", "local text-to-speech via Piper and chatllm.cpp backends");
 	const float compactModeFieldWidth = std::min(320.0f, ImGui::GetContentRegionAvail().x);
 
 	const bool loadedTtsProfiles = ensureTtsProfilesLoaded();
@@ -476,6 +788,10 @@ void ofApp::drawTtsPanel() {
 	}
 
 	const ofxGgmlTtsModelProfile activeProfile = getSelectedTtsProfile();
+	const bool activeProfileUsesPiper = usesPiperTtsBackend(activeProfile);
+	const bool activeProfileUsesChatLlm = usesChatLlmTtsBackend(activeProfile);
+	const std::vector<PiperVoiceOption> availablePiperVoices =
+		activeProfileUsesPiper ? discoverPiperVoices(ttsModelPath) : std::vector<PiperVoiceOption>{};
 	if (!ttsProfiles.empty()) {
 		std::vector<const char *> profileNames;
 		profileNames.reserve(ttsProfiles.size());
@@ -488,11 +804,53 @@ void ofApp::drawTtsPanel() {
 			&selectedTtsProfileIndex,
 			profileNames.data(),
 			static_cast<int>(profileNames.size()))) {
+			const ofxGgmlTtsModelProfile nextProfile = getSelectedTtsProfile();
+			if (!nextProfile.supportsVoiceCloning &&
+				ttsTaskIndex == static_cast<int>(ofxGgmlTtsTask::CloneVoice)) {
+				ttsTaskIndex = static_cast<int>(ofxGgmlTtsTask::Synthesize);
+			}
+			if (usesPiperTtsBackend(nextProfile) &&
+				ttsTaskIndex == static_cast<int>(ofxGgmlTtsTask::ContinueSpeech)) {
+				ttsTaskIndex = static_cast<int>(ofxGgmlTtsTask::Synthesize);
+			}
+			const std::string configuredExecutable = trim(ttsExecutablePath);
+			if (usesPiperTtsBackend(nextProfile) &&
+				pathLooksLikeChatLlmExecutable(configuredExecutable)) {
+				copyStringToBuffer(ttsExecutablePath, sizeof(ttsExecutablePath), "");
+			}
+			if (usesChatLlmTtsBackend(nextProfile) &&
+				ofxGgmlPiperTtsAdapters::looksLikePythonLauncher(configuredExecutable)) {
+				copyStringToBuffer(ttsExecutablePath, sizeof(ttsExecutablePath), "");
+			}
 			applyTtsProfileDefaults(getSelectedTtsProfile(), false);
 			autoSaveSession();
 		}
 		if (!activeProfile.modelRepoHint.empty()) {
 			ImGui::TextDisabled("Preset repo: %s", activeProfile.modelRepoHint.c_str());
+		}
+		if (!activeProfile.architecture.empty()) {
+			ImGui::TextDisabled("Architecture: %s", activeProfile.architecture.c_str());
+		}
+		if (!activeProfile.modelFileHint.empty()) {
+			ImGui::TextDisabled("Preset file: %s", activeProfile.modelFileHint.c_str());
+		}
+		if (!activeProfile.speakerFileHint.empty()) {
+			ImGui::TextDisabled("Speaker file: %s", activeProfile.speakerFileHint.c_str());
+		}
+		ImGui::TextDisabled(
+			"Capabilities: clone voice %s | streaming %s",
+			activeProfile.supportsVoiceCloning
+				? (activeProfile.requiresSpeakerProfile
+					? "speaker.json required"
+					: "supported")
+				: "not advertised",
+			activeProfile.supportsStreaming ? "supported" : "offline export only");
+		if (activeProfileUsesPiper) {
+			ImGui::TextDisabled(
+				"Piper expects an .onnx voice file with its matching .onnx.json config beside it.");
+		} else if (!activeProfile.architecture.empty()) {
+			ImGui::TextDisabled(
+				"This profile expects a converted chatllm.cpp model artifact, not a raw GGUF or safetensors checkpoint.");
 		}
 	}
 
@@ -503,24 +861,50 @@ void ofApp::drawTtsPanel() {
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Browse exe##Tts", ImVec2(110, 0))) {
-		ofFileDialogResult result = ofSystemLoadDialog("Select chatllm executable", false);
+		ofFileDialogResult result = ofSystemLoadDialog(
+			activeProfileUsesPiper
+				? "Select Piper executable or python launcher"
+				: "Select chatllm executable",
+			false);
 		if (result.bSuccess) {
 			copyStringToBuffer(ttsExecutablePath, sizeof(ttsExecutablePath), result.getPath());
 			autoSaveSession();
 		}
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("Use local##TtsExe", ImVec2(110, 0))) {
-		copyStringToBuffer(
-			ttsExecutablePath,
-			sizeof(ttsExecutablePath),
-			ofxGgmlChatLlmTtsAdapters::preferredLocalExecutablePath());
-		autoSaveSession();
+	if (activeProfileUsesChatLlm) {
+		ImGui::SameLine();
+		if (ImGui::Button("Use local##TtsExe", ImVec2(110, 0))) {
+			copyStringToBuffer(
+				ttsExecutablePath,
+				sizeof(ttsExecutablePath),
+				ofxGgmlChatLlmTtsAdapters::preferredLocalExecutablePath());
+			autoSaveSession();
+		}
+	} else if (activeProfileUsesPiper) {
+		ImGui::SameLine();
+		if (ImGui::Button("Use local##TtsExe", ImVec2(110, 0))) {
+			copyStringToBuffer(
+				ttsExecutablePath,
+				sizeof(ttsExecutablePath),
+				ofxGgmlPiperTtsAdapters::preferredLocalExecutablePath());
+			autoSaveSession();
+		}
+	}
+	if (activeProfileUsesPiper) {
+		ImGui::TextDisabled(
+			"Leave Executable blank to auto-discover the addon-local Piper launcher first, then %s on PATH. You can also point this to python or py if Piper is installed as a module.",
+			ofxGgmlPiperTtsAdapters::defaultExecutableHint().c_str());
+		ImGui::TextDisabled(
+			"Preferred local path: %s",
+			ofxGgmlPiperTtsAdapters::preferredLocalExecutablePath().c_str());
+	} else {
+		ImGui::TextDisabled(
+			"Leave Executable blank to auto-discover chatllm.cpp. Preferred local path: %s",
+			ofxGgmlChatLlmTtsAdapters::preferredLocalExecutablePath().c_str());
 	}
 	ImGui::TextDisabled(
-		"Leave Executable blank to auto-discover chatllm.cpp. Preferred local path: %s",
-		ofxGgmlChatLlmTtsAdapters::preferredLocalExecutablePath().c_str());
-	ImGui::TextDisabled("Resolved executable: %s", resolveConfiguredTtsExecutable().c_str());
+		"Resolved executable: %s",
+		resolveConfiguredTtsExecutable(activeProfile).c_str());
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Model path", ttsModelPath, sizeof(ttsModelPath));
@@ -529,15 +913,57 @@ void ofApp::drawTtsPanel() {
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Browse model##Tts", ImVec2(110, 0))) {
-		ofFileDialogResult result = ofSystemLoadDialog("Select TTS model", false);
+		ofFileDialogResult result = ofSystemLoadDialog(
+			activeProfileUsesPiper
+				? "Select Piper voice model (.onnx)"
+				: "Select converted chatllm TTS model (.bin/.ggmm)",
+			false);
 		if (result.bSuccess) {
 			copyStringToBuffer(ttsModelPath, sizeof(ttsModelPath), result.getPath());
 			autoSaveSession();
 		}
 	}
+	if (activeProfileUsesPiper) {
+		ImGui::TextDisabled(
+			"Model path should point to a Piper .onnx voice. Keep the matching .onnx.json file next to it.");
+		if (!availablePiperVoices.empty()) {
+			std::string selectedVoiceLabel = ofFilePath::getBaseName(trim(ttsModelPath));
+			for (const auto & voice : availablePiperVoices) {
+				if (ofToLower(voice.modelPath) == ofToLower(trim(ttsModelPath))) {
+					selectedVoiceLabel = voice.label;
+					break;
+				}
+			}
+			if (selectedVoiceLabel.empty()) {
+				selectedVoiceLabel = "Select Piper voice";
+			}
+			if (ImGui::BeginCombo("Installed Piper voices", selectedVoiceLabel.c_str())) {
+				for (const auto & voice : availablePiperVoices) {
+					const bool selected =
+						(ofToLower(voice.modelPath) == ofToLower(trim(ttsModelPath)));
+					if (ImGui::Selectable(voice.label.c_str(), selected)) {
+						copyStringToBuffer(ttsModelPath, sizeof(ttsModelPath), voice.modelPath);
+						autoSaveSession();
+					}
+					if (selected) {
+						ImGui::SetItemDefaultFocus();
+					}
+				}
+				ImGui::EndCombo();
+			}
+		} else {
+			ImGui::TextDisabled("No Piper .onnx voices with matching .onnx.json were found under data/models yet.");
+		}
+	} else {
+		ImGui::TextDisabled(
+			"Model path should point to a converted chatllm.cpp artifact such as .bin or .ggmm. Raw .gguf and .safetensors files are not loaded here.");
+	}
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
-	ImGui::InputText("Speaker profile", ttsSpeakerPath, sizeof(ttsSpeakerPath));
+	ImGui::InputText(
+		activeProfileUsesPiper ? "Speaker name/id" : "Speaker profile",
+		ttsSpeakerPath,
+		sizeof(ttsSpeakerPath));
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
 	ImGui::InputText("Reference audio", ttsSpeakerReferencePath, sizeof(ttsSpeakerReferencePath));
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
@@ -550,6 +976,9 @@ void ofApp::drawTtsPanel() {
 	static const char * ttsTaskLabels[] = {"Synthesize", "Clone Voice", "Continue Speech"};
 	ImGui::SetNextItemWidth(200);
 	ImGui::Combo("TTS task", &ttsTaskIndex, ttsTaskLabels, 3);
+	if (activeProfileUsesPiper && ttsTaskIndex != static_cast<int>(ofxGgmlTtsTask::Synthesize)) {
+		ImGui::TextDisabled("Piper is currently wired for plain synthesis only.");
+	}
 	ImGui::SetNextItemWidth(180);
 	ImGui::SliderInt("Seed", &ttsSeed, -1, 999999);
 	ImGui::SetNextItemWidth(180);
@@ -569,6 +998,61 @@ void ofApp::drawTtsPanel() {
 	ImGui::Checkbox("Stream audio", &ttsStreamAudio);
 	ImGui::SameLine();
 	ImGui::Checkbox("Normalize text", &ttsNormalizeText);
+	if (activeProfileUsesPiper) {
+		ImGui::TextDisabled("Synthesize works directly with Piper .onnx voice files.");
+		ImGui::TextDisabled("Voice cloning is not wired into the Piper adapter yet; use prepared voices here.");
+	} else if (activeProfile.supportsVoiceCloning) {
+		ImGui::TextDisabled("Voice cloning remains backend-specific. For chatllm, keep using the clone/reference fields below.");
+	}
+
+	ImGui::Separator();
+	ImGui::TextDisabled("Chat voice");
+	ImGui::Checkbox("Use different voice for chat replies", &chatUseCustomTtsVoice);
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		autoSaveSession();
+	}
+	if (chatUseCustomTtsVoice) {
+		if (activeProfileUsesPiper && !availablePiperVoices.empty()) {
+			std::string selectedChatVoiceLabel = ofFilePath::getBaseName(trim(chatTtsModelPath));
+			for (const auto & voice : availablePiperVoices) {
+				if (ofToLower(voice.modelPath) == ofToLower(trim(chatTtsModelPath))) {
+					selectedChatVoiceLabel = voice.label;
+					break;
+				}
+			}
+			if (selectedChatVoiceLabel.empty()) {
+				selectedChatVoiceLabel = "Select chat voice";
+			}
+			if (ImGui::BeginCombo("Chat Piper voice", selectedChatVoiceLabel.c_str())) {
+				for (const auto & voice : availablePiperVoices) {
+					const bool selected =
+						(ofToLower(voice.modelPath) == ofToLower(trim(chatTtsModelPath)));
+					if (ImGui::Selectable(voice.label.c_str(), selected)) {
+						copyStringToBuffer(chatTtsModelPath, sizeof(chatTtsModelPath), voice.modelPath);
+						autoSaveSession();
+					}
+					if (selected) {
+						ImGui::SetItemDefaultFocus();
+					}
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::SmallButton("Use current TTS voice for chat")) {
+				copyStringToBuffer(chatTtsModelPath, sizeof(chatTtsModelPath), trim(ttsModelPath));
+				autoSaveSession();
+			}
+		}
+		ImGui::SetNextItemWidth(compactModeFieldWidth);
+		ImGui::InputText("Chat model path", chatTtsModelPath, sizeof(chatTtsModelPath));
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
+			autoSaveSession();
+		}
+		ImGui::SetNextItemWidth(compactModeFieldWidth);
+		ImGui::InputText("Chat speaker/profile", chatTtsSpeakerPath, sizeof(chatTtsSpeakerPath));
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
+			autoSaveSession();
+		}
+	}
 
 	ImGui::InputTextMultiline(
 		"TTS text",
@@ -598,12 +1082,45 @@ void ofApp::drawTtsPanel() {
 	if (!ttsResolvedSpeakerPath.empty()) {
 		ImGui::TextDisabled("Resolved speaker: %s", ttsResolvedSpeakerPath.c_str());
 	}
+	if (!ttsMetadata.empty()) {
+		for (const auto & entry : ttsMetadata) {
+			if (trim(entry.first).empty() || trim(entry.second).empty()) {
+				continue;
+			}
+			ImGui::TextDisabled("%s: %s", entry.first.c_str(), entry.second.c_str());
+		}
+	}
 	if (!ttsAudioFiles.empty()) {
 		ImGui::TextDisabled("Generated audio:");
 		for (const auto & artifact : ttsAudioFiles) {
 			ImGui::BulletText("%s", artifact.path.c_str());
 		}
 	}
+	if (!ttsPanelPreview.statusMessage.empty()) {
+		ImGui::TextDisabled("%s", ttsPanelPreview.statusMessage.c_str());
+	}
+	drawTtsPreviewControls(
+		generating.load(),
+		ttsPanelPreview,
+		{
+			"##TtsPanelAudio",
+			"Pause TTS audio",
+			"Resume TTS audio",
+			"Play TTS audio",
+			"Restart TTS audio",
+			"Stop TTS audio",
+			"TTS audio file:",
+			"Paused synthesized TTS output.",
+			"Playing synthesized TTS output.",
+			"Restarted synthesized TTS output.",
+			"Stopped synthesized TTS output."
+		},
+		[this](int artifactIndex, bool autoplay) {
+			return ensureTtsPanelAudioLoaded(artifactIndex, autoplay);
+		},
+		[this](bool clearLoadedPath) {
+			stopTtsPanelPlayback(clearLoadedPath);
+		});
 	ImGui::BeginChild("##TtsOut", ImVec2(0, 0), true);
 	if (generating.load() && activeGenerationMode == AiMode::Tts) {
 		std::string partial;

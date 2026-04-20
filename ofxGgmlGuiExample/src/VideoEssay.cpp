@@ -165,28 +165,24 @@ std::string videoEssayPlanningStatusSuffix(const ofxGgmlVideoEssayResult & resul
 template <typename EnsureLoadedFn, typename StopPlaybackFn>
 void drawTtsPreviewControls(
 	const bool generating,
-	std::vector<ofxGgmlTtsAudioArtifact> & audioFiles,
-	int & selectedAudioIndex,
-	const std::string & loadedAudioPath,
-	bool & playbackPaused,
-	ofSoundPlayer & player,
-	std::string & statusMessage,
+	TtsPreviewState & previewState,
 	const TtsPreviewUiLabels & labels,
 	EnsureLoadedFn && ensureLoaded,
 	StopPlaybackFn && stopPlayback) {
+	auto & audioFiles = previewState.audioFiles;
 	if (audioFiles.empty()) {
 		return;
 	}
 
-	selectedAudioIndex = std::clamp(
-		selectedAudioIndex,
+	previewState.selectedAudioIndex = std::clamp(
+		previewState.selectedAudioIndex,
 		0,
 		std::max(0, static_cast<int>(audioFiles.size()) - 1));
 	if (audioFiles.size() > 1) {
 		std::string previewLabel =
-			ofFilePath::getBaseName(audioFiles[static_cast<size_t>(selectedAudioIndex)].path);
+			ofFilePath::getBaseName(audioFiles[static_cast<size_t>(previewState.selectedAudioIndex)].path);
 		if (previewLabel.empty()) {
-			previewLabel = "Audio " + std::to_string(selectedAudioIndex + 1);
+			previewLabel = "Audio " + std::to_string(previewState.selectedAudioIndex + 1);
 		}
 		if (ImGui::BeginCombo(labels.comboLabel, previewLabel.c_str())) {
 			for (int i = 0; i < static_cast<int>(audioFiles.size()); ++i) {
@@ -195,10 +191,10 @@ void drawTtsPreviewControls(
 				const std::string itemLabel = fileLabel.empty()
 					? "Audio " + std::to_string(i + 1)
 					: fileLabel;
-				const bool selected = (selectedAudioIndex == i);
+				const bool selected = (previewState.selectedAudioIndex == i);
 				if (ImGui::Selectable(itemLabel.c_str(), selected)) {
-					selectedAudioIndex = i;
-					ensureLoaded(selectedAudioIndex, false);
+					previewState.selectedAudioIndex = i;
+					ensureLoaded(previewState.selectedAudioIndex, false);
 				}
 				if (selected) {
 					ImGui::SetItemDefaultFocus();
@@ -210,47 +206,39 @@ void drawTtsPreviewControls(
 
 	const bool canPreviewAudio = !generating && !audioFiles.empty();
 	ImGui::BeginDisabled(!canPreviewAudio);
-	const bool audioLoaded = player.isLoaded() && !loadedAudioPath.empty();
-	const bool audioPlaying = audioLoaded && player.isPlaying();
+	const bool audioLoaded = previewState.isAudioLoaded();
+	const bool audioPlaying = previewState.isAudioPlaying();
 	const char * playPauseLabel = audioPlaying
 		? labels.pauseLabel
-		: (playbackPaused ? labels.resumeLabel : labels.playLabel);
+		: (previewState.isPlaybackPaused() ? labels.resumeLabel : labels.playLabel);
 	if (ImGui::SmallButton(playPauseLabel)) {
 		if (!audioLoaded) {
-			ensureLoaded(selectedAudioIndex, true);
+			ensureLoaded(previewState.selectedAudioIndex, true);
 		} else if (audioPlaying) {
-			player.setPaused(true);
-			playbackPaused = true;
-			statusMessage = labels.pausedStatus;
+			previewState.pausePlayback();
+			previewState.statusMessage = labels.pausedStatus;
 		} else {
-			if (playbackPaused) {
-				player.setPaused(false);
-			} else {
-				player.play();
-			}
-			playbackPaused = false;
-			statusMessage = labels.playingStatus;
+			previewState.resumePlayback();
+			previewState.statusMessage = labels.playingStatus;
 		}
 	}
 	ImGui::SameLine();
 	if (ImGui::SmallButton(labels.restartLabel)) {
-		if (ensureLoaded(selectedAudioIndex, false)) {
-			player.stop();
-			player.play();
-			playbackPaused = false;
-			statusMessage = labels.restartedStatus;
+		if (ensureLoaded(previewState.selectedAudioIndex, false)) {
+			previewState.restartPlayback();
+			previewState.statusMessage = labels.restartedStatus;
 		}
 	}
 	ImGui::SameLine();
 	if (ImGui::SmallButton(labels.stopLabel)) {
 		stopPlayback(false);
-		statusMessage = labels.stoppedStatus;
+		previewState.statusMessage = labels.stoppedStatus;
 	}
 	ImGui::EndDisabled();
 	ImGui::TextDisabled(
 		"%s %s",
 		labels.filePrefix,
-		audioFiles[static_cast<size_t>(selectedAudioIndex)].path.c_str());
+		audioFiles[static_cast<size_t>(previewState.selectedAudioIndex)].path.c_str());
 }
 
 } // namespace
@@ -432,12 +420,7 @@ void ofApp::drawVideoEssayPanel() {
 		};
 		drawTtsPreviewControls(
 			generating.load(),
-			videoEssayTtsPreview.audioFiles,
-			videoEssayTtsPreview.selectedAudioIndex,
-			videoEssayTtsPreview.loadedAudioPath,
-			videoEssayTtsPreview.playbackPaused,
-			videoEssayTtsPreview.player,
-			videoEssayTtsPreview.statusMessage,
+			videoEssayTtsPreview,
 			ttsLabels,
 			[this](int artifactIndex, bool autoplay) {
 				return ensureVideoEssayTtsAudioLoaded(artifactIndex, autoplay);

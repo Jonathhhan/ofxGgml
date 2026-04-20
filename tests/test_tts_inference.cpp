@@ -1,4 +1,6 @@
 #include "catch2.hpp"
+#include "../src/inference/ofxGgmlChatLlmTtsAdapters.h"
+#include "../src/inference/ofxGgmlPiperTtsAdapters.h"
 #include "../src/inference/ofxGgmlTtsInference.h"
 
 TEST_CASE("TTS Inference initialization", "[tts_inference]") {
@@ -51,6 +53,34 @@ TEST_CASE("TTS default model profiles", "[tts_inference]") {
 			REQUIRE_FALSE(profile.architecture.empty());
 		}
 	}
+
+	SECTION("Profiles expose backend-specific expectations") {
+		bool foundPiperProfile = false;
+		bool foundChatLlmProfile = false;
+		bool foundSpeakerProfileRequirement = false;
+		bool foundConvertedModelHint = false;
+		for (const auto & profile : profiles) {
+			if (profile.backendId == "piper" &&
+				profile.modelFileHint.find("piper/") != std::string::npos &&
+				profile.modelFileHint.find(".onnx") != std::string::npos) {
+				foundPiperProfile = true;
+			}
+			if (profile.architecture.find("chatllm.cpp") != std::string::npos) {
+				foundChatLlmProfile = true;
+			}
+			if (profile.modelFileHint.find(".bin") != std::string::npos) {
+				foundConvertedModelHint = true;
+			}
+			if (profile.requiresSpeakerProfile &&
+				profile.speakerFileHint == "speaker.json") {
+				foundSpeakerProfileRequirement = true;
+			}
+		}
+		REQUIRE(foundPiperProfile);
+		REQUIRE(foundChatLlmProfile);
+		REQUIRE(foundConvertedModelHint);
+		REQUIRE(foundSpeakerProfileRequirement);
+	}
 }
 
 TEST_CASE("TTS bridge backend creation", "[tts_inference]") {
@@ -74,6 +104,12 @@ TEST_CASE("TTS bridge backend creation", "[tts_inference]") {
 
 	SECTION("Create OuteTTS backend") {
 		auto backend = ofxGgmlTtsInference::createOuteTtsBridgeBackend();
+		REQUIRE(backend != nullptr);
+		REQUIRE_FALSE(backend->backendName().empty());
+	}
+
+	SECTION("Create Piper backend") {
+		auto backend = ofxGgmlTtsInference::createPiperTtsBridgeBackend();
 		REQUIRE(backend != nullptr);
 		REQUIRE_FALSE(backend->backendName().empty());
 	}
@@ -293,6 +329,118 @@ TEST_CASE("TTS synthesize with mock backend", "[tts_inference]") {
 
 		REQUIRE_FALSE(result.success);
 		REQUIRE(result.error == "Mock error");
+	}
+}
+
+TEST_CASE("ChatLLM TTS loader failures preserve raw output", "[tts_inference]") {
+	SECTION("Bad magic errors keep the loader details") {
+		const std::string message =
+			ofxGgmlChatLlmTtsAdapters::summarizeModelLoadFailure(
+				"gguf_init_from_file: bad magic in header",
+				"C:/models/outetts.gguf");
+		REQUIRE(
+			message.find("Raw loader output: gguf_init_from_file: bad magic in header") !=
+			std::string::npos);
+	}
+
+	SECTION("Empty loader output still falls back to the friendly message") {
+		const std::string message =
+			ofxGgmlChatLlmTtsAdapters::summarizeModelLoadFailure(
+				"  ",
+				"C:/models/outetts.gguf");
+		REQUIRE(
+			message.find("The selected TTS model file was rejected by chatllm.cpp.") !=
+			std::string::npos);
+	}
+}
+
+TEST_CASE("ChatLLM TTS validation surfaces backend-specific hints", "[tts_inference]") {
+	SECTION("Raw gguf models are rejected up front") {
+		ofxGgmlTtsRequest request;
+		request.modelPath = "C:/models/OuteTTS-0.2-500M-Q8_0.gguf";
+
+		ofxGgmlChatLlmTtsAdapters::MetadataEntries metadata;
+		const std::string error =
+			ofxGgmlChatLlmTtsAdapters::validateRequestForChatLlmTts(
+				request,
+				metadata);
+		REQUIRE(error.find("convert.py") != std::string::npos);
+		REQUIRE(error.find(".bin/.ggmm") != std::string::npos);
+	}
+
+	SECTION("Converted non-OuteTTS names keep a compatibility hint") {
+		ofxGgmlTtsRequest request;
+		request.modelPath = "C:/models/some-other-tts.bin";
+
+		ofxGgmlChatLlmTtsAdapters::MetadataEntries metadata;
+		const std::string error =
+			ofxGgmlChatLlmTtsAdapters::validateRequestForChatLlmTts(
+				request,
+				metadata);
+		REQUIRE(error.empty());
+
+		bool foundCompatibilityHint = false;
+		bool foundConversionHint = false;
+		for (const auto & entry : metadata) {
+			if (entry.first == "compatibilityHint" &&
+				entry.second.find("converted OuteTTS artifacts") != std::string::npos) {
+				foundCompatibilityHint = true;
+			}
+			if (entry.first == "conversionHint" &&
+				entry.second.find(".bin/.ggmm") != std::string::npos) {
+				foundConversionHint = true;
+			}
+		}
+		REQUIRE(foundCompatibilityHint);
+		REQUIRE(foundConversionHint);
+	}
+
+	SECTION("Clone voice still requires speaker.json") {
+		ofxGgmlTtsRequest request;
+		request.task = ofxGgmlTtsTask::CloneVoice;
+		request.modelPath = "C:/models/outetts.bin";
+
+		ofxGgmlChatLlmTtsAdapters::MetadataEntries metadata;
+		const std::string error =
+			ofxGgmlChatLlmTtsAdapters::validateRequestForChatLlmTts(
+				request,
+				metadata);
+		REQUIRE(error.find("speaker.json") != std::string::npos);
+	}
+}
+
+TEST_CASE("Piper TTS validation surfaces backend-specific hints", "[tts_inference]") {
+	SECTION("Piper expects an .onnx voice model") {
+		ofxGgmlTtsRequest request;
+		request.modelPath = "C:/models/voice.bin";
+
+		ofxGgmlPiperTtsAdapters::MetadataEntries metadata;
+		const std::string error =
+			ofxGgmlPiperTtsAdapters::validateRequestForPiper(
+				request,
+				metadata);
+		REQUIRE(error.find(".onnx") != std::string::npos);
+	}
+
+	SECTION("Piper clone voice is rejected explicitly") {
+		ofxGgmlTtsRequest request;
+		request.task = ofxGgmlTtsTask::CloneVoice;
+		request.modelPath = "C:/models/en_US-lessac-medium.onnx";
+
+		ofxGgmlPiperTtsAdapters::MetadataEntries metadata;
+		const std::string error =
+			ofxGgmlPiperTtsAdapters::validateRequestForPiper(
+				request,
+				metadata);
+		REQUIRE(error.find("Clone Voice") != std::string::npos);
+	}
+
+	SECTION("Piper default executable hint is stable") {
+		REQUIRE_FALSE(ofxGgmlPiperTtsAdapters::defaultExecutableHint().empty());
+	}
+
+	SECTION("Piper preferred local executable path is exposed") {
+		REQUIRE_FALSE(ofxGgmlPiperTtsAdapters::preferredLocalExecutablePath().empty());
 	}
 }
 

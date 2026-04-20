@@ -40,6 +40,8 @@ struct RuntimeOptions {
 	std::string defaultSpeakerName = "EN-FEMALE-1-NEUTRAL";
 };
 
+using MetadataEntries = std::vector<std::pair<std::string, std::string>>;
+
 inline std::string trimCopy(const std::string & value) {
 	size_t start = 0;
 	size_t end = value.size();
@@ -68,18 +70,98 @@ inline std::string summarizeModelLoadFailure(
 	const std::string trimmedOutput = trimCopy(rawOutput);
 	const std::string loweredOutput = lowerCopy(trimmedOutput);
 	const std::string fileName = std::filesystem::path(modelPath).filename().string();
-	const std::string loweredFileName = lowerCopy(fileName);
 
 	if (loweredOutput.find("bad magic") != std::string::npos ||
 		loweredOutput.find("model file is broken") != std::string::npos) {
-		if (loweredFileName.find("outetts") != std::string::npos) {
+		if (trimmedOutput.empty()) {
 			return "The selected TTS model file was rejected by chatllm.cpp. "
-				"It may be corrupted, not a real GGUF binary, or incompatible with the current runtime build.";
+				"It may not be a converted chatllm.cpp model artifact such as .bin or .ggmm.";
 		}
-		return "The selected TTS model file was rejected as an invalid or incompatible GGUF by chatllm.cpp.";
+		return "chatllm.cpp rejected the selected TTS model. "
+			"Raw loader output: " + trimmedOutput;
 	}
 
 	return trimmedOutput;
+}
+
+inline void appendMetadataEntry(
+	MetadataEntries & metadata,
+	const std::string & key,
+	const std::string & value) {
+	const std::string trimmedKey = trimCopy(key);
+	const std::string trimmedValue = trimCopy(value);
+	if (trimmedKey.empty() || trimmedValue.empty()) {
+		return;
+	}
+	metadata.emplace_back(trimmedKey, trimmedValue);
+}
+
+inline bool modelPathLooksLikeOuteTts(const std::string & modelPath) {
+	const std::string loweredPath = lowerCopy(trimCopy(modelPath));
+	return loweredPath.find("outetts") != std::string::npos;
+}
+
+inline std::string loweredModelExtension(const std::string & modelPath) {
+	return lowerCopy(std::filesystem::path(trimCopy(modelPath)).extension().string());
+}
+
+inline std::string validateRequestForChatLlmTts(
+	const ofxGgmlTtsRequest & request,
+	MetadataEntries & metadata) {
+	metadata.clear();
+	appendMetadataEntry(metadata, "backendFamily", "chatllm.cpp");
+	appendMetadataEntry(metadata, "backendModelFamily", "converted chatllm.cpp OuteTTS model");
+
+	const std::string modelPath = trimCopy(request.modelPath);
+	if (modelPath.empty()) {
+		return "chatllm.cpp model path is empty";
+	}
+
+	const std::string extension = loweredModelExtension(modelPath);
+	if (extension == ".gguf" || extension == ".safetensors") {
+		return
+			"chatllm.cpp TTS does not load raw model exports like .gguf or .safetensors here. "
+			"Convert the Hugging Face OuteTTS model with chatllm.cpp's convert.py and load the generated .bin/.ggmm file instead.";
+	}
+
+	if (!modelPathLooksLikeOuteTts(modelPath)) {
+		appendMetadataEntry(
+			metadata,
+			"compatibilityHint",
+			"chatllm.cpp TTS is wired for converted OuteTTS artifacts produced by convert.py; unrelated files may fail to load.");
+	}
+	appendMetadataEntry(metadata, "conversionHint", "Use chatllm.cpp convert.py output (.bin/.ggmm), not raw GGUF");
+
+	if (request.task == ofxGgmlTtsTask::CloneVoice &&
+		trimCopy(request.speakerPath).empty()) {
+		return
+			"chatllm.cpp OuteTTS expects a prepared speaker.json profile for voice cloning. "
+			"Creating speaker profiles from reference audio is not wired into this adapter yet.";
+	}
+
+	if (request.task == ofxGgmlTtsTask::ContinueSpeech) {
+		return "Continue Speech is not wired into the chatllm.cpp adapter yet.";
+	}
+
+	appendMetadataEntry(metadata, "task", ofxGgmlTtsInference::taskLabel(request.task));
+	appendMetadataEntry(metadata, "languageHint", trimCopy(request.language));
+	if (!trimCopy(request.speakerReferencePath).empty()) {
+		appendMetadataEntry(
+			metadata,
+			"speakerReferenceIgnored",
+			trimCopy(request.speakerReferencePath));
+	}
+	if (request.streamAudio) {
+		appendMetadataEntry(
+			metadata,
+			"streamAudioIgnored",
+			"chatllm.cpp adapter exports a completed audio file");
+	}
+	if (!request.normalizeText) {
+		appendMetadataEntry(metadata, "normalizeTextHint", "disabled");
+	}
+
+	return {};
 }
 
 inline bool hasPathSeparator(const std::string & value) {
@@ -513,25 +595,11 @@ inline std::shared_ptr<ofxGgmlTtsBackend> createBackend(
 			ofxGgmlTtsResult result;
 			result.backendName = displayName;
 
+			result.error = validateRequestForChatLlmTts(request, result.metadata);
+			if (!result.error.empty()) {
+				return result;
+			}
 			const std::string modelPath = trimCopy(request.modelPath);
-			if (modelPath.empty()) {
-				result.error = "chatllm.cpp model path is empty";
-				return result;
-			}
-
-			if (request.task == ofxGgmlTtsTask::CloneVoice &&
-				trimCopy(request.speakerPath).empty()) {
-				result.error =
-					"chatllm.cpp OuteTTS expects a prepared speaker.json profile for voice cloning. "
-					"Creating speaker profiles from reference audio is not wired into this adapter yet.";
-				return result;
-			}
-
-			if (request.task == ofxGgmlTtsTask::ContinueSpeech) {
-				result.error =
-					"Continue Speech is not wired into the chatllm.cpp adapter yet.";
-				return result;
-			}
 
 			std::string outputPath = trimCopy(request.outputPath);
 			if (outputPath.empty()) {
@@ -633,7 +701,6 @@ inline std::shared_ptr<ofxGgmlTtsBackend> createBackend(
 			result.speakerPath = speakerPath;
 			result.metadata.emplace_back("modelPath", modelPath);
 			result.metadata.emplace_back("outputPath", outputPath);
-			result.metadata.emplace_back("task", ofxGgmlTtsInference::taskLabel(request.task));
 
 			std::error_code existsEc;
 			const bool hasOutputFile =

@@ -63,25 +63,21 @@ void drawGeneratedOutputChild(
 template <typename EnsureLoadedFn, typename StopPlaybackFn>
 void drawTtsPreviewControls(
 	const bool generating,
-	std::vector<ofxGgmlTtsAudioArtifact> & audioFiles,
-	int & selectedAudioIndex,
-	const std::string & loadedAudioPath,
-	bool & playbackPaused,
-	ofSoundPlayer & player,
-	std::string & statusMessage,
+	TtsPreviewState & previewState,
 	const TtsPreviewUiLabels & labels,
 	EnsureLoadedFn && ensureLoaded,
 	StopPlaybackFn && stopPlayback) {
+	auto & audioFiles = previewState.audioFiles;
 	if (!audioFiles.empty()) {
-		selectedAudioIndex = std::clamp(
-			selectedAudioIndex,
+		previewState.selectedAudioIndex = std::clamp(
+			previewState.selectedAudioIndex,
 			0,
 			std::max(0, static_cast<int>(audioFiles.size()) - 1));
 		if (audioFiles.size() > 1) {
 			std::string previewLabel =
-				ofFilePath::getBaseName(audioFiles[static_cast<size_t>(selectedAudioIndex)].path);
+				ofFilePath::getBaseName(audioFiles[static_cast<size_t>(previewState.selectedAudioIndex)].path);
 			if (previewLabel.empty()) {
-				previewLabel = "Audio " + std::to_string(selectedAudioIndex + 1);
+				previewLabel = "Audio " + std::to_string(previewState.selectedAudioIndex + 1);
 			}
 			if (ImGui::BeginCombo(labels.comboLabel, previewLabel.c_str())) {
 				for (int i = 0; i < static_cast<int>(audioFiles.size()); ++i) {
@@ -90,10 +86,10 @@ void drawTtsPreviewControls(
 					const std::string itemLabel = fileLabel.empty()
 						? "Audio " + std::to_string(i + 1)
 						: fileLabel;
-					const bool selected = (selectedAudioIndex == i);
+					const bool selected = (previewState.selectedAudioIndex == i);
 					if (ImGui::Selectable(itemLabel.c_str(), selected)) {
-						selectedAudioIndex = i;
-						ensureLoaded(selectedAudioIndex, false);
+						previewState.selectedAudioIndex = i;
+						ensureLoaded(previewState.selectedAudioIndex, false);
 					}
 					if (selected) {
 						ImGui::SetItemDefaultFocus();
@@ -105,47 +101,39 @@ void drawTtsPreviewControls(
 
 		const bool canPreviewAudio = !generating && !audioFiles.empty();
 		ImGui::BeginDisabled(!canPreviewAudio);
-		const bool audioLoaded = player.isLoaded() && !loadedAudioPath.empty();
-		const bool audioPlaying = audioLoaded && player.isPlaying();
+		const bool audioLoaded = previewState.isAudioLoaded();
+		const bool audioPlaying = previewState.isAudioPlaying();
 		const char * playPauseLabel = audioPlaying
 			? labels.pauseLabel
-			: (playbackPaused ? labels.resumeLabel : labels.playLabel);
+			: (previewState.isPlaybackPaused() ? labels.resumeLabel : labels.playLabel);
 		if (ImGui::SmallButton(playPauseLabel)) {
 			if (!audioLoaded) {
-				ensureLoaded(selectedAudioIndex, true);
+				ensureLoaded(previewState.selectedAudioIndex, true);
 			} else if (audioPlaying) {
-				player.setPaused(true);
-				playbackPaused = true;
-				statusMessage = labels.pausedStatus;
+				previewState.pausePlayback();
+				previewState.statusMessage = labels.pausedStatus;
 			} else {
-				if (playbackPaused) {
-					player.setPaused(false);
-				} else {
-					player.play();
-				}
-				playbackPaused = false;
-				statusMessage = labels.playingStatus;
+				previewState.resumePlayback();
+				previewState.statusMessage = labels.playingStatus;
 			}
 		}
 		ImGui::SameLine();
 		if (ImGui::SmallButton(labels.restartLabel)) {
-			if (ensureLoaded(selectedAudioIndex, false)) {
-				player.stop();
-				player.play();
-				playbackPaused = false;
-				statusMessage = labels.restartedStatus;
+			if (ensureLoaded(previewState.selectedAudioIndex, false)) {
+				previewState.restartPlayback();
+				previewState.statusMessage = labels.restartedStatus;
 			}
 		}
 		ImGui::SameLine();
 		if (ImGui::SmallButton(labels.stopLabel)) {
 			stopPlayback(false);
-			statusMessage = labels.stoppedStatus;
+			previewState.statusMessage = labels.stoppedStatus;
 		}
 		ImGui::EndDisabled();
 		ImGui::TextDisabled(
 			"%s %s",
 			labels.filePrefix,
-			audioFiles[static_cast<size_t>(selectedAudioIndex)].path.c_str());
+			audioFiles[static_cast<size_t>(previewState.selectedAudioIndex)].path.c_str());
 	}
 }
 
@@ -276,12 +264,7 @@ void ofApp::drawChatPanel() {
 	}
 	drawTtsPreviewControls(
 		generating.load(),
-		chatTtsPreview.audioFiles,
-		chatTtsPreview.selectedAudioIndex,
-		chatTtsPreview.loadedAudioPath,
-		chatTtsPreview.playbackPaused,
-		chatTtsPreview.player,
-		chatTtsPreview.statusMessage,
+		chatTtsPreview,
 		{
 			"Chat audio",
 			"Pause chat audio",
@@ -469,10 +452,50 @@ void ofApp::drawSummarizePanel() {
 		ImGui::SameLine();
 		if (ImGui::SmallButton("Clear##SumClear")) {
 			summarizeOutput.clear();
+			summarizeTtsPreview.clearPreviewArtifacts();
+			stopSummaryTtsPlayback(true);
 		}
 		ImGui::SameLine();
 		ImGui::TextDisabled("(%d chars)", static_cast<int>(summarizeOutput.size()));
 	}
+	ImGui::Checkbox("Speak summaries", &summarizeSpeakOutput);
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Automatically synthesize each completed summary through the configured TTS backend.");
+	}
+	ImGui::SameLine();
+	ImGui::BeginDisabled(generating.load() || trim(summarizeOutput).empty());
+	if (ImGui::SmallButton("Speak summary")) {
+		speakLatestSummary(true);
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Send the current summary into the TTS pipeline and mirror it into the TTS panel.");
+	}
+	if (!summarizeTtsPreview.statusMessage.empty()) {
+		ImGui::TextDisabled("%s", summarizeTtsPreview.statusMessage.c_str());
+	}
+	drawTtsPreviewControls(
+		generating.load(),
+		summarizeTtsPreview,
+		{
+			"Summary audio",
+			"Pause summary audio",
+			"Resume summary audio",
+			"Play summary audio",
+			"Restart summary audio",
+			"Stop summary audio",
+			"Summary audio file:",
+			"Paused synthesized summary.",
+			"Playing synthesized summary.",
+			"Restarted synthesized summary.",
+			"Stopped synthesized summary."
+		},
+		[this](int artifactIndex, bool autoplay) {
+			return ensureSummaryTtsAudioLoaded(artifactIndex, autoplay);
+		},
+		[this](bool clearLoadedPath) {
+			stopSummaryTtsPlayback(clearLoadedPath);
+		});
 	drawGeneratedOutputChild(
 		"##SumOut",
 		summarizeOutput,
@@ -827,12 +850,7 @@ void ofApp::drawTranslatePanel() {
 	}
 	drawTtsPreviewControls(
 		generating.load(),
-		translateTtsPreview.audioFiles,
-		translateTtsPreview.selectedAudioIndex,
-		translateTtsPreview.loadedAudioPath,
-		translateTtsPreview.playbackPaused,
-		translateTtsPreview.player,
-		translateTtsPreview.statusMessage,
+		translateTtsPreview,
 		{
 			"Translated audio",
 			"Pause translated audio",

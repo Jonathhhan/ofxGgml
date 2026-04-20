@@ -13,6 +13,7 @@ enum class ofxGgmlTtsTask {
 };
 
 struct ofxGgmlTtsModelProfile {
+	std::string backendId;
 	std::string name;
 	std::string architecture;
 	std::string modelRepoHint;
@@ -114,6 +115,10 @@ public:
 		createOuteTtsBridgeBackend(
 			ofxGgmlTtsBridgeBackend::SynthesizeFunction synthesizeFunction = {},
 			const std::string & displayName = "OuteTTS");
+	static std::shared_ptr<ofxGgmlTtsBackend>
+		createPiperTtsBridgeBackend(
+			ofxGgmlTtsBridgeBackend::SynthesizeFunction synthesizeFunction = {},
+			const std::string & displayName = "Piper TTS");
 
 	void setBackend(std::shared_ptr<ofxGgmlTtsBackend> backend);
 	std::shared_ptr<ofxGgmlTtsBackend> getBackend() const;

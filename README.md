@@ -38,7 +38,7 @@ This addon is released under the [MIT License](LICENSE).
 - server-streamed text output now uses delta-based chunk handling so Chat and Script mode no longer duplicate partial text while `llama-server` replies are still arriving
 - addon-level `Live context` support for loaded sources, domain-provider grounding, generic search fallback, and stricter citation-oriented response modes
 - `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
-- `ofxGgmlTtsInference` as a lightweight text-to-speech bridge layer for optional `chatllm.cpp`-backed OuteTTS workflows and speaker-profile handling
+- `ofxGgmlTtsInference` as a lightweight text-to-speech bridge layer for Piper and optional `chatllm.cpp`-backed OuteTTS workflows
 - `ofxGgmlClipInference` as a lightweight CLIP-style embedding and ranking bridge layer for text/image similarity workflows, with an optional `clip.cpp` adapter path
 - `ofxGgmlDiffusionInference` as a lightweight image-generation bridge layer that can host an `ofxStableDiffusion` adapter without coupling diffusion internals into the core addon, now with structured image modes, CLIP-friendly rerank selection, and richer per-image metadata
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
@@ -195,6 +195,7 @@ On Windows, the GUI example also adds central runtime folders such as:
 - `libs/llama/bin`
 - `libs/whisper/bin`
 - `libs/chatllm/bin`
+- `libs/piper/bin`
 - `libs/ggml/build/src/Release`
 
 to the process DLL search path at startup, so development builds do not need duplicate runtime DLL copies in `bin/` unless you are distributing a standalone bundle.
@@ -836,9 +837,40 @@ The Speech panel now supports a simple microphone workflow directly in the GUI:
 
 ## TTS Helpers
 
-`ofxGgmlTtsInference` adds a parallel addon-level text-to-speech layer for synthesis workflows that should stay separate from Whisper-style speech transcription. The initial scaffold is backend-agnostic and now ships with a ready-to-attach `chatllm.cpp` adapter for OuteTTS models, including speaker-profile paths and the sampler controls that matter for llama-backed TTS models.
+`ofxGgmlTtsInference` adds a parallel addon-level text-to-speech layer for synthesis workflows that should stay separate from Whisper-style speech transcription. The current addon exposes two backend families:
 
-Use it when an app wants local speech generation without baking a specific TTS runtime into its UI layer. The bridge exposes `Synthesize`, `Clone Voice`, and `Continue Speech` task labels, ships with starter OuteTTS profile hints, and can attach a runtime callback through `createChatLlmTtsBridgeBackend(...)`, `createOuteTtsBridgeBackend(...)`, or `createTtsBridgeBackend(...)`. The GUI example now treats `Executable` as an optional override: leave it blank to auto-discover `chatllm.cpp`, or point it at a specific runtime if you have one already. The preferred addon-local runtime path is still `libs/chatllm/bin/chatllm(.exe)`.
+- Piper for direct `.onnx` voice models with a matching `.onnx.json`
+- `chatllm.cpp` for converted OuteTTS artifacts such as `.bin` / `.ggmm`
+
+Use it when an app wants local speech generation without baking one TTS runtime into its UI layer. The bridge exposes `Synthesize`, `Clone Voice`, and `Continue Speech` task labels, and the GUI example now routes the selected TTS profile to the matching backend instead of pretending all TTS models are interchangeable.
+
+### Piper
+
+The first built-in TTS profile is now Piper. Leave `Executable` blank to auto-discover the addon-local launcher at `libs/piper/bin/piper.bat` first, then fall back to `piper` on `PATH`.
+
+On Windows, you can install the local Piper runtime and a recommended starter voice with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-piper.ps1
+```
+
+That helper creates a local Python-backed Piper runtime under `%LOCALAPPDATA%\ofxGgml\piper-runtime`, writes an addon-local launcher into `libs/piper/bin`, and downloads `en_US-lessac-medium` into `models/piper` by default.
+
+You can also use the one-command Windows setup flow:
+
+```bat
+scripts\setup_windows.bat --with-piper --download-piper-voice
+```
+
+To fetch another Piper voice later:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\download-piper-voice.ps1 -VoiceName en_GB-alan-medium
+```
+
+### chatllm.cpp OuteTTS
+
+`chatllm.cpp` remains available as a backend-specific TTS option for converted OuteTTS models. The GUI example treats `Executable` as an optional override: leave it blank to auto-discover `chatllm.cpp`, or point it at a specific runtime if you have one already. The preferred addon-local runtime path is still `libs/chatllm/bin/chatllm(.exe)`.
 
 On Windows, you can populate that runtime path with:
 

@@ -90,15 +90,89 @@ struct TtsPreviewState {
 	int selectedAudioIndex = 0;
 	std::string loadedAudioPath;
 	bool playbackPaused = false;
-	ofSoundPlayer player;
+	std::vector<float> playbackSamples;
+	double playbackPositionFrames = 0.0;
+	int playbackSampleRate = 0;
+	int playbackChannels = 0;
+	bool playbackLoaded = false;
+	bool playbackActive = false;
+	mutable std::mutex playbackMutex;
+
+	bool isAudioLoaded() const {
+		std::lock_guard<std::mutex> lock(playbackMutex);
+		return playbackLoaded &&
+			!loadedAudioPath.empty() &&
+			playbackSampleRate > 0 &&
+			playbackChannels > 0 &&
+			!playbackSamples.empty();
+	}
+
+	bool isAudioPlaying() const {
+		std::lock_guard<std::mutex> lock(playbackMutex);
+		return playbackLoaded &&
+			playbackActive &&
+			!playbackPaused &&
+			!playbackSamples.empty();
+	}
+
+	bool isPlaybackPaused() const {
+		std::lock_guard<std::mutex> lock(playbackMutex);
+		return playbackPaused;
+	}
+
+	void pausePlayback() {
+		std::lock_guard<std::mutex> lock(playbackMutex);
+		if (!playbackLoaded) {
+			return;
+		}
+		playbackPaused = true;
+		playbackActive = false;
+	}
+
+	void resumePlayback() {
+		std::lock_guard<std::mutex> lock(playbackMutex);
+		if (!playbackLoaded || playbackSamples.empty() || playbackChannels <= 0) {
+			return;
+		}
+		const size_t totalFrames =
+			playbackSamples.size() / static_cast<size_t>(playbackChannels);
+		if (playbackPositionFrames >= static_cast<double>(totalFrames)) {
+			playbackPositionFrames = 0.0;
+		}
+		playbackPaused = false;
+		playbackActive = true;
+	}
+
+	void restartPlayback() {
+		std::lock_guard<std::mutex> lock(playbackMutex);
+		if (!playbackLoaded || playbackSamples.empty()) {
+			return;
+		}
+		playbackPositionFrames = 0.0;
+		playbackPaused = false;
+		playbackActive = true;
+	}
+
+	void stopPlayback(bool clearLoadedPath = false) {
+		std::lock_guard<std::mutex> lock(playbackMutex);
+		playbackPaused = false;
+		playbackActive = false;
+		playbackPositionFrames = 0.0;
+		if (clearLoadedPath) {
+			loadedAudioPath.clear();
+			playbackSamples.clear();
+			playbackSampleRate = 0;
+			playbackChannels = 0;
+			playbackLoaded = false;
+		}
+	}
 
 	void clearPreviewArtifacts() {
 		statusMessage.clear();
 		request.clear();
 		audioFiles.clear();
 		selectedAudioIndex = 0;
-		loadedAudioPath.clear();
-		playbackPaused = false;
+		stopPlayback(true);
 	}
 };
 
@@ -114,6 +188,7 @@ public:
 	void exit();
 	void keyPressed(int key);
 	void audioIn(ofSoundBuffer & input);
+	void audioOut(ofSoundBuffer & output);
 
 private:
 	// -- ggml engine --
@@ -149,6 +224,10 @@ private:
 	// -- input buffers --
 	char chatInput[4096] = {};
 	bool chatSpeakReplies = false;
+	bool chatUseCustomTtsVoice = false;
+	char chatTtsModelPath[1024] = {};
+	char chatTtsSpeakerPath[1024] = {};
+	bool summarizeSpeakOutput = false;
 	char easyPrimaryInput[4096] = {};
 	char easySecondaryInput[2048] = {};
 	int easyActionIndex = 0;
@@ -361,12 +440,14 @@ private:
 	std::deque<Message> chatMessages;
 	std::string chatLastAssistantReply;
 	TtsPreviewState chatTtsPreview;
+	TtsPreviewState ttsPanelPreview;
 	std::string easyOutput;
 	std::string scriptOutput;
 	std::string scriptInlineCompletionOutput;
 	std::string scriptInlineCompletionTargetPath;
 	std::deque<Message> scriptMessages;
 	std::string summarizeOutput;
+	TtsPreviewState summarizeTtsPreview;
 	std::string writeOutput;
 	std::string translateOutput;
 	std::string voiceTranslatorStatus;
@@ -531,6 +612,11 @@ private:
 	int speechInputStreamConfigSampleRate = 0;
 	int speechInputStreamConfigChannels = 0;
 	int speechInputStreamConfigBufferSize = 0;
+	ofSoundStream ttsOutputStream;
+	bool ttsOutputStreamConfigured = false;
+	int ttsOutputSampleRate = 48000;
+	int ttsOutputChannels = 2;
+	int ttsOutputBufferSize = 512;
 	std::vector<float> speechRecordedSamples;
 	std::mutex speechRecordMutex;
 
@@ -929,12 +1015,19 @@ private:
 	void runTtsInferenceForText(
 		const std::string & text,
 		const std::string & statusLabel = "Chat reply",
-		bool mirrorIntoTtsInput = false);
+		bool mirrorIntoTtsInput = false,
+		const std::string & modelPathOverride = std::string(),
+		const std::string & speakerPathOverride = std::string());
 	void speakLatestChatReply(bool mirrorIntoTtsInput = true);
+	void speakLatestSummary(bool mirrorIntoTtsInput = true);
 	void speakTranslatedReply(bool mirrorIntoTtsInput = true);
 	void speakVideoEssayReply(bool mirrorIntoTtsInput = true);
+	bool ensureTtsPanelAudioLoaded(int artifactIndex = -1, bool autoplay = false);
+	void stopTtsPanelPlayback(bool clearLoadedPath = false);
 	bool ensureChatTtsAudioLoaded(int artifactIndex = -1, bool autoplay = false);
 	void stopChatTtsPlayback(bool clearLoadedPath = false);
+	bool ensureSummaryTtsAudioLoaded(int artifactIndex = -1, bool autoplay = false);
+	void stopSummaryTtsPlayback(bool clearLoadedPath = false);
 	bool ensureTranslateTtsAudioLoaded(int artifactIndex = -1, bool autoplay = false);
 	void stopTranslateTtsPlayback(bool clearLoadedPath = false);
 	bool ensureVideoEssayTtsAudioLoaded(int artifactIndex = -1, bool autoplay = false);
@@ -975,6 +1068,7 @@ private:
 	ofxGgmlLiveSpeechSettings makeLiveSpeechSettings() const;
 	void applyLiveSpeechTranscriberSettings();
 	bool ensureSpeechInputStreamReady();
+	bool ensureTtsOutputStreamReady();
 	bool startSpeechRecording();
 	void stopSpeechRecording(bool keepBufferedAudio = true);
 	std::string flushSpeechRecordingToTempWav();
@@ -1140,8 +1234,10 @@ private:
 	void applyTtsProfileDefaults(
 		const ofxGgmlTtsModelProfile & profile,
 		bool onlyWhenEmpty);
-	std::string resolveConfiguredTtsExecutable() const;
+	std::string resolveConfiguredTtsExecutable(
+		const ofxGgmlTtsModelProfile & profile) const;
 	std::shared_ptr<ofxGgmlTtsBackend> createConfiguredTtsBackend(
+		const ofxGgmlTtsModelProfile & profile,
 		const std::string & executableHint = "") const;
 	void drawStatusBar();
 	void drawDeviceInfoWindow();
