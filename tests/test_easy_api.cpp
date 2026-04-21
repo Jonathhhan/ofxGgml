@@ -43,8 +43,13 @@ std::string createEasyApiExecutable(const std::string & outputLine) {
 		<< "type \"%~dp0fake_easy_api_output.txt\"\r\n";
 #else
 	const auto exe = dir / "fake_easy_api.sh";
+	const auto outputFile = dir / "fake_easy_api_output.txt";
+	{
+		std::ofstream output(outputFile, std::ios::binary);
+		output << outputLine;
+	}
 	std::ofstream out(exe);
-	out << "#!/usr/bin/env bash\nset -euo pipefail\necho " << outputLine << "\n";
+	out << "#!/usr/bin/env bash\ncat \"$(dirname \"$0\")/fake_easy_api_output.txt\"\n";
 	out.close();
 	chmod(exe.c_str(), 0755);
 #endif
@@ -140,7 +145,8 @@ public:
 			"Crawled Source",
 			request.startUrl,
 			{},
-			"Example markdown about Berlin weather and icy conditions.",
+			"Example markdown about Berlin weather and icy conditions. "
+			"Icy weather halted flights.",
 			0,
 			52
 		});

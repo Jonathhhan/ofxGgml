@@ -326,6 +326,7 @@ std::string ofxGgmlCitationSearchInternal::cleanCrawlerMarkdownForCitations(
 	std::ostringstream cleaned;
 	bool inFrontMatter = isLikelyYamlFrontMatter(lines);
 	bool frontMatterConsumed = !inFrontMatter;
+	bool seenFrontMatterOpening = !inFrontMatter;
 	bool previousWasBlank = true;
 	bool sawBody = false;
 
@@ -378,6 +379,10 @@ std::string ofxGgmlCitationSearchInternal::cleanCrawlerMarkdownForCitations(
 	for (const auto & rawLine : lines) {
 		const std::string trimmed = trimCopy(rawLine);
 		if (inFrontMatter) {
+			if (!seenFrontMatterOpening) {
+				seenFrontMatterOpening = true;
+				continue;
+			}
 			if (trimmed == "---") {
 				inFrontMatter = false;
 				frontMatterConsumed = true;
