@@ -73,18 +73,41 @@ m_array.push_back(item);
 
 // --- Static factories ---
 
-static ofJson parse(const std::string & text, void * = nullptr, bool = true) {
+static ofJson parse(const std::string & text, void * = nullptr, bool allow_exceptions = true) {
+auto makeDiscarded = []() {
+ofJson json;
+json.m_type = Type::Discarded;
+return json;
+};
+
 const std::string trimmed = trimStr(text);
 if (trimmed.empty()) {
+if (!allow_exceptions) {
+return makeDiscarded();
+}
 throw std::invalid_argument("ofJson::parse: empty input");
 }
+
+try {
 size_t pos = 0;
 const ofJson result = parseValue(trimmed, pos);
 // Skip trailing whitespace
 while (pos < trimmed.size() && std::isspace(static_cast<unsigned char>(trimmed[pos]))) {
 ++pos;
 }
+if (pos != trimmed.size()) {
+if (!allow_exceptions) {
+return makeDiscarded();
+}
+throw std::invalid_argument("ofJson::parse: trailing characters after JSON value");
+}
 return result;
+} catch (const std::exception & e) {
+if (!allow_exceptions) {
+return makeDiscarded();
+}
+throw std::invalid_argument(std::string("ofJson::parse: ") + e.what());
+}
 }
 
 static ofJson array() {
