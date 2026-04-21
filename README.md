@@ -388,6 +388,34 @@ inference.generate(modelPath, prompt, settings, [ctx](const std::string& chunk) 
 });
 ```
 
+**Enhanced Progress Tracking** (v1.1.0+):
+
+Track detailed streaming progress with token counts, speed, and completion percentage:
+
+```cpp
+auto ctx = std::make_shared<ofxGgmlStreamingContext>();
+ctx->setEstimatedTotal(settings.maxTokens);
+
+inference.generate(modelPath, prompt, settings, [ctx](const std::string& chunk) {
+    ctx->addTokens(1); // Increment for each token/chunk
+
+    auto progress = ctx->getProgress(chunk);
+    ofLogNotice() << "Progress: " << (progress.percentComplete * 100.0f) << "% "
+                  << "Speed: " << progress.tokensPerSecond << " tok/s "
+                  << "Elapsed: " << progress.elapsedMs << "ms";
+
+    if (ctx->isCancelled()) return false;
+    return true;
+});
+```
+
+Progress information includes:
+- `tokensGenerated` - Current token count
+- `estimatedTotal` - Expected total (from maxTokens)
+- `percentComplete` - Progress as 0.0 to 1.0
+- `tokensPerSecond` - Generation speed
+- `elapsedMs` - Time since start
+
 ### Logging and Metrics
 
 `ofxGgmlLogger` provides configurable logging, and `ofxGgmlMetrics` tracks performance:
