@@ -162,15 +162,22 @@ Or for a comprehensive application (like the GUI example), include all layers:
 - Video workflows
 - Music generation
 
-### Example 5: Everything
+### Example 5: Comprehensive Application
 
-**Goal:** Comprehensive AI toolkit
+**Goal:** Build full-featured AI toolkit (like GUI example)
 
-**Include:** `ofxGgml.h`
+**Include:** All layers
+```cpp
+#include "ofxGgmlCore.h"
+#include "ofxGgmlBasic.h"
+#include "ofxGgmlModalities.h"
+#include "ofxGgmlWorkflows.h"
+#include "ofxGgmlAssistants.h"
+```
 
-**You get:** All features
+**You get:** Everything
 
-**Use when:** You want maximum flexibility or are building the GUI example
+**Use when:** Building comprehensive applications with many AI features
 
 ## External Dependencies
 
@@ -197,7 +204,7 @@ Approximate build times (Release, 8-core machine):
 | `ofxGgmlModalities.h` | +5 min |
 | `ofxGgmlWorkflows.h` | +7 min |
 | `ofxGgmlAssistants.h` | +4 min |
-| `ofxGgml.h` (all) | +8 min |
+| All 5 layers | +8 min |
 
 **Tip:** Use the smallest header that meets your needs to reduce build times during development.
 
@@ -243,7 +250,7 @@ Each layer includes the previous layers, so migration is just changing the inclu
 ### For Exploration
 1. Run `ofxGgmlGuiExample`
 2. Try different modes
-3. Include `ofxGgml.h` to experiment
+3. Start with focused header for your project
 4. Narrow down to specific layer for production
 
 ## Getting Help

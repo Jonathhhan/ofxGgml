@@ -79,14 +79,19 @@ ofxGgml provides layered headers for incremental adoption:
 
 | Header | What You Get | Use When |
 |--------|--------------|----------|
-| `ofxGgmlCore.h` | Runtime, tensors, models | You need low-level tensor operations |
-| `ofxGgmlBasic.h` | Core + text inference | You only need text/chat AI (recommended start) |
+| `ofxGgmlBasic.h` | Core + text inference | **You only need text/chat AI (recommended start)** |
 | `ofxGgmlModalities.h` | Basic + speech/vision/TTS/images | You need multimodal AI |
 | `ofxGgmlWorkflows.h` | Modalities + specialized pipelines | You need video/montage/research workflows |
 | `ofxGgmlAssistants.h` | Basic + code/chat/review assistants | You need AI coding assistance |
-| `ofxGgml.h` | Everything | You want all features |
+| `ofxGgmlCore.h` | Runtime, tensors, models | You need low-level tensor operations |
 
 **Recommended:** Start with `ofxGgmlBasic.h` for text-only projects.
+
+**Need multiple features?** Include multiple headers:
+```cpp
+#include "ofxGgmlBasic.h"
+#include "ofxGgmlModalities.h"  // Also get speech/vision
+```
 
 ## Next Steps
 
