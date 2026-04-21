@@ -879,6 +879,131 @@ std::string ofxGgmlEasy::saveMilkDropPreset(
 	return m_milkDropGenerator.savePreset(presetText, outputPath);
 }
 
+// Workflow Presets Implementation
+
+ofxGgmlEasyWorkflowResult ofxGgmlEasy::summarizeAndTranslate(
+	const std::string & text,
+	const std::string & targetLanguage,
+	const std::string & sourceLanguage,
+	int maxSummaryWords) const {
+	ofxGgmlEasyWorkflowResult result;
+	auto startTime = std::chrono::steady_clock::now();
+
+	// Step 1: Summarize
+	auto summaryResult = summarize(text);
+	if (!summaryResult.success) {
+		result.error = "Summarization failed: " + summaryResult.error;
+		return result;
+	}
+	result.intermediateResults.push_back(summaryResult.text);
+
+	// Step 2: Translate the summary
+	auto translationResult = translate(summaryResult.text, targetLanguage, sourceLanguage);
+	if (!translationResult.success) {
+		result.error = "Translation failed: " + translationResult.error;
+		return result;
+	}
+	result.finalOutput = translationResult.text;
+
+	auto endTime = std::chrono::steady_clock::now();
+	result.totalElapsedMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
+	result.success = true;
+	return result;
+}
+
+ofxGgmlEasyWorkflowResult ofxGgmlEasy::transcribeAndSummarize(
+	const std::string & audioPath,
+	int maxSummaryWords) const {
+	ofxGgmlEasyWorkflowResult result;
+	auto startTime = std::chrono::steady_clock::now();
+
+	// Step 1: Transcribe audio
+	auto transcriptionResult = transcribeAudio(audioPath);
+	if (!transcriptionResult.success) {
+		result.error = "Transcription failed: " + transcriptionResult.error;
+		return result;
+	}
+	result.intermediateResults.push_back(transcriptionResult.text);
+
+	// Step 2: Summarize the transcript
+	auto summaryResult = summarize(transcriptionResult.text);
+	if (!summaryResult.success) {
+		result.error = "Summarization failed: " + summaryResult.error;
+		return result;
+	}
+	result.finalOutput = summaryResult.text;
+
+	auto endTime = std::chrono::steady_clock::now();
+	result.totalElapsedMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
+	result.success = true;
+	return result;
+}
+
+ofxGgmlEasyWorkflowResult ofxGgmlEasy::describeAndAnalyze(
+	const std::string & imagePath,
+	const std::string & analysisPrompt,
+	const std::string & descriptionPrompt) const {
+	ofxGgmlEasyWorkflowResult result;
+	auto startTime = std::chrono::steady_clock::now();
+
+	// Step 1: Describe the image
+	auto descriptionResult = describeImage(imagePath, descriptionPrompt);
+	if (!descriptionResult.success) {
+		result.error = "Image description failed: " + descriptionResult.error;
+		return result;
+	}
+	result.intermediateResults.push_back(descriptionResult.text);
+
+	// Step 2: Analyze the description with text model
+	std::string fullPrompt = analysisPrompt + "\n\nImage description: " + descriptionResult.text;
+	auto analysisResult = complete(fullPrompt);
+	if (!analysisResult.success) {
+		result.error = "Analysis failed: " + analysisResult.error;
+		return result;
+	}
+	result.finalOutput = analysisResult.text;
+
+	auto endTime = std::chrono::steady_clock::now();
+	result.totalElapsedMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
+	result.success = true;
+	return result;
+}
+
+ofxGgmlEasyWorkflowResult ofxGgmlEasy::crawlAndSummarize(
+	const std::string & startUrl,
+	int maxDepth,
+	int maxSummaryWords) const {
+	ofxGgmlEasyWorkflowResult result;
+	auto startTime = std::chrono::steady_clock::now();
+
+	// Step 1: Crawl the website
+	auto crawlResult = crawlWebsite(startUrl, maxDepth);
+	if (!crawlResult.success) {
+		result.error = "Website crawling failed: " + crawlResult.error;
+		return result;
+	}
+
+	// Combine crawled documents
+	std::string combinedContent;
+	for (const auto& doc : crawlResult.documents) {
+		combinedContent += doc.title + "\n" + doc.content + "\n\n";
+	}
+	result.intermediateResults.push_back(combinedContent);
+
+	// Step 2: Summarize the crawled content
+	auto summaryResult = summarize(combinedContent);
+	if (!summaryResult.success) {
+		result.error = "Summarization failed: " + summaryResult.error;
+		return result;
+	}
+	result.finalOutput = summaryResult.text;
+
+	auto endTime = std::chrono::steady_clock::now();
+	result.totalElapsedMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
+	result.success = true;
+	return result;
+}
+
 ofxGgmlRAGResult ofxGgmlEasy::ragQuery(
 	const std::string & query,
 	size_t topK,
