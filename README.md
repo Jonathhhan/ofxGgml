@@ -210,7 +210,7 @@ On Windows, the GUI example also adds central runtime folders such as:
 - `libs/whisper/bin`
 - `libs/chatllm/bin`
 - `libs/piper/bin`
-- `libs/ggml/build/src/Release`
+- `libs/ggml/lib`
 
 to the process DLL search path at startup, so development builds do not need duplicate runtime DLL copies in `bin/` unless you are distributing a standalone bundle.
 
@@ -711,21 +711,18 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-llama-server.ps1 -Detac
 
 The helpers default to `http://127.0.0.1:8080`, reuse the recommended local GGUF model when possible, and expose GPU layers / context size flags so the server path matches the GUI example's defaults more closely.
 
-### Manual CMake build
+### Build ggml locally
+
+The repository keeps `libs/ggml` empty (include/lib placeholders only). Use the helper to fetch ggml from upstream and populate `libs/ggml/include` and `libs/ggml/lib`:
 
 ```bash
-cmake -B libs/ggml/build libs/ggml -DCMAKE_BUILD_TYPE=Release
-cmake --build libs/ggml/build --config Release
+./scripts/build-ggml.sh --cpu-only      # CPU only
+./scripts/build-ggml.sh --cuda          # Force CUDA backend
+./scripts/build-ggml.sh --vulkan        # Force Vulkan backend
+./scripts/build-ggml.sh --metal         # Force Metal backend (macOS)
 ```
 
-Common options:
-
-| Option | Default | Description |
-| --- | --- | --- |
-| `OFXGGML_GPU_AUTODETECT` | `ON` | Auto-detect and enable available GPU backends |
-| `OFXGGML_CUDA` | `OFF` | Force CUDA backend on or off |
-| `OFXGGML_VULKAN` | `OFF` | Force Vulkan backend on or off |
-| `OFXGGML_METAL` | `OFF` | Force Metal backend on or off |
+The script downloads ggml (default ref: v0.9.9), builds static libraries, copies headers/libs into `libs/ggml`, and refreshes `addon_config.mk` library lists. Use `--clean` to wipe previous build/cache.
 
 ## Getting Started
 

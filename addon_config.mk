@@ -11,10 +11,10 @@
 # += will add the values to the previous ones in the file or the ones parsed from the file
 # system.
 #
-# ggml is bundled in libs/ggml/ and compiled via CMake as a static
-# library.  Run ./scripts/build-ggml.sh before building your OF project.
-# GPU backends (CUDA, Vulkan, Metal) are auto-detected by default
-# (use --cpu-only to disable, or --cuda/--vulkan/--metal to force one).
+# ggml is fetched and built into libs/ggml/include and libs/ggml/lib
+# via ./scripts/build-ggml.sh.  GPU backends (CUDA, Vulkan, Metal) are
+# auto-detected by default (use --cpu-only to disable, or --cuda/--vulkan/--metal
+# to force one).
 meta:
 	ADDON_NAME = ofxGgml
 	ADDON_DESCRIPTION = openFrameworks addon wrapping the ggml tensor library for machine-learning computation
@@ -27,28 +27,27 @@ common:
 	# Exclude bundled ggml source from the oF build - it is compiled
 	# separately via CMake (scripts/build-ggml.sh).
 	ADDON_SOURCES_EXCLUDE += build/%
-	ADDON_SOURCES_EXCLUDE += libs/ggml/src/%
 	ADDON_SOURCES_EXCLUDE += libs/ggml/build/%
+	ADDON_SOURCES_EXCLUDE += libs/ggml/.download/%
 	ADDON_SOURCES_EXCLUDE += libs/acestep/%
 	ADDON_SOURCES_EXCLUDE += libs/mojo/%
 	ADDON_SOURCES_EXCLUDE += libs/llama/bin/%
 	ADDON_SOURCES_EXCLUDE += libs/whisper/bin/%
 	ADDON_INCLUDES_EXCLUDE += build/%
+	ADDON_INCLUDES_EXCLUDE += libs/ggml/.download/%
 	ADDON_INCLUDES_EXCLUDE += libs/acestep/%
 	ADDON_INCLUDES_EXCLUDE += libs/mojo/%
 	ADDON_INCLUDES_EXCLUDE += libs/llama/bin/%
 	ADDON_INCLUDES_EXCLUDE += libs/whisper/bin/%
-	# Do not exclude generic build/% library paths here, because the actual
-	# ggml runtime libs intentionally live under libs/ggml/build/.
 	ADDON_LIBS_EXCLUDE += libs/acestep/%
 	ADDON_LIBS_EXCLUDE += libs/mojo/%
 	ADDON_LIBS_EXCLUDE += libs/llama/bin/%
 	ADDON_LIBS_EXCLUDE += libs/whisper/bin/%
 linux64:
 	# @DIFFUSION_LIBS_START linux64
-	ADDON_LIBS += libs/ggml/build/src/libggml.a
-	ADDON_LIBS += libs/ggml/build/src/libggml-base.a
-	ADDON_LIBS += libs/ggml/build/src/libggml-cpu.a
+	ADDON_LIBS += libs/ggml/lib/libggml.a
+	ADDON_LIBS += libs/ggml/lib/libggml-base.a
+	ADDON_LIBS += libs/ggml/lib/libggml-cpu.a
 	# @DIFFUSION_LIBS_END linux64
 	ADDON_LDFLAGS += -lpthread -ldl
 linux:
@@ -56,20 +55,20 @@ linuxarmv6l:
 linuxarmv7l:
 msys2:
 	# @DIFFUSION_LIBS_START msys2
-	ADDON_LIBS += libs/ggml/build/src/libggml.a
-	ADDON_LIBS += libs/ggml/build/src/libggml-base.a
-	ADDON_LIBS += libs/ggml/build/src/libggml-cpu.a
+	ADDON_LIBS += libs/ggml/lib/libggml.a
+	ADDON_LIBS += libs/ggml/lib/libggml-base.a
+	ADDON_LIBS += libs/ggml/lib/libggml-cpu.a
 	# @DIFFUSION_LIBS_END msys2
 	ADDON_LDFLAGS += -lpthread
 vs:
 	ADDON_INCLUDES += src
 	ADDON_INCLUDES += libs/ggml/include
 	# @DIFFUSION_LIBS_START vs
-	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml.lib
-	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml-base.lib
-	ADDON_LIBS += libs/ggml/build/src/$(Configuration)/ggml-cpu.lib
-	ADDON_LIBS += libs/ggml/build/src/ggml-cuda/$(Configuration)/ggml-cuda.lib
-	ADDON_LIBS += libs/ggml/build/src/ggml-vulkan/$(Configuration)/ggml-vulkan.lib
+	ADDON_LIBS += libs/ggml/lib/ggml.lib
+	ADDON_LIBS += libs/ggml/lib/ggml-base.lib
+	ADDON_LIBS += libs/ggml/lib/ggml-cpu.lib
+	ADDON_LIBS += libs/ggml/lib/ggml-cuda.lib
+	ADDON_LIBS += libs/ggml/lib/ggml-vulkan.lib
 	ADDON_LIBS += "$(CUDA_PATH)\lib\x64\cublas.lib"
 	ADDON_LIBS += "$(CUDA_PATH)\lib\x64\cudart.lib"
 	ADDON_LIBS += "$(CUDA_PATH)\lib\x64\cuda.lib"
@@ -79,9 +78,9 @@ android/armeabi:
 android/armeabi-v7a:
 osx:
 	# @DIFFUSION_LIBS_START osx
-	ADDON_LIBS += libs/ggml/build/src/libggml.a
-	ADDON_LIBS += libs/ggml/build/src/libggml-base.a
-	ADDON_LIBS += libs/ggml/build/src/libggml-cpu.a
+	ADDON_LIBS += libs/ggml/lib/libggml.a
+	ADDON_LIBS += libs/ggml/lib/libggml-base.a
+	ADDON_LIBS += libs/ggml/lib/libggml-cpu.a
 	# @DIFFUSION_LIBS_END osx
 	ADDON_FRAMEWORKS += Accelerate
 ios:

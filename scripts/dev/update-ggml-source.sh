@@ -13,6 +13,10 @@
 #   --commit SHA      Checkout a specific commit after cloning
 #   --help            Show this help message
 # ---------------------------------------------------------------------------
+
+echo "This addon no longer bundles ggml source under libs/ggml; use scripts/build-ggml.sh to fetch ggml instead." >&2
+exit 1
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

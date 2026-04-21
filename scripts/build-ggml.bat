@@ -22,6 +22,9 @@ REM   --jobs N       Parallel build jobs (default: %NUMBER_OF_PROCESSORS%)
 REM   --help         Show this help message
 REM ---------------------------------------------------------------------------
 
+echo [ofxGgml] build-ggml.bat is deprecated. Please run "bash scripts/build-ggml.sh" from Git Bash/WSL to download and build ggml into libs\ggml\lib.
+exit /b 1
+
 set "SCRIPT_DIR=%~dp0"
 set "ADDON_ROOT=%SCRIPT_DIR%.."
 set "GGML_DIR=%ADDON_ROOT%\libs\ggml"
