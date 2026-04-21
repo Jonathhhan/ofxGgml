@@ -1,9 +1,0 @@
-# build artifacts and downloaded sources
-/build/
-/.download/
-
-# populated at build-time
-/include/*
-/lib/*
-!/include/.gitkeep
-!/lib/.gitkeep
