@@ -2,6 +2,7 @@
 
 #include "ofFileUtils.h"
 #include "ofxGgmlTtsInference.h"
+#include "ofxGgmlTtsAdapterCommon.h"
 #include "core/ofxGgmlWindowsUtf8.h"
 #include "support/ofxGgmlProcessSecurity.h"
 
@@ -36,7 +37,7 @@ struct RuntimeOptions {
 	std::string defaultSpeakerName = "EN-FEMALE-1-NEUTRAL";
 };
 
-using MetadataEntries = std::vector<std::pair<std::string, std::string>>;
+using MetadataEntries = ofxGgmlTtsAdapterCommon::MetadataEntries;
 
 inline std::string trimCopy(const std::string & value) {
 	size_t start = 0;
@@ -244,16 +245,7 @@ inline bool isPreferredLocalExecutablePath(const std::string & executableHint) {
 	return lhs == rhs;
 }
 
-inline std::string findFirstExistingExecutable(
-	const std::vector<std::filesystem::path> & candidates) {
-	for (const auto & candidate : candidates) {
-		std::error_code ec;
-		if (std::filesystem::exists(candidate, ec) && !ec) {
-			return candidate.string();
-		}
-	}
-	return {};
-}
+using ofxGgmlTtsAdapterCommon::findFirstExistingExecutable;
 
 #ifdef _WIN32
 using ofxGgmlProcessSecurity::getEnvVarString;
@@ -289,17 +281,7 @@ inline bool runCommandCapture(
 	return success;
 }
 
-inline std::string makeTempOutputPath(const char * extension = ".wav") {
-	std::error_code ec;
-	std::filesystem::path base = std::filesystem::temp_directory_path(ec);
-	if (ec) {
-		base = std::filesystem::current_path();
-	}
-	const auto stamp =
-		std::chrono::duration_cast<std::chrono::microseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count();
-	return (base / ("ofxggml_tts_" + std::to_string(stamp) + extension)).string();
-}
+using ofxGgmlTtsAdapterCommon::makeTempOutputPath;
 
 inline std::string resolveChatLlmExecutable(const std::string & executableHint) {
 #ifdef _WIN32
