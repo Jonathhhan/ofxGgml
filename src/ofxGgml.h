@@ -37,6 +37,7 @@
 #include "inference/ofxGgmlVisionInference.h"
 #include "inference/ofxGgmlVideoInference.h"
 #include "inference/ofxGgmlVideoPlanner.h"
+#include "inference/ofxGgmlRAGPipeline.h"
 #include "assistants/ofxGgmlChatAssistant.h"
 #include "inference/ofxGgmlWebCrawler.h"
 #include "assistants/ofxGgmlCodeAssistant.h"
@@ -50,4 +51,5 @@
 #include "support/ofxGgmlEasy.h"
 #include "support/ofxGgmlScriptSource.h"
 #include "support/ofxGgmlPromptTemplates.h"
+#include "support/ofxGgmlConversationManager.h"
 #include "core/ofxGgmlCore.h"

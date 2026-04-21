@@ -60,6 +60,7 @@ void ofxGgmlEasy::configureText(const ofxGgmlEasyTextConfig & config) {
 void ofxGgmlEasy::syncTextBackends() {
 	applyInferenceExecutables(m_inference, m_textConfig);
 	applyInferenceExecutables(m_citationSearch.getInference(), m_textConfig);
+	applyInferenceExecutables(m_ragPipeline.getInference(), m_textConfig);
 	m_chatAssistant.setCompletionExecutable(m_textConfig.completionExecutable);
 	m_textAssistant.setCompletionExecutable(m_textConfig.completionExecutable);
 	m_codingAgent.setCompletionExecutable(m_textConfig.completionExecutable);
@@ -70,6 +71,8 @@ void ofxGgmlEasy::syncTextBackends() {
 	m_videoEssayWorkflow.getTextAssistant().setCompletionExecutable(
 		m_textConfig.completionExecutable);
 	m_longVideoPlanner.getTextAssistant().setCompletionExecutable(
+		m_textConfig.completionExecutable);
+	m_conversationManager.getInference().setCompletionExecutable(
 		m_textConfig.completionExecutable);
 	applyInferenceExecutables(
 		m_videoEssayWorkflow.getCitationSearch().getInference(),
@@ -224,6 +227,22 @@ ofxGgmlCodingAgent & ofxGgmlEasy::getCodingAgent() {
 
 const ofxGgmlCodingAgent & ofxGgmlEasy::getCodingAgent() const {
 	return m_codingAgent;
+}
+
+ofxGgmlRAGPipeline & ofxGgmlEasy::getRAGPipeline() {
+	return m_ragPipeline;
+}
+
+const ofxGgmlRAGPipeline & ofxGgmlEasy::getRAGPipeline() const {
+	return m_ragPipeline;
+}
+
+ofxGgmlConversationManager & ofxGgmlEasy::getConversationManager() {
+	return m_conversationManager;
+}
+
+const ofxGgmlConversationManager & ofxGgmlEasy::getConversationManager() const {
+	return m_conversationManager;
 }
 
 ofxGgmlInferenceSettings ofxGgmlEasy::makeTextSettings() const {
@@ -858,4 +877,28 @@ std::string ofxGgmlEasy::saveMilkDropPreset(
 	const std::string & presetText,
 	const std::string & outputPath) const {
 	return m_milkDropGenerator.savePreset(presetText, outputPath);
+}
+
+ofxGgmlRAGResult ofxGgmlEasy::ragQuery(
+	const std::string & query,
+	size_t topK,
+	size_t chunkSize,
+	size_t chunkOverlap,
+	const std::string & promptPrefix) const {
+	ofxGgmlRAGResult result;
+	if (m_textConfig.modelPath.empty()) {
+		result.error =
+			"Easy API text model is not configured. Call configureText(...) first.";
+		return result;
+	}
+
+	ofxGgmlRAGRequest request;
+	request.query.query = query;
+	request.query.topK = topK;
+	request.query.chunkSize = chunkSize;
+	request.query.chunkOverlap = chunkOverlap;
+	request.modelPath = m_textConfig.modelPath;
+	request.promptPrefix = promptPrefix;
+	request.inferenceSettings = makeTextSettings();
+	return m_ragPipeline.generate(request);
 }
