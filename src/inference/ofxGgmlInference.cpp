@@ -1870,6 +1870,17 @@ ofxGgmlBatchResult ofxGgmlInference::generateBatch(
 		}
 	}
 
+	// If server batch is unavailable or skipped, still honor parallel settings for local/CLI paths.
+	if (allowParallelBatchProcessing) {
+		batchResult = processBatchWithWorkers(modelPath, requests, batchSettings);
+		if (batchResult.success || !batchSettings.fallbackToSequential) {
+			batchResult.totalElapsedMs = ofGetElapsedTimeMillis() - startTime;
+			metrics.recordBatchEnd(modelPath, batchResult.processedCount,
+				batchResult.failedCount, batchResult.totalElapsedMs, batchResult.success);
+			return batchResult;
+		}
+	}
+
 	// Fall back to sequential processing
 	batchResult = processBatchSequentially(modelPath, requests, batchSettings);
 	batchResult.totalElapsedMs = ofGetElapsedTimeMillis() - startTime;
@@ -1941,14 +1952,17 @@ ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
 	const std::string & modelPath,
 	const std::vector<ofxGgmlBatchRequest> & requests,
 	const ofxGgmlBatchSettings & batchSettings) const {
+	return processBatchWithWorkers(modelPath, requests, batchSettings);
+}
+
+ofxGgmlBatchResult ofxGgmlInference::processBatchWithWorkers(
+	const std::string & modelPath,
+	const std::vector<ofxGgmlBatchRequest> & requests,
+	const ofxGgmlBatchSettings & batchSettings) const {
 
 	ofxGgmlBatchResult batchResult;
 	batchResult.results.resize(requests.size());
 
-	// For now, we use a small worker pool rather than a true /v1/batch call,
-	// since not all llama-server implementations expose that endpoint.
-	// Reusing workers avoids the repeated thread-burst overhead from the old
-	// chunked implementation while keeping the behavior predictable.
 	std::atomic<bool> shouldStop(false);
 	std::atomic<size_t> nextIndex(0);
 	std::atomic<size_t> processedCount(0);

@@ -331,11 +331,17 @@ private:
 	mutable std::unordered_map<std::string, int> m_tokenCountCache;
 	mutable std::mutex m_tokenCountCacheMutex;
 
-	/// Helper to process batch via server backend
-	ofxGgmlBatchResult processBatchViaServer(
-		const std::string & modelPath,
-		const std::vector<ofxGgmlBatchRequest> & requests,
-		const ofxGgmlBatchSettings & batchSettings) const;
+		/// Helper to process batch via server backend
+		ofxGgmlBatchResult processBatchViaServer(
+			const std::string & modelPath,
+			const std::vector<ofxGgmlBatchRequest> & requests,
+			const ofxGgmlBatchSettings & batchSettings) const;
+
+		/// Helper to process batch using worker threads (local/server agnostic)
+		ofxGgmlBatchResult processBatchWithWorkers(
+			const std::string & modelPath,
+			const std::vector<ofxGgmlBatchRequest> & requests,
+			const ofxGgmlBatchSettings & batchSettings) const;
 
 	/// Helper to process batch sequentially (CLI fallback)
 	ofxGgmlBatchResult processBatchSequentially(

@@ -5,6 +5,7 @@
 #include <vector>
 #include <sstream>
 #include <cmath>
+#include <iomanip>
 
 /// WebVTT cue settings for positioning and styling
 struct ofxGgmlVttCueSettings {
