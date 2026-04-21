@@ -652,7 +652,7 @@ Linux and macOS:
 ./scripts/build-ggml.sh --cpu-only
 ```
 
-Windows:
+Windows (wrapper uses Git Bash or WSL to call the same helper):
 
 ```bat
 scripts\build-ggml.bat
@@ -661,13 +661,11 @@ scripts\build-ggml.bat --vulkan
 scripts\build-ggml.bat --cpu-only
 ```
 
-By default the Windows script builds `Release`. Pass `--with-debug` when you also want `Debug`.
-
-If a parallel Windows build hits a transient CUDA or MSBuild object-link race, the script automatically retries that configuration with a single job.
+The `.bat` wrapper forwards all flags to `scripts/build-ggml.sh`, so make sure `bash` is on `PATH` (Git Bash or WSL). The helper builds the Release ggml libraries; use a manual CMake invocation if you also need Debug artifacts.
 
 After building ggml, regenerate your project with the openFrameworks Project Generator so generated Visual Studio projects pick up the latest addon library list.
 
-`scripts\build-ggml.bat` also refreshes `addon_config.mk` for the `vs` section so Visual Studio links the exact ggml libraries you just built. When CUDA is enabled, it injects the CUDA Toolkit dependencies using `$(CUDA_PATH)`. Vulkan linking uses `$(VULKAN_SDK)`.
+`scripts/build-ggml.sh` (and the Windows wrapper) also refreshes `addon_config.mk` for the `vs` section so Visual Studio links the exact ggml libraries you just built. When CUDA is enabled, it injects the CUDA Toolkit dependencies using `$(CUDA_PATH)`. Vulkan linking uses `$(VULKAN_SDK)`.
 
 ### llama-server on Windows
 
