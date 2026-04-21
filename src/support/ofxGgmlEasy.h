@@ -11,11 +11,13 @@
 #include "inference/ofxGgmlMontagePlanner.h"
 #include "inference/ofxGgmlLongVideoPlanner.h"
 #include "inference/ofxGgmlMusicGenerator.h"
+#include "inference/ofxGgmlRAGPipeline.h"
 #include "inference/ofxGgmlSpeechInference.h"
 #include "inference/ofxGgmlVideoEssayWorkflow.h"
 #include "inference/ofxGgmlVideoPlanner.h"
 #include "inference/ofxGgmlVisionInference.h"
 #include "inference/ofxGgmlWebCrawler.h"
+#include "support/ofxGgmlConversationManager.h"
 
 #include <string>
 #include <vector>
@@ -137,6 +139,10 @@ public:
 	const ofxGgmlLongVideoPlanner & getLongVideoPlanner() const;
 	ofxGgmlCodingAgent & getCodingAgent();
 	const ofxGgmlCodingAgent & getCodingAgent() const;
+	ofxGgmlRAGPipeline & getRAGPipeline();
+	const ofxGgmlRAGPipeline & getRAGPipeline() const;
+	ofxGgmlConversationManager & getConversationManager();
+	const ofxGgmlConversationManager & getConversationManager() const;
 
 	ofxGgmlInferenceResult complete(const std::string & prompt) const;
 	ofxGgmlChatAssistantResult chat(
@@ -244,6 +250,15 @@ public:
 		const std::string & presetText,
 		const std::string & outputPath) const;
 
+	/// Convenience method: run a full RAG query against documents already added
+	/// to getRAGPipeline(). Requires configureText() to be called first.
+	ofxGgmlRAGResult ragQuery(
+		const std::string & query,
+		size_t topK = 5,
+		size_t chunkSize = 400,
+		size_t chunkOverlap = 80,
+		const std::string & promptPrefix = "") const;
+
 private:
 	ofxGgmlInferenceSettings makeTextSettings() const;
 	ofxGgmlVisionModelProfile makeVisionProfile() const;
@@ -273,4 +288,6 @@ private:
 	ofxGgmlVideoEssayWorkflow m_videoEssayWorkflow;
 	ofxGgmlLongVideoPlanner m_longVideoPlanner;
 	ofxGgmlCodingAgent m_codingAgent;
+	ofxGgmlRAGPipeline m_ragPipeline;
+	ofxGgmlConversationManager m_conversationManager;
 };
