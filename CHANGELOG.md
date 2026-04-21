@@ -4,7 +4,36 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ## [Unreleased]
 
+### Enhanced
+
+- **EDL Export Improvements**:
+  - Added support for drop-frame timecode for NTSC 29.97fps workflows
+  - Added `buildEdlWithAudio()` function for combined video/audio track EDL export
+  - Added source file path references in EDL metadata (`* SOURCE FILE:`)
+  - Added transition duration metadata in frames (`* TRANSITION DURATION:`)
+  - Added custom audio track routing per clip (A, A2, A3, etc.)
+  - Extended `ofxGgmlMontageClip` with `sourceFilePath`, `audioTrack`, and `transitionDurationFrames` fields
+  - Extended `ofxGgmlMontagePlannerRequest` with `sourceFilePath` and `dropFrameTimecode` fields
+  - Updated `formatTimecode()` function to support drop-frame timecode with semicolon separators
+  - Improved EDL metadata export for better NLE compatibility with Avid, Premiere, Resolve, and Final Cut Pro
+
 ### Added
+
+- New comprehensive documentation: `docs/EDL_EXPORT.md` covering:
+  - Basic and advanced EDL export usage
+  - Drop-frame timecode explanation and usage
+  - Audio track configuration
+  - Transition metadata handling
+  - Frame rate support (24, 25, 30, 60 fps)
+  - NLE compatibility guide
+  - Complete workflow examples
+- New test cases for EDL functionality in `tests/test_montage_planner.cpp`:
+  - Drop-frame vs non-drop-frame timecode validation
+  - Source file path metadata inclusion
+  - Audio track export verification
+  - Transition duration metadata handling
+
+### Added (Previous)
 - **Enhanced Streaming Progress Tracking** - `ofxGgmlStreamingContext` now includes detailed progress metrics for streaming inference:
   - Added `ofxGgmlStreamingProgress` struct with `tokensGenerated`, `estimatedTotal`, `percentComplete`, `tokensPerSecond`, and `elapsedMs` fields
   - Added methods: `setEstimatedTotal()`, `addTokens()`, `getTokensGenerated()`, `getElapsedMs()`, and `getProgress()`
