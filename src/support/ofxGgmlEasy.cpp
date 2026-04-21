@@ -891,19 +891,20 @@ ofxGgmlEasyWorkflowResult ofxGgmlEasy::summarizeAndTranslate(
 
 	// Step 1: Summarize
 	auto summaryResult = summarize(text);
-	if (!summaryResult.success) {
-		result.error = "Summarization failed: " + summaryResult.error;
+	if (!summaryResult.inference.success) {
+		result.error = "Summarization failed: " + summaryResult.inference.error;
 		return result;
 	}
-	result.intermediateResults.push_back(summaryResult.text);
+	result.intermediateResults.push_back(summaryResult.inference.text);
 
 	// Step 2: Translate the summary
-	auto translationResult = translate(summaryResult.text, targetLanguage, sourceLanguage);
-	if (!translationResult.success) {
-		result.error = "Translation failed: " + translationResult.error;
+	auto translationResult =
+		translate(summaryResult.inference.text, targetLanguage, sourceLanguage);
+	if (!translationResult.inference.success) {
+		result.error = "Translation failed: " + translationResult.inference.error;
 		return result;
 	}
-	result.finalOutput = translationResult.text;
+	result.finalOutput = translationResult.inference.text;
 
 	auto endTime = std::chrono::steady_clock::now();
 	result.totalElapsedMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
@@ -927,11 +928,11 @@ ofxGgmlEasyWorkflowResult ofxGgmlEasy::transcribeAndSummarize(
 
 	// Step 2: Summarize the transcript
 	auto summaryResult = summarize(transcriptionResult.text);
-	if (!summaryResult.success) {
-		result.error = "Summarization failed: " + summaryResult.error;
+	if (!summaryResult.inference.success) {
+		result.error = "Summarization failed: " + summaryResult.inference.error;
 		return result;
 	}
-	result.finalOutput = summaryResult.text;
+	result.finalOutput = summaryResult.inference.text;
 
 	auto endTime = std::chrono::steady_clock::now();
 	result.totalElapsedMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
@@ -986,17 +987,17 @@ ofxGgmlEasyWorkflowResult ofxGgmlEasy::crawlAndSummarize(
 	// Combine crawled documents
 	std::string combinedContent;
 	for (const auto& doc : crawlResult.documents) {
-		combinedContent += doc.title + "\n" + doc.content + "\n\n";
+		combinedContent += doc.title + "\n" + doc.markdown + "\n\n";
 	}
 	result.intermediateResults.push_back(combinedContent);
 
 	// Step 2: Summarize the crawled content
 	auto summaryResult = summarize(combinedContent);
-	if (!summaryResult.success) {
-		result.error = "Summarization failed: " + summaryResult.error;
+	if (!summaryResult.inference.success) {
+		result.error = "Summarization failed: " + summaryResult.inference.error;
 		return result;
 	}
-	result.finalOutput = summaryResult.text;
+	result.finalOutput = summaryResult.inference.text;
 
 	auto endTime = std::chrono::steady_clock::now();
 	result.totalElapsedMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
