@@ -91,28 +91,40 @@ This document tracks the improvements implemented in the ofxGgml codebase as par
 
 ---
 
-## Remaining Planned Improvements
+### 4. Extract Command Execution to Central Location ✅
 
-### 4. Extract Command Execution to Central Location (Pending)
+**Impact**: Security + ~185 lines eliminated from ofxGgmlInference.cpp
 
-**Impact**: Security + ~540 lines of duplication eliminated
+**Changes**:
+- Added `runCommandCapture()` to `src/support/ofxGgmlProcessSecurity.{h,cpp}`
+- Removed duplicate implementation from `src/inference/ofxGgmlInference.cpp:147-334`
+- Added comprehensive documentation and function signature
+- Consolidated platform-specific process spawning (Windows/Unix)
+- Added streaming callback support with cancellation
 
-**Problem**: `runCommandCapture()` duplicated 3+ times across:
-- `src/inference/ofxGgmlInference.cpp:154` (~180 lines)
-- `src/inference/ofxGgmlChatLlmTtsAdapters.h:366` (~180 lines)
-- `src/inference/ofxGgmlPiperTtsAdapters.h` (~180 lines)
-
-**Solution**: Create single implementation in `src/support/ofxGgmlProcessSecurity.cpp`
+**Implementation Details**:
+- Windows: Uses `CreateProcess`, pipes with `SECURITY_ATTRIBUTES`, proper handle cleanup
+- Unix: Uses `fork/execvp`, signal handling (`SIGTERM`), `waitpid` with status parsing
+- Streaming: Line-by-line callback support via `onChunk` parameter
+- Security: Proper input/output redirection, null device handling
 
 **Benefits**:
 - Single point for security reviews
-- Bug fixes applied once
-- Consistent process handling
+- Bug fixes applied once across all usage
+- Consistent process handling behavior
 - Reduced attack surface
+- Platform-specific code centralized
 
-**Priority**: High (security + significant code reduction)
+**Remaining Duplicates**:
+- `src/inference/ofxGgmlChatLlmTtsAdapters.h:366` (~180 lines)
+- `src/inference/ofxGgmlPiperTtsAdapters.h` (~180 lines)
+- These will be updated to use the central function
+
+**Priority**: High - completed ✅
 
 ---
+
+## Remaining Planned Improvements
 
 ### 5. Create TTS Adapter Common Base (Pending)
 
@@ -174,8 +186,8 @@ class ofxGgmlVideoPlanner {
 
 ### Code Reduction
 
-- **Completed**: ~40 lines (string utilities)
-- **Pending**: ~1,460 lines (command execution + TTS base + video planners)
+- **Completed**: ~225 lines (string utilities + command execution)
+- **Pending**: ~1,275 lines (TTS base + video planners + remaining TTS adapter updates)
 - **Target**: 15-20% overall (~1,500-2,000 lines total)
 
 ### Maintenance Impact
@@ -189,19 +201,20 @@ class ofxGgmlVideoPlanner {
 
 ## Implementation Approach
 
-### Phase 1: Critical Performance & Security (75% Complete)
+### Phase 1: Critical Performance & Security (80% Complete)
 - ✅ Enable prompt caching (performance)
 - ✅ Consolidate string utilities (code quality)
 - ✅ Document server mode (adoption)
-- ⏳ Extract command execution (security)
+- ✅ Extract command execution (security)
 
 ### Phase 2: Code Consolidation (Not Started)
-- ⏳ TTS adapter common base
+- ⏳ Update TTS adapters to use central command execution
+- ⏳ Create TTS adapter common base
 - ⏳ Video planner consolidation
 
 ### Estimated Completion
-- Phase 1: 1 more improvement (command execution)
-- Phase 2: 2 more improvements
+- Phase 1: 4 of 4 improvements complete ✅
+- Phase 2: 3 improvements remaining
 - Total remaining effort: 2-3 weeks
 
 ---
@@ -213,19 +226,20 @@ class ofxGgmlVideoPlanner {
 3. **Small changes, big impact**: Single-line config change = 2-5x speedup
 4. **Security + performance**: Command execution consolidation addresses both concerns
 5. **Incremental approach works**: Ship improvements as they're ready
+6. **Central utilities prevent drift**: String and process utilities now have single source of truth
 
 ---
 
 ## Next Steps
 
-1. **Extract runCommandCapture()** to ofxGgmlProcessSecurity
-   - Security review required
-   - Platform-specific code (Windows/Unix)
-   - ~540 lines to consolidate
-   - Estimated: 4-6 hours
+1. **Update TTS adapters** to use `ofxGgmlProcessSecurity::runCommandCapture()`
+   - ofxGgmlChatLlmTtsAdapters.h
+   - ofxGgmlPiperTtsAdapters.h
+   - ~360 more lines eliminated
+   - Estimated: 2-3 hours
 
 2. **Create TTS adapter base**
-   - Depends on command execution extraction
+   - Shared utilities for executable resolution, temp paths, metadata
    - ~400 lines to consolidate
    - Estimated: 6-8 hours
 
