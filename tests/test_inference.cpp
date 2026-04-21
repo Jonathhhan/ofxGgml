@@ -298,6 +298,7 @@ TEST_CASE("Executable resolution accepts absolute path and PATH command", "[infe
 			pathValue += existingPath;
 		}
 		ScopedEnvVar scopedPath("PATH", pathValue);
+		ScopedEnvVar scopedAllow("OFXGGML_ALLOW_PATH_EXEC", "1");
 
 		ofxGgmlInference inf;
 		inf.setCompletionExecutable("ofxggml-path-cmd");
