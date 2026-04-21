@@ -1,7 +1,11 @@
 #pragma once
 
 #include "ofMain.h"
-#include "ofxGgml.h"
+#include "ofxGgmlCore.h"
+#include "ofxGgmlBasic.h"
+#include "ofxGgmlModalities.h"
+#include "ofxGgmlWorkflows.h"
+#include "ofxGgmlAssistants.h"
 #include "bridges/ofxGgmlHoloscanBridge.h"
 #include "ofxImGui.h"
 #include "config/ModelPresets.h"

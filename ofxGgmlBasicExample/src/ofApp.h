@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ofMain.h"
-#include "ofxGgml.h"
+#include "ofxGgmlCore.h"  // Only need core for tensor operations
 #include "core/ofxGgmlHelpers.h"
 
 #include <random>
