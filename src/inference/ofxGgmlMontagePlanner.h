@@ -2,6 +2,7 @@
 
 #include "core/ofxGgmlResult.h"
 #include "inference/ofxGgmlSpeechInference.h"
+#include "support/ofxGgmlSubtitleHelpers.h"
 
 #include <string>
 #include <vector>
@@ -34,6 +35,9 @@ struct ofxGgmlMontageClip {
 	std::string note;
 	std::string themeBucket;
 	std::string transitionSuggestion;
+	std::string sourceFilePath;
+	std::string audioTrack = "A";
+	int transitionDurationFrames = 0;
 };
 
 struct ofxGgmlMontageSubtitleCue {
@@ -43,6 +47,7 @@ struct ofxGgmlMontageSubtitleCue {
 	double startSeconds = 0.0;
 	double endSeconds = 0.0;
 	std::string text;
+	ofxGgmlVttCueSettings vttSettings;  // Optional VTT styling
 };
 
 struct ofxGgmlMontageSubtitleTrack {
@@ -70,6 +75,8 @@ struct ofxGgmlMontagePlannerRequest {
 	double targetDurationSeconds = 0.0;
 	bool preserveChronology = true;
 	std::string fallbackReelName = "AX";
+	std::string sourceFilePath;
+	bool dropFrameTimecode = false;
 };
 
 struct ofxGgmlMontagePlannerResult {
@@ -107,6 +114,16 @@ public:
 	static std::string buildEdl(
 		const ofxGgmlMontagePlan & plan,
 		const std::string & title = "MONTAGE",
-		int fps = 25);
+		int fps = 25,
+		bool dropFrame = false);
+	static std::string buildEdlWithAudio(
+		const ofxGgmlMontagePlan & plan,
+		const std::string & title = "MONTAGE",
+		int fps = 25,
+		bool dropFrame = false);
 	static double computePlanDurationSeconds(const ofxGgmlMontagePlan & plan);
+	static ofxGgmlSubtitleValidation validateSubtitleTrack(
+		const ofxGgmlMontageSubtitleTrack & track);
+	static ofxGgmlSubtitleMetrics calculateSubtitleMetrics(
+		const ofxGgmlMontageSubtitleTrack & track);
 };

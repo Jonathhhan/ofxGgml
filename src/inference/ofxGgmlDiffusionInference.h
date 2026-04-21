@@ -22,6 +22,17 @@ enum class ofxGgmlImageSelectionMode {
 	BestOnly
 };
 
+enum class ofxGgmlImageGenerationErrorType {
+	None = 0,
+	ConfigurationError,
+	ModelLoadError,
+	ValidationError,
+	GenerationError,
+	ResourceError,
+	TimeoutError,
+	BackendError
+};
+
 struct ofxGgmlImageGenerationModelProfile {
 	std::string name;
 	std::string architecture;
@@ -52,6 +63,38 @@ struct ofxGgmlGeneratedImage {
 	std::string scoreSummary;
 };
 
+struct ofxGgmlImageGenerationProgress {
+	float progress = 0.0f;
+	int currentStep = 0;
+	int totalSteps = 0;
+	int currentBatch = 0;
+	int totalBatches = 0;
+	std::string currentPhase;
+	float elapsedMs = 0.0f;
+	bool cancelled = false;
+};
+
+using ofxGgmlImageGenerationProgressCallback =
+	std::function<bool(const ofxGgmlImageGenerationProgress &)>;
+
+struct ofxGgmlImageGenerationCapabilities {
+	bool supportsTextToImage = false;
+	bool supportsImageToImage = false;
+	bool supportsInstructImage = false;
+	bool supportsVariation = false;
+	bool supportsRestyle = false;
+	bool supportsInpaint = false;
+	bool supportsUpscale = false;
+	bool supportsControlNet = false;
+	bool supportsLoRA = false;
+	bool supportsProgressCallbacks = false;
+	bool supportsBatchGeneration = false;
+	int maxBatchSize = 1;
+	std::vector<std::string> supportedSamplers;
+	std::string modelArchitecture;
+	std::string backendVersion;
+};
+
 struct ofxGgmlImageGenerationRequest {
 	ofxGgmlImageGenerationTask task = ofxGgmlImageGenerationTask::TextToImage;
 	ofxGgmlImageSelectionMode selectionMode = ofxGgmlImageSelectionMode::KeepOrder;
@@ -80,16 +123,30 @@ struct ofxGgmlImageGenerationRequest {
 	float controlStrength = 1.0f;
 	bool normalizeClipEmbeddings = true;
 	bool saveMetadata = true;
+	ofxGgmlImageGenerationProgressCallback progressCallback;
+};
+
+struct ofxGgmlImageGenerationDiagnostics {
+	float modelLoadTimeMs = 0.0f;
+	float generationTimeMs = 0.0f;
+	float postProcessTimeMs = 0.0f;
+	size_t peakMemoryMB = 0;
+	size_t contextReloads = 0;
+	std::string modelArchitecture;
+	std::string backendVersion;
+	std::vector<std::pair<std::string, std::string>> timingBreakdown;
 };
 
 struct ofxGgmlImageGenerationResult {
 	bool success = false;
 	float elapsedMs = 0.0f;
 	std::string error;
+	ofxGgmlImageGenerationErrorType errorType = ofxGgmlImageGenerationErrorType::None;
 	std::string backendName;
 	std::string rawOutput;
 	std::vector<ofxGgmlGeneratedImage> images;
 	std::vector<std::pair<std::string, std::string>> metadata;
+	ofxGgmlImageGenerationDiagnostics diagnostics;
 };
 
 class ofxGgmlImageGenerationBackend {
@@ -98,26 +155,33 @@ public:
 	virtual std::string backendName() const = 0;
 	virtual ofxGgmlImageGenerationResult generate(
 		const ofxGgmlImageGenerationRequest & request) const = 0;
+	virtual ofxGgmlImageGenerationCapabilities getCapabilities() const {
+		return {};
+	}
 };
 
 class ofxGgmlStableDiffusionBridgeBackend : public ofxGgmlImageGenerationBackend {
 public:
 	using GenerateFunction = std::function<ofxGgmlImageGenerationResult(
 		const ofxGgmlImageGenerationRequest &)>;
+	using GetCapabilitiesFunction = std::function<ofxGgmlImageGenerationCapabilities()>;
 
 	explicit ofxGgmlStableDiffusionBridgeBackend(
 		GenerateFunction generateFunction = {},
 		std::string displayName = "ofxStableDiffusion");
 
 	void setGenerateFunction(GenerateFunction generateFunction);
+	void setGetCapabilitiesFunction(GetCapabilitiesFunction getCapabilitiesFunction);
 	bool isConfigured() const;
 
 	std::string backendName() const override;
 	ofxGgmlImageGenerationResult generate(
 		const ofxGgmlImageGenerationRequest & request) const override;
+	ofxGgmlImageGenerationCapabilities getCapabilities() const override;
 
 private:
 	GenerateFunction m_generateFunction;
+	GetCapabilitiesFunction m_getCapabilitiesFunction;
 	std::string m_displayName;
 };
 
@@ -138,6 +202,10 @@ public:
 
 	ofxGgmlImageGenerationResult generate(
 		const ofxGgmlImageGenerationRequest & request) const;
+
+	ofxGgmlImageGenerationCapabilities getCapabilities() const;
+
+	static const char * errorTypeLabel(ofxGgmlImageGenerationErrorType errorType);
 
 private:
 	std::shared_ptr<ofxGgmlImageGenerationBackend> m_backend;

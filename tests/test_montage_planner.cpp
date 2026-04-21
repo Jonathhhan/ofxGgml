@@ -53,3 +53,61 @@ TEST_CASE("Montage planner enforces spacing and applies handles", "[montage]") {
 		REQUIRE_FALSE(result.plan.clips[1].transitionSuggestion.empty());
 	}
 }
+
+TEST_CASE("EDL export supports drop-frame timecode and audio tracks", "[montage][edl]") {
+	ofxGgmlMontagePlannerRequest request;
+	request.goal = "train action";
+	request.segments = makeSegments();
+	request.maxClips = 2;
+	request.minScore = 0.05;
+	request.sourceFilePath = "/path/to/source/video.mp4";
+	request.dropFrameTimecode = true;
+
+	const auto result = ofxGgmlMontagePlanner::plan(request);
+	REQUIRE(result.success);
+	REQUIRE(result.plan.clips.size() == 2);
+
+	SECTION("EDL with drop-frame timecode uses semicolon separator") {
+		const std::string edl = ofxGgmlMontagePlanner::buildEdl(result.plan, "TRAIN_MONTAGE", 30, true);
+		REQUIRE_FALSE(edl.empty());
+		REQUIRE(edl.find("FCM: DROP FRAME") != std::string::npos);
+		REQUIRE(edl.find(";") != std::string::npos);
+	}
+
+	SECTION("EDL without drop-frame uses colon separator") {
+		const std::string edl = ofxGgmlMontagePlanner::buildEdl(result.plan, "TRAIN_MONTAGE", 30, false);
+		REQUIRE_FALSE(edl.empty());
+		REQUIRE(edl.find("FCM: NON-DROP FRAME") != std::string::npos);
+	}
+
+	SECTION("EDL includes source file path references") {
+		const std::string edl = ofxGgmlMontagePlanner::buildEdl(result.plan, "TRAIN_MONTAGE", 25, false);
+		REQUIRE(edl.find("SOURCE FILE: /path/to/source/video.mp4") != std::string::npos);
+	}
+
+	SECTION("EDL with audio tracks includes both video and audio entries") {
+		const std::string edl = ofxGgmlMontagePlanner::buildEdlWithAudio(result.plan, "TRAIN_MONTAGE", 25, false);
+		REQUIRE_FALSE(edl.empty());
+		REQUIRE(edl.find("V     C") != std::string::npos);
+		REQUIRE(edl.find("A     C") != std::string::npos);
+	}
+}
+
+TEST_CASE("EDL export handles transition metadata", "[montage][edl]") {
+	ofxGgmlMontagePlannerRequest request;
+	request.goal = "bright moments";
+	request.segments = makeSegments();
+	request.maxClips = 2;
+	request.minScore = 0.05;
+
+	auto result = ofxGgmlMontagePlanner::plan(request);
+	REQUIRE(result.success);
+
+	// Manually add transition duration to first clip
+	result.plan.clips[0].transitionDurationFrames = 12;
+
+	SECTION("EDL includes transition duration when specified") {
+		const std::string edl = ofxGgmlMontagePlanner::buildEdl(result.plan, "TEST", 25, false);
+		REQUIRE(edl.find("TRANSITION DURATION: 12 frames") != std::string::npos);
+	}
+}

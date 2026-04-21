@@ -55,18 +55,36 @@ inline std::string describeTimeRange(double startSeconds, double endSeconds) {
 }
 
 /// Format seconds as timecode "HH:MM:SS:FF" for EDL (frame-accurate).
-inline std::string formatTimecode(double seconds, int fps = 30) {
+/// @param seconds Time in seconds
+/// @param fps Frame rate (e.g., 25, 30, 24)
+/// @param dropFrame If true, use drop-frame timecode (e.g., for 29.97fps)
+inline std::string formatTimecode(double seconds, int fps = 30, bool dropFrame = false) {
 	const int totalFrames = static_cast<int>(seconds * fps);
-	const int frames = totalFrames % fps;
-	const int totalSeconds = totalFrames / fps;
+	int frames = totalFrames % fps;
+	int totalSeconds = totalFrames / fps;
 	const int secs = totalSeconds % 60;
 	const int mins = (totalSeconds / 60) % 60;
 	const int hours = totalSeconds / 3600;
 
+	// Drop-frame timecode skips frame numbers 0 and 1 at the start of each minute,
+	// except for every tenth minute (00, 10, 20, 30, 40, 50)
+	if (dropFrame && fps == 30) {
+		const int dropFrames = 2;
+		const int framesPerMinute = fps * 60;
+		const int framesPerTenMinutes = framesPerMinute * 10;
+		const int tenMinuteGroups = totalFrames / framesPerTenMinutes;
+		const int remainingFrames = totalFrames % framesPerTenMinutes;
+
+		if (remainingFrames > 0) {
+			const int minutesInGroup = remainingFrames / framesPerMinute;
+			frames = totalFrames + (tenMinuteGroups * 9 * dropFrames) + (minutesInGroup * dropFrames);
+		}
+	}
+
 	std::ostringstream out;
 	out << std::setfill('0') << std::setw(2) << hours << ":"
 		<< std::setw(2) << mins << ":"
-		<< std::setw(2) << secs << ":"
+		<< std::setw(2) << secs << (dropFrame ? ";" : ":")
 		<< std::setw(2) << frames;
 	return out.str();
 }

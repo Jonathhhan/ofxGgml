@@ -432,6 +432,7 @@ ofxGgmlMontagePlannerResult ofxGgmlMontagePlanner::plan(
 		clip.note = segment.text;
 		clip.themeBucket = chooseThemeBucket(goalTokens, goalLookup, segment);
 		clip.transitionSuggestion = suggestTransition(previousClip, clip);
+		clip.sourceFilePath = request.sourceFilePath;
 		plan.clips.push_back(std::move(clip));
 		previousClip = &plan.clips.back();
 	}
@@ -682,8 +683,15 @@ std::string ofxGgmlMontagePlanner::buildVtt(const ofxGgmlMontageSubtitleTrack & 
 		out << (i + 1) << "\n"
 			<< formatSubtitleTimestamp(cue.startSeconds, true)
 			<< " --> "
-			<< formatSubtitleTimestamp(cue.endSeconds, true) << "\n"
-			<< cue.text << "\n";
+			<< formatSubtitleTimestamp(cue.endSeconds, true);
+
+		// Add VTT cue settings if present
+		const std::string settings = cue.vttSettings.toString();
+		if (!settings.empty()) {
+			out << " " << settings;
+		}
+
+		out << "\n" << cue.text << "\n";
 		if (i + 1 < track.cues.size()) {
 			out << "\n";
 		}
@@ -694,10 +702,11 @@ std::string ofxGgmlMontagePlanner::buildVtt(const ofxGgmlMontageSubtitleTrack & 
 std::string ofxGgmlMontagePlanner::buildEdl(
 	const ofxGgmlMontagePlan & plan,
 	const std::string & title,
-	int fps) {
+	int fps,
+	bool dropFrame) {
 	std::ostringstream edl;
 	edl << "TITLE: " << sanitizeEdlTitle(title) << "\n";
-	edl << "FCM: NON-DROP FRAME\n\n";
+	edl << "FCM: " << (dropFrame ? "DROP FRAME" : "NON-DROP FRAME") << "\n\n";
 
 	double recordCursorSeconds = 0.0;
 	for (size_t i = 0; i < plan.clips.size(); ++i) {
@@ -707,12 +716,15 @@ std::string ofxGgmlMontagePlanner::buildEdl(
 		edl << std::setfill('0') << std::setw(3) << (i + 1)
 			<< "  " << sanitizeReelName(clip.reelName, "AX")
 			<< "       V     C        "
-			<< formatTimecode(clip.startSeconds, fps) << ' '
-			<< formatTimecode(clip.endSeconds, fps) << ' '
-			<< formatTimecode(recordCursorSeconds, fps) << ' '
-			<< formatTimecode(recordOut, fps) << "\n";
+			<< formatTimecode(clip.startSeconds, fps, dropFrame) << ' '
+			<< formatTimecode(clip.endSeconds, fps, dropFrame) << ' '
+			<< formatTimecode(recordCursorSeconds, fps, dropFrame) << ' '
+			<< formatTimecode(recordOut, fps, dropFrame) << "\n";
 		if (!clip.clipName.empty()) {
 			edl << "* FROM CLIP NAME: " << clip.clipName << "\n";
+		}
+		if (!clip.sourceFilePath.empty()) {
+			edl << "* SOURCE FILE: " << clip.sourceFilePath << "\n";
 		}
 		if (!clip.note.empty()) {
 			edl << "* COMMENT: " << clip.note << "\n";
@@ -722,6 +734,67 @@ std::string ofxGgmlMontagePlanner::buildEdl(
 		}
 		if (!clip.transitionSuggestion.empty()) {
 			edl << "* TRANSITION: " << clip.transitionSuggestion << "\n";
+		}
+		if (clip.transitionDurationFrames > 0) {
+			edl << "* TRANSITION DURATION: " << clip.transitionDurationFrames << " frames\n";
+		}
+		recordCursorSeconds = recordOut;
+	}
+	return edl.str();
+}
+
+std::string ofxGgmlMontagePlanner::buildEdlWithAudio(
+	const ofxGgmlMontagePlan & plan,
+	const std::string & title,
+	int fps,
+	bool dropFrame) {
+	std::ostringstream edl;
+	edl << "TITLE: " << sanitizeEdlTitle(title) << "\n";
+	edl << "FCM: " << (dropFrame ? "DROP FRAME" : "NON-DROP FRAME") << "\n\n";
+
+	double recordCursorSeconds = 0.0;
+	for (size_t i = 0; i < plan.clips.size(); ++i) {
+		const auto & clip = plan.clips[i];
+		const double duration = std::max(0.0, clip.endSeconds - clip.startSeconds);
+		const double recordOut = recordCursorSeconds + duration;
+
+		// Video track
+		edl << std::setfill('0') << std::setw(3) << (i + 1)
+			<< "  " << sanitizeReelName(clip.reelName, "AX")
+			<< "       V     C        "
+			<< formatTimecode(clip.startSeconds, fps, dropFrame) << ' '
+			<< formatTimecode(clip.endSeconds, fps, dropFrame) << ' '
+			<< formatTimecode(recordCursorSeconds, fps, dropFrame) << ' '
+			<< formatTimecode(recordOut, fps, dropFrame) << "\n";
+
+		// Audio track (if specified)
+		if (!clip.audioTrack.empty() && clip.audioTrack != "NONE") {
+			edl << std::setfill('0') << std::setw(3) << (i + 1)
+				<< "  " << sanitizeReelName(clip.reelName, "AX")
+				<< "       " << clip.audioTrack << "     C        "
+				<< formatTimecode(clip.startSeconds, fps, dropFrame) << ' '
+				<< formatTimecode(clip.endSeconds, fps, dropFrame) << ' '
+				<< formatTimecode(recordCursorSeconds, fps, dropFrame) << ' '
+				<< formatTimecode(recordOut, fps, dropFrame) << "\n";
+		}
+
+		if (!clip.clipName.empty()) {
+			edl << "* FROM CLIP NAME: " << clip.clipName << "\n";
+		}
+		if (!clip.sourceFilePath.empty()) {
+			edl << "* SOURCE FILE: " << clip.sourceFilePath << "\n";
+		}
+		if (!clip.note.empty()) {
+			edl << "* COMMENT: " << clip.note << "\n";
+		}
+		if (!clip.themeBucket.empty()) {
+			edl << "* THEME: " << clip.themeBucket << "\n";
+		}
+		if (!clip.transitionSuggestion.empty()) {
+			edl << "* TRANSITION: " << clip.transitionSuggestion << "\n";
+		}
+		if (clip.transitionDurationFrames > 0) {
+			edl << "* TRANSITION DURATION: " << clip.transitionDurationFrames << " frames\n";
 		}
 		recordCursorSeconds = recordOut;
 	}
@@ -734,4 +807,14 @@ double ofxGgmlMontagePlanner::computePlanDurationSeconds(const ofxGgmlMontagePla
 		duration += std::max(0.0, clip.endSeconds - clip.startSeconds);
 	}
 	return duration;
+}
+
+ofxGgmlSubtitleValidation ofxGgmlMontagePlanner::validateSubtitleTrack(
+	const ofxGgmlMontageSubtitleTrack & track) {
+	return ofxGgmlSubtitleHelpers::validateCues(track.cues);
+}
+
+ofxGgmlSubtitleMetrics ofxGgmlMontagePlanner::calculateSubtitleMetrics(
+	const ofxGgmlMontageSubtitleTrack & track) {
+	return ofxGgmlSubtitleHelpers::calculateMetrics(track.cues);
 }

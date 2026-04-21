@@ -1079,6 +1079,15 @@ Use it when an app wants an LLM to structure video generation or editing before 
 
 `ofxGgmlMontagePlanner` turns subtitle or transcript cues into a ranked montage plan. It can parse SRT-style cues, score them against a montage goal, keep the result in timeline order, and export a CMX-style EDL alongside a human-readable editor brief.
 
+The planner supports:
+- **Drop-frame timecode** for NTSC 29.97fps workflows
+- **Audio track export** for combined video/audio EDL files
+- **Source file path references** for media management
+- **Transition metadata** including duration and suggestions
+- **Custom audio track routing** per clip
+
+For detailed EDL export documentation, see `docs/EDL_EXPORT.md`.
+
 The GUI example includes a `Subtitle montage automat` workflow with:
 
 - local `.srt` selection or reuse of speech-generated subtitle output
