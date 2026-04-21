@@ -3,6 +3,7 @@
 #include "ofFileUtils.h"
 #include "ofxGgmlTtsInference.h"
 #include "core/ofxGgmlWindowsUtf8.h"
+#include "support/ofxGgmlProcessSecurity.h"
 
 #include <algorithm>
 #include <array>
@@ -26,11 +27,6 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#else
-#include <fcntl.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <unistd.h>
 #endif
 
 namespace ofxGgmlChatLlmTtsAdapters {
@@ -260,117 +256,19 @@ inline std::string findFirstExistingExecutable(
 }
 
 #ifdef _WIN32
-inline std::string quoteWindowsArg(const std::string & arg) {
-	if (arg.empty()) return "\"\"";
-	bool needsQuotes = false;
-	for (char c : arg) {
-		if (std::isspace(static_cast<unsigned char>(c)) || c == '"') {
-			needsQuotes = true;
-			break;
-		}
-	}
-	if (!needsQuotes) return arg;
-
-	std::string out = "\"";
-	size_t backslashes = 0;
-	for (char c : arg) {
-		if (c == '\\') {
-			++backslashes;
-			continue;
-		}
-		if (c == '"') {
-			out.append(backslashes * 2 + 1, '\\');
-			out.push_back('"');
-			backslashes = 0;
-			continue;
-		}
-		if (backslashes) {
-			out.append(backslashes, '\\');
-			backslashes = 0;
-		}
-		out.push_back(c);
-	}
-	if (backslashes) {
-		out.append(backslashes * 2, '\\');
-	}
-	out.push_back('"');
-	return out;
-}
-
-inline std::string getEnvVarString(const char * name) {
-	if (!name || !*name) return {};
-	const DWORD size = GetEnvironmentVariableA(name, nullptr, 0);
-	if (size == 0) return {};
-	std::string value(static_cast<size_t>(size), '\0');
-	const DWORD written = GetEnvironmentVariableA(name, value.data(), size);
-	if (written == 0) return {};
-	if (!value.empty() && value.back() == '\0') {
-		value.pop_back();
-	}
-	return value;
-}
-
-inline bool isWindowsBatchScript(const std::string & executable) {
-	const std::string lowered = lowerCopy(
-		std::filesystem::path(executable).extension().string());
-	return lowered == ".bat" || lowered == ".cmd";
-}
-
-inline std::string resolveWindowsLaunchPath(const std::string & executable) {
-	if (executable.empty()) return {};
-	const std::filesystem::path inputPath(executable);
-	if (inputPath.is_absolute() || inputPath.has_parent_path() ||
-		hasPathSeparator(executable)) {
-		return executable;
-	}
-
-	std::vector<std::string> exts;
-	const std::string pathext = getEnvVarString("PATHEXT");
-	if (!pathext.empty()) {
-		std::istringstream stream(pathext);
-		std::string ext;
-		while (std::getline(stream, ext, ';')) {
-			if (!ext.empty()) {
-				exts.push_back(ext);
-			}
-		}
-	}
-	if (exts.empty()) {
-		exts = {".exe", ".bat", ".cmd"};
-	}
-
-	const std::string envPath = getEnvVarString("PATH");
-	std::istringstream pathStream(envPath);
-	std::string dir;
-	while (std::getline(pathStream, dir, ';')) {
-		if (dir.empty()) continue;
-		std::filesystem::path base = trimCopy(dir);
-		std::error_code ec;
-		if (!std::filesystem::is_directory(base, ec) || ec) continue;
-
-		const std::filesystem::path direct = base / executable;
-		if (std::filesystem::exists(direct, ec) && !ec) {
-			return direct.string();
-		}
-		for (const auto & ext : exts) {
-			const std::filesystem::path candidate = base / (executable + ext);
-			if (std::filesystem::exists(candidate, ec) && !ec) {
-				return candidate.string();
-			}
-		}
-	}
-	return executable;
-}
+using ofxGgmlProcessSecurity::getEnvVarString;
+using ofxGgmlProcessSecurity::quoteWindowsArg;
+using ofxGgmlProcessSecurity::isWindowsBatchScript;
+using ofxGgmlProcessSecurity::resolveWindowsLaunchPath;
 #endif
 
+/// Wrapper around ofxGgmlProcessSecurity::runCommandCapture with launchError support.
 inline bool runCommandCapture(
 	const std::vector<std::string> & args,
 	std::string & output,
 	int & exitCode,
 	bool mergeStderr = true,
 	std::string * launchError = nullptr) {
-	output.clear();
-	exitCode = -1;
 	if (launchError) {
 		launchError->clear();
 	}
@@ -381,154 +279,14 @@ inline bool runCommandCapture(
 		return false;
 	}
 
-#ifdef _WIN32
-	SECURITY_ATTRIBUTES sa {};
-	sa.nLength = sizeof(sa);
-	sa.bInheritHandle = TRUE;
+	const bool success = ofxGgmlProcessSecurity::runCommandCapture(
+		args, output, exitCode, mergeStderr);
 
-	HANDLE readPipe = nullptr;
-	HANDLE writePipe = nullptr;
-	if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) {
-		if (launchError) {
-			*launchError = "CreatePipe failed";
-		}
-		return false;
-	}
-	SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
-
-	STARTUPINFOW si {};
-	si.cb = sizeof(si);
-	si.dwFlags = STARTF_USESTDHANDLES;
-	si.hStdOutput = writePipe;
-	si.hStdError = mergeStderr ? writePipe : GetStdHandle(STD_ERROR_HANDLE);
-	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-
-	PROCESS_INFORMATION pi {};
-	const std::string resolvedExecutable = resolveWindowsLaunchPath(args.front());
-	const bool useCmdWrapper = isWindowsBatchScript(resolvedExecutable);
-	const std::string comspec = [&]() {
-		const std::string envComspec = getEnvVarString("COMSPEC");
-		return envComspec.empty()
-			? std::string("C:\\Windows\\System32\\cmd.exe")
-			: envComspec;
-	}();
-
-	std::string cmdLine;
-	if (useCmdWrapper) {
-		cmdLine += quoteWindowsArg(comspec);
-		cmdLine += " /d /s /c \"";
-		cmdLine += quoteWindowsArg(resolvedExecutable);
-		for (size_t i = 1; i < args.size(); ++i) {
-			cmdLine.push_back(' ');
-			cmdLine += quoteWindowsArg(args[i]);
-		}
-		cmdLine += "\"";
-	} else {
-		for (size_t i = 0; i < args.size(); ++i) {
-			if (i > 0) cmdLine.push_back(' ');
-			cmdLine += quoteWindowsArg(i == 0 ? resolvedExecutable : args[i]);
-		}
+	if (!success && launchError) {
+		*launchError = "command execution failed";
 	}
 
-	std::wstring wideCmdLine = ofxGgmlWideFromUtf8(cmdLine);
-	std::vector<wchar_t> mutableCmd(wideCmdLine.begin(), wideCmdLine.end());
-	mutableCmd.push_back(L'\0');
-
-	const BOOL ok = CreateProcessW(
-		nullptr,
-		mutableCmd.data(),
-		nullptr,
-		nullptr,
-		TRUE,
-		CREATE_NO_WINDOW,
-		nullptr,
-		nullptr,
-		&si,
-		&pi);
-
-	CloseHandle(writePipe);
-	if (!ok) {
-		if (launchError) {
-			*launchError = "CreateProcessW failed for \"" + resolvedExecutable +
-				"\" (Windows error " +
-				std::to_string(static_cast<int>(GetLastError())) + ")";
-		}
-		CloseHandle(readPipe);
-		return false;
-	}
-
-	std::array<char, 4096> buf {};
-	DWORD bytesRead = 0;
-	while (ReadFile(
-		readPipe,
-		buf.data(),
-		static_cast<DWORD>(buf.size()),
-		&bytesRead,
-		nullptr) && bytesRead > 0) {
-		output.append(buf.data(), bytesRead);
-	}
-	CloseHandle(readPipe);
-
-	WaitForSingleObject(pi.hProcess, INFINITE);
-	DWORD code = 0;
-	GetExitCodeProcess(pi.hProcess, &code);
-	exitCode = static_cast<int>(code);
-	CloseHandle(pi.hThread);
-	CloseHandle(pi.hProcess);
-	return true;
-#else
-	int pipeFds[2];
-	if (pipe(pipeFds) != 0) {
-		if (launchError) {
-			*launchError = "pipe() failed";
-		}
-		return false;
-	}
-
-	const pid_t pid = fork();
-	if (pid < 0) {
-		close(pipeFds[0]);
-		close(pipeFds[1]);
-		if (launchError) {
-			*launchError = "fork() failed";
-		}
-		return false;
-	}
-
-	if (pid == 0) {
-		dup2(pipeFds[1], STDOUT_FILENO);
-		if (mergeStderr) {
-			dup2(pipeFds[1], STDERR_FILENO);
-		}
-		close(pipeFds[0]);
-		close(pipeFds[1]);
-		std::vector<char *> argv;
-		argv.reserve(args.size() + 1);
-		for (const auto & arg : args) {
-			argv.push_back(const_cast<char *>(arg.c_str()));
-		}
-		argv.push_back(nullptr);
-		execvp(argv[0], argv.data());
-		_exit(127);
-	}
-
-	close(pipeFds[1]);
-	std::array<char, 4096> buf {};
-	ssize_t bytesRead = 0;
-	while ((bytesRead = read(pipeFds[0], buf.data(), buf.size())) > 0) {
-		output.append(buf.data(), static_cast<size_t>(bytesRead));
-	}
-	close(pipeFds[0]);
-
-	int status = 0;
-	waitpid(pid, &status, 0);
-	if (WIFEXITED(status)) {
-		exitCode = WEXITSTATUS(status);
-	} else if (WIFSIGNALED(status)) {
-		exitCode = 128 + WTERMSIG(status);
-	}
-	return true;
-#endif
+	return success;
 }
 
 inline std::string makeTempOutputPath(const char * extension = ".wav") {
