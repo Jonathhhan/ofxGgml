@@ -17,6 +17,18 @@ All notable changes to `ofxGgml` are documented in this file.
   - Updated `formatTimecode()` function to support drop-frame timecode with semicolon separators
   - Improved EDL metadata export for better NLE compatibility with Avid, Premiere, Resolve, and Final Cut Pro
 
+- **Subtitle Functionality Improvements**:
+  - Added VTT cue settings support (position, line, size, align, vertical, region)
+  - Added comprehensive subtitle validation with error and warning detection
+  - Added subtitle quality metrics (reading speed, duration analysis, overlap/gap detection)
+  - Added subtitle timing utilities (offset, scale, merge, split)
+  - Enhanced VTT export to include optional cue settings for positioning and styling
+  - Added `ofxGgmlSubtitleHelpers.h` with reusable subtitle utilities
+  - Added validation methods: `validateSubtitleTrack()` for error detection
+  - Added metrics methods: `calculateSubtitleMetrics()` for quality analysis
+  - Added timing helpers: `offsetTiming()`, `scaleTiming()` for synchronization
+  - Added merging/splitting helpers: `mergeCues()`, `splitLongCues()` for optimization
+
 ### Added
 
 - New comprehensive documentation: `docs/EDL_EXPORT.md` covering:
@@ -32,6 +44,13 @@ All notable changes to `ofxGgml` are documented in this file.
   - Source file path metadata inclusion
   - Audio track export verification
   - Transition duration metadata handling
+- New comprehensive subtitle tests in `tests/test_subtitle_helpers.cpp`:
+  - Subtitle validation (overlaps, timing errors, duration warnings, reading speed)
+  - Quality metrics calculation (cue statistics, gap/overlap detection)
+  - Timing utilities (offset, scale adjustments)
+  - Merging and splitting operations
+  - VTT cue settings formatting
+  - Word counting and reading speed calculations
 
 ### Added (Previous)
 - **Enhanced Streaming Progress Tracking** - `ofxGgmlStreamingContext` now includes detailed progress metrics for streaming inference:

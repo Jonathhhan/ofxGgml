@@ -2,6 +2,7 @@
 
 #include "core/ofxGgmlResult.h"
 #include "inference/ofxGgmlSpeechInference.h"
+#include "support/ofxGgmlSubtitleHelpers.h"
 
 #include <string>
 #include <vector>
@@ -46,6 +47,7 @@ struct ofxGgmlMontageSubtitleCue {
 	double startSeconds = 0.0;
 	double endSeconds = 0.0;
 	std::string text;
+	ofxGgmlVttCueSettings vttSettings;  // Optional VTT styling
 };
 
 struct ofxGgmlMontageSubtitleTrack {
@@ -120,4 +122,8 @@ public:
 		int fps = 25,
 		bool dropFrame = false);
 	static double computePlanDurationSeconds(const ofxGgmlMontagePlan & plan);
+	static ofxGgmlSubtitleValidation validateSubtitleTrack(
+		const ofxGgmlMontageSubtitleTrack & track);
+	static ofxGgmlSubtitleMetrics calculateSubtitleMetrics(
+		const ofxGgmlMontageSubtitleTrack & track);
 };

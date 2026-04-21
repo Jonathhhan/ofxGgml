@@ -683,8 +683,15 @@ std::string ofxGgmlMontagePlanner::buildVtt(const ofxGgmlMontageSubtitleTrack & 
 		out << (i + 1) << "\n"
 			<< formatSubtitleTimestamp(cue.startSeconds, true)
 			<< " --> "
-			<< formatSubtitleTimestamp(cue.endSeconds, true) << "\n"
-			<< cue.text << "\n";
+			<< formatSubtitleTimestamp(cue.endSeconds, true);
+
+		// Add VTT cue settings if present
+		const std::string settings = cue.vttSettings.toString();
+		if (!settings.empty()) {
+			out << " " << settings;
+		}
+
+		out << "\n" << cue.text << "\n";
 		if (i + 1 < track.cues.size()) {
 			out << "\n";
 		}
@@ -800,4 +807,14 @@ double ofxGgmlMontagePlanner::computePlanDurationSeconds(const ofxGgmlMontagePla
 		duration += std::max(0.0, clip.endSeconds - clip.startSeconds);
 	}
 	return duration;
+}
+
+ofxGgmlSubtitleValidation ofxGgmlMontagePlanner::validateSubtitleTrack(
+	const ofxGgmlMontageSubtitleTrack & track) {
+	return ofxGgmlSubtitleHelpers::validateCues(track.cues);
+}
+
+ofxGgmlSubtitleMetrics ofxGgmlMontagePlanner::calculateSubtitleMetrics(
+	const ofxGgmlMontageSubtitleTrack & track) {
+	return ofxGgmlSubtitleHelpers::calculateMetrics(track.cues);
 }
