@@ -34,6 +34,9 @@ struct ofxGgmlMontageClip {
 	std::string note;
 	std::string themeBucket;
 	std::string transitionSuggestion;
+	std::string sourceFilePath;
+	std::string audioTrack = "A";
+	int transitionDurationFrames = 0;
 };
 
 struct ofxGgmlMontageSubtitleCue {
@@ -70,6 +73,8 @@ struct ofxGgmlMontagePlannerRequest {
 	double targetDurationSeconds = 0.0;
 	bool preserveChronology = true;
 	std::string fallbackReelName = "AX";
+	std::string sourceFilePath;
+	bool dropFrameTimecode = false;
 };
 
 struct ofxGgmlMontagePlannerResult {
@@ -107,6 +112,12 @@ public:
 	static std::string buildEdl(
 		const ofxGgmlMontagePlan & plan,
 		const std::string & title = "MONTAGE",
-		int fps = 25);
+		int fps = 25,
+		bool dropFrame = false);
+	static std::string buildEdlWithAudio(
+		const ofxGgmlMontagePlan & plan,
+		const std::string & title = "MONTAGE",
+		int fps = 25,
+		bool dropFrame = false);
 	static double computePlanDurationSeconds(const ofxGgmlMontagePlan & plan);
 };
