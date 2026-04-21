@@ -2,22 +2,24 @@
 
 `ofxGgml` is an openFrameworks wrapper around [ggml](https://github.com/ggml-org/ggml) with backend selection, graph execution, GGUF model loading, server-first `llama-server` plus optional llama.cpp CLI inference helpers, prompt-memory utilities, and a GUI example aimed at local AI workflows.
 
-## Layered API
+## Layered API Architecture
 
-ofxGgml provides **layered headers** for incremental adoption:
+ofxGgml uses **layered headers** - include only what you need:
 
 | Header | What You Get | Use When |
 |--------|--------------|----------|
-| `ofxGgmlCore.h` | Runtime, tensors, models | Low-level tensor operations only |
-| `ofxGgmlBasic.h` | Core + text inference | **Text/chat AI (recommended start)** |
+| **`ofxGgmlBasic.h`** | **Core + text inference** | **Text/chat AI (start here!)** |
 | `ofxGgmlModalities.h` | Basic + speech/vision/TTS/images | Multimodal AI workflows |
 | `ofxGgmlWorkflows.h` | Modalities + video/montage/research | Specialized creative pipelines |
 | `ofxGgmlAssistants.h` | Basic + code/chat assistants | AI coding assistance |
-| `ofxGgml.h` | Everything | All features |
+| `ofxGgmlCore.h` | Runtime, tensors, models | Low-level tensor ops only |
+| `ofxGgml.h` | All layers combined | ⚠️ Everything (slower builds) |
 
-**Quick Start:** Most projects should start with `ofxGgmlBasic.h` for text-only AI.
+**Recommended:** Start with `#include "ofxGgmlBasic.h"` for text-only projects.
 
-See [docs/getting-started/CHOOSING_FEATURES.md](docs/getting-started/CHOOSING_FEATURES.md) for guidance.
+**Why layered?** Faster compile times, clearer APIs, simpler examples. Each layer builds on previous ones.
+
+See [docs/getting-started/CHOOSING_FEATURES.md](docs/getting-started/CHOOSING_FEATURES.md) for detailed guidance.
 
 It is aimed at local-first AI tools, lightweight inference utilities, prompt-driven creative apps, and openFrameworks projects that want ggml runtime access without wiring the low-level backend API by hand.
 

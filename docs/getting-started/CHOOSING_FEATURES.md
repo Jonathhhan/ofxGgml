@@ -1,108 +1,88 @@
 # Choosing Features Guide
 
-ofxGgml is a comprehensive AI toolkit with many features. This guide helps you choose the right subset for your project.
+ofxGgml uses a **layered architecture** - you include only the features you need. This reduces compile times and complexity.
 
-## Decision Tree
+## Quick Decision
 
-### 1. What do you want to do?
+**Most users should start with `#include "ofxGgmlBasic.h"`** - it provides text inference which covers 80% of use cases.
 
-**Just text AI (chat, summarize, translate)**
-→ Use `ofxGgmlBasic.h`
-→ See [BASIC_INFERENCE.md](BASIC_INFERENCE.md)
+## The Five Layers
 
-**Audio processing (transcription, TTS)**
-→ Use `ofxGgmlModalities.h`
-→ See [../features/MODALITIES.md](../features/MODALITIES.md#speech)
+### Layer 1: Core
+**Header:** `#include "ofxGgmlCore.h"`
+**Size:** ~5,000 LOC
 
-**Image understanding or generation**
-→ Use `ofxGgmlModalities.h`
-→ See [../features/MODALITIES.md](../features/MODALITIES.md#vision)
-
-**Video editing/planning workflows**
-→ Use `ofxGgmlWorkflows.h`
-→ See [../features/WORKFLOWS.md](../features/WORKFLOWS.md#video)
-
-**Code assistant features**
-→ Use `ofxGgmlAssistants.h`
-→ See [../features/ASSISTANTS.md](../features/ASSISTANTS.md)
-
-**Everything**
-→ Use `ofxGgml.h`
-→ See [../README.md](../README.md)
-
-## Feature Layers
-
-### Layer 1: Core (Always Included)
-
-When you include any ofxGgml header, you get:
+What you get:
 - Runtime and backend management (CPU/CUDA/Vulkan/Metal)
 - Tensor operations (30+ ops)
 - Graph building and execution
 - GGUF model loading
-- Logging and metrics
 
-**Include:** `ofxGgmlCore.h`
-**Size:** ~5,000 LOC
-**Use when:** You only need low-level tensor operations
+**Use when:** You only need low-level tensor operations without AI inference.
 
-### Layer 2: Basic Inference
+### Layer 2: Basic (Recommended Start)
+**Header:** `#include "ofxGgmlBasic.h"`
+**Size:** Core + ~8,000 LOC
 
-Adds text-only LLM inference:
-- llama-server backend (recommended)
-- CLI fallback backend
-- Streaming with backpressure
+What you get (includes Core plus):
+- LLM text inference (llama-server and CLI backends)
+- Streaming with backpressure control
 - Batch processing
 - `ofxGgmlEasy` facade
 - Chat and text assistants
+- Prompt templates
 
-**Include:** `ofxGgmlBasic.h`
-**Size:** +8,000 LOC
-**Use when:** You need chat, summarization, translation
-
-**Recommended starting point for most projects.**
+**Use when:** You need chat, summarization, translation, or any text AI.
 
 ### Layer 3: Modalities
+**Header:** `#include "ofxGgmlModalities.h"`
+**Size:** Basic + ~12,000 LOC
 
-Adds multimodal AI:
-- **Speech**: Whisper transcription, translation
-- **TTS**: Piper and OuteTTS synthesis
-- **Vision**: Image understanding (LLaVA-style)
-- **Video**: Frame sampling analysis
-- **Diffusion**: Stable Diffusion integration
-- **CLIP**: Text/image embeddings
+What you get (includes Basic plus):
+- Speech-to-text (Whisper)
+- Text-to-speech (Piper, OuteTTS)
+- Vision (image understanding)
+- Video (frame analysis)
+- Image generation (Stable Diffusion integration)
+- CLIP embeddings
 
-**Include:** `ofxGgmlModalities.h`
-**Size:** +12,000 LOC
-**Use when:** You need audio/visual AI
+**Use when:** You need audio or visual AI capabilities.
 
 ### Layer 4: Workflows
+**Header:** `#include "ofxGgmlWorkflows.h"`
+**Size:** Modalities + ~10,000 LOC
 
-Adds specialized creative pipelines:
-- **Video planning**: Beat planning, multi-scene scripts
-- **Montage**: Subtitle-driven editing, EDL export
-- **Citation search**: Source-grounded research
-- **Video essay**: Topic → script → narration pipeline
-- **Music**: Prompt generation, ABC notation
-- **MilkDrop**: Visualization presets
-- **Web crawling**: Site ingestion for RAG
-- **Media translation**: Music ↔ Image prompts
+What you get (includes Modalities plus):
+- Video planning and editing
+- Montage planning with EDL export
+- Citation search
+- Video essay pipeline
+- Music generation
+- MilkDrop presets
+- Web crawling for RAG
 
-**Include:** `ofxGgmlWorkflows.h`
-**Size:** +10,000 LOC
-**Use when:** You need domain-specific creative tools
+**Use when:** You need domain-specific creative or research tools.
 
 ### Layer 5: Assistants
+**Header:** `#include "ofxGgmlAssistants.h"`
+**Size:** Basic + ~6,000 LOC
 
-Adds task-oriented AI helpers:
-- **Chat assistant**: Multi-turn conversations
-- **Code assistant**: Semantic search, completions
-- **Workspace assistant**: Patch validation, diffs
-- **Coding agent**: Orchestration with approvals
-- **Code review**: Hierarchical analysis
+What you get (includes Basic plus):
+- Chat assistant (multi-turn conversations)
+- Code assistant (semantic search, completions)
+- Workspace assistant (patch validation)
+- Coding agent (orchestration)
+- Code review
 
-**Include:** `ofxGgmlAssistants.h`
-**Size:** +6,000 LOC
-**Use when:** You need AI coding/review tools
+**Use when:** You need AI coding or review tools.
+
+### Complete Set (Not Recommended)
+**Header:** `#include "ofxGgml.h"`
+**Size:** All layers (~41,000 LOC)
+
+**⚠️ Warning:** This includes everything and will slow down compilation significantly.
+
+**Only use when:** You're exploring all features or building the comprehensive GUI example.
 
 ## Project Examples
 
