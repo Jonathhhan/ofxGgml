@@ -63,15 +63,15 @@ endif()
 # ---------------------------------------------------------------------------
 
 set(GGML_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../libs/ggml")
-set(GGML_BUILD_DIR "${GGML_DIR}/build")
+set(GGML_INCLUDE_DIR "${GGML_DIR}/include")
+set(GGML_LIB_DIR "${GGML_DIR}/lib")
 
-# Check if ggml is built
-if(NOT EXISTS "${GGML_BUILD_DIR}")
-    message(FATAL_ERROR "ggml not built. Run ./scripts/build-ggml.sh first.")
+if(NOT EXISTS "${GGML_INCLUDE_DIR}/ggml.h")
+    message(FATAL_ERROR "ggml headers not found in ${GGML_INCLUDE_DIR}. Run ./scripts/build-ggml.sh first.")
 endif()
 
 # Include directories
-include_directories(${GGML_DIR}/include)
+include_directories(${GGML_INCLUDE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
@@ -219,13 +219,29 @@ if(NOT OFXGGML_WITH_OPENFRAMEWORKS)
     target_compile_definitions(ofxGgml-tests PRIVATE OFXGGML_HEADLESS_STUBS=1)
 endif()
 
+if(WIN32)
+    set(GGML_CORE_LIBS
+        ${GGML_LIB_DIR}/ggml.lib
+        ${GGML_LIB_DIR}/ggml-base.lib
+        ${GGML_LIB_DIR}/ggml-cpu.lib)
+else()
+    set(GGML_CORE_LIBS
+        ${GGML_LIB_DIR}/libggml.a
+        ${GGML_LIB_DIR}/libggml-base.a
+        ${GGML_LIB_DIR}/libggml-cpu.a)
+endif()
+
+foreach(lib ${GGML_CORE_LIBS})
+    if(NOT EXISTS "${lib}")
+        message(FATAL_ERROR "Required ggml library not found: ${lib}. Run ./scripts/build-ggml.sh first.")
+    endif()
+endforeach()
+
 set(GGML_OPTIONAL_LIBS)
 set(VULKAN_RUNTIME_LIBS)
 if(WIN32)
-    file(GLOB GGML_OPTIONAL_LIBS
-        "${GGML_BUILD_DIR}/src/Release/ggml-*.lib"
-        "${GGML_BUILD_DIR}/src/*/Release/ggml-*.lib")
-    list(FILTER GGML_OPTIONAL_LIBS EXCLUDE REGEX "ggml-(base|cpu)\\.lib$")
+    file(GLOB GGML_OPTIONAL_LIBS "${GGML_LIB_DIR}/ggml-*.lib")
+    list(FILTER GGML_OPTIONAL_LIBS EXCLUDE REGEX "ggml(-base|-cpu)?\\.lib$")
 
     set(CUDA_RUNTIME_LIBS)
     if(GGML_OPTIONAL_LIBS MATCHES "ggml-cuda\\.lib")
@@ -238,8 +254,8 @@ if(WIN32)
         endif()
     endif()
 else()
-    foreach(optlib libggml-cuda.a libggml-vulkan.a libggml-metal.a libggml-blas.a)
-        set(_p "${GGML_BUILD_DIR}/src/${optlib}")
+    foreach(optlib libggml-cuda.a libggml-vulkan.a libggml-metal.a libggml-blas.a libggml-opencl.a libggml-sycl.a libggml-virtgpu.a libggml-zdnn.a)
+        set(_p "${GGML_LIB_DIR}/${optlib}")
         if(EXISTS "${_p}")
             list(APPEND GGML_OPTIONAL_LIBS "${_p}")
         endif()
@@ -260,9 +276,7 @@ if(UNIX AND NOT APPLE)
     # Linux
     find_package(OpenMP QUIET)
     target_link_libraries(ofxGgml-tests
-        ${GGML_BUILD_DIR}/src/libggml.a
-        ${GGML_BUILD_DIR}/src/libggml-base.a
-        ${GGML_BUILD_DIR}/src/libggml-cpu.a
+        ${GGML_CORE_LIBS}
         ${GGML_OPTIONAL_LIBS}
         pthread
         dl
@@ -273,9 +287,7 @@ if(UNIX AND NOT APPLE)
 elseif(APPLE)
     # macOS
     target_link_libraries(ofxGgml-tests
-        ${GGML_BUILD_DIR}/src/libggml.a
-        ${GGML_BUILD_DIR}/src/libggml-base.a
-        ${GGML_BUILD_DIR}/src/libggml-cpu.a
+        ${GGML_CORE_LIBS}
         "-framework Accelerate"
     )
 elseif(WIN32)
@@ -286,9 +298,7 @@ elseif(WIN32)
             message(FATAL_ERROR "openFrameworks library not found: ${OF_LIB_RELEASE}")
         endif()
         target_link_libraries(ofxGgml-tests
-            ${GGML_BUILD_DIR}/src/Release/ggml.lib
-            ${GGML_BUILD_DIR}/src/Release/ggml-base.lib
-            ${GGML_BUILD_DIR}/src/Release/ggml-cpu.lib
+            ${GGML_CORE_LIBS}
             ${GGML_OPTIONAL_LIBS}
             ${CUDA_RUNTIME_LIBS}
             ${VULKAN_RUNTIME_LIBS}
@@ -299,9 +309,7 @@ elseif(WIN32)
         )
     else()
         target_link_libraries(ofxGgml-tests
-            ${GGML_BUILD_DIR}/src/Release/ggml.lib
-            ${GGML_BUILD_DIR}/src/Release/ggml-base.lib
-            ${GGML_BUILD_DIR}/src/Release/ggml-cpu.lib
+            ${GGML_CORE_LIBS}
             ${GGML_OPTIONAL_LIBS}
             ${CUDA_RUNTIME_LIBS}
             ${VULKAN_RUNTIME_LIBS}

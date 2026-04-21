@@ -14,6 +14,9 @@ REM Usage:
 REM   scripts\dev\update-addon-config.bat
 REM ---------------------------------------------------------------------------
 
+echo [ofxGgml] update-addon-config.bat is deprecated. Run "bash scripts/build-ggml.sh" to rebuild ggml and refresh addon_config.mk automatically.
+exit /b 1
+
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..") do set "ADDON_ROOT=%%~fI"
 set "BUILD_DIR=%ADDON_ROOT%\libs\ggml\build"

@@ -10,6 +10,9 @@
 # Usage:
 #   ./scripts/dev/apply-patches.sh
 # ---------------------------------------------------------------------------
+echo "ggml source is no longer bundled locally. No patches applied. Use scripts/build-ggml.sh to fetch ggml." >&2
+exit 1
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
