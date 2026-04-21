@@ -2,9 +2,22 @@
 
 `ofxGgml` is an openFrameworks wrapper around [ggml](https://github.com/ggml-org/ggml) with backend selection, graph execution, GGUF model loading, server-first `llama-server` plus optional llama.cpp CLI inference helpers, prompt-memory utilities, and a GUI example aimed at local AI workflows.
 
-The main public header is:
+## Layered API
 
-- `src/ofxGgml.h`
+ofxGgml provides **layered headers** for incremental adoption:
+
+| Header | What You Get | Use When |
+|--------|--------------|----------|
+| `ofxGgmlCore.h` | Runtime, tensors, models | Low-level tensor operations only |
+| `ofxGgmlBasic.h` | Core + text inference | **Text/chat AI (recommended start)** |
+| `ofxGgmlModalities.h` | Basic + speech/vision/TTS/images | Multimodal AI workflows |
+| `ofxGgmlWorkflows.h` | Modalities + video/montage/research | Specialized creative pipelines |
+| `ofxGgmlAssistants.h` | Basic + code/chat assistants | AI coding assistance |
+| `ofxGgml.h` | Everything | All features |
+
+**Quick Start:** Most projects should start with `ofxGgmlBasic.h` for text-only AI.
+
+See [docs/getting-started/CHOOSING_FEATURES.md](docs/getting-started/CHOOSING_FEATURES.md) for guidance.
 
 It is aimed at local-first AI tools, lightweight inference utilities, prompt-driven creative apps, and openFrameworks projects that want ggml runtime access without wiring the low-level backend API by hand.
 
@@ -713,13 +726,36 @@ Common options:
 | `OFXGGML_VULKAN` | `OFF` | Force Vulkan backend on or off |
 | `OFXGGML_METAL` | `OFF` | Force Metal backend on or off |
 
+## Getting Started
+
+### Quick Start (5 minutes)
+
+See [docs/getting-started/QUICKSTART.md](docs/getting-started/QUICKSTART.md)
+
+### Learning Path
+
+1. **Text-only AI**: [docs/getting-started/BASIC_INFERENCE.md](docs/getting-started/BASIC_INFERENCE.md)
+2. **Speech/Vision**: [docs/features/MODALITIES.md](docs/features/MODALITIES.md)
+3. **Video/Research**: [docs/features/WORKFLOWS.md](docs/features/WORKFLOWS.md)
+4. **Code Assistants**: [docs/features/ASSISTANTS.md](docs/features/ASSISTANTS.md)
+
+### Which Features Do I Need?
+
+See [docs/getting-started/CHOOSING_FEATURES.md](docs/getting-started/CHOOSING_FEATURES.md) to pick the right subset.
+
 ## Examples
 
-- `ofxGgmlBasicExample`: interactive matrix demo plus steady-state matmul benchmark
-- `ofxGgmlGuiExample`: local chat, review, script, speech, multimodal, and `Live context` workflow UI backed by addon helpers
-- `ofxGgmlNeuralExample`: reusable inference graph with live class bars and latency view
+### Focused Examples (Recommended for Learning)
 
-Both lightweight examples are now keyboard-driven so you can rerun compute and benchmark paths without restarting the app.
+- `ofxGgmlChatExample`: **Simple chat application** (~200 lines, uses `ofxGgmlBasic.h`)
+- `ofxGgmlBasicExample`: Interactive matrix demo plus steady-state matmul benchmark
+- `ofxGgmlNeuralExample`: Reusable inference graph with live class bars and latency view
+
+### Comprehensive Example
+
+- `ofxGgmlGuiExample`: All features in one GUI demo - local chat, review, script, speech, multimodal, and `Live context` workflow UI backed by addon helpers
+
+The lightweight examples are keyboard-driven so you can rerun compute and benchmark paths without restarting the app.
 
 ## Tests
 
