@@ -341,6 +341,11 @@ montageRequest.maxClips = 10;
 
 auto montageResult = ofxGgmlMontagePlanner::plan(montageRequest);
 
+// For headless automation, ofxGgmlEasy::planMontageFromSrt(...) applies the
+// same montage defaults (12s target, 1.5s spacing, 0.25s/0.35s handles) and
+// lets you override spacing/handles, target duration, drop-frame EDL output,
+// or a source-file path without building the request manually.
+
 // 4. Generate subtitles
 auto subtitleTrack = ofxGgmlMontagePlanner::buildSubtitleTrack(
     montageResult.plan, "INTERVIEW_HIGHLIGHTS");

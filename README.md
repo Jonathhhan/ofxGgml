@@ -286,6 +286,8 @@ auto citations = ai.findCitations(
 auto montage = ai.planMontageFromSrt(
     "data/subtitles/scene.srt",
     "Build a concise recap montage.");
+// Defaults match the GUI montage automat (12s target, 1.5s spacing, 0.25s/0.35s handles)
+// and accept optional target/spacing/handles/drop-frame/source-path overrides for EDL export.
 
 auto editPlan = ai.planVideoEdit(
     "Berlin city footage",
