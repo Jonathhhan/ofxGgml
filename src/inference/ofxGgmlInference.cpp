@@ -229,6 +229,29 @@ static std::string findCurlExecutable() {
 	return {};
 }
 
+static void recordStreamingMetrics(
+	const std::string & modelPath,
+	const std::string & transport,
+	size_t chunkCount,
+	size_t byteCount,
+	bool cancelled) {
+	auto & metrics = ofxGgmlMetrics::getInstance();
+	const std::string base = "stream." + transport;
+	metrics.incrementCounter(base + ".chunks", chunkCount);
+	metrics.incrementCounter(base + ".bytes", byteCount);
+	if (cancelled) {
+		metrics.incrementCounter(base + ".cancelled");
+	}
+	if (!modelPath.empty()) {
+		const std::string perModel = base + ".model." + std::to_string(std::hash<std::string>{}(modelPath));
+		metrics.incrementCounter(perModel + ".chunks", chunkCount);
+		metrics.incrementCounter(perModel + ".bytes", byteCount);
+		if (cancelled) {
+			metrics.incrementCounter(perModel + ".cancelled");
+		}
+	}
+}
+
 static bool writeTextFile(const std::string & path, const std::string & text) {
 	std::ofstream out(path, std::ios::binary);
 	if (!out.is_open()) return false;
@@ -888,6 +911,8 @@ std::function<bool(const std::string&)> onChunk) const {
 				std::string pending;
 				std::string accumulated;
 				bool cancelled = false;
+				size_t chunkCount = 0;
+				size_t byteCount = 0;
 				const bool started = runCommandCapture(
 					args,
 					output,
@@ -923,6 +948,8 @@ std::function<bool(const std::string&)> onChunk) const {
 							if (delta.empty()) {
 								continue;
 							}
+							++chunkCount;
+							byteCount += delta.size();
 							accumulated += delta;
 							if (onChunk && !onChunk(delta)) {
 								cancelled = true;
@@ -946,6 +973,12 @@ std::function<bool(const std::string&)> onChunk) const {
 					return result;
 				}
 				result.text = trim(accumulated.empty() ? output : accumulated);
+				recordStreamingMetrics(
+					serverModel,
+					"server.curl",
+					chunkCount,
+					byteCount,
+					cancelled);
 				if (result.text.empty()) {
 					ofJson retryPayload = payload;
 					retryPayload["stream"] = false;
@@ -1090,6 +1123,9 @@ std::function<bool(const std::string&)> onChunk) const {
 
 				std::string accumulated;
 				std::string pending;
+				size_t chunkCount = 0;
+				size_t byteCount = 0;
+				bool cancelled = false;
 				for (;;) {
 					DWORD available = 0;
 					if (!WinHttpQueryDataAvailable(request, &available) || available == 0) {
@@ -1129,12 +1165,14 @@ std::function<bool(const std::string&)> onChunk) const {
 							break;
 						}
 
-					const std::string delta =
-						ofxGgmlInferenceServerInternals::extractDeltaTextFromOpenAiStreamEvent(
-							eventPayload);
+						const std::string delta =
+							ofxGgmlInferenceServerInternals::extractDeltaTextFromOpenAiStreamEvent(
+								eventPayload);
 						if (delta.empty()) {
 							continue;
 						}
+						++chunkCount;
+						byteCount += delta.size();
 						accumulated += delta;
 						if (onChunk && !onChunk(delta)) {
 							closeHandle(request);
@@ -1142,6 +1180,13 @@ std::function<bool(const std::string&)> onChunk) const {
 							closeHandle(session);
 							result.error = "server-backed inference cancelled";
 							result.text = trim(accumulated);
+							cancelled = true;
+							recordStreamingMetrics(
+								serverModel,
+								"server.winhttp",
+								chunkCount,
+								byteCount,
+								cancelled);
 							return result;
 						}
 					}
@@ -1150,6 +1195,12 @@ std::function<bool(const std::string&)> onChunk) const {
 				closeHandle(connect);
 				closeHandle(session);
 				result.text = trim(accumulated);
+				recordStreamingMetrics(
+					serverModel,
+					"server.winhttp",
+					chunkCount,
+					byteCount,
+					cancelled);
 				if (result.text.empty()) {
 					ofJson retryPayload = payload;
 					retryPayload["stream"] = false;
@@ -1235,6 +1286,22 @@ std::function<bool(const std::string&)> onChunk) const {
 	int effectiveBatch = std::clamp(settings.batchSize, 1, 8192);
 	if ((!settings.device.empty() || settings.gpuLayers > 0) && effectiveBatch > 256) {
 		effectiveBatch = 256;
+	}
+
+	size_t streamChunkCount = 0;
+	size_t streamByteCount = 0;
+	bool streamCancelled = false;
+	std::function<bool(const std::string &)> streamingHandler;
+	if (onChunk) {
+		streamingHandler = [&](const std::string & chunk) -> bool {
+			++streamChunkCount;
+			streamByteCount += chunk.size();
+			if (!onChunk(chunk)) {
+				streamCancelled = true;
+				return false;
+			}
+			return true;
+		};
 	}
 
 	auto buildArgs = [&](int batchOverride, bool simpleIoEnabled) {
@@ -1383,7 +1450,7 @@ std::function<bool(const std::string&)> onChunk) const {
 		return true;
 	};
 
-	if (!tryRun(effectiveBatch, settings.simpleIo, raw, cleaned, exitCode, onChunk)) {
+	if (!tryRun(effectiveBatch, settings.simpleIo, raw, cleaned, exitCode, streamingHandler)) {
 		result.error = "failed to start llama completion process";
 		return result;
 	}
@@ -1457,6 +1524,14 @@ std::function<bool(const std::string&)> onChunk) const {
 	result.outputLikelyCutoff = isLikelyCutoffOutput(
 		result.text,
 		looksLikeCodeOutput(result.text));
+	if (streamingHandler) {
+		recordStreamingMetrics(
+			modelPath,
+			"cli",
+			streamChunkCount,
+			streamByteCount,
+			streamCancelled);
+	}
 
 	if (settings.autoContinueCutoff &&
 		result.outputLikelyCutoff &&
