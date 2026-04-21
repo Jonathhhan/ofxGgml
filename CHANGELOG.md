@@ -6,6 +6,20 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ### Enhanced
 
+- **ofxGgml/ofxStableDiffusion Integration Improvements**:
+  - Added structured error handling with `ofxGgmlImageGenerationErrorType` enum (ConfigurationError, ModelLoadError, ValidationError, GenerationError, ResourceError, TimeoutError, BackendError)
+  - Added comprehensive diagnostics tracking (`ofxGgmlImageGenerationDiagnostics`) with model load time, generation time, post-process time, peak memory, context reload count, and timing breakdown
+  - Added model capability detection system (`ofxGgmlImageGenerationCapabilities`) for runtime feature queries
+  - Added progress callback support (`ofxGgmlImageGenerationProgress` and `ofxGgmlImageGenerationProgressCallback`) for real-time generation monitoring and cancellation
+  - Added smart context caching to reduce unnecessary model reloads with `ContextCacheKey` structure
+  - Added `enableContextCaching` option to `RuntimeOptions` (enabled by default)
+  - Enhanced `needsContextReload()` function to support cache-aware reload detection
+  - Added `getCapabilities()` method to `ofxGgmlImageGenerationBackend` interface
+  - Added `setGetCapabilitiesFunction()` to `ofxGgmlStableDiffusionBridgeBackend` for capability registration
+  - Added `errorTypeLabel()` static method for error type string conversion
+  - Improved error messages with specific error types instead of generic failures
+  - Enhanced test coverage with 50+ new test cases for error handling, capabilities, progress callbacks, and diagnostics
+
 - **EDL Export Improvements**:
   - Added support for drop-frame timecode for NTSC 29.97fps workflows
   - Added `buildEdlWithAudio()` function for combined video/audio track EDL export
@@ -31,6 +45,15 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ### Added
 
+- New comprehensive documentation: `docs/OFXGGML_STABLEDIFFUSION_INTEGRATION.md` covering:
+  - Enhanced error handling patterns and error type usage
+  - Model capability detection and capability queries
+  - Progress callback implementation examples
+  - Smart context caching configuration
+  - Diagnostics and performance monitoring
+  - Best practices for integration
+  - Troubleshooting guide for common issues
+  - Complete code examples for basic and advanced integration
 - New comprehensive documentation: `docs/EDL_EXPORT.md` covering:
   - Basic and advanced EDL export usage
   - Drop-frame timecode explanation and usage
@@ -51,6 +74,13 @@ All notable changes to `ofxGgml` are documented in this file.
   - Merging and splitting operations
   - VTT cue settings formatting
   - Word counting and reading speed calculations
+- New comprehensive diffusion integration tests in `tests/test_diffusion_inference.cpp`:
+  - Error type label verification
+  - Capability detection and queries
+  - Progress callback functionality
+  - Diagnostics tracking
+  - Backend configuration with capabilities
+  - Error propagation with typed errors
 
 ### Added (Previous)
 - **Enhanced Streaming Progress Tracking** - `ofxGgmlStreamingContext` now includes detailed progress metrics for streaming inference:
