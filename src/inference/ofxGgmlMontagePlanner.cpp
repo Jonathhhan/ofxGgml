@@ -1,4 +1,5 @@
 #include "ofxGgmlMontagePlanner.h"
+#include "ofxGgmlPlannerCommon.h"
 
 #include "support/ofxGgmlSimpleSrtSubtitleParser.h"
 
@@ -13,17 +14,10 @@
 
 namespace {
 
-std::string trimMontageCopy(const std::string & text) {
-	size_t start = 0;
-	while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start]))) {
-		++start;
-	}
-	size_t end = text.size();
-	while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1]))) {
-		--end;
-	}
-	return text.substr(start, end - start);
-}
+using ofxGgmlPlannerCommon::trim;
+using ofxGgmlPlannerCommon::collapseWhitespace;
+using ofxGgmlPlannerCommon::formatTimecode;
+using ofxGgmlPlannerCommon::formatSubtitleTimestamp;
 
 std::string sanitizeReelName(const std::string & value, const std::string & fallback) {
 	std::string sanitized;
@@ -43,23 +37,6 @@ std::string sanitizeReelName(const std::string & value, const std::string & fall
 	return sanitizeReelName(fallback.empty() ? "AX" : fallback, "AX");
 }
 
-std::string collapseWhitespace(const std::string & text) {
-	std::ostringstream out;
-	bool previousWasSpace = false;
-	for (char c : text) {
-		if (std::isspace(static_cast<unsigned char>(c))) {
-			if (!previousWasSpace) {
-				out << ' ';
-				previousWasSpace = true;
-			}
-			continue;
-		}
-		out << c;
-		previousWasSpace = false;
-	}
-	return trimMontageCopy(out.str());
-}
-
 std::unordered_set<std::string> toTokenLookup(const std::vector<std::string> & tokens) {
 	return std::unordered_set<std::string>(tokens.begin(), tokens.end());
 }
@@ -75,41 +52,8 @@ std::string joinStrings(const std::vector<std::string> & values, const std::stri
 	return out.str();
 }
 
-std::string formatTimecode(double seconds, int fps) {
-	const int safeFps = std::max(1, fps);
-	const double clamped = std::max(0.0, seconds);
-	const int totalFrames = static_cast<int>(std::llround(clamped * static_cast<double>(safeFps)));
-	const int frames = totalFrames % safeFps;
-	const int totalSeconds = totalFrames / safeFps;
-	const int secs = totalSeconds % 60;
-	const int totalMinutes = totalSeconds / 60;
-	const int mins = totalMinutes % 60;
-	const int hours = totalMinutes / 60;
-	std::ostringstream out;
-	out << std::setfill('0')
-		<< std::setw(2) << hours << ':'
-		<< std::setw(2) << mins << ':'
-		<< std::setw(2) << secs << ':'
-		<< std::setw(2) << frames;
-	return out.str();
-}
-
-std::string formatSubtitleTimestamp(double seconds, bool webVttStyle) {
-	const int totalMs = static_cast<int>(std::llround(std::max(0.0, seconds) * 1000.0));
-	const int millis = totalMs % 1000;
-	const int totalSeconds = totalMs / 1000;
-	const int secs = totalSeconds % 60;
-	const int totalMinutes = totalSeconds / 60;
-	const int mins = totalMinutes % 60;
-	const int hours = totalMinutes / 60;
-	std::ostringstream out;
-	out << std::setfill('0')
-		<< std::setw(2) << hours << ':'
-		<< std::setw(2) << mins << ':'
-		<< std::setw(2) << secs
-		<< (webVttStyle ? '.' : ',')
-		<< std::setw(3) << millis;
-	return out.str();
+std::string toTokenKey(const std::string & word) {
+	return ofxGgmlPlannerCommon::toLower(collapseWhitespace(trim(word)));
 }
 
 bool isStopWord(const std::string & token) {
@@ -162,7 +106,7 @@ std::string sanitizeEdlTitle(const std::string & value) {
 }
 
 std::string sanitizeSubtitleText(const std::string & text) {
-	std::string sanitized = trimMontageCopy(text);
+	std::string sanitized = trim(text);
 	for (char & c : sanitized) {
 		if (c == '\r') {
 			c = '\n';
@@ -359,7 +303,7 @@ ofxGgmlMontageMatch ofxGgmlMontagePlanner::scoreSegment(
 	const std::string & goal,
 	const ofxGgmlMontageSegment & segment,
 	size_t segmentIndex) {
-	const std::string trimmedGoal = trimMontageCopy(goal);
+	const std::string trimmedGoal = trim(goal);
 	const std::vector<std::string> goalTokens = extractKeywords(trimmedGoal);
 	const std::unordered_set<std::string> goalLookup = toTokenLookup(goalTokens);
 	return scoreSegmentAgainstGoalTokens(trimmedGoal, goalTokens, goalLookup, segment, segmentIndex);
@@ -370,7 +314,7 @@ ofxGgmlMontagePlannerResult ofxGgmlMontagePlanner::plan(
 	ofxGgmlMontagePlannerResult result;
 	const auto started = std::chrono::steady_clock::now();
 
-	const std::string goal = trimMontageCopy(request.goal);
+	const std::string goal = trim(request.goal);
 	if (goal.empty()) {
 		result.error = "Montage goal is empty.";
 		return result;

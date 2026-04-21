@@ -1,4 +1,5 @@
 #include "inference/ofxGgmlLongVideoPlanner.h"
+#include "ofxGgmlPlannerCommon.h"
 
 #include "ofJson.h"
 
@@ -10,19 +11,8 @@
 
 namespace {
 
-std::string trimCopy(const std::string & value) {
-	size_t start = 0;
-	while (start < value.size() &&
-		std::isspace(static_cast<unsigned char>(value[start]))) {
-		++start;
-	}
-	size_t end = value.size();
-	while (end > start &&
-		std::isspace(static_cast<unsigned char>(value[end - 1]))) {
-		--end;
-	}
-	return value.substr(start, end - start);
-}
+using ofxGgmlPlannerCommon::trim;
+using ofxGgmlPlannerCommon::toLower;
 
 std::string makeChunkId(int index) {
 	std::ostringstream output;
@@ -49,22 +39,14 @@ std::string defaultChunkTitle(int index, int chunkCount) {
 	return output.str();
 }
 
-std::string toLowerCopy(const std::string & value) {
-	std::string lowered = value;
-	std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
-		return static_cast<char>(std::tolower(c));
-	});
-	return lowered;
-}
-
 bool containsToken(const std::string & haystack, const std::string & needle) {
-	return toLowerCopy(haystack).find(toLowerCopy(needle)) != std::string::npos;
+	return toLower(haystack).find(toLower(needle)) != std::string::npos;
 }
 
 std::vector<std::string> titlesForStructure(
 	const ofxGgmlLongVideoPlanRequest & request,
 	int chunkCount) {
-	const std::string structure = toLowerCopy(request.structureHint);
+	const std::string structure = toLower(request.structureHint);
 	std::vector<std::string> titles;
 	if (containsToken(structure, "music")) {
 		titles = {"Intro", "Verse A", "Pre-Chorus", "Chorus", "Bridge", "Final Chorus", "Outro"};
@@ -253,12 +235,12 @@ std::string buildContinuityBibleText(
 	const std::vector<ofxGgmlLongVideoPlanChunk> & chunks) {
 	std::ostringstream output;
 	output
-		<< "Concept: " << trimCopy(request.conceptText) << "\n"
-		<< "Visual style: " << trimCopy(request.style) << "\n"
-		<< "Tone: " << trimCopy(request.tone) << "\n"
-		<< "Structure: " << trimCopy(request.structureHint) << "\n"
-		<< "Pacing: " << trimCopy(request.pacingProfile) << "\n"
-		<< "Continuity rule: " << trimCopy(request.continuityGoal) << "\n"
+		<< "Concept: " << trim(request.conceptText) << "\n"
+		<< "Visual style: " << trim(request.style) << "\n"
+		<< "Tone: " << trim(request.tone) << "\n"
+		<< "Structure: " << trim(request.structureHint) << "\n"
+		<< "Pacing: " << trim(request.pacingProfile) << "\n"
+		<< "Continuity rule: " << trim(request.continuityGoal) << "\n"
 		<< "Render target: " << request.width << "x" << request.height
 		<< " at " << request.fps << " fps, "
 		<< request.framesPerChunk << " frames per chunk.\n\n"
@@ -270,7 +252,7 @@ std::string buildContinuityBibleText(
 			<< chunk.continuityNote
 			<< " Transition: " << chunk.transitionHint << "\n";
 	}
-	return trimCopy(output.str());
+	return trim(output.str());
 }
 
 } // namespace
@@ -286,7 +268,7 @@ const ofxGgmlTextAssistant & ofxGgmlLongVideoPlanner::getTextAssistant() const {
 ofxGgmlLongVideoPlanValidation ofxGgmlLongVideoPlanner::validateRequest(
 	const ofxGgmlLongVideoPlanRequest & request) {
 	ofxGgmlLongVideoPlanValidation validation;
-	if (trimCopy(request.conceptText).empty()) {
+	if (trim(request.conceptText).empty()) {
 		validation.ok = false;
 		validation.errors.push_back("Concept is empty.");
 	}
@@ -319,10 +301,10 @@ ofxGgmlLongVideoPlanValidation ofxGgmlLongVideoPlanner::validateRequest(
 	if (request.targetDurationSeconds / std::max(1, request.chunkCount) < 4.0) {
 		validation.warnings.push_back("Average chunk duration is very short; transitions may feel abrupt.");
 	}
-	if (trimCopy(request.structureHint).empty()) {
+	if (trim(request.structureHint).empty()) {
 		validation.warnings.push_back("Structure hint is empty. The plan may feel flatter than intended.");
 	}
-	if (trimCopy(request.pacingProfile).empty()) {
+	if (trim(request.pacingProfile).empty()) {
 		validation.warnings.push_back("Pacing profile is empty. Chunk timing will rely on defaults.");
 	}
 	return validation;
@@ -333,14 +315,14 @@ std::string ofxGgmlLongVideoPlanner::buildPlanningPrompt(
 	std::ostringstream prompt;
 	prompt
 		<< "Plan a long-form video as a chunked native rendering workflow.\n"
-		<< "Concept: " << trimCopy(request.conceptText) << "\n"
-		<< "Style: " << trimCopy(request.style) << "\n"
-		<< "Tone: " << trimCopy(request.tone) << "\n"
-		<< "Structure: " << trimCopy(request.structureHint) << "\n"
-		<< "Pacing: " << trimCopy(request.pacingProfile) << "\n"
+		<< "Concept: " << trim(request.conceptText) << "\n"
+		<< "Style: " << trim(request.style) << "\n"
+		<< "Tone: " << trim(request.tone) << "\n"
+		<< "Structure: " << trim(request.structureHint) << "\n"
+		<< "Pacing: " << trim(request.pacingProfile) << "\n"
 		<< "Target duration: " << request.targetDurationSeconds << " seconds\n"
 		<< "Chunk count: " << request.chunkCount << "\n"
-		<< "Continuity goal: " << trimCopy(request.continuityGoal) << "\n"
+		<< "Continuity goal: " << trim(request.continuityGoal) << "\n"
 		<< "Render target: " << request.width << "x" << request.height
 		<< ", " << request.fps << " fps, "
 		<< request.framesPerChunk << " frames per chunk.\n"

@@ -1,4 +1,5 @@
 #include "ofxGgmlVideoPlanner.h"
+#include "ofxGgmlPlannerCommon.h"
 
 #ifndef OFXGGML_HEADLESS_STUBS
 #include "ofJson.h"
@@ -11,17 +12,11 @@
 
 namespace {
 
-std::string trimCopy(const std::string & text) {
-	size_t start = 0;
-	while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start]))) {
-		++start;
-	}
-	size_t end = text.size();
-	while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1]))) {
-		--end;
-	}
-	return text.substr(start, end - start);
-}
+using ofxGgmlPlannerCommon::trim;
+using ofxGgmlPlannerCommon::toLower;
+using ofxGgmlPlannerCommon::formatSeconds;
+using ofxGgmlPlannerCommon::describeTimeRange;
+using ofxGgmlPlannerCommon::containsAnyToken;
 
 template <typename T>
 T jsonValueOr(const ofJson & json, const char * key, const T & fallback) {
@@ -53,13 +48,7 @@ std::vector<std::string> jsonStringArray(const ofJson & json, const char * key) 
 	return values;
 }
 
-std::string formatSeconds(double seconds) {
-	std::ostringstream out;
-	out << std::fixed << std::setprecision(1) << std::max(0.0, seconds) << "s";
-	return out.str();
-}
-
-std::string describeCutIntensity(float intensity) {
+inline std::string describeCutIntensity(float intensity) {
 	if (intensity <= 0.33f) {
 		return "restrained";
 	}
@@ -69,41 +58,9 @@ std::string describeCutIntensity(float intensity) {
 	return "aggressive";
 }
 
-std::string toLowerCopy(const std::string & text) {
-	std::string lowered = text;
-	std::transform(
-		lowered.begin(),
-		lowered.end(),
-		lowered.begin(),
-		[](unsigned char ch) {
-			return static_cast<char>(std::tolower(ch));
-		});
-	return lowered;
-}
-
-bool containsAnyToken(const std::string & text, const std::vector<std::string> & tokens) {
-	const std::string lowered = toLowerCopy(text);
-	return std::any_of(
-		tokens.begin(),
-		tokens.end(),
-		[&](const std::string & token) {
-			return !token.empty() && lowered.find(token) != std::string::npos;
-		});
-}
-
-std::string describeTimeRange(double startSeconds, double endSeconds) {
-	if (endSeconds > startSeconds) {
-		return formatSeconds(startSeconds) + " - " + formatSeconds(endSeconds);
-	}
-	if (startSeconds > 0.0) {
-		return "around " + formatSeconds(startSeconds);
-	}
-	return {};
-}
-
 std::string appendSentence(const std::string & base, const std::string & addition) {
-	const std::string trimmedBase = trimCopy(base);
-	const std::string trimmedAddition = trimCopy(addition);
+	const std::string trimmedBase = trim(base);
+	const std::string trimmedAddition = trim(addition);
 	if (trimmedAddition.empty()) {
 		return trimmedBase;
 	}
@@ -120,19 +77,19 @@ std::string buildClipWorkflowText(const ofxGgmlVideoEditClip & clip) {
 	if (!timeRange.empty()) {
 		text << " Focus on " << timeRange << ".";
 	}
-	if (!trimCopy(clip.purpose).empty()) {
+	if (!trim(clip.purpose).empty()) {
 		text << " Purpose: " << clip.purpose << ".";
 	}
-	if (!trimCopy(clip.sourceDescription).empty()) {
+	if (!trim(clip.sourceDescription).empty()) {
 		text << " Source moment: " << clip.sourceDescription << ".";
 	}
-	if (!trimCopy(clip.treatment).empty()) {
+	if (!trim(clip.treatment).empty()) {
 		text << " Treatment: " << clip.treatment << ".";
 	}
-	if (!trimCopy(clip.transition).empty()) {
+	if (!trim(clip.transition).empty()) {
 		text << " Transition: " << clip.transition << ".";
 	}
-	if (!trimCopy(clip.textOverlay).empty()) {
+	if (!trim(clip.textOverlay).empty()) {
 		text << " Suggested on-screen text: " << clip.textOverlay << ".";
 	}
 	return text.str();
@@ -145,16 +102,16 @@ std::string buildActionWorkflowText(const ofxGgmlVideoEditAction & action) {
 	if (!timeRange.empty()) {
 		text << " Focus on " << timeRange << ".";
 	}
-	if (!trimCopy(action.type).empty()) {
+	if (!trim(action.type).empty()) {
 		text << " Action type: " << action.type << ".";
 	}
-	if (!trimCopy(action.instruction).empty()) {
+	if (!trim(action.instruction).empty()) {
 		text << " Instruction: " << action.instruction << ".";
 	}
-	if (!trimCopy(action.rationale).empty()) {
+	if (!trim(action.rationale).empty()) {
 		text << " Why: " << action.rationale << ".";
 	}
-	if (!trimCopy(action.assetHint).empty()) {
+	if (!trim(action.assetHint).empty()) {
 		text << " Asset direction: " << action.assetHint << ".";
 	}
 	return text.str();
@@ -162,7 +119,7 @@ std::string buildActionWorkflowText(const ofxGgmlVideoEditAction & action) {
 
 std::string chooseActionHandoffMode(const ofxGgmlVideoEditAction & action) {
 	const std::string actionContext =
-		trimCopy(action.type) + " " + trimCopy(action.instruction) + " " + trimCopy(action.assetHint);
+		trim(action.type) + " " + trim(action.instruction) + " " + trim(action.assetHint);
 	if (containsAnyToken(
 			actionContext,
 			{"asset", "b-roll", "b roll", "cutaway", "insert", "plate", "graphic", "still", "replace", "background"})) {
@@ -231,14 +188,14 @@ std::string ofxGgmlVideoPlanner::buildPlanningPrompt(const ofxGgmlVideoPlannerRe
 		prompt << "Requested section count: " << sectionCount << "\n";
 		prompt << "Music-video cut intensity: " << describeCutIntensity(request.cutIntensity) << "\n";
 	}
-	if (!trimCopy(request.preferredStyle).empty()) {
-		prompt << "Preferred style: " << trimCopy(request.preferredStyle) << "\n";
+	if (!trim(request.preferredStyle).empty()) {
+		prompt << "Preferred style: " << trim(request.preferredStyle) << "\n";
 	}
-	if (!trimCopy(request.negativePrompt).empty()) {
-		prompt << "Negative prompt hints: " << trimCopy(request.negativePrompt) << "\n";
+	if (!trim(request.negativePrompt).empty()) {
+		prompt << "Negative prompt hints: " << trim(request.negativePrompt) << "\n";
 	}
-	if (!trimCopy(request.sectionStructureHint).empty()) {
-		prompt << "Preferred section structure: " << trimCopy(request.sectionStructureHint) << "\n";
+	if (!trim(request.sectionStructureHint).empty()) {
+		prompt << "Preferred section structure: " << trim(request.sectionStructureHint) << "\n";
 	}
 	prompt
 		<< "\nJSON schema:\n"
@@ -301,7 +258,7 @@ std::string ofxGgmlVideoPlanner::buildPlanningPrompt(const ofxGgmlVideoPlannerRe
 			? "Fill the sections array meaningfully and align beat pacing with section energy. Use labels like intro, verse, chorus, bridge, drop, outro when appropriate.\n\n"
 			: "")
 		<< "User prompt:\n"
-		<< trimCopy(request.prompt);
+		<< trim(request.prompt);
 	return prompt.str();
 }
 
@@ -358,20 +315,20 @@ std::string ofxGgmlVideoPlanner::buildEditingPrompt(const ofxGgmlVideoEditPlanne
 		<< "  ]\n"
 		<< "}\n\n"
 		<< "User editing goal:\n"
-		<< trimCopy(request.editGoal) << "\n\n";
-	if (!trimCopy(request.sourcePrompt).empty()) {
+		<< trim(request.editGoal) << "\n\n";
+	if (!trim(request.sourcePrompt).empty()) {
 		prompt << "Original video prompt or source note:\n"
-			<< trimCopy(request.sourcePrompt) << "\n\n";
+			<< trim(request.sourcePrompt) << "\n\n";
 	}
-	if (!trimCopy(request.sourceAnalysis).empty()) {
+	if (!trim(request.sourceAnalysis).empty()) {
 		prompt << "Source video analysis:\n"
-			<< trimCopy(request.sourceAnalysis) << "\n";
+			<< trim(request.sourceAnalysis) << "\n";
 	}
 	return prompt.str();
 }
 
 std::string ofxGgmlVideoPlanner::extractJsonObject(const std::string & text) {
-	const std::string trimmed = trimCopy(text);
+	const std::string trimmed = trim(text);
 	if (trimmed.empty()) {
 		return {};
 	}
@@ -380,7 +337,7 @@ std::string ofxGgmlVideoPlanner::extractJsonObject(const std::string & text) {
 		size_t jsonStart = trimmed.find('{', fenceStart);
 		size_t fenceEnd = trimmed.rfind("```");
 		if (jsonStart != std::string::npos && fenceEnd != std::string::npos && fenceEnd > jsonStart) {
-			return trimCopy(trimmed.substr(jsonStart, fenceEnd - jsonStart));
+			return trim(trimmed.substr(jsonStart, fenceEnd - jsonStart));
 		}
 	}
 	const size_t start = trimmed.find('{');
@@ -388,7 +345,7 @@ std::string ofxGgmlVideoPlanner::extractJsonObject(const std::string & text) {
 	if (start == std::string::npos || end == std::string::npos || end <= start) {
 		return {};
 	}
-	return trimCopy(trimmed.substr(start, end - start + 1));
+	return trim(trimmed.substr(start, end - start + 1));
 }
 
 Result<ofxGgmlVideoPlan> ofxGgmlVideoPlanner::parsePlanJson(const std::string & jsonText) {
@@ -615,32 +572,32 @@ Result<ofxGgmlVideoEditPlan> ofxGgmlVideoPlanner::parseEditPlanJson(const std::s
 
 std::string ofxGgmlVideoPlanner::buildGenerationPrompt(const ofxGgmlVideoPlan & plan) {
 	std::ostringstream prompt;
-	if (!trimCopy(plan.originalPrompt).empty()) {
+	if (!trim(plan.originalPrompt).empty()) {
 		prompt << plan.originalPrompt;
 	} else {
 		prompt << "Generate a coherent short video that follows the structured beat plan below.";
 	}
 	prompt << "\n\nStructured video plan:";
-	if (!trimCopy(plan.style).empty()) {
+	if (!trim(plan.style).empty()) {
 		prompt << "\nStyle: " << plan.style;
 	}
-	if (!trimCopy(plan.overallScene).empty()) {
+	if (!trim(plan.overallScene).empty()) {
 		prompt << "\nOverall scene: " << plan.overallScene;
 	}
-	if (!trimCopy(plan.overallCamera).empty()) {
+	if (!trim(plan.overallCamera).empty()) {
 		prompt << "\nOverall camera: " << plan.overallCamera;
 	}
-	if (!trimCopy(plan.continuityNotes).empty()) {
+	if (!trim(plan.continuityNotes).empty()) {
 		prompt << "\nContinuity: " << plan.continuityNotes;
 	}
 	if (!plan.entities.empty()) {
 		prompt << "\nRecurring entities:";
 		for (const auto & entity : plan.entities) {
 			prompt << "\n- " << (!entity.label.empty() ? entity.label : entity.id);
-			if (!trimCopy(entity.role).empty()) {
+			if (!trim(entity.role).empty()) {
 				prompt << " (" << entity.role << ")";
 			}
-			if (!trimCopy(entity.description).empty()) {
+			if (!trim(entity.description).empty()) {
 				prompt << ": " << entity.description;
 			}
 		}
@@ -649,7 +606,7 @@ std::string ofxGgmlVideoPlanner::buildGenerationPrompt(const ofxGgmlVideoPlan & 
 		prompt << "\nSubjects:";
 		for (const auto & subject : plan.subjects) {
 			prompt << "\n- " << (!subject.label.empty() ? subject.label : subject.id);
-			if (!trimCopy(subject.description).empty()) {
+			if (!trim(subject.description).empty()) {
 				prompt << ": " << subject.description;
 			}
 		}
@@ -661,22 +618,22 @@ std::string ofxGgmlVideoPlanner::buildGenerationPrompt(const ofxGgmlVideoPlan & 
 			if (section.index > 0) {
 				prompt << section.index << ". ";
 			}
-			prompt << (!trimCopy(section.label).empty() ? section.label : "section");
-			if (!trimCopy(section.role).empty()) {
+			prompt << (!trim(section.label).empty() ? section.label : "section");
+			if (!trim(section.role).empty()) {
 				prompt << " (" << section.role << ")";
 			}
 			const std::string sectionRange =
 				describeTimeRange(section.startSeconds, section.endSeconds);
-			if (!trimCopy(sectionRange).empty()) {
+			if (!trim(sectionRange).empty()) {
 				prompt << " | " << sectionRange;
 			}
-			if (!trimCopy(section.energy).empty()) {
+			if (!trim(section.energy).empty()) {
 				prompt << " | energy: " << section.energy;
 			}
-			if (!trimCopy(section.cutDensity).empty()) {
+			if (!trim(section.cutDensity).empty()) {
 				prompt << " | cut density: " << section.cutDensity;
 			}
-			if (!trimCopy(section.visualFocus).empty()) {
+			if (!trim(section.visualFocus).empty()) {
 				prompt << " | focus: " << section.visualFocus;
 			}
 		}
@@ -686,17 +643,17 @@ std::string ofxGgmlVideoPlanner::buildGenerationPrompt(const ofxGgmlVideoPlan & 
 		const auto & beat = plan.beats[i];
 		prompt << "\n" << (i + 1) << ". "
 			<< formatSeconds(beat.startSeconds) << " to " << formatSeconds(beat.endSeconds)
-			<< " - " << trimCopy(beat.summary);
-		if (!trimCopy(beat.scene).empty()) {
+			<< " - " << trim(beat.summary);
+		if (!trim(beat.scene).empty()) {
 			prompt << " | scene: " << beat.scene;
 		}
-		if (!trimCopy(beat.camera).empty()) {
+		if (!trim(beat.camera).empty()) {
 			prompt << " | camera: " << beat.camera;
 		}
-		if (!trimCopy(beat.motion).empty()) {
+		if (!trim(beat.motion).empty()) {
 			prompt << " | motion: " << beat.motion;
 		}
-		if (!trimCopy(beat.visualGoal).empty()) {
+		if (!trim(beat.visualGoal).empty()) {
 			prompt << " | visual goal: " << beat.visualGoal;
 		}
 		if (!beat.subjects.empty()) {
@@ -713,19 +670,19 @@ std::string ofxGgmlVideoPlanner::buildGenerationPrompt(const ofxGgmlVideoPlan & 
 		prompt << "\nScenes:";
 		for (const auto & scene : plan.scenes) {
 			prompt << "\n- Scene " << scene.index;
-			if (!trimCopy(scene.title).empty()) {
+			if (!trim(scene.title).empty()) {
 				prompt << " (" << scene.title << ")";
 			}
-			if (!trimCopy(scene.summary).empty()) {
+			if (!trim(scene.summary).empty()) {
 				prompt << ": " << scene.summary;
 			}
-			if (!trimCopy(scene.eventPrompt).empty()) {
+			if (!trim(scene.eventPrompt).empty()) {
 				prompt << " | prompt: " << scene.eventPrompt;
 			}
-			if (!trimCopy(scene.background).empty()) {
+			if (!trim(scene.background).empty()) {
 				prompt << " | background: " << scene.background;
 			}
-			if (!trimCopy(scene.cameraMovement).empty()) {
+			if (!trim(scene.cameraMovement).empty()) {
 				prompt << " | camera: " << scene.cameraMovement;
 			}
 		}
@@ -736,7 +693,7 @@ std::string ofxGgmlVideoPlanner::buildGenerationPrompt(const ofxGgmlVideoPlan & 
 			prompt << "\n- " << constraint;
 		}
 	}
-	if (!trimCopy(plan.negativePrompt).empty()) {
+	if (!trim(plan.negativePrompt).empty()) {
 		prompt << "\nNegative prompt: " << plan.negativePrompt;
 	}
 	return prompt.str();
@@ -748,44 +705,44 @@ std::string ofxGgmlVideoPlanner::buildScenePrompt(const ofxGgmlVideoPlan & plan,
 	}
 	const auto & scene = plan.scenes[sceneIndex];
 	std::ostringstream prompt;
-	if (!trimCopy(scene.eventPrompt).empty()) {
+	if (!trim(scene.eventPrompt).empty()) {
 		prompt << scene.eventPrompt;
-	} else if (!trimCopy(scene.summary).empty()) {
+	} else if (!trim(scene.summary).empty()) {
 		prompt << scene.summary;
 	} else {
 		prompt << plan.originalPrompt;
 	}
-	if (!trimCopy(plan.style).empty()) {
+	if (!trim(plan.style).empty()) {
 		prompt << "\nStyle: " << plan.style;
 	}
-	if (!trimCopy(scene.background).empty()) {
+	if (!trim(scene.background).empty()) {
 		prompt << "\nBackground: " << scene.background;
 	}
-	if (!trimCopy(scene.cameraMovement).empty()) {
+	if (!trim(scene.cameraMovement).empty()) {
 		prompt << "\nCamera: " << scene.cameraMovement;
 	}
 	if (scene.durationSeconds > 0.0) {
 		prompt << "\nTarget scene duration: " << formatSeconds(scene.durationSeconds);
 	}
-	if (!trimCopy(scene.transition).empty()) {
+	if (!trim(scene.transition).empty()) {
 		prompt << "\nTransition: " << scene.transition;
 	}
-	if (!trimCopy(plan.continuityNotes).empty()) {
+	if (!trim(plan.continuityNotes).empty()) {
 		prompt << "\nContinuity: " << plan.continuityNotes;
 	}
 	if (sceneIndex > 0) {
 		const auto & previousScene = plan.scenes[sceneIndex - 1];
 		const std::string previousSceneLabel =
-			!trimCopy(previousScene.title).empty() ? previousScene.title : previousScene.summary;
-		if (!trimCopy(previousSceneLabel).empty()) {
+			!trim(previousScene.title).empty() ? previousScene.title : previousScene.summary;
+		if (!trim(previousSceneLabel).empty()) {
 			prompt << "\nPrevious scene context: " << previousSceneLabel;
 		}
 	}
 	if (sceneIndex + 1 < plan.scenes.size()) {
 		const auto & nextScene = plan.scenes[sceneIndex + 1];
 		const std::string nextSceneLabel =
-			!trimCopy(nextScene.title).empty() ? nextScene.title : nextScene.summary;
-		if (!trimCopy(nextSceneLabel).empty()) {
+			!trim(nextScene.title).empty() ? nextScene.title : nextScene.summary;
+		if (!trim(nextSceneLabel).empty()) {
 			prompt << "\nNext scene should transition toward: " << nextSceneLabel;
 		}
 	}
@@ -795,19 +752,19 @@ std::string ofxGgmlVideoPlanner::buildScenePrompt(const ofxGgmlVideoPlan & plan,
 			const auto * entity = findEntityByIdOrLabel(plan, entityId);
 			if (entity != nullptr) {
 				prompt << "\n- " << (!entity->label.empty() ? entity->label : entity->id);
-				if (!trimCopy(entity->role).empty()) {
+				if (!trim(entity->role).empty()) {
 					prompt << " (" << entity->role << ")";
 				}
-				if (!trimCopy(entity->description).empty()) {
+				if (!trim(entity->description).empty()) {
 					prompt << ": " << entity->description;
 				}
-				if (!trimCopy(entity->referenceImagePath).empty()) {
+				if (!trim(entity->referenceImagePath).empty()) {
 					prompt << " | reference image: " << entity->referenceImagePath;
 				}
 			}
 		}
 	}
-	if (!trimCopy(plan.negativePrompt).empty()) {
+	if (!trim(plan.negativePrompt).empty()) {
 		prompt << "\nNegative prompt: " << plan.negativePrompt;
 	}
 	return prompt.str();
@@ -819,34 +776,34 @@ std::string ofxGgmlVideoPlanner::buildSceneSequencePrompt(const ofxGgmlVideoPlan
 	}
 
 	std::ostringstream prompt;
-	if (!trimCopy(plan.originalPrompt).empty()) {
+	if (!trim(plan.originalPrompt).empty()) {
 		prompt << plan.originalPrompt;
 	} else {
 		prompt << "Generate a coherent multi-scene video that follows the structured scene sequence below.";
 	}
-	if (!trimCopy(plan.style).empty()) {
+	if (!trim(plan.style).empty()) {
 		prompt << "\nStyle: " << plan.style;
 	}
-	if (!trimCopy(plan.overallScene).empty()) {
+	if (!trim(plan.overallScene).empty()) {
 		prompt << "\nOverall setting: " << plan.overallScene;
 	}
-	if (!trimCopy(plan.overallCamera).empty()) {
+	if (!trim(plan.overallCamera).empty()) {
 		prompt << "\nOverall camera language: " << plan.overallCamera;
 	}
-	if (!trimCopy(plan.continuityNotes).empty()) {
+	if (!trim(plan.continuityNotes).empty()) {
 		prompt << "\nContinuity notes: " << plan.continuityNotes;
 	}
 	if (!plan.entities.empty()) {
 		prompt << "\nRecurring entities:";
 		for (const auto & entity : plan.entities) {
 			prompt << "\n- " << (!entity.label.empty() ? entity.label : entity.id);
-			if (!trimCopy(entity.role).empty()) {
+			if (!trim(entity.role).empty()) {
 				prompt << " (" << entity.role << ")";
 			}
-			if (!trimCopy(entity.description).empty()) {
+			if (!trim(entity.description).empty()) {
 				prompt << ": " << entity.description;
 			}
-			if (!trimCopy(entity.referenceImagePath).empty()) {
+			if (!trim(entity.referenceImagePath).empty()) {
 				prompt << " | reference image: " << entity.referenceImagePath;
 			}
 		}
@@ -858,22 +815,22 @@ std::string ofxGgmlVideoPlanner::buildSceneSequencePrompt(const ofxGgmlVideoPlan
 			if (section.index > 0) {
 				prompt << section.index << ". ";
 			}
-			prompt << (!trimCopy(section.label).empty() ? section.label : "section");
-			if (!trimCopy(section.role).empty()) {
+			prompt << (!trim(section.label).empty() ? section.label : "section");
+			if (!trim(section.role).empty()) {
 				prompt << " (" << section.role << ")";
 			}
 			const std::string sectionRange =
 				describeTimeRange(section.startSeconds, section.endSeconds);
-			if (!trimCopy(sectionRange).empty()) {
+			if (!trim(sectionRange).empty()) {
 				prompt << " | " << sectionRange;
 			}
-			if (!trimCopy(section.energy).empty()) {
+			if (!trim(section.energy).empty()) {
 				prompt << " | energy: " << section.energy;
 			}
-			if (!trimCopy(section.cutDensity).empty()) {
+			if (!trim(section.cutDensity).empty()) {
 				prompt << " | cut density: " << section.cutDensity;
 			}
-			if (!trimCopy(section.visualFocus).empty()) {
+			if (!trim(section.visualFocus).empty()) {
 				prompt << " | focus: " << section.visualFocus;
 			}
 		}
@@ -881,7 +838,7 @@ std::string ofxGgmlVideoPlanner::buildSceneSequencePrompt(const ofxGgmlVideoPlan
 	prompt << "\nScene sequence:";
 	for (const auto & scene : plan.scenes) {
 		prompt << "\n" << scene.index << ". ";
-		if (!trimCopy(scene.title).empty()) {
+		if (!trim(scene.title).empty()) {
 			prompt << scene.title;
 		} else {
 			prompt << "Scene " << scene.index;
@@ -889,19 +846,19 @@ std::string ofxGgmlVideoPlanner::buildSceneSequencePrompt(const ofxGgmlVideoPlan
 		if (scene.durationSeconds > 0.0) {
 			prompt << " (" << formatSeconds(scene.durationSeconds) << ")";
 		}
-		if (!trimCopy(scene.summary).empty()) {
+		if (!trim(scene.summary).empty()) {
 			prompt << " | " << scene.summary;
 		}
-		if (!trimCopy(scene.eventPrompt).empty()) {
+		if (!trim(scene.eventPrompt).empty()) {
 			prompt << " | prompt: " << scene.eventPrompt;
 		}
-		if (!trimCopy(scene.background).empty()) {
+		if (!trim(scene.background).empty()) {
 			prompt << " | background: " << scene.background;
 		}
-		if (!trimCopy(scene.cameraMovement).empty()) {
+		if (!trim(scene.cameraMovement).empty()) {
 			prompt << " | camera: " << scene.cameraMovement;
 		}
-		if (!trimCopy(scene.transition).empty()) {
+		if (!trim(scene.transition).empty()) {
 			prompt << " | transition: " << scene.transition;
 		}
 		if (!scene.entityIds.empty()) {
@@ -915,7 +872,7 @@ std::string ofxGgmlVideoPlanner::buildSceneSequencePrompt(const ofxGgmlVideoPlan
 			}
 		}
 	}
-	if (!trimCopy(plan.negativePrompt).empty()) {
+	if (!trim(plan.negativePrompt).empty()) {
 		prompt << "\nNegative prompt: " << plan.negativePrompt;
 	}
 	return prompt.str();
@@ -928,20 +885,20 @@ std::string ofxGgmlVideoPlanner::summarizePlan(const ofxGgmlVideoPlan & plan) {
 	} else {
 		summary << "Video plan with " << plan.beats.size() << " beat(s)";
 	}
-	if (!trimCopy(plan.style).empty()) {
+	if (!trim(plan.style).empty()) {
 		summary << "\nStyle: " << plan.style;
 	}
-	if (!trimCopy(plan.overallCamera).empty()) {
+	if (!trim(plan.overallCamera).empty()) {
 		summary << "\nCamera: " << plan.overallCamera;
 	}
-	if (!trimCopy(plan.continuityNotes).empty()) {
+	if (!trim(plan.continuityNotes).empty()) {
 		summary << "\nContinuity: " << plan.continuityNotes;
 	}
 	if (!plan.entities.empty()) {
 		summary << "\nEntities:";
 		for (const auto & entity : plan.entities) {
 			summary << "\n- " << (!entity.label.empty() ? entity.label : entity.id);
-			if (!trimCopy(entity.role).empty()) {
+			if (!trim(entity.role).empty()) {
 				summary << " (" << entity.role << ")";
 			}
 		}
@@ -953,22 +910,22 @@ std::string ofxGgmlVideoPlanner::summarizePlan(const ofxGgmlVideoPlan & plan) {
 			if (section.index > 0) {
 				summary << section.index << ". ";
 			}
-			summary << (!trimCopy(section.label).empty() ? section.label : "section");
-			if (!trimCopy(section.role).empty()) {
+			summary << (!trim(section.label).empty() ? section.label : "section");
+			if (!trim(section.role).empty()) {
 				summary << " (" << section.role << ")";
 			}
 			const std::string sectionRange =
 				describeTimeRange(section.startSeconds, section.endSeconds);
-			if (!trimCopy(sectionRange).empty()) {
+			if (!trim(sectionRange).empty()) {
 				summary << " | " << sectionRange;
 			}
-			if (!trimCopy(section.energy).empty()) {
+			if (!trim(section.energy).empty()) {
 				summary << " | " << section.energy;
 			}
-			if (!trimCopy(section.cutDensity).empty()) {
+			if (!trim(section.cutDensity).empty()) {
 				summary << " | cuts: " << section.cutDensity;
 			}
-			if (!trimCopy(section.visualFocus).empty()) {
+			if (!trim(section.visualFocus).empty()) {
 				summary << " | focus: " << section.visualFocus;
 			}
 		}
@@ -977,18 +934,18 @@ std::string ofxGgmlVideoPlanner::summarizePlan(const ofxGgmlVideoPlan & plan) {
 		summary << "\nScenes:";
 		for (const auto & scene : plan.scenes) {
 			summary << "\n" << scene.index << ". ";
-			if (!trimCopy(scene.title).empty()) {
+			if (!trim(scene.title).empty()) {
 				summary << scene.title;
 			} else {
 				summary << "Scene " << scene.index;
 			}
-			if (!trimCopy(scene.summary).empty()) {
+			if (!trim(scene.summary).empty()) {
 				summary << ": " << scene.summary;
 			}
 			if (scene.durationSeconds > 0.0) {
 				summary << " | " << formatSeconds(scene.durationSeconds);
 			}
-			if (!trimCopy(scene.cameraMovement).empty()) {
+			if (!trim(scene.cameraMovement).empty()) {
 				summary << " | " << scene.cameraMovement;
 			}
 			if (!scene.entityIds.empty()) {
@@ -1007,11 +964,11 @@ std::string ofxGgmlVideoPlanner::summarizePlan(const ofxGgmlVideoPlan & plan) {
 		const auto & beat = plan.beats[i];
 		summary << "\n" << (i + 1) << ". "
 			<< formatSeconds(beat.startSeconds) << " - " << formatSeconds(beat.endSeconds)
-			<< ": " << trimCopy(beat.summary);
-		if (!trimCopy(beat.camera).empty()) {
+			<< ": " << trim(beat.summary);
+		if (!trim(beat.camera).empty()) {
 			summary << " | " << beat.camera;
 		}
-		if (!trimCopy(beat.motion).empty()) {
+		if (!trim(beat.motion).empty()) {
 			summary << " | " << beat.motion;
 		}
 	}
@@ -1021,19 +978,19 @@ std::string ofxGgmlVideoPlanner::summarizePlan(const ofxGgmlVideoPlan & plan) {
 std::string ofxGgmlVideoPlanner::buildEditorBrief(const ofxGgmlVideoEditPlan & plan) {
 	std::ostringstream brief;
 	brief << "Video edit brief";
-	if (!trimCopy(plan.originalGoal).empty()) {
+	if (!trim(plan.originalGoal).empty()) {
 		brief << "\nGoal: " << plan.originalGoal;
 	}
-	if (!trimCopy(plan.overallDirection).empty()) {
+	if (!trim(plan.overallDirection).empty()) {
 		brief << "\nDirection: " << plan.overallDirection;
 	}
-	if (!trimCopy(plan.pacingStrategy).empty()) {
+	if (!trim(plan.pacingStrategy).empty()) {
 		brief << "\nPacing: " << plan.pacingStrategy;
 	}
-	if (!trimCopy(plan.visualStyle).empty()) {
+	if (!trim(plan.visualStyle).empty()) {
 		brief << "\nVisual style: " << plan.visualStyle;
 	}
-	if (!trimCopy(plan.audioStrategy).empty()) {
+	if (!trim(plan.audioStrategy).empty()) {
 		brief << "\nAudio: " << plan.audioStrategy;
 	}
 	if (!plan.globalNotes.empty()) {
@@ -1047,14 +1004,14 @@ std::string ofxGgmlVideoPlanner::buildEditorBrief(const ofxGgmlVideoEditPlan & p
 		for (const auto & clip : plan.clips) {
 			brief << "\n" << clip.index << ". "
 				<< formatSeconds(clip.startSeconds) << " - " << formatSeconds(clip.endSeconds)
-				<< " | " << (!trimCopy(clip.purpose).empty() ? clip.purpose : clip.sourceDescription);
-			if (!trimCopy(clip.treatment).empty()) {
+				<< " | " << (!trim(clip.purpose).empty() ? clip.purpose : clip.sourceDescription);
+			if (!trim(clip.treatment).empty()) {
 				brief << " | " << clip.treatment;
 			}
-			if (!trimCopy(clip.transition).empty()) {
+			if (!trim(clip.transition).empty()) {
 				brief << " | transition: " << clip.transition;
 			}
-			if (!trimCopy(clip.textOverlay).empty()) {
+			if (!trim(clip.textOverlay).empty()) {
 				brief << " | text: " << clip.textOverlay;
 			}
 		}
@@ -1063,11 +1020,11 @@ std::string ofxGgmlVideoPlanner::buildEditorBrief(const ofxGgmlVideoEditPlan & p
 		brief << "\nEdit actions:";
 		for (const auto & action : plan.actions) {
 			brief << "\n- [" << action.type << "] "
-				<< (!trimCopy(action.instruction).empty() ? action.instruction : action.rationale);
+				<< (!trim(action.instruction).empty() ? action.instruction : action.rationale);
 			if (action.endSeconds > action.startSeconds) {
 				brief << " (" << formatSeconds(action.startSeconds) << " - " << formatSeconds(action.endSeconds) << ")";
 			}
-			if (!trimCopy(action.assetHint).empty()) {
+			if (!trim(action.assetHint).empty()) {
 				brief << " | asset: " << action.assetHint;
 			}
 		}
@@ -1085,10 +1042,10 @@ ofxGgmlVideoEditWorkflow ofxGgmlVideoPlanner::buildEditWorkflow(
 	const ofxGgmlVideoEditPlan & plan,
 	const ofxGgmlVideoEditWorkflowContext & context) {
 	ofxGgmlVideoEditWorkflow workflow;
-	workflow.headline = !trimCopy(plan.overallDirection).empty()
+	workflow.headline = !trim(plan.overallDirection).empty()
 		? plan.overallDirection
-		: !trimCopy(plan.originalGoal).empty()
-			? "Editing goal: " + trimCopy(plan.originalGoal)
+		: !trim(plan.originalGoal).empty()
+			? "Editing goal: " + trim(plan.originalGoal)
 			: "AI-assisted video editing workflow";
 
 	if (context.hasSourceVideo) {
@@ -1100,9 +1057,9 @@ ofxGgmlVideoEditWorkflow ofxGgmlVideoPlanner::buildEditWorkflow(
 		reviewStep.handoffMode = "Vision";
 		reviewStep.handoffText = appendSentence(
 			"Review this source clip like an editor before cutting.",
-			!trimCopy(plan.originalGoal).empty()
-				? "Editing goal: " + trimCopy(plan.originalGoal)
-				: trimCopy(plan.sourceSummary));
+			!trim(plan.originalGoal).empty()
+				? "Editing goal: " + trim(plan.originalGoal)
+				: trim(plan.sourceSummary));
 		workflow.steps.push_back(reviewStep);
 	}
 
@@ -1111,7 +1068,7 @@ ofxGgmlVideoEditWorkflow ofxGgmlVideoPlanner::buildEditWorkflow(
 		clipStep.index = static_cast<int>(workflow.steps.size() + 1);
 		clipStep.title = "Rough cut clip " + std::to_string(clip.index);
 		const std::string clipTimeRange = describeTimeRange(clip.startSeconds, clip.endSeconds);
-		const std::string clipPurpose = trimCopy(clip.purpose);
+		const std::string clipPurpose = trim(clip.purpose);
 		clipStep.detail =
 			!clipTimeRange.empty() && !clipPurpose.empty()
 				? clipTimeRange + " | " + clipPurpose
@@ -1129,13 +1086,13 @@ ofxGgmlVideoEditWorkflow ofxGgmlVideoPlanner::buildEditWorkflow(
 		ofxGgmlVideoEditWorkflowStep actionStep;
 		actionStep.index = static_cast<int>(workflow.steps.size() + 1);
 		actionStep.title =
-			trimCopy(action.type).empty()
+			trim(action.type).empty()
 				? "Apply edit action " + std::to_string(action.index)
-				: trimCopy(action.type);
+				: trim(action.type);
 		actionStep.detail =
-			trimCopy(action.instruction).empty()
-				? trimCopy(action.rationale)
-				: trimCopy(action.instruction);
+			trim(action.instruction).empty()
+				? trim(action.rationale)
+				: trim(action.instruction);
 		actionStep.handoffMode = chooseActionHandoffMode(action);
 		actionStep.handoffText = buildActionWorkflowText(action);
 		actionStep.startSeconds = action.startSeconds;
@@ -1152,7 +1109,7 @@ ofxGgmlVideoEditWorkflow ofxGgmlVideoPlanner::buildEditWorkflow(
 				? "Preview the montage-timed subtitle track and verify cue rhythm against the intended pacing."
 				: "Preview the source-timed subtitle track and verify cue alignment against the source clip.";
 		previewStep.handoffMode = "Montage";
-		previewStep.handoffText = !trimCopy(plan.originalGoal).empty()
+		previewStep.handoffText = !trim(plan.originalGoal).empty()
 			? plan.originalGoal
 			: "Review subtitle timing and montage continuity for this edit.";
 		workflow.steps.push_back(previewStep);
@@ -1165,8 +1122,8 @@ ofxGgmlVideoEditWorkflow ofxGgmlVideoPlanner::buildEditWorkflow(
 			plan.globalNotes.end());
 	}
 	for (const auto & asset : plan.assetSuggestions) {
-		if (!trimCopy(asset).empty()) {
-			workflow.checklist.push_back("Prepare asset: " + trimCopy(asset));
+		if (!trim(asset).empty()) {
+			workflow.checklist.push_back("Prepare asset: " + trim(asset));
 		}
 	}
 
@@ -1201,13 +1158,13 @@ std::string ofxGgmlVideoPlanner::summarizeEditPlan(const ofxGgmlVideoEditPlan & 
 	if (plan.targetDurationSeconds > 0.0) {
 		summary << "\nTarget duration: " << formatSeconds(plan.targetDurationSeconds);
 	}
-	if (!trimCopy(plan.overallDirection).empty()) {
+	if (!trim(plan.overallDirection).empty()) {
 		summary << "\nDirection: " << plan.overallDirection;
 	}
-	if (!trimCopy(plan.pacingStrategy).empty()) {
+	if (!trim(plan.pacingStrategy).empty()) {
 		summary << "\nPacing: " << plan.pacingStrategy;
 	}
-	if (!trimCopy(plan.visualStyle).empty()) {
+	if (!trim(plan.visualStyle).empty()) {
 		summary << "\nVisual style: " << plan.visualStyle;
 	}
 	if (!plan.clips.empty()) {
@@ -1215,8 +1172,8 @@ std::string ofxGgmlVideoPlanner::summarizeEditPlan(const ofxGgmlVideoEditPlan & 
 		for (const auto & clip : plan.clips) {
 			summary << "\n" << clip.index << ". "
 				<< formatSeconds(clip.startSeconds) << " - " << formatSeconds(clip.endSeconds)
-				<< ": " << (!trimCopy(clip.purpose).empty() ? clip.purpose : clip.sourceDescription);
-			if (!trimCopy(clip.treatment).empty()) {
+				<< ": " << (!trim(clip.purpose).empty() ? clip.purpose : clip.sourceDescription);
+			if (!trim(clip.treatment).empty()) {
 				summary << " | " << clip.treatment;
 			}
 		}
@@ -1224,10 +1181,10 @@ std::string ofxGgmlVideoPlanner::summarizeEditPlan(const ofxGgmlVideoEditPlan & 
 	if (!plan.actions.empty()) {
 		summary << "\nActions:";
 		for (const auto & action : plan.actions) {
-			summary << "\n- " << (!trimCopy(action.type).empty() ? action.type : "edit");
-			if (!trimCopy(action.instruction).empty()) {
+			summary << "\n- " << (!trim(action.type).empty() ? action.type : "edit");
+			if (!trim(action.instruction).empty()) {
 				summary << ": " << action.instruction;
-			} else if (!trimCopy(action.rationale).empty()) {
+			} else if (!trim(action.rationale).empty()) {
 				summary << ": " << action.rationale;
 			}
 		}
@@ -1237,15 +1194,15 @@ std::string ofxGgmlVideoPlanner::summarizeEditPlan(const ofxGgmlVideoEditPlan & 
 
 std::string ofxGgmlVideoPlanner::summarizeEditWorkflow(const ofxGgmlVideoEditWorkflow & workflow) {
 	std::ostringstream summary;
-	if (!trimCopy(workflow.headline).empty()) {
+	if (!trim(workflow.headline).empty()) {
 		summary << workflow.headline;
 	} else {
 		summary << "Video editing workflow";
 	}
-	if (!trimCopy(workflow.nextAction).empty()) {
+	if (!trim(workflow.nextAction).empty()) {
 		summary << "\nNext action: " << workflow.nextAction;
 	}
-	if (!trimCopy(workflow.previewHint).empty()) {
+	if (!trim(workflow.previewHint).empty()) {
 		summary << "\nPreview: " << workflow.previewHint;
 	}
 	if (!workflow.checklist.empty()) {
@@ -1258,10 +1215,10 @@ std::string ofxGgmlVideoPlanner::summarizeEditWorkflow(const ofxGgmlVideoEditWor
 		summary << "\nSteps:";
 		for (const auto & step : workflow.steps) {
 			summary << "\n" << step.index << ". " << step.title;
-			if (!trimCopy(step.detail).empty()) {
+			if (!trim(step.detail).empty()) {
 				summary << " | " << step.detail;
 			}
-			if (!trimCopy(step.handoffMode).empty()) {
+			if (!trim(step.handoffMode).empty()) {
 				summary << " | handoff: " << step.handoffMode;
 			}
 		}
@@ -1276,7 +1233,7 @@ ofxGgmlVideoPlannerResult ofxGgmlVideoPlanner::plan(
 	const ofxGgmlInference & inference) const {
 	ofxGgmlVideoPlannerResult result;
 	result.planningPrompt = buildPlanningPrompt(request);
-	if (trimCopy(modelPath).empty() && !settings.useServerBackend) {
+	if (trim(modelPath).empty() && !settings.useServerBackend) {
 		result.error = "No text model selected for video planning.";
 		return result;
 	}
@@ -1312,7 +1269,7 @@ ofxGgmlVideoEditPlannerResult ofxGgmlVideoPlanner::planEdits(
 	const ofxGgmlInference & inference) const {
 	ofxGgmlVideoEditPlannerResult result;
 	result.planningPrompt = buildEditingPrompt(request);
-	if (trimCopy(modelPath).empty() && !settings.useServerBackend) {
+	if (trim(modelPath).empty() && !settings.useServerBackend) {
 		result.error = "No text model selected for video edit planning.";
 		return result;
 	}
