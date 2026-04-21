@@ -18,8 +18,6 @@ All notable changes to `ofxGgml` are documented in this file.
   - `summarizeHistory()` for LLM-assisted conversation recap.
 - `ofxGgmlEasy` now exposes `getRAGPipeline()`, `getConversationManager()`, and a convenience `ragQuery(...)` method so apps can build local RAG and multi-turn chat flows without wiring the lower-level helpers directly.
 - Headless test coverage for both new helpers, including document chunking, keyword scoring, retrieval, prompt assembly, pruning, JSON round-trips, and Easy API integration.
-
-### Added
 - `scripts/build-chatllm.ps1` and `scripts/build-chatllm.bat` as addon-local helpers for building the optional `chatllm.cpp` TTS runtime while keeping only the final executable and DLLs under `libs/chatllm/bin`.
 - The GUI example AceStep panel now includes an explicit server setup check plus a one-click install-command helper, making it clearer that prompt/ABC workflows stay local-first while rendered audio requires an external AceStep server.
 - `scripts/install-acestep.ps1` and `scripts/install-acestep.bat` as addon-local helpers for checking out and building AceStep while keeping only the final runtime binaries under `libs/acestep/bin`.
