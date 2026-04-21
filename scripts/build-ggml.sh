@@ -227,26 +227,36 @@ if [[ -d "$SRC_DIR/include" ]]; then
 fi
 touch "$INCLUDE_DIR/.gitkeep"
 
-# Static libraries
-LIB_SEARCH=(
-	"$BUILD_DIR"/src/libggml*.a
-	"$BUILD_DIR"/src/*/Release/ggml*.lib
-	"$BUILD_DIR"/src/Release/ggml*.lib
-)
+# Static libraries (recursively for ggml 0.10.x backend layout)
+declare -A LIB_MAP=()
+declare -A LIB_PRIO=()
 
-FOUND_LIBS=0
-for libglob in "${LIB_SEARCH[@]}"; do
-	for lib in $libglob; do
-		if [[ -f "$lib" ]]; then
-			cp "$lib" "$LIB_DIR/"
-			FOUND_LIBS=1
-		fi
-	done
-done
+while IFS= read -r -d '' lib; do
+	base_name="$(basename "$lib")"
 
-if [[ "$FOUND_LIBS" -eq 0 ]]; then
+	# Prefer non-config/Makefile outputs, then Release/RelWithDebInfo, then Debug.
+	priority=1
+	if [[ "$lib" == *"/Release/"* || "$lib" == *"/RelWithDebInfo/"* || "$lib" == *"/MinSizeRel/"* ]]; then
+		priority=1
+	elif [[ "$lib" == *"/Debug/"* ]]; then
+		priority=0
+	else
+		priority=2
+	fi
+
+	if [[ -z "${LIB_MAP[$base_name]:-}" || "${LIB_PRIO[$base_name]:-0}" -lt "$priority" ]]; then
+		LIB_MAP[$base_name]="$lib"
+		LIB_PRIO[$base_name]="$priority"
+	fi
+done < <(find "$BUILD_DIR" -type f \( -name "libggml*.a" -o -name "ggml*.lib" \) -print0)
+
+if [[ ${#LIB_MAP[@]} -eq 0 ]]; then
 	die "No ggml libraries found in build output"
 fi
+
+for base_name in $(printf '%s\n' "${!LIB_MAP[@]}" | sort); do
+	cp "${LIB_MAP[$base_name]}" "$LIB_DIR/$base_name"
+done
 touch "$LIB_DIR/.gitkeep"
 
 # ---------------------------------------------------------------------------
