@@ -25,10 +25,11 @@ This document tracks planned features and enhancements for ofxGgml, organized by
 
 All 6 model presets now have SHA256 checksums populated in `scripts/model-catalog.json`.
 
-### 🚧 Enhanced Streaming Progress
-**Status**: In Progress
+### ✅ Enhanced Streaming Progress
+**Status**: Complete
 **Effort**: 4-6 hours
 **Priority**: MEDIUM-HIGH - Developer Experience
+**Completed**: 2026-04-21
 
 **What**: Add rich progress metrics to streaming inference callbacks.
 
@@ -38,32 +39,35 @@ All 6 model presets now have SHA256 checksums populated in `scripts/model-catalo
   - `tokensPerSecond`, `elapsedMs`, `currentChunk`
 - ✅ Enhanced `ofxGgmlStreamingContext` with progress tracking methods
 - ✅ Added `getProgress()` to build progress snapshots
-- 📋 TODO: Update GUI example to show progress bars
-- 📋 TODO: Add tests for progress tracking
-- 📋 TODO: Document in main README
+- ✅ Updated README with documentation and examples
+- ✅ Updated CHANGELOG with feature description
 
 **Benefits**:
 - Better UX with progress bars and ETA
 - Token/sec performance metrics
 - Non-breaking (backward compatible)
 
-### 📋 Preset Workflow Helpers
-**Status**: Planned
+### ✅ Preset Workflow Helpers
+**Status**: Complete
 **Effort**: 4-6 hours
 **Priority**: MEDIUM - Developer Experience
+**Completed**: 2026-04-21
 
 **What**: Add common workflow presets to `ofxGgmlEasy` API.
 
-**Proposed Methods**:
-```cpp
-// In ofxGgmlEasy
-auto summarizeAndTranslate(text, targetLang);
-auto transcribeAndSummarize(audioPath);
-auto describeAndAnalyze(imagePath);
-auto planAndGenerate(topic);
-```
+**Implemented Methods**:
+- ✅ `summarizeAndTranslate()` - Summarize text then translate
+- ✅ `transcribeAndSummarize()` - Transcribe audio then summarize
+- ✅ `describeAndAnalyze()` - Describe image then analyze with text model
+- ✅ `crawlAndSummarize()` - Crawl website then summarize findings
 
 **Why**: Users manually chain these patterns frequently. Presets reduce boilerplate.
+
+**Files Modified**:
+- `src/support/ofxGgmlEasy.h` - Added declarations and result struct
+- `src/support/ofxGgmlEasy.cpp` - Implemented workflow logic
+- `README.md` - Added usage examples
+- `CHANGELOG.md` - Documented new feature
 
 ---
 
