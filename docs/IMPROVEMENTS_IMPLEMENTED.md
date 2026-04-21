@@ -6,8 +6,8 @@ This document tracks the improvements implemented in the ofxGgml codebase as par
 
 **Goal**: Combine and simplify features, optimize inference performance, and reduce code duplication.
 
-**Completed**: Phase 1 (Complete) + Phase 2 TTS adapters (1 of 3)
-**Status**: 5 of 7 planned improvements completed (71%)
+**Completed**: Phase 1 (Complete) + Phase 2 TTS work (2 of 3)
+**Status**: 6 of 7 planned improvements completed (86%)
 
 ---
 
@@ -173,28 +173,50 @@ inline bool runCommandCapture(
 
 ---
 
-## Remaining Planned Improvements
+### 6. Create TTS Adapter Common Base ✅
 
-### 6. Create TTS Adapter Common Base (Pending)
+**Impact**: ~40 lines eliminated, improved maintainability
 
-**Impact**: ~230 lines could be eliminated (reduced from initial ~400 estimate)
+**Changes**:
+- Created `src/inference/ofxGgmlTtsAdapterCommon.h` with shared utilities
+- Consolidated duplicate functions across both TTS adapters:
+  - `makeTempOutputPath()` - unified temp audio file creation
+  - `makeTempInputPath()` - unified temp text file creation
+  - `findFirstExistingExecutable()` - unified executable search
+  - `MetadataEntries` typedef - single definition for metadata pairs
+- Added `makeTempPath()` as generic temp file creation utility
+- Updated `ofxGgmlChatLlmTtsAdapters.h` to use common base
+- Updated `ofxGgmlPiperTtsAdapters.h` to use common base
 
-**Problem**: Duplicate utilities across TTS adapters (reduced scope):
-- `resolveTtsExecutable()` logic duplicated
-- `makeTempOutputPath()` duplicated
-- `MetadataEntries` typedef duplicated
-- Note: Windows argument quoting now centralized in ProcessSecurity
+**Implementation**:
+```cpp
+namespace ofxGgmlTtsAdapterCommon {
+    using MetadataEntries = std::vector<std::pair<std::string, std::string>>;
 
-**Solution**: Create `src/inference/ofxGgmlTtsAdapterCommon.{h,cpp}`
+    std::string makeTempPath(const char * prefix, const char * extension);
+    std::string makeTempOutputPath(const char * extension = ".wav");
+    std::string makeTempInputPath(const char * extension = ".txt");
+    std::string findFirstExistingExecutable(const std::vector<std::filesystem::path> &);
+}
+```
 
 **Benefits**:
-- DRY principle enforced
-- Consistent behavior across TTS backends
-- Easier to add new TTS backends
+- DRY principle enforced across TTS adapters
+- Consistent temp file naming and creation logic
+- Easier to add new TTS backends (common utilities available)
+- Single point of maintenance for shared TTS functionality
+- Backend-specific code (executable resolution) remains specialized
 
-**Priority**: Medium (code quality + maintainability)
+**Files Updated**:
+- `src/inference/ofxGgmlTtsAdapterCommon.h` - New common base (created)
+- `src/inference/ofxGgmlChatLlmTtsAdapters.h` - Using common base
+- `src/inference/ofxGgmlPiperTtsAdapters.h` - Using common base
+
+**Priority**: Medium - completed ✅
 
 ---
+
+## Remaining Planned Improvements
 
 ### 7. Consolidate Video Planners (Pending)
 
@@ -235,9 +257,9 @@ class ofxGgmlVideoPlanner {
 
 ### Code Reduction
 
-- **Completed**: ~395 lines (string utilities + command execution + TTS adapters)
-- **Pending**: ~730 lines (TTS base + video planners)
-- **Target**: 15-20% overall (~1,125 lines total)
+- **Completed**: ~435 lines (string utilities + command execution + TTS adapters + TTS common base)
+- **Pending**: ~500 lines (video planners)
+- **Target**: 15-20% overall (~935 lines total)
 
 ### Maintenance Impact
 
@@ -256,15 +278,15 @@ class ofxGgmlVideoPlanner {
 - ✅ Document server mode (adoption)
 - ✅ Extract command execution (security)
 
-### Phase 2: Code Consolidation (In Progress - 33% Complete)
+### Phase 2: Code Consolidation (In Progress - 67% Complete)
 - ✅ Update TTS adapters to use central command execution (~170 lines eliminated)
-- ⏳ Create TTS adapter common base (~230 lines)
+- ✅ Create TTS adapter common base (~40 lines eliminated)
 - ⏳ Video planner consolidation (~500 lines)
 
 ### Estimated Completion
 - Phase 1: 4 of 4 improvements complete ✅
-- Phase 2: 1 of 3 complete (33%) ⏳
-- Total remaining effort: 1-2 weeks
+- Phase 2: 2 of 3 complete (67%) ⏳
+- Total remaining effort: ~1 week
 
 ---
 
@@ -287,10 +309,12 @@ class ofxGgmlVideoPlanner {
    - ~170 lines eliminated
    - Actual time: 1 hour
 
-2. **Create TTS adapter base**
-   - Shared utilities for executable resolution, temp paths, metadata
-   - ~230 lines to consolidate (revised from 400)
-   - Estimated: 4-6 hours
+2. ✅ **Create TTS adapter base** - COMPLETED
+   - Created ofxGgmlTtsAdapterCommon.h with shared utilities
+   - Consolidated makeTempOutputPath, makeTempInputPath, findFirstExistingExecutable
+   - Unified MetadataEntries typedef
+   - ~40 lines eliminated
+   - Actual time: 30 minutes
 
 3. **Consolidate video planners**
    - Largest refactoring effort
