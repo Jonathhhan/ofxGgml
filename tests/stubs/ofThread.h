@@ -1,3 +1,3 @@
 #pragma once
-// Stub: ofThread is defined in ofMain.h in headless test mode.
+// Stub: ofThread is defined in ofMain.h for headless tests.
 #include "ofMain.h"

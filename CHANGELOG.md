@@ -5,6 +5,19 @@ All notable changes to `ofxGgml` are documented in this file.
 ## [Unreleased]
 
 ### Added
+- `ofxGgmlRAGPipeline` as a new local Retrieval-Augmented Generation helper for text documents. It chunks documents into overlapping passages, scores them with BM25-inspired keyword overlap, assembles the top-K passages into a grounded context, and runs inference over that context. Works entirely offline — no network or external process is required for the retrieval step.
+  - `addDocument()` / `addTextDocument()` / `clearDocuments()` for managing the local document store.
+  - `retrieve()` for pure retrieval without inference, returning scored and sorted `ofxGgmlRAGChunk` items plus an assembled context string.
+  - `generate()` for the full retrieval + LLM generation loop.
+  - Static helpers `chunkDocument()`, `scoreChunk()`, `buildAugmentedContext()`, and `buildAugmentedPrompt()` for composing custom RAG flows.
+- `ofxGgmlConversationManager` as a new multi-turn conversation history helper with configurable context-window pruning, flat prompt assembly, JSON serialization/deserialization, and LLM-assisted history summarization.
+  - `addSystemTurn()`, `addUserTurn()`, `addAssistantTurn()`, `addTurn()` for building history.
+  - `pruneOldTurns()` for keeping the history within a configurable turn budget while preserving system context and the first user turn.
+  - `buildPrompt()` with a configurable `ofxGgmlConversationPromptSettings` for custom prefixes and turn separators.
+  - `toJson()` / `fromJson()` for session persistence.
+  - `summarizeHistory()` for LLM-assisted conversation recap.
+- `ofxGgmlEasy` now exposes `getRAGPipeline()`, `getConversationManager()`, and a convenience `ragQuery(...)` method so apps can build local RAG and multi-turn chat flows without wiring the lower-level helpers directly.
+- Headless test coverage for both new helpers, including document chunking, keyword scoring, retrieval, prompt assembly, pruning, JSON round-trips, and Easy API integration.
 - `scripts/build-chatllm.ps1` and `scripts/build-chatllm.bat` as addon-local helpers for building the optional `chatllm.cpp` TTS runtime while keeping only the final executable and DLLs under `libs/chatllm/bin`.
 - The GUI example AceStep panel now includes an explicit server setup check plus a one-click install-command helper, making it clearer that prompt/ABC workflows stay local-first while rendered audio requires an external AceStep server.
 - `scripts/install-acestep.ps1` and `scripts/install-acestep.bat` as addon-local helpers for checking out and building AceStep while keeping only the final runtime binaries under `libs/acestep/bin`.

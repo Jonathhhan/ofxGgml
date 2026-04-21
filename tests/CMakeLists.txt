@@ -132,6 +132,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/inference/ofxGgmlVideoEssayWorkflow.cpp
         ../src/inference/ofxGgmlMontagePlanner.cpp
         ../src/inference/ofxGgmlMontagePreviewBridge.cpp
+        ../src/inference/ofxGgmlRAGPipeline.cpp
         ../src/inference/ofxGgmlSpeechInference.cpp
         ../src/inference/ofxGgmlVideoPlanner.cpp
         ../src/inference/ofxGgmlVisionInference.cpp
@@ -139,6 +140,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/inference/ofxGgmlWebCrawler.cpp
         ../src/inference/ofxGgmlTtsInference.cpp
         ../src/inference/ofxGgmlClipInference.cpp
+        ../src/support/ofxGgmlConversationManager.cpp
         ../src/support/ofxGgmlScriptSource.cpp
         ../src/support/ofxGgmlProcessSecurity.cpp
         ../src/assistants/ofxGgmlCodeAssistant.cpp
@@ -193,7 +195,9 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         test_code_review.cpp
         test_tts_inference.cpp
         test_clip_inference.cpp
-        test_diffusion_inference.cpp)
+        test_diffusion_inference.cpp
+        test_rag_pipeline.cpp
+        test_conversation_manager.cpp)
 endif()
 
 # LiveSpeechTranscriber requires full openFrameworks
