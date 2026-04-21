@@ -68,12 +68,12 @@ std::vector<std::string> titlesForStructure(
 	return titles;
 }
 
-std::vector<double> durationWeightsForRequest(
-	const ofxGgmlLongVideoPlanRequest & request,
-	int chunkCount) {
-	std::vector<double> weights(static_cast<size_t>(chunkCount), 1.0);
-	const std::string structure = toLowerCopy(request.structureHint);
-	const std::string pacing = toLowerCopy(request.pacingProfile);
+	std::vector<double> durationWeightsForRequest(
+		const ofxGgmlLongVideoPlanRequest & request,
+		int chunkCount) {
+		std::vector<double> weights(static_cast<size_t>(chunkCount), 1.0);
+		const std::string structure = toLower(request.structureHint);
+		const std::string pacing = toLower(request.pacingProfile);
 
 	if (containsToken(structure, "three-act")) {
 		for (int i = 0; i < chunkCount; ++i) {

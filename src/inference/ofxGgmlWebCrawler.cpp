@@ -565,14 +565,6 @@ ofxGgmlWebCrawlerResult ofxGgmlMojoWebCrawlerBackend::crawl(
 		return result;
 	}
 
-	if (!request.allowedDomains.empty()) {
-		result.error =
-			"allowedDomains restriction is not enforced by the Mojo backend, so the crawl "
-			"was blocked to avoid requesting outside hosts.";
-		result.elapsedMs = elapsedMsSince(start);
-		return result;
-	}
-
 	const std::string executable =
 		resolveMojoExecutable(
 			trimCopy(request.executablePath).empty()
