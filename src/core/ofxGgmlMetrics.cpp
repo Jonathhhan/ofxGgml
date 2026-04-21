@@ -62,27 +62,7 @@ std::string ofxGgmlMetrics::getSummary() const {
 
 	// Counters
 	if (!m_counters.empty()) {
-		struct StreamAggregate {
-			uint64_t chunks = 0;
-			uint64_t bytes = 0;
-			uint64_t cancelled = 0;
-		};
-		std::map<std::string, StreamAggregate> stream;
-
-		for (const auto& [name, value] : m_counters) {
-			const std::string prefix = "stream.";
-			if (name.rfind(prefix, 0) == 0) {
-				const std::string rest = name.substr(prefix.size());
-				const auto dot = rest.find('.');
-				const std::string transport = (dot == std::string::npos) ? rest : rest.substr(0, dot);
-				const std::string kind = (dot == std::string::npos) ? "" : rest.substr(dot + 1);
-				auto & agg = stream[transport];
-				if (kind == "chunks") agg.chunks += value;
-				else if (kind == "bytes") agg.bytes += value;
-				else if (kind == "cancelled") agg.cancelled += value;
-			}
-		}
-
+		const auto stream = getStreamStats();
 		if (!stream.empty()) {
 			oss << "Streaming:\n";
 			for (const auto & [transport, agg] : stream) {

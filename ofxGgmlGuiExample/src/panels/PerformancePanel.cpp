@@ -1,4 +1,5 @@
 #include "PerformancePanel.h"
+#include "core/ofxGgmlMetrics.h"
 
 // TextInferenceBackend enum definition (from ofApp.h)
 enum class TextInferenceBackend {
@@ -93,6 +94,23 @@ void PerformancePanel::draw(
 
 		if (ImGui::Button("Refresh Devices")) {
 			devicesOut = ggml.listDevices();
+		}
+
+		// Streaming telemetry
+		const auto streamStats = ofxGgmlMetrics::getInstance().getStreamStats();
+		if (!streamStats.empty()) {
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Text("Streaming:");
+			for (const auto & entry : streamStats) {
+				const auto & name = entry.first;
+				const auto & agg = entry.second;
+				ImGui::BulletText("%s  chunks=%" PRIu64 "  bytes=%" PRIu64 "  cancelled=%" PRIu64,
+					name.c_str(),
+					static_cast<uint64_t>(agg.chunks),
+					static_cast<uint64_t>(agg.bytes),
+					static_cast<uint64_t>(agg.cancelled));
+			}
 		}
 	}
 	ImGui::End();
