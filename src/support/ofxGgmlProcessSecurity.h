@@ -9,6 +9,18 @@ namespace ofxGgmlProcessSecurity {
 std::string getEnvVarString(const char * name);
 bool isValidExecutablePath(const std::string & path);
 
+/// Control whether PATH lookup is allowed when validating executables.
+/// Default is false for stricter security; set to true only when you
+/// explicitly need PATH resolution (e.g., tests or controlled environments).
+void setAllowPathLookupForExecutables(bool allow);
+bool getAllowPathLookupForExecutables();
+
+/// Optional allowlist of absolute directory roots for executables.
+/// When non-empty, validated executables must reside under one of the
+/// provided roots (after canonicalization).
+void setExecutableAllowlistRoots(const std::vector<std::string> & roots);
+std::vector<std::string> getExecutableAllowlistRoots();
+
 /// Execute a command and capture its output.
 ///
 /// @param args Command and arguments (args[0] is the executable)

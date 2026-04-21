@@ -62,6 +62,12 @@ public:
 		size_t activeBatches = 0;
 	};
 
+	struct StreamStats {
+		uint64_t chunks = 0;
+		uint64_t bytes = 0;
+		uint64_t cancelled = 0;
+	};
+
 	/// Get singleton instance.
 	static ofxGgmlMetrics& getInstance() {
 		static ofxGgmlMetrics instance;
@@ -208,6 +214,31 @@ public:
 			return (it->second.totalTokens * 1000.0) / it->second.totalTimeMs;
 		}
 		return 0.0;
+	}
+
+	/// Get streaming aggregates per transport (derived from counters).
+	std::map<std::string, StreamStats> getStreamStats() const {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		std::map<std::string, StreamStats> stream;
+		static const std::string prefix = "stream.";
+		for (const auto & entry : m_counters) {
+			const std::string & name = entry.first;
+			if (name.rfind(prefix, 0) != 0) continue;
+			const uint64_t value = entry.second;
+			const std::string rest = name.substr(prefix.size());
+			const auto dot = rest.find('.');
+			const std::string transport = (dot == std::string::npos) ? rest : rest.substr(0, dot);
+			const std::string kind = (dot == std::string::npos) ? "" : rest.substr(dot + 1);
+			auto & agg = stream[transport];
+			if (kind == "chunks") {
+				agg.chunks += value;
+			} else if (kind == "bytes") {
+				agg.bytes += value;
+			} else if (kind == "cancelled") {
+				agg.cancelled += value;
+			}
+		}
+		return stream;
 	}
 
 	/// Get cache hit rate (0.0 to 1.0).

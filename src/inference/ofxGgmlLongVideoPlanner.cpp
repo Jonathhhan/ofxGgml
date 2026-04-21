@@ -14,6 +14,13 @@ namespace {
 using ofxGgmlPlannerCommon::trim;
 using ofxGgmlPlannerCommon::toLower;
 
+std::string toLowerCopy(std::string value) {
+	for (char & c : value) {
+		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	}
+	return value;
+}
+
 std::string makeChunkId(int index) {
 	std::ostringstream output;
 	output << "chunk-" << (index + 1);

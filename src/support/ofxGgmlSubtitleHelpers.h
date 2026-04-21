@@ -1,10 +1,11 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <vector>
-#include <sstream>
-#include <cmath>
 
 /// WebVTT cue settings for positioning and styling
 struct ofxGgmlVttCueSettings {

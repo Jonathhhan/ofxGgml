@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <mutex>
 #include <sstream>
 #include <vector>
 
@@ -26,6 +27,32 @@
 #endif
 
 namespace ofxGgmlProcessSecurity {
+
+namespace {
+std::mutex g_execConfigMutex;
+bool g_allowPathLookup = false;
+std::vector<std::string> g_allowedRoots;
+
+bool isUnderAllowedRoot(const std::filesystem::path & candidate) {
+	if (g_allowedRoots.empty()) return true;
+	std::error_code ec;
+	const auto canon = std::filesystem::weakly_canonical(candidate, ec);
+	if (ec) return false;
+	for (const auto & root : g_allowedRoots) {
+		std::filesystem::path rootPath(root);
+		const auto canonRoot = std::filesystem::weakly_canonical(rootPath, ec);
+		if (ec) continue;
+		auto rel = std::filesystem::relative(canon, canonRoot, ec);
+		if (!ec && !rel.empty() && rel.native().front() != '.') {
+			return true;
+		}
+		if (!ec && rel.empty()) {
+			return true;
+		}
+	}
+	return false;
+}
+} // namespace
 
 std::string getEnvVarString(const char * name) {
 	if (!name || *name == '\0') return {};
@@ -49,6 +76,19 @@ std::string getEnvVarString(const char * name) {
 bool isValidExecutablePath(const std::string & path) {
 	if (path.empty()) return false;
 	if (path.find('\0') != std::string::npos) return false;
+
+	// Allow PATH lookup only when explicitly enabled for controlled environments.
+	bool allowPathLookup = false;
+	{
+		std::lock_guard<std::mutex> lock(g_execConfigMutex);
+		allowPathLookup = g_allowPathLookup;
+	}
+	if (!allowPathLookup) {
+		const std::string envAllow = getEnvVarString("OFXGGML_ALLOW_PATH_EXEC");
+		if (!envAllow.empty() && envAllow != "0") {
+			allowPathLookup = true;
+		}
+	}
 
 	auto containsPathSeparator = [](const std::string & value) {
 		return value.find('/') != std::string::npos ||
@@ -76,9 +116,11 @@ bool isValidExecutablePath(const std::string & path) {
 		const std::filesystem::path fsPath(path);
 		const std::filesystem::path canonical =
 			std::filesystem::weakly_canonical(fsPath, ec);
-		if (!ec && isRegularExecutableFile(canonical)) return true;
-		return isRegularExecutableFile(fsPath);
+		if (!ec && isRegularExecutableFile(canonical) && isUnderAllowedRoot(canonical)) return true;
+		return isRegularExecutableFile(fsPath) && isUnderAllowedRoot(fsPath);
 	}
+
+	if (!allowPathLookup) return false;
 
 	for (char c : path) {
 		const unsigned char uc = static_cast<unsigned char>(c);
@@ -123,6 +165,26 @@ bool isValidExecutablePath(const std::string & path) {
 #endif
 	}
 	return false;
+}
+
+void setAllowPathLookupForExecutables(bool allow) {
+	std::lock_guard<std::mutex> lock(g_execConfigMutex);
+	g_allowPathLookup = allow;
+}
+
+bool getAllowPathLookupForExecutables() {
+	std::lock_guard<std::mutex> lock(g_execConfigMutex);
+	return g_allowPathLookup;
+}
+
+void setExecutableAllowlistRoots(const std::vector<std::string> & roots) {
+	std::lock_guard<std::mutex> lock(g_execConfigMutex);
+	g_allowedRoots = roots;
+}
+
+std::vector<std::string> getExecutableAllowlistRoots() {
+	std::lock_guard<std::mutex> lock(g_execConfigMutex);
+	return g_allowedRoots;
 }
 
 #ifdef _WIN32

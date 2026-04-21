@@ -982,7 +982,8 @@ ofxGgmlMemoryUsage ofxGgml::getMemoryUsage() const {
 	if (m_impl->sched && m_impl->allocatedGraph) {
 		// Note: ggml doesn't expose direct scheduler memory query,
 		// so we provide a conservative estimate based on graph complexity
-		usage.graphAllocBytes = m_impl->allocatedGraph->n_nodes * 1024; // Rough estimate
+		const int nodeCount = ggml_graph_n_nodes(m_impl->allocatedGraph);
+		usage.graphAllocBytes = static_cast<uint64_t>(std::max(0, nodeCount)) * 1024; // Rough estimate
 	}
 
 	// Total allocated is sum of model weights and graph allocations

@@ -69,10 +69,12 @@ inline std::string summarizeModelLoadFailure(
 	const std::string fileName = std::filesystem::path(modelPath).filename().string();
 
 	if (trimmedOutput.empty()) {
-		return "The selected TTS model file" +
-			(fileName.empty() ? std::string() : " (" + fileName + ")") +
-			" was rejected by chatllm.cpp. "
-			"It may not be a converted chatllm.cpp model artifact such as .bin or .ggmm.";
+		std::string message = "The selected TTS model file was rejected by chatllm.cpp.";
+		if (!fileName.empty()) {
+			message += " (" + fileName + ")";
+		}
+		message += " It may not be a converted chatllm.cpp model artifact such as .bin or .ggmm.";
+		return message;
 	}
 
 	if (loweredOutput.find("bad magic") != std::string::npos ||
