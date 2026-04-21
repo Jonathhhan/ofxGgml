@@ -15,6 +15,11 @@ void ofxGgmlStableDiffusionBridgeBackend::setGenerateFunction(
 	m_generateFunction = std::move(generateFunction);
 }
 
+void ofxGgmlStableDiffusionBridgeBackend::setGetCapabilitiesFunction(
+	GetCapabilitiesFunction getCapabilitiesFunction) {
+	m_getCapabilitiesFunction = std::move(getCapabilitiesFunction);
+}
+
 bool ofxGgmlStableDiffusionBridgeBackend::isConfigured() const {
 	return static_cast<bool>(m_generateFunction);
 }
@@ -31,6 +36,7 @@ ofxGgmlImageGenerationResult ofxGgmlStableDiffusionBridgeBackend::generate(
 		result.error =
 			"stable diffusion bridge backend is not configured yet. "
 			"Attach an ofxStableDiffusion adapter callback before calling generate().";
+		result.errorType = ofxGgmlImageGenerationErrorType::ConfigurationError;
 		return result;
 	}
 
@@ -44,6 +50,14 @@ ofxGgmlImageGenerationResult ofxGgmlStableDiffusionBridgeBackend::generate(
 			std::chrono::steady_clock::now() - started).count();
 	}
 	return result;
+}
+
+ofxGgmlImageGenerationCapabilities
+ofxGgmlStableDiffusionBridgeBackend::getCapabilities() const {
+	if (m_getCapabilitiesFunction) {
+		return m_getCapabilitiesFunction();
+	}
+	return {};
 }
 
 ofxGgmlDiffusionInference::ofxGgmlDiffusionInference()
@@ -152,4 +166,33 @@ ofxGgmlImageGenerationResult ofxGgmlDiffusionInference::generate(
 	const ofxGgmlImageGenerationRequest & request) const {
 	const auto backend = m_backend ? m_backend : createStableDiffusionBridgeBackend();
 	return backend->generate(request);
+}
+
+ofxGgmlImageGenerationCapabilities
+ofxGgmlDiffusionInference::getCapabilities() const {
+	return m_backend ? m_backend->getCapabilities()
+		: ofxGgmlImageGenerationCapabilities{};
+}
+
+const char * ofxGgmlDiffusionInference::errorTypeLabel(
+	ofxGgmlImageGenerationErrorType errorType) {
+	switch (errorType) {
+	case ofxGgmlImageGenerationErrorType::ConfigurationError:
+		return "Configuration Error";
+	case ofxGgmlImageGenerationErrorType::ModelLoadError:
+		return "Model Load Error";
+	case ofxGgmlImageGenerationErrorType::ValidationError:
+		return "Validation Error";
+	case ofxGgmlImageGenerationErrorType::GenerationError:
+		return "Generation Error";
+	case ofxGgmlImageGenerationErrorType::ResourceError:
+		return "Resource Error";
+	case ofxGgmlImageGenerationErrorType::TimeoutError:
+		return "Timeout Error";
+	case ofxGgmlImageGenerationErrorType::BackendError:
+		return "Backend Error";
+	case ofxGgmlImageGenerationErrorType::None:
+	default:
+		return "No Error";
+	}
 }

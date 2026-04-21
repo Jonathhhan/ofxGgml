@@ -51,6 +51,33 @@ inline void attachClipBackend(
 
 #if OFXGGML_HAS_OFXSTABLEDIFFUSION
 
+struct ContextCacheKey {
+	std::string modelPath;
+	std::string vaePath;
+	std::string taesdPath;
+	std::string controlNetPath;
+	std::string loraModelDir;
+	int threads = -1;
+	sd_type_t weightType = SD_TYPE_F16;
+
+	bool operator==(const ContextCacheKey & other) const {
+		return modelPath == other.modelPath &&
+			vaePath == other.vaePath &&
+			taesdPath == other.taesdPath &&
+			controlNetPath == other.controlNetPath &&
+			loraModelDir == other.loraModelDir &&
+			threads == other.threads &&
+			weightType == other.weightType;
+	}
+
+	std::size_t hash() const {
+		std::size_t h = std::hash<std::string>{}(modelPath);
+		h ^= std::hash<std::string>{}(vaePath) << 1;
+		h ^= std::hash<int>{}(threads) << 2;
+		return h;
+	}
+};
+
 struct RuntimeOptions {
 	int clipSkip = -1;
 	int threads = -1;
@@ -78,6 +105,7 @@ struct RuntimeOptions {
 	std::string clipScorerName = "ofxGgmlClip";
 	std::chrono::milliseconds pollInterval{15};
 	std::chrono::seconds timeout{300};
+	bool enableContextCaching = true;
 };
 
 inline sample_method_t parseSampleMethod(const std::string & sampler) {
@@ -349,37 +377,63 @@ inline std::vector<ofxStableDiffusionImageScore> scoreImagesWithClip(
 inline bool needsContextReload(
 	const ofxStableDiffusion & engine,
 	const ofxGgmlImageGenerationRequest & request,
-	const RuntimeOptions & options) {
-	return engine.thread.sdCtx == nullptr ||
-		engine.modelPath != request.modelPath ||
-		engine.vaePath != request.vaePath ||
-		engine.taesdPath != options.taesdPath ||
-		engine.controlNetPathCStr != options.controlNetPath ||
-		engine.loraModelDir != options.loraModelDir ||
-		engine.embedDirCStr != options.embedDir ||
-		engine.stackedIdEmbedDirCStr != options.stackedIdEmbedDir ||
-		engine.nThreads != options.threads ||
-		engine.wType != options.weightType ||
-		engine.rngType != options.rngType ||
-		engine.schedule != options.schedule ||
-		engine.vaeDecodeOnly != options.vaeDecodeOnly ||
-		engine.vaeTiling != options.vaeTiling ||
-		engine.freeParamsImmediately != options.freeParamsImmediately ||
-		engine.keepClipOnCpu != options.keepClipOnCpu ||
-		engine.keepControlNetCpu != options.keepControlNetCpu ||
-		engine.keepVaeOnCpu != options.keepVaeOnCpu;
+	const RuntimeOptions & options,
+	const ContextCacheKey * cachedKey = nullptr) {
+	if (!options.enableContextCaching || engine.thread.sdCtx == nullptr) {
+		return engine.thread.sdCtx == nullptr ||
+			engine.modelPath != request.modelPath ||
+			engine.vaePath != request.vaePath ||
+			engine.taesdPath != options.taesdPath ||
+			engine.controlNetPathCStr != options.controlNetPath ||
+			engine.loraModelDir != options.loraModelDir ||
+			engine.embedDirCStr != options.embedDir ||
+			engine.stackedIdEmbedDirCStr != options.stackedIdEmbedDir ||
+			engine.nThreads != options.threads ||
+			engine.wType != options.weightType ||
+			engine.rngType != options.rngType ||
+			engine.schedule != options.schedule ||
+			engine.vaeDecodeOnly != options.vaeDecodeOnly ||
+			engine.vaeTiling != options.vaeTiling ||
+			engine.freeParamsImmediately != options.freeParamsImmediately ||
+			engine.keepClipOnCpu != options.keepClipOnCpu ||
+			engine.keepControlNetCpu != options.keepControlNetCpu ||
+			engine.keepVaeOnCpu != options.keepVaeOnCpu;
+	}
+
+	// With caching enabled, check against cached key
+	if (cachedKey) {
+		ContextCacheKey currentKey;
+		currentKey.modelPath = request.modelPath;
+		currentKey.vaePath = request.vaePath;
+		currentKey.taesdPath = options.taesdPath;
+		currentKey.controlNetPath = options.controlNetPath;
+		currentKey.loraModelDir = options.loraModelDir;
+		currentKey.threads = options.threads;
+		currentKey.weightType = options.weightType;
+		return !(*cachedKey == currentKey);
+	}
+
+	return true;
 }
 
 inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 	std::shared_ptr<ofxStableDiffusion> engine,
 	const RuntimeOptions & options = {}) {
-	return ofxGgmlDiffusionInference::createStableDiffusionBridgeBackend(
-		[engine, options](const ofxGgmlImageGenerationRequest & request) {
+
+	// Cache for context state
+	auto cachedKey = std::make_shared<ContextCacheKey>();
+	auto contextReloadCount = std::make_shared<size_t>(0);
+
+	auto backend = ofxGgmlDiffusionInference::createStableDiffusionBridgeBackend(
+		[engine, options, cachedKey, contextReloadCount](
+			const ofxGgmlImageGenerationRequest & request) {
 			ofxGgmlImageGenerationResult result;
 			result.backendName = "ofxStableDiffusion";
+			const auto started = std::chrono::steady_clock::now();
 
 			if (!engine) {
 				result.error = "ofxStableDiffusion engine is null";
+				result.errorType = ofxGgmlImageGenerationErrorType::ConfigurationError;
 				return result;
 			}
 			const bool isInstructionTask =
@@ -388,18 +442,20 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 				request.instruction.empty() &&
 				request.task != ofxGgmlImageGenerationTask::Upscale) {
 				result.error = "prompt is empty";
+				result.errorType = ofxGgmlImageGenerationErrorType::ValidationError;
 				return result;
 			}
 			if (request.task == ofxGgmlImageGenerationTask::Inpaint) {
 				result.error =
 					"inpaint is not exposed by the current ofxStableDiffusion wrapper yet";
+				result.errorType = ofxGgmlImageGenerationErrorType::ValidationError;
 				return result;
 			}
 
-			const auto started = std::chrono::steady_clock::now();
 			std::string waitError;
 			if (!waitForIdle(*engine, options, &waitError)) {
 				result.error = waitError;
+				result.errorType = ofxGgmlImageGenerationErrorType::TimeoutError;
 				return result;
 			}
 
@@ -410,6 +466,7 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 			std::filesystem::create_directories(outputDir, dirEc);
 			if (dirEc) {
 				result.error = "failed to create output directory: " + outputDir;
+				result.errorType = ofxGgmlImageGenerationErrorType::ResourceError;
 				return result;
 			}
 
