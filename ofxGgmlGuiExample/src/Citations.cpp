@@ -299,9 +299,9 @@ void ofApp::runCitationSearch() {
 			request.useCrawler = useCrawler;
 			request.inferenceSettings = inferenceSettings;
 			request.sourceSettings.requestCitations = true;
-			request.sourceSettings.maxSources = 8;
+			request.sourceSettings.maxSources = 16;
 			request.sourceSettings.maxCharsPerSource = 2500;
-			request.sourceSettings.maxTotalChars = 12000;
+			request.sourceSettings.maxTotalChars = 20000;
 			request.sourceUrls = loadedUrls;
 			if (useCrawler) {
 				request.crawlerRequest.startUrl = crawlUrl;

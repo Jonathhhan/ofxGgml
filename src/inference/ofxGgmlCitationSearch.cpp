@@ -237,14 +237,17 @@ std::string buildCitationPrompt(
 		<< "Using only the provided source material, extract up to "
 		<< std::max<size_t>(1, maxCitations)
 		<< " short, relevant citations about the topic below.\n"
-		<< "Each quote must be an exact verbatim span copied from one provided source.\n"
-		<< "Do not paraphrase, summarize, or rewrite source text inside the quote field.\n"
-		<< "If you cannot find an exact quote, omit that citation entirely.\n"
-		<< "If the evidence is weak, return fewer citations instead of guessing.\n"
+		<< "CRITICAL REQUIREMENTS:\n"
+		<< "- Each quote MUST be an exact verbatim span copied word-for-word from one provided source\n"
+		<< "- Each citation MUST include a valid sourceIndex (1-based) matching a [Source N] label\n"
+		<< "- Do NOT paraphrase, summarize, or rewrite source text inside the quote field\n"
+		<< "- Do NOT invent sources, URLs, or quotes\n"
+		<< "- If you cannot find an exact quote, omit that citation entirely\n"
+		<< "- If the evidence is weak, return fewer citations instead of guessing\n"
+		<< "- Prioritize diverse sources over multiple quotes from the same source\n"
 		<< "Return valid JSON only in this shape:\n"
 		<< "{\"summary\":\"...\",\"citations\":[{\"quote\":\"...\",\"sourceIndex\":1,\"note\":\"...\"}]}\n"
-		<< "Use 1-based sourceIndex values that match the provided [Source N] labels.\n"
-		<< "Do not invent sources, URLs, or quotes.\n\n"
+		<< "Use 1-based sourceIndex values that match the provided [Source N] labels.\n\n"
 		<< "Topic: " << topic << "\n";
 	return prompt.str();
 }
@@ -854,7 +857,7 @@ std::vector<ofxGgmlPromptSource> selectRetrievedSources(
 		return sources;
 	}
 
-	const size_t topK = std::min<size_t>(8, indexedChunkPositions.size());
+	const size_t topK = std::min<size_t>(16, indexedChunkPositions.size());
 	const auto hits = index.search(queryEmbeddingResult.embedding, topK);
 	if (hits.empty()) {
 		return sources;
@@ -965,7 +968,7 @@ ofxGgmlRealtimeInfoSettings makeRealtimeCitationSettings(
 	settings.allowPromptUrlFetch = true;
 	settings.allowDomainProviders = true;
 	settings.allowGenericSearch = true;
-	settings.maxSources = std::max<size_t>(sourceSettings.maxSources, 4);
+	settings.maxSources = std::max<size_t>(sourceSettings.maxSources, 12);
 	settings.maxCharsPerSource = sourceSettings.maxCharsPerSource;
 	settings.maxTotalChars = sourceSettings.maxTotalChars;
 	settings.requestCitations = sourceSettings.requestCitations;
