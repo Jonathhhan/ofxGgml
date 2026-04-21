@@ -91,6 +91,14 @@ public:
 	ofxGgmlTimings getLastTimings() const;
 
 	// ---------------------------------------------------------------------------
+	// Monitoring
+	// ---------------------------------------------------------------------------
+
+	/// Query current memory usage for loaded models and graphs.
+	/// Provides visibility into memory consumption for diagnostics and monitoring.
+	ofxGgmlMemoryUsage getMemoryUsage() const;
+
+	// ---------------------------------------------------------------------------
 	// Model upload
 	// ---------------------------------------------------------------------------
 

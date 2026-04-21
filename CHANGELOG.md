@@ -45,6 +45,12 @@ All notable changes to `ofxGgml` are documented in this file.
 
 ### Added
 
+- **Monitoring and Observability**:
+  - Memory usage reporting via `ofxGgml::getMemoryUsage()` for monitoring model and graph memory consumption
+  - Server queue status API via `ofxGgmlInference::getServerQueueStatus()` for monitoring llama-server request queues
+  - `ofxGgmlMemoryUsage` struct with detailed memory metrics including model weights, graph allocations, and backend memory stats
+  - `ofxGgmlServerQueueStatus` struct with queue length, processing count, and completion statistics
+
 - New comprehensive documentation: `docs/OFXGGML_STABLEDIFFUSION_INTEGRATION.md` covering:
   - Enhanced error handling patterns and error type usage
   - Model capability detection and capability queries

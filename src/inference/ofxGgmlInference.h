@@ -140,6 +140,17 @@ struct ofxGgmlServerProbeResult {
 	std::string error;
 };
 
+/// Server queue status for monitoring active inference requests.
+struct ofxGgmlServerQueueStatus {
+	bool available = false;
+	int queueLength = 0;
+	int processingCount = 0;
+	int completedCount = 0;
+	int failedCount = 0;
+	std::string serverUrl;
+	std::string error;
+};
+
 struct ofxGgmlSimilarityHit {
 	std::string id;
 	std::string text;
@@ -282,6 +293,11 @@ public:
 	static ofxGgmlServerProbeResult probeServer(
 		const std::string & serverUrl,
 		bool fetchModels = true);
+
+	/// Query server queue status for monitoring active requests.
+	/// Returns queue length, processing count, and completion stats when available.
+	static ofxGgmlServerQueueStatus getServerQueueStatus(
+		const std::string & serverUrl);
 	static std::vector<ofxGgmlPromptSource> collectScriptSourceDocuments(
 		ofxGgmlScriptSource & scriptSource,
 		const ofxGgmlPromptSourceSettings & sourceSettings = {});

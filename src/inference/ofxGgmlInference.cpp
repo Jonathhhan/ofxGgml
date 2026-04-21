@@ -558,6 +558,66 @@ ofxGgmlServerProbeResult ofxGgmlInference::probeServer(
 #endif
 }
 
+ofxGgmlServerQueueStatus ofxGgmlInference::getServerQueueStatus(
+	const std::string & serverUrl) {
+	ofxGgmlServerQueueStatus status;
+	status.serverUrl = ofxGgmlInferenceServerInternals::serverBaseUrlFromConfiguredUrl(serverUrl);
+
+#ifdef OFXGGML_HEADLESS_STUBS
+	status.error = "server queue status requires openFrameworks HTTP runtime";
+	return status;
+#else
+	// Try to query llama-server /metrics endpoint for queue stats
+	const std::string metricsUrl = status.serverUrl + "/metrics";
+	const ofHttpResponse response = ofLoadURL(metricsUrl);
+
+	if (response.status >= 200 && response.status < 300) {
+		status.available = true;
+		const std::string body = response.data.getText();
+
+		// Parse Prometheus-style metrics from llama-server
+		// Look for patterns like:
+		// llamacpp:queue_len{type="processing"} N
+		// llamacpp:queue_len{type="queued"} N
+
+		auto extractMetric = [](const std::string& text, const std::string& pattern) -> int {
+			const size_t pos = text.find(pattern);
+			if (pos != std::string::npos) {
+				const size_t numStart = text.find_last_of(' ', pos + pattern.size() + 20);
+				if (numStart != std::string::npos) {
+					const std::string numStr = text.substr(numStart + 1,
+						text.find_first_of(" \r\n", numStart + 1) - numStart - 1);
+					try {
+						return std::stoi(trim(numStr));
+					} catch (...) {
+						return 0;
+					}
+				}
+			}
+			return 0;
+		};
+
+		status.processingCount = extractMetric(body, "queue_len{type=\"processing\"}");
+		status.queueLength = extractMetric(body, "queue_len{type=\"queued\"}");
+
+		// Look for completion/failure counters if available
+		status.completedCount = extractMetric(body, "requests_completed");
+		status.failedCount = extractMetric(body, "requests_failed");
+
+	} else {
+		status.error = trim(response.error);
+		if (status.error.empty() && response.status > 0) {
+			status.error = "HTTP status " + std::to_string(response.status);
+		}
+		if (status.error.empty()) {
+			status.error = "Failed to query server queue status";
+		}
+	}
+
+	return status;
+#endif
+}
+
 std::vector<ofxGgmlPromptSource> ofxGgmlInference::collectScriptSourceDocuments(
 	ofxGgmlScriptSource & scriptSource,
 	const ofxGgmlPromptSourceSettings & sourceSettings) {

@@ -960,6 +960,48 @@ ofxGgmlTimings ofxGgml::getLastTimings() const {
 }
 
 // --------------------------------------------------------------------------
+//  Monitoring
+// --------------------------------------------------------------------------
+
+ofxGgmlMemoryUsage ofxGgml::getMemoryUsage() const {
+	ofxGgmlMemoryUsage usage;
+
+	if (!m_impl->backend) {
+		return usage;
+	}
+
+	// Get backend name
+	usage.backendName = ggml_backend_name(m_impl->backend);
+
+	// Get model weight buffer size if available
+	if (m_impl->modelWeightBuf) {
+		usage.modelWeightBytes = ggml_backend_buffer_get_size(m_impl->modelWeightBuf);
+	}
+
+	// Estimate graph allocation size from scheduler if available
+	if (m_impl->sched && m_impl->allocatedGraph) {
+		// Note: ggml doesn't expose direct scheduler memory query,
+		// so we provide a conservative estimate based on graph complexity
+		usage.graphAllocBytes = m_impl->allocatedGraph->n_nodes * 1024; // Rough estimate
+	}
+
+	// Total allocated is sum of model weights and graph allocations
+	usage.totalAllocatedBytes = usage.modelWeightBytes + usage.graphAllocBytes;
+
+	// Query backend memory info if available
+	// Note: Not all backends expose memory stats; CPU backends typically return 0
+	ggml_backend_dev_t dev = ggml_backend_get_device(m_impl->backend);
+	if (dev) {
+		size_t free = 0, total = 0;
+		ggml_backend_dev_memory(dev, &free, &total);
+		usage.backendFreeBytes = free;
+		usage.backendTotalBytes = total;
+	}
+
+	return usage;
+}
+
+// --------------------------------------------------------------------------
 //  Low-level access
 // --------------------------------------------------------------------------
 
