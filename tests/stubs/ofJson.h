@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <initializer_list>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -38,7 +39,7 @@ ofJson(const std::string & value) : m_type(Type::String), m_string(value) {}  //
 ofJson(std::string && value) : m_type(Type::String), m_string(std::move(value)) {}  // NOLINT
 ofJson(const char * value) : m_type(Type::String), m_string(value ? value : "") {}  // NOLINT
 
-// Implicit construction from bool
+// Implicit construction from bool (before arithmetic to avoid ambiguity)
 ofJson(bool value) : m_type(Type::Bool), m_bool(value) {}  // NOLINT
 
 // Implicit construction from arithmetic types (excluding bool)
@@ -49,7 +50,7 @@ ofJson(T value) : m_type(Type::Number), m_number(static_cast<double>(value)) {} 
 // If all elements are 2-element arrays whose first element is a string,
 // the result is an object; otherwise it is an array.
 ofJson(std::initializer_list<ofJson> items) {  // NOLINT
-bool looksLikeObject = !items.size() == 0;
+bool looksLikeObject = (items.size() > 0);
 for (const auto & item : items) {
 if (!item.is_array() || item.m_array.size() != 2 ||
 !item.m_array[0].is_string()) {
@@ -74,53 +75,16 @@ m_array.push_back(item);
 
 static ofJson parse(const std::string & text, void * = nullptr, bool = true) {
 const std::string trimmed = trimStr(text);
-if (trimmed.empty()) return ofJson();
-
-if (trimmed.front() == '[' && trimmed.back() == ']') {
-ofJson arr;
-arr.m_type = Type::Array;
-const std::string body = trimStr(trimmed.substr(1, trimmed.size() - 2));
-if (body.empty()) return arr;
-
-size_t start = 0;
-while (start < body.size()) {
-size_t comma = body.find(',', start);
-if (comma == std::string::npos) comma = body.size();
-const std::string token = trimStr(body.substr(start, comma - start));
-char * end = nullptr;
-const double value = std::strtod(token.c_str(), &end);
-if (end == token.c_str() || (end && *end != '\0')) {
-ofJson discarded;
-discarded.m_type = Type::Discarded;
-return discarded;
+if (trimmed.empty()) {
+throw std::invalid_argument("ofJson::parse: empty input");
 }
-ofJson num;
-num.m_type = Type::Number;
-num.m_number = value;
-arr.m_array.push_back(num);
-start = comma + 1;
+size_t pos = 0;
+const ofJson result = parseValue(trimmed, pos);
+// Skip trailing whitespace
+while (pos < trimmed.size() && std::isspace(static_cast<unsigned char>(trimmed[pos]))) {
+++pos;
 }
-return arr;
-}
-
-if (trimmed.front() == '{' && trimmed.back() == '}') {
-ofJson obj;
-obj.m_type = Type::Object;
-return obj;
-}
-
-char * end = nullptr;
-const double scalar = std::strtod(trimmed.c_str(), &end);
-if (end != trimmed.c_str() && end && *end == '\0') {
-ofJson num;
-num.m_type = Type::Number;
-num.m_number = scalar;
-return num;
-}
-
-ofJson discarded;
-discarded.m_type = Type::Discarded;
-return discarded;
+return result;
 }
 
 static ofJson array() {
@@ -205,6 +169,7 @@ return fallback;
 }
 if constexpr (std::is_arithmetic_v<T>) {
 if (it->second.m_type == Type::Number) return static_cast<T>(it->second.m_number);
+if (it->second.m_type == Type::Bool) return static_cast<T>(it->second.m_bool ? 1 : 0);
 return fallback;
 }
 return fallback;
@@ -276,8 +241,19 @@ std::ostringstream out;
 out << m_number;
 return out.str();
 }
-case Type::String:
-return "\"" + m_string + "\"";
+case Type::String: {
+std::string result = "\"";
+for (char c : m_string) {
+if (c == '"') result += "\\\"";
+else if (c == '\\') result += "\\\\";
+else if (c == '\n') result += "\\n";
+else if (c == '\r') result += "\\r";
+else if (c == '\t') result += "\\t";
+else result += c;
+}
+result += '"';
+return result;
+}
 case Type::Array: {
 std::ostringstream out;
 out << "[";
@@ -304,7 +280,7 @@ return out.str();
 return "null";
 }
 
-// --- Iteration ---
+// --- Iteration (over array elements) ---
 
 std::vector<ofJson>::const_iterator begin() const { return m_array.begin(); }
 std::vector<ofJson>::const_iterator end() const { return m_array.end(); }
@@ -321,6 +297,150 @@ while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
 size_t e = s.size();
 while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
 return s.substr(b, e - b);
+}
+
+// --- Recursive descent parser ---
+
+static void skipWs(const std::string & s, size_t & pos) {
+while (pos < s.size() && std::isspace(static_cast<unsigned char>(s[pos]))) ++pos;
+}
+
+static ofJson parseValue(const std::string & s, size_t & pos) {
+skipWs(s, pos);
+if (pos >= s.size()) {
+throw std::invalid_argument("ofJson::parse: unexpected end of input");
+}
+char c = s[pos];
+if (c == '"') return parseString(s, pos);
+if (c == '{') return parseObject(s, pos);
+if (c == '[') return parseArray(s, pos);
+if (c == 't') {
+if (s.substr(pos, 4) == "true") { pos += 4; ofJson j; j.m_type = Type::Bool; j.m_bool = true; return j; }
+}
+if (c == 'f') {
+if (s.substr(pos, 5) == "false") { pos += 5; ofJson j; j.m_type = Type::Bool; j.m_bool = false; return j; }
+}
+if (c == 'n') {
+if (s.substr(pos, 4) == "null") { pos += 4; return ofJson(); }
+}
+if (c == '-' || std::isdigit(static_cast<unsigned char>(c))) return parseNumber(s, pos);
+throw std::invalid_argument(std::string("ofJson::parse: unexpected character '") + c + "'");
+}
+
+static std::string parseRawString(const std::string & s, size_t & pos) {
+if (pos >= s.size() || s[pos] != '"') {
+throw std::invalid_argument("ofJson::parse: expected '\"'");
+}
+++pos; // skip opening "
+std::string result;
+while (pos < s.size()) {
+char c = s[pos];
+if (c == '"') { ++pos; return result; }
+if (c == '\\') {
+++pos;
+if (pos >= s.size()) break;
+char esc = s[pos++];
+switch (esc) {
+case '"': result += '"'; break;
+case '\\': result += '\\'; break;
+case '/': result += '/'; break;
+case 'b': result += '\b'; break;
+case 'f': result += '\f'; break;
+case 'n': result += '\n'; break;
+case 'r': result += '\r'; break;
+case 't': result += '\t'; break;
+case 'u': {
+// Skip 4 hex digits (simplified: treat as '?')
+for (int i = 0; i < 4 && pos < s.size(); ++i) ++pos;
+result += '?';
+break;
+}
+default: result += esc; break;
+}
+} else {
+result += c;
+++pos;
+}
+}
+throw std::invalid_argument("ofJson::parse: unterminated string");
+}
+
+static ofJson parseString(const std::string & s, size_t & pos) {
+ofJson j;
+j.m_type = Type::String;
+j.m_string = parseRawString(s, pos);
+return j;
+}
+
+static ofJson parseObject(const std::string & s, size_t & pos) {
+if (pos >= s.size() || s[pos] != '{') {
+throw std::invalid_argument("ofJson::parse: expected '{'");
+}
+++pos;
+ofJson j;
+j.m_type = Type::Object;
+skipWs(s, pos);
+if (pos < s.size() && s[pos] == '}') { ++pos; return j; }
+while (pos < s.size()) {
+skipWs(s, pos);
+std::string key = parseRawString(s, pos);
+skipWs(s, pos);
+if (pos >= s.size() || s[pos] != ':') {
+throw std::invalid_argument("ofJson::parse: expected ':'");
+}
+++pos;
+ofJson value = parseValue(s, pos);
+j.m_object[std::move(key)] = std::move(value);
+skipWs(s, pos);
+if (pos >= s.size()) break;
+if (s[pos] == '}') { ++pos; return j; }
+if (s[pos] == ',') { ++pos; continue; }
+throw std::invalid_argument("ofJson::parse: expected ',' or '}'");
+}
+throw std::invalid_argument("ofJson::parse: unterminated object");
+}
+
+static ofJson parseArray(const std::string & s, size_t & pos) {
+if (pos >= s.size() || s[pos] != '[') {
+throw std::invalid_argument("ofJson::parse: expected '['");
+}
+++pos;
+ofJson j;
+j.m_type = Type::Array;
+skipWs(s, pos);
+if (pos < s.size() && s[pos] == ']') { ++pos; return j; }
+while (pos < s.size()) {
+ofJson value = parseValue(s, pos);
+j.m_array.push_back(std::move(value));
+skipWs(s, pos);
+if (pos >= s.size()) break;
+if (s[pos] == ']') { ++pos; return j; }
+if (s[pos] == ',') { ++pos; continue; }
+throw std::invalid_argument("ofJson::parse: expected ',' or ']'");
+}
+throw std::invalid_argument("ofJson::parse: unterminated array");
+}
+
+static ofJson parseNumber(const std::string & s, size_t & pos) {
+const size_t start = pos;
+if (pos < s.size() && s[pos] == '-') ++pos;
+while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) ++pos;
+if (pos < s.size() && s[pos] == '.') {
+++pos;
+while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) ++pos;
+}
+if (pos < s.size() && (s[pos] == 'e' || s[pos] == 'E')) {
+++pos;
+if (pos < s.size() && (s[pos] == '+' || s[pos] == '-')) ++pos;
+while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) ++pos;
+}
+const std::string numStr = s.substr(start, pos - start);
+char * end = nullptr;
+const double value = std::strtod(numStr.c_str(), &end);
+ofJson j;
+j.m_type = Type::Number;
+j.m_number = value;
+return j;
 }
 
 Type m_type = Type::Null;

@@ -71,12 +71,13 @@ inline std::string summarizeModelLoadFailure(
 	const std::string loweredOutput = lowerCopy(trimmedOutput);
 	const std::string fileName = std::filesystem::path(modelPath).filename().string();
 
+	if (trimmedOutput.empty()) {
+		return "The selected TTS model file was rejected by chatllm.cpp. "
+			"It may not be a converted chatllm.cpp model artifact such as .bin or .ggmm.";
+	}
+
 	if (loweredOutput.find("bad magic") != std::string::npos ||
 		loweredOutput.find("model file is broken") != std::string::npos) {
-		if (trimmedOutput.empty()) {
-			return "The selected TTS model file was rejected by chatllm.cpp. "
-				"It may not be a converted chatllm.cpp model artifact such as .bin or .ggmm.";
-		}
 		return "chatllm.cpp rejected the selected TTS model. "
 			"Raw loader output: " + trimmedOutput;
 	}

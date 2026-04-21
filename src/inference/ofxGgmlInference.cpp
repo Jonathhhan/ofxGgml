@@ -80,11 +80,18 @@ static bool looksLikeCodeOutput(const std::string & text) {
 	return (hasBraces && hasSemicolon) || hasIncludeOrImport;
 }
 
+static bool looksLikeJsonOutput(const std::string & text) {
+	const std::string trimmed = trim(text);
+	if (trimmed.size() < 2) return false;
+	return (trimmed.front() == '{' && trimmed.back() == '}') ||
+		(trimmed.front() == '[' && trimmed.back() == ']');
+}
+
 static std::string trimToNaturalBoundary(const std::string & text) {
 	std::string out = trim(text);
 	if (out.empty()) return out;
 
-	if (looksLikeCodeOutput(out)) {
+	if (looksLikeCodeOutput(out) || looksLikeJsonOutput(out)) {
 		if (out.back() != '\n') {
 			const size_t cut = out.find_last_of('\n');
 			if (cut != std::string::npos && cut > out.size() / 2) {
