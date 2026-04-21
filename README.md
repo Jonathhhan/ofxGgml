@@ -13,9 +13,8 @@ ofxGgml uses **layered headers** - include only what you need:
 | `ofxGgmlWorkflows.h` | Modalities + video/montage/research | Specialized creative pipelines |
 | `ofxGgmlAssistants.h` | Basic + code/chat assistants | AI coding assistance |
 | `ofxGgmlCore.h` | Runtime, tensors, models | Low-level tensor ops only |
-| `ofxGgml.h` | All layers combined | ⚠️ Everything (slower builds) |
 
-**Recommended:** Start with `#include "ofxGgmlBasic.h"` for text-only projects.
+**Start with `ofxGgmlBasic.h`** for most projects.
 
 **Why layered?** Faster compile times, clearer APIs, simpler examples. Each layer builds on previous ones.
 

@@ -76,13 +76,25 @@ What you get (includes Basic plus):
 
 **Use when:** You need AI coding or review tools.
 
-### Complete Set (Not Recommended)
-**Header:** `#include "ofxGgml.h"`
-**Size:** All layers (~41,000 LOC)
+## Need Multiple Layers?
 
-**⚠️ Warning:** This includes everything and will slow down compilation significantly.
+You can include multiple layered headers in the same project:
 
-**Only use when:** You're exploring all features or building the comprehensive GUI example.
+```cpp
+#include "ofxGgmlBasic.h"      // For text inference
+#include "ofxGgmlModalities.h"  // Also get speech/vision
+#include "ofxGgmlAssistants.h"  // Also get code assistants
+```
+
+Or for a comprehensive application (like the GUI example), include all layers:
+
+```cpp
+#include "ofxGgmlCore.h"
+#include "ofxGgmlBasic.h"
+#include "ofxGgmlModalities.h"
+#include "ofxGgmlWorkflows.h"
+#include "ofxGgmlAssistants.h"
+```
 
 ## Project Examples
 
