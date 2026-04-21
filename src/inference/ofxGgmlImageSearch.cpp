@@ -1,4 +1,5 @@
 #include "ofxGgmlImageSearch.h"
+#include "ofxGgmlClipInference.h"
 
 #ifndef OFXGGML_HEADLESS_STUBS
 #include "ofJson.h"
@@ -240,6 +241,14 @@ ofxGgmlImageSearch::getBackend() const {
 	return m_backend;
 }
 
+void ofxGgmlImageSearch::setClipInference(ofxGgmlClipInference * clip) {
+	m_clipInference = clip;
+}
+
+ofxGgmlClipInference * ofxGgmlImageSearch::getClipInference() const {
+	return m_clipInference;
+}
+
 ofxGgmlImageSearchResult ofxGgmlImageSearch::search(
 	const ofxGgmlImageSearchRequest & request) const {
 	if (!m_backend) {
@@ -252,5 +261,82 @@ ofxGgmlImageSearchResult ofxGgmlImageSearch::search(
 			{}
 		};
 	}
-	return m_backend->search(request);
+	auto result = m_backend->search(request);
+
+	if (request.useSemanticRanking && m_clipInference && result.success && !result.items.empty()) {
+		return searchWithSemanticRanking(request);
+	}
+
+	return result;
+}
+
+ofxGgmlImageSearchResult ofxGgmlImageSearch::searchWithSemanticRanking(
+	const ofxGgmlImageSearchRequest & request) const {
+	if (!m_backend) {
+		return {
+			false,
+			0.0f,
+			"",
+			request.prompt,
+			"Image search backend is not configured.",
+			{}
+		};
+	}
+
+	if (!m_clipInference) {
+		return {
+			false,
+			0.0f,
+			"",
+			request.prompt,
+			"CLIP inference not configured for semantic ranking.",
+			{}
+		};
+	}
+
+	using Clock = std::chrono::steady_clock;
+	const auto start = Clock::now();
+
+	auto result = m_backend->search(request);
+	if (!result.success || result.items.empty()) {
+		return result;
+	}
+
+	std::vector<std::string> imagePaths;
+	for (const auto & item : result.items) {
+		imagePaths.push_back(item.thumbnailUrl.empty() ? item.imageUrl : item.thumbnailUrl);
+	}
+
+	ofxGgmlClipImageRankingRequest rankRequest;
+	rankRequest.prompt = result.normalizedQuery;
+	rankRequest.promptId = "search-query";
+	rankRequest.promptLabel = "Search Query";
+	rankRequest.imagePaths = imagePaths;
+	rankRequest.topK = 0;
+	rankRequest.normalizeEmbeddings = true;
+
+	const auto rankResult = m_clipInference->rankImagesForText(rankRequest);
+	if (!rankResult.success) {
+		result.error = "CLIP ranking failed: " + rankResult.error;
+		result.success = false;
+		result.elapsedMs += rankResult.elapsedMs;
+		return result;
+	}
+
+	for (size_t i = 0; i < rankResult.hits.size() && i < result.items.size(); ++i) {
+		const auto & hit = rankResult.hits[i];
+		if (hit.index < result.items.size()) {
+			result.items[hit.index].semanticScore = hit.score;
+		}
+	}
+
+	std::sort(
+		result.items.begin(),
+		result.items.end(),
+		[](const ofxGgmlImageSearchItem & a, const ofxGgmlImageSearchItem & b) {
+			return a.semanticScore > b.semanticScore;
+		});
+
+	result.elapsedMs = elapsedMsSince(start);
+	return result;
 }

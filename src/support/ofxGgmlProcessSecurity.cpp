@@ -1,14 +1,28 @@
 #include "ofxGgmlProcessSecurity.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <sstream>
 #include <vector>
 
-#ifndef _WIN32
-#include <unistd.h>
+#ifdef _WIN32
+	#ifndef NOMINMAX
+		#define NOMINMAX
+	#endif
+	#include <windows.h>
+#else
+	#include <fcntl.h>
+	#include <signal.h>
+	#include <sys/wait.h>
+	#include <unistd.h>
+#endif
+
+#ifdef _WIN32
+	#include "core/ofxGgmlWindowsUtf8.h"
 #endif
 
 namespace ofxGgmlProcessSecurity {
@@ -257,5 +271,198 @@ std::string buildWindowsCommandLine(const std::vector<std::string> & args) {
 	return cmdLine;
 }
 #endif
+
+bool runCommandCapture(
+	const std::vector<std::string> & args,
+	std::string & output,
+	int & exitCode,
+	bool mergeStderr,
+	std::function<bool(const std::string &)> onChunk) {
+	output.clear();
+	exitCode = -1;
+	if (args.empty() || args.front().empty()) return false;
+
+	std::string pendingChunk;
+	auto dispatchChunk = [&](const std::string & chunk) -> bool {
+		if (!onChunk || chunk.empty()) {
+			return true;
+		}
+		pendingChunk.append(chunk);
+		size_t newlinePos = std::string::npos;
+		while ((newlinePos = pendingChunk.find('\n')) != std::string::npos) {
+			const std::string segment = pendingChunk.substr(0, newlinePos);
+			pendingChunk.erase(0, newlinePos + 1);
+			if (!onChunk(segment)) {
+				return false;
+			}
+		}
+		if (!pendingChunk.empty()) {
+			const std::string segment = pendingChunk;
+			pendingChunk.clear();
+			return onChunk(segment);
+		}
+		return true;
+	};
+
+#ifdef _WIN32
+	SECURITY_ATTRIBUTES sa {};
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = TRUE;
+	sa.lpSecurityDescriptor = nullptr;
+
+	HANDLE readPipe = nullptr;
+	HANDLE writePipe = nullptr;
+	if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) return false;
+	if (!SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0)) {
+		CloseHandle(readPipe);
+		CloseHandle(writePipe);
+		return false;
+	}
+
+	STARTUPINFOW si {};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESTDHANDLES;
+	HANDLE nullInput = CreateFileA("NUL", GENERIC_READ, 0, &sa,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	si.hStdInput = (nullInput != INVALID_HANDLE_VALUE)
+		? nullInput
+		: GetStdHandle(STD_INPUT_HANDLE);
+	si.hStdOutput = writePipe;
+	HANDLE nullErr = INVALID_HANDLE_VALUE;
+	if (mergeStderr) {
+		si.hStdError = writePipe;
+	} else {
+		nullErr = CreateFileA("NUL", GENERIC_WRITE, 0, &sa,
+			OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+		si.hStdError = (nullErr != INVALID_HANDLE_VALUE)
+			? nullErr
+			: GetStdHandle(STD_ERROR_HANDLE);
+	}
+
+	PROCESS_INFORMATION pi {};
+	const std::string cmdLine = buildWindowsCommandLine(args);
+	if (cmdLine.empty()) {
+		CloseHandle(readPipe);
+		CloseHandle(writePipe);
+		if (nullInput != INVALID_HANDLE_VALUE) {
+			CloseHandle(nullInput);
+		}
+		if (nullErr != INVALID_HANDLE_VALUE) {
+			CloseHandle(nullErr);
+		}
+		return false;
+	}
+	std::wstring wideCmdLine = ofxGgmlWideFromUtf8(cmdLine);
+	std::vector<wchar_t> mutableCmd(wideCmdLine.begin(), wideCmdLine.end());
+	mutableCmd.push_back(L'\0');
+
+	BOOL ok = CreateProcessW(
+		nullptr,
+		mutableCmd.data(),
+		nullptr,
+		nullptr,
+		TRUE,
+		CREATE_NO_WINDOW,
+		nullptr,
+		nullptr,
+		&si,
+		&pi);
+	CloseHandle(writePipe);
+	if (nullInput != INVALID_HANDLE_VALUE) {
+		CloseHandle(nullInput);
+	}
+	if (nullErr != INVALID_HANDLE_VALUE) {
+		CloseHandle(nullErr);
+	}
+	if (!ok) {
+		CloseHandle(readPipe);
+		return false;
+	}
+
+	std::array<char, 4096> buf {};
+	DWORD bytesRead = 0;
+	while (ReadFile(readPipe, buf.data(), static_cast<DWORD>(buf.size()), &bytesRead, nullptr) && bytesRead > 0) {
+		std::string chunk(buf.data(), bytesRead);
+		output.append(chunk);
+		if (!dispatchChunk(chunk)) {
+			TerminateProcess(pi.hProcess, 1);
+			break;
+		}
+	}
+	CloseHandle(readPipe);
+
+	WaitForSingleObject(pi.hProcess, INFINITE);
+	DWORD code = 1;
+	GetExitCodeProcess(pi.hProcess, &code);
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+	exitCode = static_cast<int>(code);
+#else
+	int pipeFds[2] = { -1, -1 };
+	if (pipe(pipeFds) != 0) {
+		return false;
+	}
+
+	pid_t pid = fork();
+	if (pid < 0) {
+		close(pipeFds[0]);
+		close(pipeFds[1]);
+		return false;
+	}
+
+	if (pid == 0) {
+		dup2(pipeFds[1], STDOUT_FILENO);
+		if (mergeStderr) {
+			dup2(pipeFds[1], STDERR_FILENO);
+		} else {
+			const int devNull = open("/dev/null", O_WRONLY);
+			if (devNull >= 0) {
+				dup2(devNull, STDERR_FILENO);
+				close(devNull);
+			} else {
+				close(STDERR_FILENO);
+			}
+		}
+		close(pipeFds[0]);
+		close(pipeFds[1]);
+
+		std::vector<char *> argv;
+		argv.reserve(args.size() + 1);
+		for (const auto & arg : args) {
+			argv.push_back(const_cast<char *>(arg.c_str()));
+		}
+		argv.push_back(nullptr);
+
+		execvp(argv[0], argv.data());
+		_exit(127);
+	}
+
+	close(pipeFds[1]);
+	std::array<char, 4096> buf {};
+	ssize_t bytesRead = 0;
+	while ((bytesRead = read(pipeFds[0], buf.data(), buf.size())) > 0) {
+		std::string chunk(buf.data(), static_cast<size_t>(bytesRead));
+		output.append(chunk);
+		if (!dispatchChunk(chunk)) {
+			kill(pid, SIGTERM);
+			break;
+		}
+	}
+	close(pipeFds[0]);
+
+	int status = 0;
+	if (waitpid(pid, &status, 0) < 0) {
+		return false;
+	}
+	if (WIFEXITED(status)) {
+		exitCode = WEXITSTATUS(status);
+	} else if (WIFSIGNALED(status)) {
+		exitCode = 128 + WTERMSIG(status);
+	} else {
+		exitCode = -1;
+	}
+#endif
+	return true;
+}
 
 } // namespace ofxGgmlProcessSecurity

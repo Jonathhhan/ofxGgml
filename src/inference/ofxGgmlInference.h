@@ -35,7 +35,7 @@ struct ofxGgmlInferenceSettings {
 	int threadsBatch = 0;
 	int seed = -1;
 	bool simpleIo = true;
-	bool promptCacheAll = false;
+	bool promptCacheAll = true;
 	bool flashAttn = false;
 	bool mlock = false;
 	bool singleTurn = true;

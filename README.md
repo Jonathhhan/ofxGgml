@@ -669,9 +669,16 @@ Text-heavy modes also ship with server-friendly quick actions so the warm backen
 
 ## Performance
 
-`ofxGgml` now ships with explicit benchmark entry points instead of burying performance checks only inside `tests/`.
+`ofxGgml` now ships with explicit benchmark entry points and performance optimizations.
 
-Run the benchmark suite with:
+### Quick Performance Tips
+
+**For best inference performance:**
+1. **Use server mode** - `settings.useServerBackend = true` (10-50ms faster per request)
+2. **Prompt caching** - Enabled by default for 2-5x speedup in multi-turn workflows
+3. **Batch API** - Process multiple requests in parallel with `generateBatch()`
+
+**Run benchmarks:**
 
 ```bash
 ./scripts/benchmark-addon.sh
@@ -681,7 +688,9 @@ Run the benchmark suite with:
 powershell -ExecutionPolicy Bypass -File .\scripts\benchmark-addon.ps1
 ```
 
-These wrappers configure the test suite with `OFXGGML_ENABLE_BENCHMARK_TESTS=ON`, build `ofxGgml-tests`, and run the stable benchmark set (`[benchmark]~[manual]`) by default. For tuning guidance and recommended measurement workflow, see `docs/PERFORMANCE.md`.
+These wrappers configure the test suite with `OFXGGML_ENABLE_BENCHMARK_TESTS=ON`, build `ofxGgml-tests`, and run the stable benchmark set (`[benchmark]~[manual]`) by default.
+
+**For detailed performance tuning, optimization strategies, and expected performance numbers, see `docs/PERFORMANCE.md`.**
 
 ## Source-grounded generation
 

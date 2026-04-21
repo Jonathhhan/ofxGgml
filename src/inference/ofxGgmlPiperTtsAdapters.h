@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ofxGgmlChatLlmTtsAdapters.h"
+#include "ofxGgmlTtsAdapterCommon.h"
 
 #include <chrono>
 #include <filesystem>
@@ -16,7 +17,7 @@ struct RuntimeOptions {
 	std::string executablePath;
 };
 
-using MetadataEntries = std::vector<std::pair<std::string, std::string>>;
+using MetadataEntries = ofxGgmlTtsAdapterCommon::MetadataEntries;
 
 inline std::string defaultExecutableHint() {
 #ifdef _WIN32
@@ -53,16 +54,7 @@ inline std::string preferredLocalExecutablePath() {
 		.string();
 }
 
-inline std::string findFirstExistingExecutable(
-	const std::vector<std::filesystem::path> & candidates) {
-	for (const auto & candidate : candidates) {
-		std::error_code ec;
-		if (std::filesystem::exists(candidate, ec) && !ec) {
-			return candidate.string();
-		}
-	}
-	return {};
-}
+using ofxGgmlTtsAdapterCommon::findFirstExistingExecutable;
 
 inline bool looksLikePythonLauncher(const std::string & executable) {
 	const std::string fileName =
@@ -108,17 +100,7 @@ inline std::string dataDirFromModelPath(const std::string & modelPath) {
 	return path.parent_path().string();
 }
 
-inline std::string makeTempInputPath(const char * extension = ".txt") {
-	std::error_code ec;
-	std::filesystem::path base = std::filesystem::temp_directory_path(ec);
-	if (ec) {
-		base = std::filesystem::current_path();
-	}
-	const auto stamp =
-		std::chrono::duration_cast<std::chrono::microseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count();
-	return (base / ("ofxggml_tts_input_" + std::to_string(stamp) + extension)).string();
-}
+using ofxGgmlTtsAdapterCommon::makeTempInputPath;
 
 inline std::string validateRequestForPiper(
 	const ofxGgmlTtsRequest & request,
