@@ -111,23 +111,33 @@ class ofxGgmlSemanticCache {
 - Works across paraphrased prompts
 - Leverages existing embedding infrastructure
 
-### 💡 Memory Usage Reporting
-**Status**: Proposed
+### ✅ Memory Usage Reporting
+**Status**: Complete
 **Effort**: 2-3 hours
 **Priority**: LOW-MEDIUM - Monitoring
-
-**Alternative to**: Full memory management (deferred)
+**Completed**: 2026-04-21
 
 **What**: Add `getMemoryUsage()` to report current model memory consumption.
 
-### 💡 Server Queue Status API
-**Status**: Proposed
+**Implementation**:
+- ✅ Added `ofxGgmlMemoryUsage` struct
+- ✅ Implemented `ofxGgml::getMemoryUsage()` method
+- ✅ Tracks model weights, graph allocations, backend memory stats
+- ✅ Updated README and CHANGELOG
+
+### ✅ Server Queue Status API
+**Status**: Complete
 **Effort**: 2-3 hours
 **Priority**: LOW-MEDIUM - Monitoring
+**Completed**: 2026-04-21
 
-**Alternative to**: Full inference request queue (deferred)
+**What**: Expose `getServerQueueStatus()` to query llama-server queue state.
 
-**What**: Expose `getActiveRequests()` to query llama-server queue state.
+**Implementation**:
+- ✅ Added `ofxGgmlServerQueueStatus` struct
+- ✅ Implemented `ofxGgmlInference::getServerQueueStatus()` method
+- ✅ Queries llama-server /metrics endpoint
+- ✅ Updated README and CHANGELOG
 
 ---
 
@@ -336,6 +346,7 @@ To propose new features or changes to this roadmap:
 
 ## Change Log
 
+- **2026-04-21**: Memory usage reporting and server queue status APIs completed
 - **2026-04-21**: Initial roadmap created from deep review analysis
 - **2026-04-21**: Model checksums verified complete
 - **2026-04-21**: Enhanced streaming progress implementation started

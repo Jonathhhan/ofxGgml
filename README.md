@@ -466,6 +466,35 @@ metrics.recordInferenceEnd("llama-7b", tokens, elapsedMs);
 std::cout << metrics.getSummary();
 ```
 
+### Memory Usage and Server Monitoring
+
+Monitor resource consumption and server status for production deployments:
+
+```cpp
+// Check memory usage
+ofxGgml runtime;
+runtime.setup();
+auto memory = runtime.getMemoryUsage();
+std::cout << "Model weights: " << (memory.modelWeightBytes / 1024 / 1024) << " MB" << std::endl;
+std::cout << "Total allocated: " << (memory.totalAllocatedBytes / 1024 / 1024) << " MB" << std::endl;
+std::cout << "Backend: " << memory.backendName << std::endl;
+
+// Monitor server queue
+ofxGgmlInference inference;
+auto queueStatus = ofxGgmlInference::getServerQueueStatus("http://127.0.0.1:8080");
+if (queueStatus.available) {
+    std::cout << "Queue length: " << queueStatus.queueLength << std::endl;
+    std::cout << "Processing: " << queueStatus.processingCount << std::endl;
+    std::cout << "Completed: " << queueStatus.completedCount << std::endl;
+}
+```
+
+These monitoring APIs are essential for:
+- Diagnosing memory issues and optimizing resource usage
+- Load balancing across multiple server instances
+- Detecting server overload conditions
+- Performance profiling and capacity planning
+
 ### Model Version Management
 
 `ofxGgmlModelRegistry` enables hot-swapping between model versions:

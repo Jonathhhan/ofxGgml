@@ -132,5 +132,15 @@ struct ofxGgmlTimings {
 	float computeTotalMs = 0.0f;
 };
 
+/// Memory usage information for monitoring and diagnostics.
+struct ofxGgmlMemoryUsage {
+	size_t modelWeightBytes = 0;
+	size_t graphAllocBytes = 0;
+	size_t totalAllocatedBytes = 0;
+	size_t backendFreeBytes = 0;
+	size_t backendTotalBytes = 0;
+	std::string backendName;
+};
+
 /// Progress and log callback signature.
 using ofxGgmlLogCallback = std::function<void(int level, const std::string & message)>;
