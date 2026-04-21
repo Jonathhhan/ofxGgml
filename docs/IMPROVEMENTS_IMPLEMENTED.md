@@ -6,8 +6,8 @@ This document tracks the improvements implemented in the ofxGgml codebase as par
 
 **Goal**: Combine and simplify features, optimize inference performance, and reduce code duplication.
 
-**Completed**: Phase 1 (Critical Performance & Security)
-**Status**: In progress - 3 of 6 planned improvements completed
+**Completed**: Phase 1 (Complete) + Phase 2 TTS adapters (1 of 3)
+**Status**: 5 of 7 planned improvements completed (71%)
 
 ---
 
@@ -116,9 +116,58 @@ This document tracks the improvements implemented in the ofxGgml codebase as par
 - Platform-specific code centralized
 
 **Remaining Duplicates**:
-- `src/inference/ofxGgmlChatLlmTtsAdapters.h:366` (~180 lines)
-- `src/inference/ofxGgmlPiperTtsAdapters.h` (~180 lines)
-- These will be updated to use the central function
+- ✅ `src/inference/ofxGgmlChatLlmTtsAdapters.h` - Updated to use central function (~170 lines eliminated)
+- ✅ `src/inference/ofxGgmlPiperTtsAdapters.h` - Uses ChatLlmTtsAdapters wrapper (automatic benefit)
+
+**Priority**: High - completed ✅
+
+---
+
+### 5. Update TTS Adapters to Use Central Command Execution ✅
+
+**Impact**: ~170 lines eliminated, automatic security benefits
+
+**Changes**:
+- Updated `src/inference/ofxGgmlChatLlmTtsAdapters.h` to use centralized command execution
+- Replaced ~170 lines of duplicate Windows/Unix process spawning code
+- Created thin wrapper to maintain `launchError` parameter compatibility
+- Added `using` declarations for Windows helper functions from ProcessSecurity
+- Removed duplicate implementations of:
+  - `getEnvVarString()`
+  - `quoteWindowsArg()`
+  - `isWindowsBatchScript()`
+  - `resolveWindowsLaunchPath()`
+  - `runCommandCapture()` (complete Windows/Unix implementation)
+
+**Implementation**:
+```cpp
+// Thin wrapper maintains launchError compatibility
+inline bool runCommandCapture(
+    const std::vector<std::string> & args,
+    std::string & output,
+    int & exitCode,
+    bool mergeStderr = true,
+    std::string * launchError = nullptr) {
+    // ... validation ...
+    const bool success = ofxGgmlProcessSecurity::runCommandCapture(
+        args, output, exitCode, mergeStderr);
+    if (!success && launchError) {
+        *launchError = "command execution failed";
+    }
+    return success;
+}
+```
+
+**Benefits**:
+- TTS adapters now benefit from centralized security improvements
+- All TTS command execution goes through audited code path
+- Bug fixes in ProcessSecurity automatically apply to TTS adapters
+- Consistent error handling across all process spawning
+- Platform-specific code centralized
+
+**Files Updated**:
+- `src/inference/ofxGgmlChatLlmTtsAdapters.h` - Wrapper + using declarations
+- `src/inference/ofxGgmlPiperTtsAdapters.h` - No changes (already uses ChatLlmTtsAdapters)
 
 **Priority**: High - completed ✅
 
@@ -126,15 +175,15 @@ This document tracks the improvements implemented in the ofxGgml codebase as par
 
 ## Remaining Planned Improvements
 
-### 5. Create TTS Adapter Common Base (Pending)
+### 6. Create TTS Adapter Common Base (Pending)
 
-**Impact**: ~400 lines eliminated
+**Impact**: ~230 lines could be eliminated (reduced from initial ~400 estimate)
 
-**Problem**: Duplicate utilities across TTS adapters:
+**Problem**: Duplicate utilities across TTS adapters (reduced scope):
 - `resolveTtsExecutable()` logic duplicated
 - `makeTempOutputPath()` duplicated
-- `quoteWindowsArg()` duplicated
 - `MetadataEntries` typedef duplicated
+- Note: Windows argument quoting now centralized in ProcessSecurity
 
 **Solution**: Create `src/inference/ofxGgmlTtsAdapterCommon.{h,cpp}`
 
@@ -147,7 +196,7 @@ This document tracks the improvements implemented in the ofxGgml codebase as par
 
 ---
 
-### 6. Consolidate Video Planners (Pending)
+### 7. Consolidate Video Planners (Pending)
 
 **Impact**: ~500 lines eliminated, simpler API
 
@@ -186,9 +235,9 @@ class ofxGgmlVideoPlanner {
 
 ### Code Reduction
 
-- **Completed**: ~225 lines (string utilities + command execution)
-- **Pending**: ~1,275 lines (TTS base + video planners + remaining TTS adapter updates)
-- **Target**: 15-20% overall (~1,500-2,000 lines total)
+- **Completed**: ~395 lines (string utilities + command execution + TTS adapters)
+- **Pending**: ~730 lines (TTS base + video planners)
+- **Target**: 15-20% overall (~1,125 lines total)
 
 ### Maintenance Impact
 
@@ -201,21 +250,21 @@ class ofxGgmlVideoPlanner {
 
 ## Implementation Approach
 
-### Phase 1: Critical Performance & Security (80% Complete)
+### Phase 1: Critical Performance & Security (Complete) ✅
 - ✅ Enable prompt caching (performance)
 - ✅ Consolidate string utilities (code quality)
 - ✅ Document server mode (adoption)
 - ✅ Extract command execution (security)
 
-### Phase 2: Code Consolidation (Not Started)
-- ⏳ Update TTS adapters to use central command execution
-- ⏳ Create TTS adapter common base
-- ⏳ Video planner consolidation
+### Phase 2: Code Consolidation (In Progress - 33% Complete)
+- ✅ Update TTS adapters to use central command execution (~170 lines eliminated)
+- ⏳ Create TTS adapter common base (~230 lines)
+- ⏳ Video planner consolidation (~500 lines)
 
 ### Estimated Completion
 - Phase 1: 4 of 4 improvements complete ✅
-- Phase 2: 3 improvements remaining
-- Total remaining effort: 2-3 weeks
+- Phase 2: 1 of 3 complete (33%) ⏳
+- Total remaining effort: 1-2 weeks
 
 ---
 
@@ -232,16 +281,16 @@ class ofxGgmlVideoPlanner {
 
 ## Next Steps
 
-1. **Update TTS adapters** to use `ofxGgmlProcessSecurity::runCommandCapture()`
-   - ofxGgmlChatLlmTtsAdapters.h
-   - ofxGgmlPiperTtsAdapters.h
-   - ~360 more lines eliminated
-   - Estimated: 2-3 hours
+1. ✅ **Update TTS adapters** to use `ofxGgmlProcessSecurity::runCommandCapture()` - COMPLETED
+   - Updated ofxGgmlChatLlmTtsAdapters.h
+   - ofxGgmlPiperTtsAdapters.h automatically benefits
+   - ~170 lines eliminated
+   - Actual time: 1 hour
 
 2. **Create TTS adapter base**
    - Shared utilities for executable resolution, temp paths, metadata
-   - ~400 lines to consolidate
-   - Estimated: 6-8 hours
+   - ~230 lines to consolidate (revised from 400)
+   - Estimated: 4-6 hours
 
 3. **Consolidate video planners**
    - Largest refactoring effort
