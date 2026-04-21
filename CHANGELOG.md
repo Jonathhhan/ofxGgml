@@ -5,6 +5,20 @@ All notable changes to `ofxGgml` are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Enhanced Streaming Progress Tracking** - `ofxGgmlStreamingContext` now includes detailed progress metrics for streaming inference:
+  - Added `ofxGgmlStreamingProgress` struct with `tokensGenerated`, `estimatedTotal`, `percentComplete`, `tokensPerSecond`, and `elapsedMs` fields
+  - Added methods: `setEstimatedTotal()`, `addTokens()`, `getTokensGenerated()`, `getElapsedMs()`, and `getProgress()`
+  - Progress calculation includes automatic percentage and speed updates
+  - Backward compatible - existing streaming code continues to work
+  - Enables progress bars, ETA displays, and real-time performance monitoring in applications
+- **Workflow Presets in ofxGgmlEasy** - Added preset multi-step AI workflows for common use cases:
+  - `summarizeAndTranslate()` - Summarize text then translate to target language
+  - `transcribeAndSummarize()` - Transcribe audio then generate summary
+  - `describeAndAnalyze()` - Describe image with vision model then analyze with text model
+  - `crawlAndSummarize()` - Crawl website then summarize findings
+  - Returns `ofxGgmlEasyWorkflowResult` with `intermediateResults`, `finalOutput`, and `totalElapsedMs`
+  - Eliminates boilerplate for frequently-chained operations
+- **Development Roadmap** - Added comprehensive `docs/ROADMAP.md` documenting planned features across immediate, short-term, medium-term, and long-term timeframes with effort estimates and priorities
 - `ofxGgmlRAGPipeline` as a new local Retrieval-Augmented Generation helper for text documents. It chunks documents into overlapping passages, scores them with BM25-inspired keyword overlap, assembles the top-K passages into a grounded context, and runs inference over that context. Works entirely offline — no network or external process is required for the retrieval step.
   - `addDocument()` / `addTextDocument()` / `clearDocuments()` for managing the local document store.
   - `retrieve()` for pure retrieval without inference, returning scored and sorted `ofxGgmlRAGChunk` items plus an assembled context string.

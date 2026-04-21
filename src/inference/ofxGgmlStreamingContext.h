@@ -2,17 +2,46 @@
 
 #include "ofMain.h"
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
+
+/// Progress information for streaming inference.
+struct ofxGgmlStreamingProgress {
+	size_t tokensGenerated = 0;
+	size_t estimatedTotal = 0;      ///< Based on maxTokens setting
+	float percentComplete = 0.0f;   ///< 0.0 to 1.0
+	float tokensPerSecond = 0.0f;
+	float elapsedMs = 0.0f;
+	std::string currentChunk;
+	size_t totalChunks = 0;
+
+	/// Calculate percent complete based on tokens generated vs estimated total.
+	void updatePercent() {
+		if (estimatedTotal > 0) {
+			percentComplete = std::min(1.0f, static_cast<float>(tokensGenerated) / static_cast<float>(estimatedTotal));
+		}
+	}
+
+	/// Calculate tokens per second based on elapsed time.
+	void updateSpeed() {
+		if (elapsedMs > 0.0f) {
+			tokensPerSecond = (tokensGenerated * 1000.0f) / elapsedMs;
+		}
+	}
+};
+
+/// Callback signature for enhanced streaming with progress.
+using ofxGgmlStreamingProgressCallback = std::function<bool(const ofxGgmlStreamingProgress&)>;
 
 /// Streaming context for managing backpressure and flow control during inference.
 ///
 /// Provides pause/resume/cancel capabilities and backpressure signals to allow
 /// consumers to control generation speed and resource usage.
 ///
-/// Example usage:
+/// Example usage (basic):
 /// ```cpp
 /// auto ctx = std::make_shared<ofxGgmlStreamingContext>();
 ///
@@ -32,6 +61,23 @@
 ///     return true;
 /// });
 /// ```
+///
+/// Example usage (with progress tracking):
+/// ```cpp
+/// auto ctx = std::make_shared<ofxGgmlStreamingContext>();
+/// ctx->setEstimatedTotal(settings.maxTokens);
+///
+/// inference.generate(modelPath, prompt, settings, [ctx](const std::string& chunk) {
+///     ctx->addTokens(1); // Increment token count
+///
+///     auto progress = ctx->getProgress(chunk);
+///     ofLogNotice() << "Progress: " << (progress.percentComplete * 100.0f) << "%"
+///                   << " (" << progress.tokensPerSecond << " tok/s)";
+///
+///     if (ctx->isCancelled()) return false;
+///     return true;
+/// });
+/// ```
 class ofxGgmlStreamingContext {
 public:
 	enum class State {
@@ -47,7 +93,10 @@ public:
 		, m_consumedChars(0)
 		, m_backpressureThreshold(0)
 		, m_totalChunks(0)
-		, m_droppedChunks(0) {
+		, m_droppedChunks(0)
+		, m_tokensGenerated(0)
+		, m_estimatedTotal(0)
+		, m_startTime(std::chrono::steady_clock::now()) {
 	}
 
 	/// Request the stream to pause. The generator should check shouldPause().
@@ -222,6 +271,60 @@ public:
 		m_consumedChars = 0;
 		m_totalChunks = 0;
 		m_droppedChunks = 0;
+		m_tokensGenerated = 0;
+		m_startTime = std::chrono::steady_clock::now();
+	}
+
+	/// Set estimated total tokens (typically maxTokens from settings).
+	void setEstimatedTotal(size_t total) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_estimatedTotal = total;
+	}
+
+	/// Get estimated total tokens.
+	size_t getEstimatedTotal() const {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_estimatedTotal;
+	}
+
+	/// Increment token count (should be called for each generated token/chunk).
+	void addTokens(size_t count = 1) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_tokensGenerated += count;
+	}
+
+	/// Get current token count.
+	size_t getTokensGenerated() const {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_tokensGenerated;
+	}
+
+	/// Get elapsed time in milliseconds since streaming started.
+	float getElapsedMs() const {
+		auto now = std::chrono::steady_clock::now();
+		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_startTime);
+		return static_cast<float>(duration.count());
+	}
+
+	/// Build a progress snapshot with current metrics.
+	ofxGgmlStreamingProgress getProgress(const std::string& currentChunk = "") const {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		ofxGgmlStreamingProgress progress;
+		progress.tokensGenerated = m_tokensGenerated;
+		progress.estimatedTotal = m_estimatedTotal;
+		progress.totalChunks = m_totalChunks;
+		progress.currentChunk = currentChunk;
+
+		// Calculate elapsed time (unlock for this call)
+		auto now = std::chrono::steady_clock::now();
+		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_startTime);
+		progress.elapsedMs = static_cast<float>(duration.count());
+
+		// Update calculated fields
+		progress.updatePercent();
+		progress.updateSpeed();
+
+		return progress;
 	}
 
 private:
@@ -233,6 +336,9 @@ private:
 	size_t m_backpressureThreshold;
 	size_t m_totalChunks;
 	size_t m_droppedChunks;
+	size_t m_tokensGenerated;
+	size_t m_estimatedTotal;
+	std::chrono::steady_clock::time_point m_startTime;
 };
 
 using ofxGgmlStreamingContextPtr = std::shared_ptr<ofxGgmlStreamingContext>;

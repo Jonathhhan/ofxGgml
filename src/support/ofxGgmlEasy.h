@@ -81,6 +81,19 @@ struct ofxGgmlEasyVideoEditResult {
 	std::string editorBrief;
 };
 
+struct ofxGgmlEasyWorkflowResult {
+	bool success = false;
+	std::string error;
+	std::vector<std::string> intermediateResults;
+	std::string finalOutput;
+	float totalElapsedMs = 0.0f;
+
+	/// Add helper to extract specific intermediate result by index
+	std::string getIntermediateResult(size_t index, const std::string& defaultValue = "") const {
+		return (index < intermediateResults.size()) ? intermediateResults[index] : defaultValue;
+	}
+};
+
 /// High-level convenience facade for common text, vision, and speech workflows.
 ///
 /// This wrapper keeps the underlying addon classes available, but gives apps a
@@ -249,6 +262,36 @@ public:
 	std::string saveMilkDropPreset(
 		const std::string & presetText,
 		const std::string & outputPath) const;
+
+	/// Workflow Presets - Common multi-step AI workflows
+
+	/// Summarize text and then translate the summary to target language.
+	/// Returns workflow result with intermediate summary and final translation.
+	ofxGgmlEasyWorkflowResult summarizeAndTranslate(
+		const std::string & text,
+		const std::string & targetLanguage,
+		const std::string & sourceLanguage = "Auto detect",
+		int maxSummaryWords = 150) const;
+
+	/// Transcribe audio to text and then summarize the transcript.
+	/// Returns workflow result with intermediate transcript and final summary.
+	ofxGgmlEasyWorkflowResult transcribeAndSummarize(
+		const std::string & audioPath,
+		int maxSummaryWords = 100) const;
+
+	/// Describe an image with vision model and then analyze the description with text model.
+	/// Returns workflow result with intermediate description and final analysis.
+	ofxGgmlEasyWorkflowResult describeAndAnalyze(
+		const std::string & imagePath,
+		const std::string & analysisPrompt = "Provide a detailed analysis of this scene",
+		const std::string & descriptionPrompt = "") const;
+
+	/// Crawl a website, extract content, and then summarize the findings.
+	/// Returns workflow result with intermediate crawled content and final summary.
+	ofxGgmlEasyWorkflowResult crawlAndSummarize(
+		const std::string & startUrl,
+		int maxDepth = 2,
+		int maxSummaryWords = 200) const;
 
 	/// Convenience method: run a full RAG query against documents already added
 	/// to getRAGPipeline(). Requires configureText() to be called first.

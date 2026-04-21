@@ -323,6 +323,40 @@ if (!validation.valid) {
 }
 ```
 
+**Workflow Presets** (v1.1.0+):
+
+Chain common AI workflows with a single method call:
+
+```cpp
+// Summarize then translate
+auto result = ai.summarizeAndTranslate(
+    longArticleText,
+    "Spanish",  // target language
+    "English",  // source language (or "Auto detect")
+    150);       // max summary words
+
+cout << "Summary: " << result.getIntermediateResult(0) << endl;
+cout << "Translation: " << result.finalOutput << endl;
+cout << "Total time: " << result.totalElapsedMs << "ms" << endl;
+
+// Transcribe audio then summarize transcript
+auto audioResult = ai.transcribeAndSummarize("interview.mp3", 100);
+
+// Describe image then analyze with text model
+auto visionResult = ai.describeAndAnalyze(
+    "scene.jpg",
+    "Analyze the artistic style and composition");
+
+// Crawl website then summarize findings
+auto webResult = ai.crawlAndSummarize("https://example.com", 2, 200);
+```
+
+Workflow results include:
+- `intermediateResults` - Outputs from each step
+- `finalOutput` - Final result
+- `totalElapsedMs` - End-to-end timing
+- `success` / `error` - Status information
+
 `ofxGgmlEasy` is intentionally small. If you need deeper control, it still exposes the owned lower-level helpers:
 
 - `getInference()`
@@ -387,6 +421,34 @@ inference.generate(modelPath, prompt, settings, [ctx](const std::string& chunk) 
     return true;
 });
 ```
+
+**Enhanced Progress Tracking** (v1.1.0+):
+
+Track detailed streaming progress with token counts, speed, and completion percentage:
+
+```cpp
+auto ctx = std::make_shared<ofxGgmlStreamingContext>();
+ctx->setEstimatedTotal(settings.maxTokens);
+
+inference.generate(modelPath, prompt, settings, [ctx](const std::string& chunk) {
+    ctx->addTokens(1); // Increment for each token/chunk
+
+    auto progress = ctx->getProgress(chunk);
+    ofLogNotice() << "Progress: " << (progress.percentComplete * 100.0f) << "% "
+                  << "Speed: " << progress.tokensPerSecond << " tok/s "
+                  << "Elapsed: " << progress.elapsedMs << "ms";
+
+    if (ctx->isCancelled()) return false;
+    return true;
+});
+```
+
+Progress information includes:
+- `tokensGenerated` - Current token count
+- `estimatedTotal` - Expected total (from maxTokens)
+- `percentComplete` - Progress as 0.0 to 1.0
+- `tokensPerSecond` - Generation speed
+- `elapsedMs` - Time since start
 
 ### Logging and Metrics
 
