@@ -722,7 +722,7 @@ The repository keeps `libs/ggml` empty (include/lib placeholders only). Use the 
 ./scripts/build-ggml.sh --metal         # Force Metal backend (macOS)
 ```
 
-The script downloads ggml (default ref: v0.9.9), builds static libraries, copies headers/libs into `libs/ggml`, and refreshes `addon_config.mk` library lists. Use `--clean` to wipe previous build/cache.
+The script downloads ggml (default ref: v0.10.0), builds static libraries, copies headers/libs into `libs/ggml`, and refreshes `addon_config.mk` library lists. Use `--clean` to wipe previous build/cache.
 
 ## Getting Started
 
