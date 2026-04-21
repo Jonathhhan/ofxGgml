@@ -18,7 +18,7 @@
 #   --auto         Auto-detect available GPU backends (default)
 #   --cpu-only     Disable GPU autodetection, build CPU backend only
 #   --clean        Remove build and download cache before building
-#   --ref REF      Git ref to checkout from the ggml repo (default: v0.9.9)
+#   --ref REF      Git ref to checkout from the ggml repo (default: v0.10.0)
 #   --repo URL     Upstream ggml repository (default: https://github.com/ggml-org/ggml.git)
 #   --help         Show this help message
 # ---------------------------------------------------------------------------
@@ -33,7 +33,7 @@ BUILD_DIR="$GGML_DIR/build"
 INCLUDE_DIR="$GGML_DIR/include"
 LIB_DIR="$GGML_DIR/lib"
 GGML_REPO="https://github.com/ggml-org/ggml.git"
-GGML_REF="v0.9.9"
+GGML_REF="v0.10.0"
 JOBS=""
 ENABLE_CUDA=""
 ENABLE_VULKAN=""
