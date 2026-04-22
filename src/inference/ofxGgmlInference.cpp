@@ -1884,6 +1884,9 @@ int ofxGgmlInference::countPromptTokens(
 		std::lock_guard<std::mutex> lock(m_tokenCountCacheMutex);
 		auto it = m_tokenCountCache.find(cacheKey);
 		if (it != m_tokenCountCache.end()) {
+			// Move to front of LRU list (most recently used)
+			m_tokenCountCacheLRU.remove(cacheKey);
+			m_tokenCountCacheLRU.push_front(cacheKey);
 			return it->second;
 		}
 	}
@@ -1930,10 +1933,20 @@ int ofxGgmlInference::countPromptTokens(
 	const int tokenCount = parseVerbosePromptTokenCount(raw);
 	if (tokenCount >= 0) {
 		std::lock_guard<std::mutex> lock(m_tokenCountCacheMutex);
-		if (m_tokenCountCache.size() > 2000) {
-			m_tokenCountCache.clear();
+
+		// Implement LRU eviction
+		if (m_tokenCountCache.size() >= TOKEN_CACHE_MAX_SIZE) {
+			// Remove least recently used entry (back of list)
+			if (!m_tokenCountCacheLRU.empty()) {
+				const std::string & lruKey = m_tokenCountCacheLRU.back();
+				m_tokenCountCache.erase(lruKey);
+				m_tokenCountCacheLRU.pop_back();
+			}
 		}
+
+		// Add new entry and mark as most recently used
 		m_tokenCountCache[cacheKey] = tokenCount;
+		m_tokenCountCacheLRU.push_front(cacheKey);
 	}
 	return tokenCount;
 }
