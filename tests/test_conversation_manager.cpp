@@ -176,6 +176,21 @@ TEST_CASE("Conversation manager JSON round-trips content with special characters
 	REQUIRE(restored.getTurns()[0].content == "He said: \"Hello, world!\" and it's great.\nNew line here.");
 }
 
+TEST_CASE("Conversation manager JSON preserves empty message content", "[conversation]") {
+	ofxGgmlConversationManager mgr;
+	mgr.addSystemTurn("");
+	mgr.addUserTurn("");
+	mgr.addAssistantTurn("");
+
+	const auto json = mgr.toJson();
+	ofxGgmlConversationManager restored;
+	REQUIRE(ofxGgmlConversationManager::fromJson(json, restored));
+	REQUIRE(restored.turnCount() == 3);
+	REQUIRE(restored.getTurns()[0].content.empty());
+	REQUIRE(restored.getTurns()[1].content.empty());
+	REQUIRE(restored.getTurns()[2].content.empty());
+}
+
 TEST_CASE("Conversation manager fromJson returns false for invalid input", "[conversation]") {
 	ofxGgmlConversationManager empty;
 	REQUIRE_FALSE(ofxGgmlConversationManager::fromJson("", empty));

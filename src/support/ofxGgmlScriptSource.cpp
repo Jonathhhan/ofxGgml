@@ -1166,8 +1166,23 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 		in.close();
 		outContent = std::move(content);
 		std::lock_guard<std::mutex> lock(m_mutex);
-		m_files[static_cast<size_t>(index)].cachedContent = outContent;
-		m_files[static_cast<size_t>(index)].isCached = true;
+		const size_t entryIndex = static_cast<size_t>(index);
+		if (entryIndex < m_files.size() &&
+			m_files[entryIndex].fullPath == entry.fullPath) {
+			m_files[entryIndex].cachedContent = outContent;
+			m_files[entryIndex].isCached = true;
+		} else {
+			const auto match = std::find_if(
+				m_files.begin(),
+				m_files.end(),
+				[&entry](const ofxGgmlScriptSourceFileEntry & candidate) {
+					return candidate.fullPath == entry.fullPath;
+				});
+			if (match != m_files.end()) {
+				match->cachedContent = outContent;
+				match->isCached = true;
+			}
+		}
 		m_status = "Loaded: " + entry.name;
 		return true;
 	}
@@ -1187,8 +1202,23 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 		}
 		outContent = response.data.getText();
 		std::lock_guard<std::mutex> lock(m_mutex);
-		m_files[static_cast<size_t>(index)].cachedContent = outContent;
-		m_files[static_cast<size_t>(index)].isCached = true;
+		const size_t entryIndex = static_cast<size_t>(index);
+		if (entryIndex < m_files.size() &&
+			m_files[entryIndex].fullPath == entry.fullPath) {
+			m_files[entryIndex].cachedContent = outContent;
+			m_files[entryIndex].isCached = true;
+		} else {
+			const auto match = std::find_if(
+				m_files.begin(),
+				m_files.end(),
+				[&entry](const ofxGgmlScriptSourceFileEntry & candidate) {
+					return candidate.fullPath == entry.fullPath;
+				});
+			if (match != m_files.end()) {
+				match->cachedContent = outContent;
+				match->isCached = true;
+			}
+		}
 		m_status = "Loaded: " + entry.name;
 		return true;
 	}
@@ -1207,8 +1237,23 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 		}
 		outContent = response.data.getText();
 		std::lock_guard<std::mutex> lock(m_mutex);
-		m_files[static_cast<size_t>(index)].cachedContent = outContent;
-		m_files[static_cast<size_t>(index)].isCached = true;
+		const size_t entryIndex = static_cast<size_t>(index);
+		if (entryIndex < m_files.size() &&
+			m_files[entryIndex].fullPath == entry.fullPath) {
+			m_files[entryIndex].cachedContent = outContent;
+			m_files[entryIndex].isCached = true;
+		} else {
+			const auto match = std::find_if(
+				m_files.begin(),
+				m_files.end(),
+				[&entry](const ofxGgmlScriptSourceFileEntry & candidate) {
+					return candidate.fullPath == entry.fullPath;
+				});
+			if (match != m_files.end()) {
+				match->cachedContent = outContent;
+				match->isCached = true;
+			}
+		}
 		m_status = "Loaded: " + entry.name;
 		return true;
 	}

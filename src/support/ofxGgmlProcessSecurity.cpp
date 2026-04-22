@@ -73,7 +73,9 @@ std::string getEnvVarString(const char * name) {
 #endif
 }
 
-bool isValidExecutablePath(const std::string & path) {
+bool isValidExecutablePath(
+	const std::string & path,
+	const std::string & workingDirectory) {
 	if (path.empty()) return false;
 	if (path.find('\0') != std::string::npos) return false;
 
@@ -113,7 +115,10 @@ bool isValidExecutablePath(const std::string & path) {
 
 	if (isLikelyPath(path)) {
 		std::error_code ec;
-		const std::filesystem::path fsPath(path);
+		std::filesystem::path fsPath(path);
+		if (!workingDirectory.empty() && fsPath.is_relative()) {
+			fsPath = std::filesystem::path(workingDirectory) / fsPath;
+		}
 		const std::filesystem::path canonical =
 			std::filesystem::weakly_canonical(fsPath, ec);
 		if (!ec && isRegularExecutableFile(canonical) && isUnderAllowedRoot(canonical)) return true;
