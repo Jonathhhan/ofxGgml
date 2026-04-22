@@ -72,9 +72,10 @@ struct ofxGgml::Impl {
 	uint64_t allocatedGraphToken = 0;
 	struct ggml_cgraph * allocatedGraph = nullptr;
 
-	/// Async compute tracking.
-	bool hasPendingAsync = false;
+	/// Async compute tracking with atomic synchronization.
+	std::atomic<bool> hasPendingAsync{false};
 	std::chrono::steady_clock::time_point asyncStart;
+	std::mutex asyncMutex;  // Protects asyncStart and state transitions
 
 	/// Last timings.
 	ofxGgmlTimings timings;
@@ -108,11 +109,11 @@ static ofxGgmlSettings sanitizeSettings(const ofxGgmlSettings & settings, ofxGgm
 }
 
 static bool synchronizePendingAsync(ofxGgml::Impl * impl, const char * context) {
-	if (!impl || !impl->hasPendingAsync) {
+	if (!impl || !impl->hasPendingAsync.load(std::memory_order_acquire)) {
 		return true;
 	}
 	if (!impl->sched) {
-		impl->hasPendingAsync = false;
+		impl->hasPendingAsync.store(false, std::memory_order_release);
 		impl->state = ofxGgmlState::Ready;
 		return true;
 	}
@@ -121,11 +122,16 @@ static bool synchronizePendingAsync(ofxGgml::Impl * impl, const char * context) 
 			std::string("ofxGgml: synchronizing pending async work before ") + context + "\n");
 	}
 	ggml_backend_sched_synchronize(impl->sched.get());
-	const auto t1 = std::chrono::steady_clock::now();
-	impl->timings.computeTotalMs =
-		std::chrono::duration<float, std::milli>(t1 - impl->asyncStart).count();
-	impl->hasPendingAsync = false;
-	impl->state = ofxGgmlState::Ready;
+
+	// Update timings and state under lock for consistency
+	{
+		std::lock_guard<std::mutex> lock(impl->asyncMutex);
+		const auto t1 = std::chrono::steady_clock::now();
+		impl->timings.computeTotalMs =
+			std::chrono::duration<float, std::milli>(t1 - impl->asyncStart).count();
+		impl->hasPendingAsync.store(false, std::memory_order_release);
+		impl->state = ofxGgmlState::Ready;
+	}
 	return true;
 }
 
@@ -253,52 +259,91 @@ static ggml_backend_dev_t findUsableDeviceByNamePrefix(const char * prefix) {
 //  Static log callback for ggml
 // --------------------------------------------------------------------------
 
+struct LogOwnerEntry {
+	ofxGgml::Impl * impl;
+	std::atomic<int> activeCallbacks{0};  // Count of active callbacks
+
+	LogOwnerEntry(ofxGgml::Impl * p) : impl(p) {}
+};
+
 static std::mutex s_logOwnerMutex;
-static std::vector<ofxGgml::Impl *> s_logOwners;
+static std::vector<std::shared_ptr<LogOwnerEntry>> s_logOwners;
 
 static void ggmlLogCallback(ggml_log_level level, const char * text, void * user_data) {
 	auto * impl = static_cast<ofxGgml::Impl *>(user_data);
 
-	// Validate the owner under lock and copy the callback to avoid use-after-free
-	// if the impl is destroyed immediately after unlocking.
-	ofxGgmlLogCallback cb;
+	// Find and increment active callback count under lock
+	std::shared_ptr<LogOwnerEntry> entry;
 	{
 		std::lock_guard<std::mutex> lock(s_logOwnerMutex);
-		const auto it = std::find(s_logOwners.begin(), s_logOwners.end(), impl);
+		auto it = std::find_if(s_logOwners.begin(), s_logOwners.end(),
+			[impl](const std::shared_ptr<LogOwnerEntry>& e) { return e->impl == impl; });
 		if (it == s_logOwners.end() || impl == nullptr) {
 			return;
 		}
+		entry = *it;
+		entry->activeCallbacks.fetch_add(1, std::memory_order_acquire);
+	}
+
+	// Copy callback under lock for safe access
+	ofxGgmlLogCallback cb;
+	{
+		std::lock_guard<std::mutex> lock(s_logOwnerMutex);
 		cb = impl->logCb;
 	}
 
+	// Call outside lock
 	if (cb) {
 		cb(static_cast<int>(level), text ? text : "");
 	}
+
+	// Decrement active callback count
+	entry->activeCallbacks.fetch_sub(1, std::memory_order_release);
 }
 
 static void registerLogCallbackOwner(ofxGgml::Impl * impl) {
 	std::lock_guard<std::mutex> lock(s_logOwnerMutex);
 	// Remove any existing registration for this impl
-	s_logOwners.erase(std::remove(s_logOwners.begin(), s_logOwners.end(), impl), s_logOwners.end());
-	// Add to the end of the list
-	s_logOwners.push_back(impl);
+	s_logOwners.erase(
+		std::remove_if(s_logOwners.begin(), s_logOwners.end(),
+			[impl](const std::shared_ptr<LogOwnerEntry>& e) { return e->impl == impl; }),
+		s_logOwners.end());
+	// Add new entry
+	s_logOwners.push_back(std::make_shared<LogOwnerEntry>(impl));
 	// Set the global callback with this impl as user_data
 	// The callback will validate the pointer is still registered
 	ggml_log_set(ggmlLogCallback, impl);
 }
 
 static void unregisterLogCallbackOwner(ofxGgml::Impl * impl) {
-	std::lock_guard<std::mutex> lock(s_logOwnerMutex);
-	// Remove this impl from the list
-	s_logOwners.erase(std::remove(s_logOwners.begin(), s_logOwners.end(), impl), s_logOwners.end());
-	if (s_logOwners.empty()) {
-		// No more owners, clear the callback
-		ggml_log_set(nullptr, nullptr);
-		return;
+	std::shared_ptr<LogOwnerEntry> entry;
+	{
+		std::lock_guard<std::mutex> lock(s_logOwnerMutex);
+		// Find and remove this impl from the list
+		auto it = std::find_if(s_logOwners.begin(), s_logOwners.end(),
+			[impl](const std::shared_ptr<LogOwnerEntry>& e) { return e->impl == impl; });
+		if (it != s_logOwners.end()) {
+			entry = *it;
+			s_logOwners.erase(it);
+		}
+
+		if (s_logOwners.empty()) {
+			// No more owners, clear the callback
+			ggml_log_set(nullptr, nullptr);
+		} else {
+			// Update the global callback to use the most recent owner
+			// This ensures callbacks go to a valid impl
+			ggml_log_set(ggmlLogCallback, s_logOwners.back()->impl);
+		}
 	}
-	// Update the global callback to use the most recent owner
-	// This ensures callbacks go to a valid impl
-	ggml_log_set(ggmlLogCallback, s_logOwners.back());
+
+	// Wait for any active callbacks to complete before returning
+	// This prevents use-after-free if impl is about to be destroyed
+	if (entry) {
+		while (entry->activeCallbacks.load(std::memory_order_acquire) > 0) {
+			std::this_thread::yield();
+		}
+	}
 }
 
 static bool validateGraphForCompute(struct ggml_cgraph * graph, std::string & error) {
@@ -311,12 +356,25 @@ static bool validateGraphForCompute(struct ggml_cgraph * graph, std::string & er
 		error = "graph has no compute nodes";
 		return false;
 	}
+
+	// Track visited nodes to detect cycles
+	std::unordered_set<const struct ggml_tensor *> visited;
+	std::unordered_set<const struct ggml_tensor *> inProgress;
+
 	for (int i = 0; i < n; ++i) {
 		struct ggml_tensor * node = ggml_graph_node(graph, i);
 		if (!node) {
 			error = "graph node " + std::to_string(i) + " is null";
 			return false;
 		}
+
+		// Check for duplicate nodes (potential cycle indicator)
+		if (visited.count(node) > 0) {
+			error = "graph node " + std::to_string(i) + " appears multiple times (possible cycle)";
+			return false;
+		}
+		visited.insert(node);
+
 		const int nd = ggml_n_dims(node);
 		if (nd <= 0 || nd > GGML_MAX_DIMS) {
 			error = "graph node " + std::to_string(i) + " has invalid rank " + std::to_string(nd);
@@ -331,6 +389,37 @@ static bool validateGraphForCompute(struct ggml_cgraph * graph, std::string & er
 		if (node->op < 0 || node->op >= GGML_OP_COUNT) {
 			error = "graph node " + std::to_string(i) + " has invalid op code";
 			return false;
+		}
+
+		// Validate data type
+		if (node->type < 0 || node->type >= GGML_TYPE_COUNT) {
+			error = "graph node " + std::to_string(i) + " has invalid data type";
+			return false;
+		}
+
+		// Basic shape consistency check for binary operations
+		if (node->op == GGML_OP_ADD || node->op == GGML_OP_SUB ||
+		    node->op == GGML_OP_MUL || node->op == GGML_OP_DIV) {
+			if (node->src[0] && node->src[1]) {
+				// For element-wise ops, check dimension compatibility
+				const int nd0 = ggml_n_dims(node->src[0]);
+				const int nd1 = ggml_n_dims(node->src[1]);
+				if (nd0 != nd1 && nd0 > 0 && nd1 > 0) {
+					// Allow broadcasting, but at least check dimensions exist
+					bool compatible = true;
+					for (int d = 0; d < std::min(nd0, nd1); ++d) {
+						if (node->src[0]->ne[d] != node->src[1]->ne[d] &&
+						    node->src[0]->ne[d] != 1 && node->src[1]->ne[d] != 1) {
+							compatible = false;
+							break;
+						}
+					}
+					if (!compatible) {
+						error = "graph node " + std::to_string(i) + " has incompatible input shapes for element-wise operation";
+						return false;
+					}
+				}
+			}
 		}
 	}
 	return true;
@@ -799,8 +888,11 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 
 	if (status == GGML_STATUS_SUCCESS) {
 		result.success = true;
-		m_impl->hasPendingAsync = true;
-		m_impl->asyncStart = t0;
+		{
+			std::lock_guard<std::mutex> lock(m_impl->asyncMutex);
+			m_impl->hasPendingAsync.store(true, std::memory_order_release);
+			m_impl->asyncStart = t0;
+		}
 	} else {
 		result.error = std::string("ofxGgml: compute failed (status ") +
 			ggml_status_to_string(status) + ")";
@@ -812,20 +904,25 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 
 ofxGgmlComputeResult ofxGgml::synchronize() {
 	ofxGgmlComputeResult result;
-	if (m_impl->state != ofxGgmlState::Computing || !m_impl->hasPendingAsync) {
+	if (m_impl->state != ofxGgmlState::Computing || !m_impl->hasPendingAsync.load(std::memory_order_acquire)) {
 		result.success = true;
 		return result;
 	}
 
 	ggml_backend_sched_synchronize(m_impl->sched.get());
-	auto t1 = std::chrono::steady_clock::now();
-	m_impl->timings.computeTotalMs =
-		std::chrono::duration<float, std::milli>(t1 - m_impl->asyncStart).count();
+
+	// Update timings and state under lock for consistency
+	{
+		std::lock_guard<std::mutex> lock(m_impl->asyncMutex);
+		auto t1 = std::chrono::steady_clock::now();
+		m_impl->timings.computeTotalMs =
+			std::chrono::duration<float, std::milli>(t1 - m_impl->asyncStart).count();
+		result.elapsedMs = m_impl->timings.computeTotalMs;
+		m_impl->hasPendingAsync.store(false, std::memory_order_release);
+		m_impl->state = ofxGgmlState::Ready;
+	}
 
 	result.success = true;
-	result.elapsedMs = m_impl->timings.computeTotalMs;
-	m_impl->hasPendingAsync = false;
-	m_impl->state = ofxGgmlState::Ready;
 	return result;
 }
 

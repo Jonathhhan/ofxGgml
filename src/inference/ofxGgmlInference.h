@@ -345,7 +345,9 @@ private:
 	mutable std::mutex m_completionCapabilitiesMutex;
 
 	mutable std::unordered_map<std::string, int> m_tokenCountCache;
+	mutable std::list<std::string> m_tokenCountCacheLRU;  // LRU tracking for cache eviction
 	mutable std::mutex m_tokenCountCacheMutex;
+	static constexpr size_t TOKEN_CACHE_MAX_SIZE = 1000;  // Reduced from 2000 for better memory management
 
 	/// Helper to process batch via server backend
 	ofxGgmlBatchResult processBatchViaServer(

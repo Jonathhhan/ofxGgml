@@ -424,7 +424,16 @@ static bool parseEmbeddingJson(const ofJson & json, std::vector<float> & out) {
 }
 
 static size_t normalizedConcurrencyLimit(size_t requestedLimit) {
-	return std::max<size_t>(1, requestedLimit);
+	// Ensure at least 1 thread
+	const size_t minLimit = std::max<size_t>(1, requestedLimit);
+
+	// Cap at hardware concurrency to prevent resource exhaustion
+	const size_t hardwareConcurrency = std::thread::hardware_concurrency();
+	// Use 2x hardware concurrency as a reasonable upper bound for I/O-bound workloads
+	// (server requests spend most time waiting on network I/O)
+	const size_t maxReasonableLimit = hardwareConcurrency > 0 ? hardwareConcurrency * 2 : 32;
+
+	return std::min(minLimit, maxReasonableLimit);
 }
 
 static size_t recommendedServerEmbeddingConcurrency(size_t requestCount) {
@@ -2021,6 +2030,9 @@ int ofxGgmlInference::countPromptTokens(
 		std::lock_guard<std::mutex> lock(m_tokenCountCacheMutex);
 		auto it = m_tokenCountCache.find(cacheKey);
 		if (it != m_tokenCountCache.end()) {
+			// Move to front of LRU list (most recently used)
+			m_tokenCountCacheLRU.remove(cacheKey);
+			m_tokenCountCacheLRU.push_front(cacheKey);
 			return it->second;
 		}
 	}
@@ -2067,10 +2079,20 @@ int ofxGgmlInference::countPromptTokens(
 	const int tokenCount = parseVerbosePromptTokenCount(raw);
 	if (tokenCount >= 0) {
 		std::lock_guard<std::mutex> lock(m_tokenCountCacheMutex);
-		if (m_tokenCountCache.size() > 2000) {
-			m_tokenCountCache.clear();
+
+		// Implement LRU eviction
+		if (m_tokenCountCache.size() >= TOKEN_CACHE_MAX_SIZE) {
+			// Remove least recently used entry (back of list)
+			if (!m_tokenCountCacheLRU.empty()) {
+				const std::string & lruKey = m_tokenCountCacheLRU.back();
+				m_tokenCountCache.erase(lruKey);
+				m_tokenCountCacheLRU.pop_back();
+			}
 		}
+
+		// Add new entry and mark as most recently used
 		m_tokenCountCache[cacheKey] = tokenCount;
+		m_tokenCountCacheLRU.push_front(cacheKey);
 	}
 	return tokenCount;
 }
@@ -2358,11 +2380,14 @@ ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
 	const size_t maxConcurrent =
 		normalizedConcurrencyLimit(batchSettings.maxConcurrentRequests);
 
+	// Thread-safe write barrier to prevent race conditions when writing results
+	std::mutex resultsMutex;
+
 	std::vector<std::thread> workers;
 	workers.reserve(maxConcurrent);
 	for (size_t workerIndex = 0; workerIndex < maxConcurrent; ++workerIndex) {
 		workers.emplace_back([&]() {
-			while (!shouldStop.load(std::memory_order_relaxed)) {
+			while (!shouldStop.load(std::memory_order_acquire)) {
 				const size_t i = nextIndex.fetch_add(1, std::memory_order_relaxed);
 				if (i >= requests.size()) {
 					return;
@@ -2380,14 +2405,19 @@ ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
 				item.id = req.id;
 				item.result = std::move(result);
 				item.batchIndex = i;
-				batchResult.results[i] = std::move(item);
+
+				// Protect result array write with mutex to prevent race conditions
+				{
+					std::lock_guard<std::mutex> lock(resultsMutex);
+					batchResult.results[i] = std::move(item);
+				}
 
 				if (success) {
 					processedCount.fetch_add(1, std::memory_order_relaxed);
 				} else {
 					failedCount.fetch_add(1, std::memory_order_relaxed);
 					if (batchSettings.stopOnFirstError) {
-						shouldStop.store(true, std::memory_order_relaxed);
+						shouldStop.store(true, std::memory_order_release);
 					}
 				}
 			}
