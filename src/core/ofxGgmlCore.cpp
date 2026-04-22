@@ -72,9 +72,10 @@ struct ofxGgml::Impl {
 	uint64_t allocatedGraphToken = 0;
 	struct ggml_cgraph * allocatedGraph = nullptr;
 
-	/// Async compute tracking.
-	bool hasPendingAsync = false;
+	/// Async compute tracking with atomic synchronization.
+	std::atomic<bool> hasPendingAsync{false};
 	std::chrono::steady_clock::time_point asyncStart;
+	std::mutex asyncMutex;  // Protects asyncStart and state transitions
 
 	/// Last timings.
 	ofxGgmlTimings timings;
@@ -108,11 +109,11 @@ static ofxGgmlSettings sanitizeSettings(const ofxGgmlSettings & settings, ofxGgm
 }
 
 static bool synchronizePendingAsync(ofxGgml::Impl * impl, const char * context) {
-	if (!impl || !impl->hasPendingAsync) {
+	if (!impl || !impl->hasPendingAsync.load(std::memory_order_acquire)) {
 		return true;
 	}
 	if (!impl->sched) {
-		impl->hasPendingAsync = false;
+		impl->hasPendingAsync.store(false, std::memory_order_release);
 		impl->state = ofxGgmlState::Ready;
 		return true;
 	}
@@ -121,11 +122,16 @@ static bool synchronizePendingAsync(ofxGgml::Impl * impl, const char * context) 
 			std::string("ofxGgml: synchronizing pending async work before ") + context + "\n");
 	}
 	ggml_backend_sched_synchronize(impl->sched.get());
-	const auto t1 = std::chrono::steady_clock::now();
-	impl->timings.computeTotalMs =
-		std::chrono::duration<float, std::milli>(t1 - impl->asyncStart).count();
-	impl->hasPendingAsync = false;
-	impl->state = ofxGgmlState::Ready;
+
+	// Update timings and state under lock for consistency
+	{
+		std::lock_guard<std::mutex> lock(impl->asyncMutex);
+		const auto t1 = std::chrono::steady_clock::now();
+		impl->timings.computeTotalMs =
+			std::chrono::duration<float, std::milli>(t1 - impl->asyncStart).count();
+		impl->hasPendingAsync.store(false, std::memory_order_release);
+		impl->state = ofxGgmlState::Ready;
+	}
 	return true;
 }
 
@@ -799,8 +805,11 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 
 	if (status == GGML_STATUS_SUCCESS) {
 		result.success = true;
-		m_impl->hasPendingAsync = true;
-		m_impl->asyncStart = t0;
+		{
+			std::lock_guard<std::mutex> lock(m_impl->asyncMutex);
+			m_impl->hasPendingAsync.store(true, std::memory_order_release);
+			m_impl->asyncStart = t0;
+		}
 	} else {
 		result.error = std::string("ofxGgml: compute failed (status ") +
 			ggml_status_to_string(status) + ")";
@@ -812,20 +821,25 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 
 ofxGgmlComputeResult ofxGgml::synchronize() {
 	ofxGgmlComputeResult result;
-	if (m_impl->state != ofxGgmlState::Computing || !m_impl->hasPendingAsync) {
+	if (m_impl->state != ofxGgmlState::Computing || !m_impl->hasPendingAsync.load(std::memory_order_acquire)) {
 		result.success = true;
 		return result;
 	}
 
 	ggml_backend_sched_synchronize(m_impl->sched.get());
-	auto t1 = std::chrono::steady_clock::now();
-	m_impl->timings.computeTotalMs =
-		std::chrono::duration<float, std::milli>(t1 - m_impl->asyncStart).count();
+
+	// Update timings and state under lock for consistency
+	{
+		std::lock_guard<std::mutex> lock(m_impl->asyncMutex);
+		auto t1 = std::chrono::steady_clock::now();
+		m_impl->timings.computeTotalMs =
+			std::chrono::duration<float, std::milli>(t1 - m_impl->asyncStart).count();
+		result.elapsedMs = m_impl->timings.computeTotalMs;
+		m_impl->hasPendingAsync.store(false, std::memory_order_release);
+		m_impl->state = ofxGgmlState::Ready;
+	}
 
 	result.success = true;
-	result.elapsedMs = m_impl->timings.computeTotalMs;
-	m_impl->hasPendingAsync = false;
-	m_impl->state = ofxGgmlState::Ready;
 	return result;
 }
 

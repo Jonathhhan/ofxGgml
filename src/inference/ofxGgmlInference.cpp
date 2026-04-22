@@ -2212,11 +2212,14 @@ ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
 	const size_t maxConcurrent =
 		normalizedConcurrencyLimit(batchSettings.maxConcurrentRequests);
 
+	// Thread-safe write barrier to prevent race conditions when writing results
+	std::mutex resultsMutex;
+
 	std::vector<std::thread> workers;
 	workers.reserve(maxConcurrent);
 	for (size_t workerIndex = 0; workerIndex < maxConcurrent; ++workerIndex) {
 		workers.emplace_back([&]() {
-			while (!shouldStop.load(std::memory_order_relaxed)) {
+			while (!shouldStop.load(std::memory_order_acquire)) {
 				const size_t i = nextIndex.fetch_add(1, std::memory_order_relaxed);
 				if (i >= requests.size()) {
 					return;
@@ -2234,14 +2237,19 @@ ofxGgmlBatchResult ofxGgmlInference::processBatchViaServer(
 				item.id = req.id;
 				item.result = std::move(result);
 				item.batchIndex = i;
-				batchResult.results[i] = std::move(item);
+
+				// Protect result array write with mutex to prevent race conditions
+				{
+					std::lock_guard<std::mutex> lock(resultsMutex);
+					batchResult.results[i] = std::move(item);
+				}
 
 				if (success) {
 					processedCount.fetch_add(1, std::memory_order_relaxed);
 				} else {
 					failedCount.fetch_add(1, std::memory_order_relaxed);
 					if (batchSettings.stopOnFirstError) {
-						shouldStop.store(true, std::memory_order_relaxed);
+						shouldStop.store(true, std::memory_order_release);
 					}
 				}
 			}
