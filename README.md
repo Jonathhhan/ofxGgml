@@ -428,6 +428,8 @@ Features:
 - Built-in metrics tracking via `ofxGgmlMetrics`
 - Batch embeddings support, now with bounded concurrent server requests instead of a purely sequential loop
 
+Default text-generation settings now lean toward smoother general-purpose prose out of the box (`temperature = 0.8`, `topP = 0.95`, `minP = 0.03`, `repeatPenalty = 1.05`), while CLI and server backends share the same cleanup and completion-finishing behavior.
+
 See `docs/BATCH_INFERENCE.md` for comprehensive documentation.
 
 ### Streaming API with Backpressure Control

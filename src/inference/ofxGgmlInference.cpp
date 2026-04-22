@@ -80,6 +80,24 @@ static bool looksLikeJsonOutput(const std::string & text) {
 		(trimmed.front() == '[' && trimmed.back() == ']');
 }
 
+static bool endsWithWrappedSentencePunctuation(const std::string & text) {
+	if (text.empty()) return false;
+	size_t i = text.size();
+	while (i > 0) {
+		const char c = text[i - 1];
+		if (std::isspace(static_cast<unsigned char>(c))) {
+			--i;
+			continue;
+		}
+		if (c == '"' || c == '\'' || c == ')' || c == ']' || c == '}') {
+			--i;
+			continue;
+		}
+		return c == '.' || c == '!' || c == '?';
+	}
+	return false;
+}
+
 static std::string trimToNaturalBoundary(const std::string & text) {
 	std::string out = trim(text);
 	if (out.empty()) return out;
@@ -94,6 +112,10 @@ static std::string trimToNaturalBoundary(const std::string & text) {
 		return out;
 	}
 
+	if (endsWithWrappedSentencePunctuation(out)) {
+		return out;
+	}
+
 	size_t sentenceEnd = std::string::npos;
 	for (size_t i = 0; i < out.size(); i++) {
 		const char c = out[i];
@@ -105,8 +127,82 @@ static std::string trimToNaturalBoundary(const std::string & text) {
 	}
 	if (sentenceEnd != std::string::npos && sentenceEnd > out.size() / 2) {
 		out = trim(out.substr(0, sentenceEnd));
+		return out;
+	}
+
+	const size_t lineBreak = out.find_last_of('\n');
+	if (lineBreak != std::string::npos && lineBreak > out.size() / 2) {
+		const std::string candidate = trim(out.substr(0, lineBreak));
+		if (!candidate.empty()) {
+			return candidate;
+		}
 	}
 	return out;
+}
+
+static std::string finalizeGeneratedResponseText(
+	const std::string & text,
+	const std::string & prompt,
+	const ofxGgmlInferenceSettings & settings) {
+	std::string cleaned =
+		ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(text, prompt);
+	if (cleaned.empty() && !trim(text).empty()) {
+		cleaned = ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(text);
+	}
+	if (cleaned.empty()) {
+		return {};
+	}
+	return settings.stopAtNaturalBoundary
+		? trimToNaturalBoundary(cleaned)
+		: trim(cleaned);
+}
+
+static std::string mergeContinuationText(
+	const std::string & baseText,
+	const std::string & continuationText) {
+	const std::string trimmedBase = trim(baseText);
+	const std::string trimmedContinuation = trim(continuationText);
+	if (trimmedBase.empty()) return trimmedContinuation;
+	if (trimmedContinuation.empty()) return trimmedBase;
+	if (trimmedBase == trimmedContinuation) {
+		return trimmedBase;
+	}
+
+	size_t overlap = 0;
+	const size_t maxOverlap = std::min(trimmedBase.size(), trimmedContinuation.size());
+	for (size_t len = maxOverlap; len > 0; --len) {
+		if (trimmedBase.compare(trimmedBase.size() - len, len, trimmedContinuation, 0, len) == 0) {
+			overlap = len;
+			break;
+		}
+	}
+
+	std::string merged = trimmedBase;
+	const std::string suffix = trimmedContinuation.substr(overlap);
+	if (suffix.empty()) {
+		return merged;
+	}
+	if (!merged.empty()) {
+		const char last = merged.back();
+		const char first = suffix.front();
+		const bool lastNeedsSeparator =
+			!std::isspace(static_cast<unsigned char>(last)) &&
+			first != '\n' &&
+			first != '.' &&
+			first != ',' &&
+			first != ';' &&
+			first != ':' &&
+			first != ')' &&
+			first != ']' &&
+			first != '}' &&
+			first != '!' &&
+			first != '?';
+		if (lastNeedsSeparator) {
+			merged.push_back('\n');
+		}
+	}
+	merged += suffix;
+	return merged;
 }
 
 static bool isValidFilePath(const std::string & path) {
@@ -744,14 +840,13 @@ bool ofxGgmlInference::isLikelyCutoffOutput(
 	const char last = trimmedText.back();
 	if (codeLike) {
 		if (last == '\n' || last == '}' || last == ')' ||
-			last == ']' || last == ';') {
+			last == ']' || last == ';' || last == '`') {
 			return false;
 		}
 		return trimmedText.size() > 80;
 	}
 
-	if (last == '.' || last == '!' || last == '?' ||
-		last == '"' || last == '\'') {
+	if (endsWithWrappedSentencePunctuation(trimmedText)) {
 		return false;
 	}
 	return trimmedText.size() > 80;
@@ -761,7 +856,8 @@ std::string ofxGgmlInference::buildCutoffContinuationRequest(
 	const std::string & tailText) {
 	return
 		"Continue exactly from where the previous answer stopped. "
-		"Do not restart. Finish the incomplete thought/code naturally.\n\n"
+		"Do not restart or repeat earlier lines. Return only the missing continuation "
+		"and finish the incomplete thought/code naturally.\n\n"
 		"Tail of previous output:\n" + tailText;
 }
 
@@ -817,13 +913,22 @@ std::function<bool(const std::string&)> onChunk) const {
 			payload["top_p"] = std::clamp(settings.topP, 0.0f, 1.0f);
 			payload["stream"] = requestStreaming;
 			if (settings.topK > 0) {
-				payload["top_k"] = settings.topK;
+				payload["top_k"] = std::clamp(settings.topK, 1, 100);
 			}
 			if (settings.minP > 0.0f) {
-				payload["min_p"] = settings.minP;
+				payload["min_p"] = std::clamp(settings.minP, 0.0f, 1.0f);
+			}
+			if (settings.presencePenalty != 0.0f) {
+				payload["presence_penalty"] =
+					std::clamp(settings.presencePenalty, -2.0f, 2.0f);
+			}
+			if (settings.frequencyPenalty != 0.0f) {
+				payload["frequency_penalty"] =
+					std::clamp(settings.frequencyPenalty, -2.0f, 2.0f);
 			}
 			if (settings.repeatPenalty > 0.0f) {
-				payload["repeat_penalty"] = settings.repeatPenalty;
+				payload["repeat_penalty"] =
+					std::clamp(settings.repeatPenalty, 1.0f, 3.0f);
 			}
 			if (settings.seed >= 0) {
 				payload["seed"] = settings.seed;
@@ -865,9 +970,11 @@ std::function<bool(const std::string&)> onChunk) const {
 					return serverResult;
 				}
 
-			serverResult.text = trim(
-				ofxGgmlInferenceServerInternals::extractTextFromOpenAiResponse(
-					responseText));
+				serverResult.text = finalizeGeneratedResponseText(
+					ofxGgmlInferenceServerInternals::extractTextFromOpenAiResponse(
+						responseText),
+					sanitizedPrompt,
+					settings);
 				serverResult.success = !serverResult.text.empty();
 				if (!serverResult.success) {
 					serverResult.error = "server-backed inference returned empty output";
@@ -964,7 +1071,10 @@ std::function<bool(const std::string&)> onChunk) const {
 				}
 				if (cancelled) {
 					result.error = "server-backed inference cancelled";
-					result.text = trim(accumulated);
+					result.text = finalizeGeneratedResponseText(
+						accumulated,
+						sanitizedPrompt,
+						settings);
 					return result;
 				}
 				if (exitCode != 0 && accumulated.empty()) {
@@ -972,7 +1082,10 @@ std::function<bool(const std::string&)> onChunk) const {
 						ofToString(exitCode) + "): " + trim(output);
 					return result;
 				}
-				result.text = trim(accumulated.empty() ? output : accumulated);
+				result.text = finalizeGeneratedResponseText(
+					accumulated.empty() ? output : accumulated,
+					sanitizedPrompt,
+					settings);
 				recordStreamingMetrics(
 					serverModel,
 					"server.curl",
@@ -1179,7 +1292,10 @@ std::function<bool(const std::string&)> onChunk) const {
 							closeHandle(connect);
 							closeHandle(session);
 							result.error = "server-backed inference cancelled";
-							result.text = trim(accumulated);
+							result.text = finalizeGeneratedResponseText(
+								accumulated,
+								sanitizedPrompt,
+								settings);
 							cancelled = true;
 							recordStreamingMetrics(
 								serverModel,
@@ -1194,7 +1310,10 @@ std::function<bool(const std::string&)> onChunk) const {
 				closeHandle(request);
 				closeHandle(connect);
 				closeHandle(session);
-				result.text = trim(accumulated);
+				result.text = finalizeGeneratedResponseText(
+					accumulated,
+					sanitizedPrompt,
+					settings);
 				recordStreamingMetrics(
 					serverModel,
 					"server.winhttp",
@@ -1219,6 +1338,31 @@ std::function<bool(const std::string&)> onChunk) const {
 			result.outputLikelyCutoff = isLikelyCutoffOutput(
 				result.text,
 				looksLikeCodeOutput(result.text));
+			if (settings.autoContinueCutoff &&
+				result.outputLikelyCutoff &&
+				!result.text.empty()) {
+				ofxGgmlInferenceSettings continuationSettings = settings;
+				continuationSettings.autoContinueCutoff = false;
+				const size_t tailChars = std::min<size_t>(result.text.size(), 600);
+				const std::string continuationRequest = buildCutoffContinuationRequest(
+					result.text.substr(result.text.size() - tailChars));
+				ofxGgmlInferenceResult continuation = generate(
+					modelPath,
+					continuationRequest,
+					continuationSettings,
+					nullptr);
+				if (continuation.success && !continuation.text.empty()) {
+					result.text = mergeContinuationText(result.text, continuation.text);
+					result.text = finalizeGeneratedResponseText(
+						result.text,
+						sanitizedPrompt,
+						settings);
+					result.outputLikelyCutoff = isLikelyCutoffOutput(
+						result.text,
+						looksLikeCodeOutput(result.text));
+					result.continuationCount = continuation.continuationCount + 1;
+				}
+			}
 			result.elapsedMs = std::chrono::duration<float, std::milli>(
 				std::chrono::steady_clock::now() - t0).count();
 			return result;
@@ -1416,29 +1560,27 @@ std::function<bool(const std::string&)> onChunk) const {
 		if (!started) {
 			return false;
 		}
-		passCleaned =
-			ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(
-				passRaw,
-				sanitizedPrompt);
-		if (passCleaned.empty() && !trim(passRaw).empty()) {
-			passCleaned =
-				ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(passRaw);
-		}
+		passCleaned = finalizeGeneratedResponseText(
+			passRaw,
+			sanitizedPrompt,
+			settings);
 		if (passExitCode != 0 && passCleaned.empty()) {
 			std::string diagRaw;
 			int diagExitCode = -1;
 			if (runCommandCapture(args, diagRaw, diagExitCode, true)) {
-				const std::string diagCleaned =
-					ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(
-						diagRaw,
-						sanitizedPrompt);
+				const std::string diagCleaned = finalizeGeneratedResponseText(
+					diagRaw,
+					sanitizedPrompt,
+					settings);
 				if (!diagCleaned.empty()) {
 					passCleaned = diagCleaned;
 				} else {
 					passRaw = ofxGgmlInferenceTextCleanup::sanitizeStructuredText(diagRaw);
 					if (passCleaned.empty() && !trim(passRaw).empty()) {
-						passCleaned =
-							ofxGgmlInferenceTextCleanup::sanitizeGeneratedText(passRaw);
+						passCleaned = finalizeGeneratedResponseText(
+							passRaw,
+							sanitizedPrompt,
+							settings);
 					}
 				}
 			}
@@ -1518,9 +1660,7 @@ std::function<bool(const std::string&)> onChunk) const {
 	}
 
 	result.success = true;
-	result.text = settings.stopAtNaturalBoundary
-		? trimToNaturalBoundary(cleaned)
-		: trim(cleaned);
+	result.text = cleaned;
 	result.outputLikelyCutoff = isLikelyCutoffOutput(
 		result.text,
 		looksLikeCodeOutput(result.text));
@@ -1547,10 +1687,14 @@ std::function<bool(const std::string&)> onChunk) const {
 			continuationSettings,
 			nullptr);
 		if (continuation.success && !continuation.text.empty()) {
-			result.text += "\n" + continuation.text;
+			result.text = mergeContinuationText(result.text, continuation.text);
+			result.text = finalizeGeneratedResponseText(
+				result.text,
+				sanitizedPrompt,
+				settings);
 			result.outputLikelyCutoff = isLikelyCutoffOutput(
-				continuation.text,
-				looksLikeCodeOutput(continuation.text));
+				result.text,
+				looksLikeCodeOutput(result.text));
 			result.continuationCount = continuation.continuationCount + 1;
 		}
 	}

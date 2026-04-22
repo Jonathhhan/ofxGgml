@@ -17,16 +17,16 @@ class ofxGgmlScriptSource;
 
 struct ofxGgmlInferenceSettings {
 	int maxTokens = 256;
-	float temperature = 0.7f;
-	float topP = 0.9f;
-	float minP = 0.05f;
+	float temperature = 0.8f;
+	float topP = 0.95f;
+	float minP = 0.03f;
 	int topK = 40;
 	int mirostat = 0;
 	float mirostatTau = 5.0f;
 	float mirostatEta = 0.1f;
 	float presencePenalty = 0.0f;
 	float frequencyPenalty = 0.0f;
-	float repeatPenalty = 1.1f;
+	float repeatPenalty = 1.05f;
 	int contextSize = 2048;
 	int batchSize = 512;
 	int ubatchSize = 512;

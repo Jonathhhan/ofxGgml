@@ -16,11 +16,17 @@ struct TokenLiteral {
 
 static constexpr TokenLiteral kRoleLabels[] = {
 	{ "user", 4 },
+	{ "user:", 5 },
 	{ "assistant", 9 },
+	{ "assistant:", 10 },
 	{ "system", 6 },
+	{ "system:", 7 },
 	{ "User", 4 },
+	{ "User:", 5 },
 	{ "Assistant", 9 },
+	{ "Assistant:", 10 },
 	{ "System", 6 },
+	{ "System:", 7 },
 	{ "A:", 2 },
 	{ "> ", 2 },
 };
@@ -32,6 +38,9 @@ static constexpr TokenLiteral kTrailingArtifacts[] = {
 	{ "Interrupted by user", 19 },
 	{ "[end of text]", 13 },
 	{ "<|endoftext|>", 13 },
+	{ "<|end_of_text|>", 15 },
+	{ "<|eot_id|>", 10 },
+	{ "[DONE]", 6 },
 };
 
 static constexpr TokenLiteral kInteractivePreambleMarkers[] = {
@@ -233,6 +242,20 @@ std::string stripLeadingRoleLabels(const std::string & text) {
 		for (const auto & label : kRoleLabels) {
 			if (out.size() >= label.len &&
 				out.compare(0, label.len, label.text, label.len) == 0) {
+				if (out.size() > label.len) {
+					const char next = out[label.len];
+					const bool hasBoundary =
+						std::isspace(static_cast<unsigned char>(next)) ||
+						next == ':' ||
+						next == '-' ||
+						next == '>' ||
+						next == '|';
+					if (!hasBoundary &&
+						label.text[label.len - 1] != ':' &&
+						label.text[label.len - 1] != ' ') {
+						continue;
+					}
+				}
 				out = trimCopy(out.substr(label.len));
 				changed = true;
 				break;
@@ -240,6 +263,58 @@ std::string stripLeadingRoleLabels(const std::string & text) {
 		}
 	}
 	return out;
+}
+
+bool isStandaloneRoleLabel(std::string_view line) {
+	auto trimViewCopy = [](std::string_view in) {
+		while (!in.empty() && std::isspace(static_cast<unsigned char>(in.front()))) {
+			in.remove_prefix(1);
+		}
+		while (!in.empty() && std::isspace(static_cast<unsigned char>(in.back()))) {
+			in.remove_suffix(1);
+		}
+		return in;
+	};
+
+	line = trimViewCopy(line);
+	while (!line.empty() && line.front() == '#') {
+		line.remove_prefix(1);
+		line = trimViewCopy(line);
+	}
+	line = trimViewCopy(line);
+	for (const auto & label : kRoleLabels) {
+		if (line.size() == label.len &&
+			line.compare(0, label.len, label.text, label.len) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+std::string stripLeadingRoleHeaderLines(const std::string & text) {
+	size_t pos = 0;
+	while (pos <= text.size()) {
+		const size_t end = text.find('\n', pos);
+		const std::string_view line = (end == std::string::npos)
+			? std::string_view(text).substr(pos)
+			: std::string_view(text).substr(pos, end - pos);
+		const std::string trimmed = trimCopy(std::string(line));
+		if (trimmed.empty()) {
+			if (end == std::string::npos) {
+				return {};
+			}
+			pos = end + 1;
+			continue;
+		}
+		if (!isStandaloneRoleLabel(trimmed)) {
+			break;
+		}
+		if (end == std::string::npos) {
+			return {};
+		}
+		pos = end + 1;
+	}
+	return trimCopy(text.substr(pos));
 }
 
 std::string stripTrailingArtifacts(const std::string & text) {
@@ -276,9 +351,13 @@ std::string cleanCompletionOutput(const std::string & raw, const std::string & p
 	cleaned = stripInteractivePreamble(cleaned);
 	cleaned = stripLiteralAnsiMarkers(cleaned);
 	cleaned = stripChatTemplateMarkers(cleaned);
+	cleaned = stripLeadingRoleHeaderLines(cleaned);
 	cleaned = stripPromptEcho(cleaned, prompt);
 	cleaned = stripLeadingRoleLabels(cleaned);
+	cleaned = stripPromptEcho(cleaned, prompt);
 	cleaned = stripTrailingArtifacts(cleaned);
+	cleaned = stripLeadingRoleHeaderLines(cleaned);
+	cleaned = stripLeadingRoleLabels(cleaned);
 	return trimCopy(cleaned);
 }
 
@@ -288,9 +367,12 @@ std::string cleanCompletionOutputConservative(const std::string & raw) {
 	cleaned = stripInteractivePreamble(cleaned);
 	cleaned = stripLiteralAnsiMarkers(cleaned);
 	cleaned = stripChatTemplateMarkers(cleaned);
+	cleaned = stripLeadingRoleHeaderLines(cleaned);
 	cleaned = stripLeadingRoleLabels(cleaned);
 	cleaned = stripTrailingArtifacts(cleaned);
 	cleaned = stripInlineArtifacts(cleaned);
+	cleaned = stripLeadingRoleHeaderLines(cleaned);
+	cleaned = stripLeadingRoleLabels(cleaned);
 	return trimCopy(cleaned);
 }
 
