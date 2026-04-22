@@ -1,5 +1,10 @@
 build/
 libs/ggml/build/
+libs/ggml/.download/
+libs/ggml/include/*
+!libs/ggml/include/.gitkeep
+libs/ggml/lib/*
+!libs/ggml/lib/.gitkeep
 compile_commands.json
 **/compile_commands.json
 
@@ -42,4 +47,3 @@ ofxGgmlNeuralExample/*.sln
 ofxGgmlNeuralExample/*.vcxproj
 ofxGgmlNeuralExample/*.vcxproj.filters
 ofxGgmlNeuralExample/icon.rc
-

@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <optional>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -43,6 +44,22 @@ std::string stripTrailingDot(std::string value) {
 		value.pop_back();
 	}
 	return value;
+}
+
+std::string stripTrailingPunctuation(std::string value) {
+	static const std::unordered_set<char> allowedTrailingDelimiters = {
+		')', ']', '"', '\''
+	};
+	while (!value.empty()) {
+		const unsigned char last = static_cast<unsigned char>(value.back());
+		if (std::isalnum(last) ||
+			allowedTrailingDelimiters.find(value.back()) !=
+				allowedTrailingDelimiters.end()) {
+			break;
+		}
+		value.pop_back();
+	}
+	return trimCopy(value);
 }
 
 std::string urlEncodeComponent(const std::string & value) {
@@ -226,6 +243,72 @@ std::string appendHostToLabel(
 float elapsedMsSince(const std::chrono::steady_clock::time_point & start) {
 	return std::chrono::duration<float, std::milli>(
 		std::chrono::steady_clock::now() - start).count();
+}
+
+bool isWordBoundary(const std::string & text, size_t index) {
+	if (index >= text.size()) {
+		return true;
+	}
+	const unsigned char ch = static_cast<unsigned char>(text[index]);
+	return !std::isalnum(ch) && ch != '_';
+}
+
+bool hasWordBoundaries(
+	const std::string & text,
+	size_t start,
+	size_t length) {
+	const bool leftBoundary = start == 0 || isWordBoundary(text, start - 1);
+	const bool rightBoundary = isWordBoundary(text, start + length);
+	return leftBoundary && rightBoundary;
+}
+
+std::string stripCitationLeadIn(std::string value) {
+	static const std::unordered_set<std::string> fillerWords = {
+		"for",
+		"about",
+		"on",
+		"regarding",
+		"re",
+		"related",
+		"to",
+		"the",
+		"some",
+		"any",
+		"relevant",
+		"supporting",
+		"web",
+		"citation",
+		"citations",
+		"cite",
+		"source",
+		"sources",
+		"quote",
+		"quotes",
+		"evidence"
+	};
+	value = trimCopy(value);
+	size_t start = 0;
+	while (start < value.size()) {
+		while (start < value.size() &&
+			!std::isalnum(static_cast<unsigned char>(value[start])) &&
+			value[start] != '_') {
+			++start;
+		}
+		size_t end = start;
+		while (end < value.size() &&
+			(std::isalnum(static_cast<unsigned char>(value[end])) || value[end] == '_')) {
+			++end;
+		}
+		if (end == start) {
+			break;
+		}
+		const std::string word = toLowerCopy(value.substr(start, end - start));
+		if (fillerWords.find(word) == fillerWords.end()) {
+			break;
+		}
+		start = end;
+	}
+	return stripTrailingPunctuation(trimCopy(value.substr(start)));
 }
 
 std::string buildCitationPrompt(
@@ -1000,6 +1083,58 @@ const ofxGgmlWebCrawler & ofxGgmlCitationSearch::getWebCrawler() const {
 	return m_webCrawler;
 }
 
+ofxGgmlCitationSearchInputMatch ofxGgmlCitationSearch::detectInputIntent(
+	const std::string & userInput,
+	const ofxGgmlCitationSearchInputSettings & settings) {
+	ofxGgmlCitationSearchInputMatch match;
+	const std::string trimmedInput = trimCopy(userInput);
+	if (trimmedInput.empty()) {
+		return match;
+	}
+
+	const std::string lowered = toLowerCopy(trimmedInput);
+	size_t bestPos = std::string::npos;
+	size_t bestLength = 0;
+	std::string bestTrigger;
+	for (const auto & rawTrigger : settings.triggerWords) {
+		const std::string trigger = toLowerCopy(trimCopy(rawTrigger));
+		if (trigger.empty()) {
+			continue;
+		}
+		size_t pos = lowered.find(trigger);
+		while (pos != std::string::npos) {
+			if (hasWordBoundaries(lowered, pos, trigger.size())) {
+				if (bestPos == std::string::npos || pos < bestPos ||
+					(pos == bestPos && trigger.size() > bestLength)) {
+					bestPos = pos;
+					bestLength = trigger.size();
+					bestTrigger = trigger;
+				}
+				break;
+			}
+			pos = lowered.find(trigger, pos + 1);
+		}
+	}
+
+	if (bestPos == std::string::npos) {
+		return match;
+	}
+
+	const size_t topicStart = bestPos + bestLength;
+	const std::string rawTopic = topicStart < trimmedInput.size()
+		? trimmedInput.substr(topicStart)
+		: std::string();
+	const std::string topic = stripCitationLeadIn(rawTopic);
+	if (topic.size() < settings.minTopicLength) {
+		return match;
+	}
+
+	match.matched = true;
+	match.triggerWord = bestTrigger;
+	match.topic = topic;
+	return match;
+}
+
 ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 	const ofxGgmlCitationSearchRequest & request) const {
 	using Clock = std::chrono::steady_clock;
@@ -1007,6 +1142,7 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 
 	ofxGgmlCitationSearchResult result;
 	result.backendName = request.useCrawler ? "Mojo+Inference" : "Inference";
+	result.requestedTopic = trimCopy(request.topic);
 
 	const std::string topic = trimCopy(request.topic);
 	if (topic.empty()) {
@@ -1170,5 +1306,27 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 
 	result.success = true;
 	result.elapsedMs = elapsedMsSince(start);
+	return result;
+}
+
+ofxGgmlCitationSearchResult ofxGgmlCitationSearch::searchFromInput(
+	const std::string & userInput,
+	const ofxGgmlCitationSearchRequest & baseRequest,
+	const ofxGgmlCitationSearchInputSettings & inputSettings) const {
+	const auto match = detectInputIntent(userInput, inputSettings);
+	if (!match.matched) {
+		ofxGgmlCitationSearchResult result;
+		result.error =
+			"Input did not contain a recognized citation-search trigger or topic.";
+		return result;
+	}
+
+	ofxGgmlCitationSearchRequest request = baseRequest;
+	request.topic = match.topic;
+	ofxGgmlCitationSearchResult result = search(request);
+	result.inputTriggerWord = match.triggerWord;
+	if (result.requestedTopic.empty()) {
+		result.requestedTopic = match.topic;
+	}
 	return result;
 }

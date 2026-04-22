@@ -368,6 +368,25 @@ TEST_CASE("Easy API exposes citation and video edit helpers", "[easy_api]") {
 			citationResult.error.find("Crawler did not return any usable markdown documents.") != std::string::npos;
 		REQUIRE(hasExpectedCitationError);
 	}
+
+	const auto interceptedCitationResult = easy.findCitationsFromInput(
+		"find sources about Berlin weather",
+		{},
+		"https://example.com/weather",
+		3);
+	if (interceptedCitationResult.success) {
+		REQUIRE(interceptedCitationResult.requestedTopic == "Berlin weather");
+		REQUIRE(interceptedCitationResult.inputTriggerWord == "find");
+		REQUIRE(interceptedCitationResult.citations.size() == 1);
+		REQUIRE(interceptedCitationResult.citations.front().quote ==
+			"Icy weather halted flights.");
+	} else {
+		const bool hasExpectedCitationError =
+			interceptedCitationResult.error.find("non-JSON output") != std::string::npos ||
+			interceptedCitationResult.error.find("Inference failed while extracting citations.") != std::string::npos ||
+			interceptedCitationResult.error.find("Crawler did not return any usable markdown documents.") != std::string::npos;
+		REQUIRE(hasExpectedCitationError);
+	}
 }
 
 TEST_CASE("Easy API exposes the coding agent wrapper", "[easy_api][coding_agent]") {

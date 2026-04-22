@@ -283,6 +283,12 @@ auto citations = ai.findCitations(
     "https://example.com/weather",
     4);
 
+auto interceptedCitations = ai.findCitationsFromInput(
+    "find sources about Berlin airport winter disruption",
+    {},
+    "https://example.com/weather",
+    4);
+
 auto montage = ai.planMontageFromSrt(
     "data/subtitles/scene.srt",
     "Build a concise recap montage.");

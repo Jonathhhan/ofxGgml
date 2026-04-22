@@ -35,3 +35,19 @@ TEST_CASE("Citation cleaner preserves content around thematic breaks", "[citatio
 		"Second paragraph that should still be available for citations.") !=
 		std::string::npos);
 }
+
+TEST_CASE("Citation search detects intercepted search-style input", "[citation_search]") {
+	const auto match = ofxGgmlCitationSearch::detectInputIntent(
+		"find sources about Berlin weather delays");
+	REQUIRE(match.matched);
+	REQUIRE(match.triggerWord == "find");
+	REQUIRE(match.topic == "Berlin weather delays");
+
+	const auto quoteMatch = ofxGgmlCitationSearch::detectInputIntent(
+		"quote evidence on icy airport disruption?");
+	REQUIRE(quoteMatch.matched);
+	REQUIRE(quoteMatch.topic == "icy airport disruption");
+
+	const auto noMatch = ofxGgmlCitationSearch::detectInputIntent("hello there");
+	REQUIRE_FALSE(noMatch.matched);
+}

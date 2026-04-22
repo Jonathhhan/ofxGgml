@@ -585,6 +585,24 @@ ofxGgmlCitationSearchResult ofxGgmlEasy::findCitations(
 	return m_citationSearch.search(request);
 }
 
+ofxGgmlCitationSearchResult ofxGgmlEasy::findCitationsFromInput(
+	const std::string & userInput,
+	const std::vector<std::string> & sourceUrls,
+	const std::string & crawlerUrl,
+	size_t maxCitations,
+	const ofxGgmlCitationSearchInputSettings & inputSettings) const {
+	ofxGgmlCitationSearchRequest request;
+	request.modelPath = m_textConfig.modelPath;
+	request.maxCitations = maxCitations;
+	request.sourceUrls = sourceUrls;
+	request.inferenceSettings = makeTextSettings();
+	if (!crawlerUrl.empty()) {
+		request.useCrawler = true;
+		request.crawlerRequest = makeCrawlerRequest(crawlerUrl);
+	}
+	return m_citationSearch.searchFromInput(userInput, request, inputSettings);
+}
+
 ofxGgmlVideoEssayResult ofxGgmlEasy::planVideoEssay(
 	const ofxGgmlVideoEssayRequest & request) const {
 	ofxGgmlVideoEssayRequest effectiveRequest = request;

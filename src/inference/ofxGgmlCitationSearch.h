@@ -25,10 +25,36 @@ struct ofxGgmlCitationSearchRequest {
 	ofxGgmlPromptSourceSettings sourceSettings;
 };
 
+struct ofxGgmlCitationSearchInputSettings {
+	std::vector<std::string> triggerWords = {
+		"search",
+		"find",
+		"query",
+		"google",
+		"citation",
+		"citations",
+		"cite",
+		"source",
+		"sources",
+		"quote",
+		"quotes",
+		"evidence"
+	};
+	size_t minTopicLength = 3;
+};
+
+struct ofxGgmlCitationSearchInputMatch {
+	bool matched = false;
+	std::string triggerWord;
+	std::string topic;
+};
+
 struct ofxGgmlCitationSearchResult {
 	bool success = false;
 	float elapsedMs = 0.0f;
 	std::string backendName;
+	std::string requestedTopic;
+	std::string inputTriggerWord;
 	std::string rawResponse;
 	std::string summary;
 	std::string error;
@@ -52,8 +78,16 @@ public:
 	ofxGgmlWebCrawler & getWebCrawler();
 	const ofxGgmlWebCrawler & getWebCrawler() const;
 
+	static ofxGgmlCitationSearchInputMatch detectInputIntent(
+		const std::string & userInput,
+		const ofxGgmlCitationSearchInputSettings & settings = {});
+
 	ofxGgmlCitationSearchResult search(
 		const ofxGgmlCitationSearchRequest & request) const;
+	ofxGgmlCitationSearchResult searchFromInput(
+		const std::string & userInput,
+		const ofxGgmlCitationSearchRequest & baseRequest,
+		const ofxGgmlCitationSearchInputSettings & inputSettings = {}) const;
 
 private:
 	ofxGgmlInference m_inference;
