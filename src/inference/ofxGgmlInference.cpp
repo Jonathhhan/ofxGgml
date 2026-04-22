@@ -131,7 +131,9 @@ static std::string trimToNaturalBoundary(const std::string & text) {
 	}
 
 	const size_t lineBreak = out.find_last_of('\n');
-	if (lineBreak != std::string::npos && lineBreak > out.size() / 2) {
+	if (out.size() > 80 &&
+		lineBreak != std::string::npos &&
+		lineBreak >= out.size() / 2) {
 		const std::string candidate = trim(out.substr(0, lineBreak));
 		if (!candidate.empty()) {
 			return candidate;

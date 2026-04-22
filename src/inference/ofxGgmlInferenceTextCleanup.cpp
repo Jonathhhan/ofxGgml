@@ -15,18 +15,18 @@ struct TokenLiteral {
 };
 
 static constexpr TokenLiteral kRoleLabels[] = {
-	{ "user", 4 },
 	{ "user:", 5 },
-	{ "assistant", 9 },
+	{ "user", 4 },
 	{ "assistant:", 10 },
-	{ "system", 6 },
+	{ "assistant", 9 },
 	{ "system:", 7 },
-	{ "User", 4 },
+	{ "system", 6 },
 	{ "User:", 5 },
-	{ "Assistant", 9 },
+	{ "User", 4 },
 	{ "Assistant:", 10 },
-	{ "System", 6 },
+	{ "Assistant", 9 },
 	{ "System:", 7 },
+	{ "System", 6 },
 	{ "A:", 2 },
 	{ "> ", 2 },
 };
