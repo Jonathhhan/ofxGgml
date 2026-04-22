@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <sstream>
 
 namespace {
@@ -108,6 +109,73 @@ ofxGgmlConversationRole roleFromString(const std::string & label) {
 	return ofxGgmlConversationRole::User;
 }
 
+const std::string & promptPrefixForRole(
+	ofxGgmlConversationRole role,
+	const ofxGgmlConversationPromptSettings & settings) {
+	switch (role) {
+	case ofxGgmlConversationRole::System:
+		return settings.systemPrefix;
+	case ofxGgmlConversationRole::Assistant:
+		return settings.assistantPrefix;
+	default:
+		return settings.userPrefix;
+	}
+}
+
+void appendPromptTurn(
+	std::ostringstream & out,
+	const ofxGgmlConversationTurn & turn,
+	const ofxGgmlConversationPromptSettings & settings,
+	const std::string & turnSeparator) {
+	out << promptPrefixForRole(turn.role, settings)
+		<< turn.content
+		<< turnSeparator;
+}
+
+size_t findFirstUserTurnIndex(
+	const std::vector<ofxGgmlConversationTurn> & turns,
+	bool preserveFirstUserTurn) {
+	if (!preserveFirstUserTurn) {
+		return turns.size();
+	}
+
+	for (size_t i = 0; i < turns.size(); ++i) {
+		if (turns[i].role == ofxGgmlConversationRole::User) {
+			return i;
+		}
+	}
+	return turns.size();
+}
+
+bool isPreservedTurn(
+	const ofxGgmlConversationTurn & turn,
+	size_t index,
+	size_t firstUserIndex,
+	const ofxGgmlConversationPruneSettings & settings) {
+	if (settings.preserveSystemTurns &&
+		turn.role == ofxGgmlConversationRole::System) {
+		return true;
+	}
+	return index == firstUserIndex;
+}
+
+bool extractConversationTurn(
+	const std::string & json,
+	size_t & searchPos,
+	ofxGgmlConversationTurn * turnOut) {
+	std::string role;
+	std::string content;
+	const bool hasRole = extractJsonString(json, "role", searchPos, &role);
+	const bool hasContent = extractJsonString(json, "content", searchPos, &content);
+	if (!hasRole || !hasContent || role.empty()) {
+		return false;
+	}
+	if (turnOut != nullptr) {
+		*turnOut = {roleFromString(role), content};
+	}
+	return true;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -149,16 +217,9 @@ void ofxGgmlConversationManager::pruneOldTurns() {
 		return;
 	}
 
-	// Find the index of the first user turn (to optionally preserve it).
-	size_t firstUserIndex = m_turns.size(); // sentinel: none found
-	if (m_pruneSettings.preserveFirstUserTurn) {
-		for (size_t i = 0; i < m_turns.size(); ++i) {
-			if (m_turns[i].role == ofxGgmlConversationRole::User) {
-				firstUserIndex = i;
-				break;
-			}
-		}
-	}
+	const size_t firstUserIndex = findFirstUserTurnIndex(
+		m_turns,
+		m_pruneSettings.preserveFirstUserTurn);
 
 	// Build a new turn list, dropping oldest non-preserved turns first.
 	size_t toRemove = m_turns.size() - m_pruneSettings.targetTurns;
@@ -168,13 +229,12 @@ void ofxGgmlConversationManager::pruneOldTurns() {
 	size_t removed = 0;
 	for (size_t i = 0; i < m_turns.size(); ++i) {
 		const auto & turn = m_turns[i];
-		const bool isSystem =
-			turn.role == ofxGgmlConversationRole::System;
-		const bool isFirstUser = (i == firstUserIndex);
-
 		if (removed < toRemove &&
-			!(m_pruneSettings.preserveSystemTurns && isSystem) &&
-			!isFirstUser) {
+			!isPreservedTurn(
+				turn,
+				i,
+				firstUserIndex,
+				m_pruneSettings)) {
 			++removed;
 		} else {
 			kept.push_back(turn);
@@ -200,18 +260,7 @@ std::string ofxGgmlConversationManager::buildPrompt(
 	const ofxGgmlConversationPromptSettings & settings) const {
 	std::ostringstream out;
 	for (const auto & turn : m_turns) {
-		switch (turn.role) {
-		case ofxGgmlConversationRole::System:
-			out << settings.systemPrefix;
-			break;
-		case ofxGgmlConversationRole::User:
-			out << settings.userPrefix;
-			break;
-		case ofxGgmlConversationRole::Assistant:
-			out << settings.assistantPrefix;
-			break;
-		}
-		out << turn.content << settings.turnSeparator;
+		appendPromptTurn(out, turn, settings, settings.turnSeparator);
 	}
 	if (settings.addFinalPromptPrefix) {
 		out << settings.assistantPrefix;
@@ -247,12 +296,9 @@ bool ofxGgmlConversationManager::fromJson(
 		if (objStart == std::string::npos) break;
 		pos = objStart + 1;
 
-		std::string role;
-		std::string content;
-		const bool hasRole = extractJsonString(text, "role", pos, &role);
-		const bool hasContent = extractJsonString(text, "content", pos, &content);
-		if (hasRole && hasContent && !role.empty()) {
-			target.m_turns.push_back({roleFromString(role), content});
+		ofxGgmlConversationTurn turn;
+		if (extractConversationTurn(text, pos, &turn)) {
+			target.m_turns.push_back(std::move(turn));
 		}
 	}
 	return true;
@@ -278,18 +324,7 @@ ofxGgmlConversationManager::summarizeHistory(
 
 	const ofxGgmlConversationPromptSettings promptSettings;
 	for (const auto & turn : m_turns) {
-		switch (turn.role) {
-		case ofxGgmlConversationRole::System:
-			prompt << promptSettings.systemPrefix;
-			break;
-		case ofxGgmlConversationRole::User:
-			prompt << promptSettings.userPrefix;
-			break;
-		case ofxGgmlConversationRole::Assistant:
-			prompt << promptSettings.assistantPrefix;
-			break;
-		}
-		prompt << turn.content << "\n";
+		appendPromptTurn(prompt, turn, promptSettings, "\n");
 	}
 	prompt << "\nSummary:";
 
