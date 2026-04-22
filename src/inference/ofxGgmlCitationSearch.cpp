@@ -755,7 +755,7 @@ std::vector<std::string> normalizeSourceUrls(
 
 std::vector<ofxGgmlPromptSource> mergeUniqueSources(
 	const std::vector<ofxGgmlPromptSource> & sources,
-	size_t maxSources = std::numeric_limits<size_t>::max()) {
+	size_t maxSources) {
 	std::vector<ofxGgmlPromptSource> merged;
 	std::unordered_set<std::string> seen;
 	for (const auto & source : sources) {
@@ -1129,7 +1129,7 @@ std::vector<ofxGgmlPromptSource> selectRetrievedSources(
 	const ofxGgmlCitationSearchResult::QueryRewriteResult & queryRewrite,
 	const ofxGgmlInferenceSettings & inferenceSettings,
 	const std::vector<ofxGgmlPromptSource> & sources,
-	ofxGgmlRAGRetrievalResult * retrievalOut = nullptr) {
+	ofxGgmlRAGRetrievalResult * retrievalOut) {
 	if (sources.size() <= 3) {
 		if (retrievalOut) {
 			retrievalOut->success = true;

@@ -303,7 +303,6 @@ ofxGgmlRAGRetrievalResult ofxGgmlRAGPipeline::retrieve(
 
 	const size_t chunkSize = std::max(size_t(64), query.chunkSize);
 	const size_t overlap = std::min(query.chunkOverlap, chunkSize / 2);
-	const size_t rerankTopN = std::max(query.topK, query.rerankTopN);
 
 	std::vector<std::string> candidateQueries = {query.query};
 	if (query.allowQueryRefinement) {
@@ -327,6 +326,8 @@ ofxGgmlRAGRetrievalResult ofxGgmlRAGPipeline::retrieve(
 			std::make_move_iterator(docChunks.begin()),
 			std::make_move_iterator(docChunks.end()));
 	}
+	const size_t rerankTopN =
+		query.rerankTopN > query.topK ? query.rerankTopN : allChunks.size();
 
 	std::vector<float> semanticScores;
 	if (query.enableSemanticRanking) {
@@ -369,7 +370,7 @@ ofxGgmlRAGRetrievalResult ofxGgmlRAGPipeline::retrieve(
 			return a.score > b.score;
 		});
 
-	if (allChunks.size() > rerankTopN) {
+	if (rerankTopN < allChunks.size()) {
 		allChunks.resize(rerankTopN);
 	}
 	const size_t k = std::min(query.topK, allChunks.size());
