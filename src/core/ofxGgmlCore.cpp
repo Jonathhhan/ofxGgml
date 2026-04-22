@@ -55,14 +55,16 @@ struct ofxGgml::Impl {
 	ofxGgmlState state = ofxGgmlState::Uninitialized;
 	ofxGgmlSettings settings;
 
-	struct ggml_backend * backend = nullptr;
-	/// When the main backend is CPU, cpuBackend will be null (we reuse backend).
-	/// When the main backend is GPU, cpuBackend will hold a separate CPU backend.
-	struct ggml_backend * cpuBackend = nullptr;
-	struct ggml_backend_sched * sched = nullptr;
+	/// Primary backend guard.
+	GgmlBackendGuard backend;
+	/// Separate CPU backend guard (only used when primary backend is GPU).
+	/// When primary backend is CPU, this remains empty and we reuse backend.
+	GgmlBackendGuard cpuBackend;
+	/// Scheduler guard.
+	GgmlBackendSchedGuard sched;
 
 	/// Backend buffer for uploaded model weights.
-	struct ggml_backend_buffer * modelWeightBuf = nullptr;
+	GgmlBackendBufferGuard modelWeightBuf;
 
 	/// Last graph reserved/allocated for scheduler reuse.
 	uint64_t reservedGraphToken = 0;
@@ -118,7 +120,7 @@ static bool synchronizePendingAsync(ofxGgml::Impl * impl, const char * context) 
 		impl->log(GGML_LOG_LEVEL_WARN,
 			std::string("ofxGgml: synchronizing pending async work before ") + context + "\n");
 	}
-	ggml_backend_sched_synchronize(impl->sched);
+	ggml_backend_sched_synchronize(impl->sched.get());
 	const auto t1 = std::chrono::steady_clock::now();
 	impl->timings.computeTotalMs =
 		std::chrono::duration<float, std::milli>(t1 - impl->asyncStart).count();
@@ -425,7 +427,7 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 		ggml_backend_dev_t namedDev = ggml_backend_dev_by_name(
 			m_impl->settings.preferredBackendName.c_str());
 		if (namedDev) {
-			m_impl->backend = tryInitBackendDev(namedDev);
+			m_impl->backend.reset(tryInitBackendDev(namedDev));
 		}
 		if (!m_impl->backend) {
 			m_impl->log(GGML_LOG_LEVEL_WARN,
@@ -441,7 +443,7 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 		for (const char * prefix : preferredPrefixes) {
 			ggml_backend_dev_t dev = findUsableDeviceByNamePrefix(prefix);
 			if (!dev) continue;
-			m_impl->backend = tryInitBackendDev(dev);
+			m_impl->backend.reset(tryInitBackendDev(dev));
 			if (m_impl->backend) break;
 		}
 
@@ -451,7 +453,7 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 				ggml_backend_dev_t dev = ggml_backend_dev_get(i);
 				if (!dev) continue;
 				if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU) continue;
-				m_impl->backend = tryInitBackendDev(dev);
+				m_impl->backend.reset(tryInitBackendDev(dev));
 			}
 		}
 	}
@@ -461,7 +463,7 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 		ggml_backend_dev_t typeDev = ggml_backend_dev_by_type(
 			static_cast<enum ggml_backend_dev_type>(m_impl->settings.preferredBackend));
 		if (typeDev) {
-			m_impl->backend = tryInitBackendDev(typeDev);
+			m_impl->backend.reset(tryInitBackendDev(typeDev));
 		}
 	}
 
@@ -475,7 +477,8 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 			m_impl->log(GGML_LOG_LEVEL_WARN,
 				"ofxGgml: no CUDA device in registry, trying direct CUDA init\n");
 			guardedGgmlCall([&]() {
-				m_impl->backend = ggml_backend_cuda_init(0);
+				ggml_backend_t b = ggml_backend_cuda_init(0);
+				m_impl->backend.reset(b);
 			}, "direct CUDA backend init");
 		}
 
@@ -485,7 +488,8 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 				m_impl->log(GGML_LOG_LEVEL_WARN,
 					"ofxGgml: no Vulkan device in registry, trying direct Vulkan init\n");
 				guardedGgmlCall([&]() {
-					m_impl->backend = ggml_backend_vk_init(0);
+					ggml_backend_t b = ggml_backend_vk_init(0);
+					m_impl->backend.reset(b);
 				}, "direct Vulkan backend init");
 			}
 		}
@@ -496,8 +500,9 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 		// Explicit CPU init as a fallback - avoids ggml_backend_init_best()
 		// which would attempt GPU init again and could crash.
 		guardedGgmlCall([&]() {
-			m_impl->backend = ggml_backend_init_by_type(
+			ggml_backend_t b = ggml_backend_init_by_type(
 				GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+			m_impl->backend.reset(b);
 		}, "CPU backend init");
 	}
 
@@ -509,48 +514,53 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 	}
 
 	// Ensure we always have a CPU backend for scheduling. When the main backend
-	// is already CPU, reuse it instead of creating a second CPU backend.
-	if (hasPrefixIgnoreCase(ggml_backend_name(m_impl->backend), "CPU")) {
-		m_impl->cpuBackend = m_impl->backend;
+	// is already CPU, we use release() to share ownership - the backend guard
+	// will handle the cleanup, and cpuBackend guard will be empty.
+	if (hasPrefixIgnoreCase(ggml_backend_name(m_impl->backend.get()), "CPU")) {
+		// Both will point to the same backend, but only backend guard owns it.
+		// cpuBackend stays empty (nullptr) to avoid double-free.
+		// We'll use a helper to get the CPU backend pointer.
 	} else {
 		guardedGgmlCall([&]() {
-			m_impl->cpuBackend = ggml_backend_init_by_type(
+			ggml_backend_t cpu = ggml_backend_init_by_type(
 				GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+			m_impl->cpuBackend.reset(cpu);
 		}, "CPU scheduling backend init");
 	}
-	if (!m_impl->cpuBackend) {
+
+	// Get the effective CPU backend pointer (either separate or shared with main backend).
+	ggml_backend_t effectiveCpuBackend = m_impl->cpuBackend.get() ?
+		m_impl->cpuBackend.get() : m_impl->backend.get();
+
+	if (!effectiveCpuBackend) {
 		m_impl->state = ofxGgmlState::Error;
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to initialize CPU backend\n");
-		ggml_backend_free(m_impl->backend);
-		m_impl->backend = nullptr;
+		m_impl->backend.reset();
 		return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
 			"Failed to initialize CPU backend for scheduling.");
 	}
 
 	// Set thread count.
 	if (m_impl->settings.threads > 0) {
-		ggml_backend_cpu_set_n_threads(m_impl->cpuBackend, m_impl->settings.threads);
+		ggml_backend_cpu_set_n_threads(effectiveCpuBackend, m_impl->settings.threads);
 	}
 
 	// Build scheduler with up to 2 backends.
-	ggml_backend_t backends[2] = { m_impl->backend, m_impl->cpuBackend };
-	int nBackends = (m_impl->backend == m_impl->cpuBackend) ? 1 : 2;
+	ggml_backend_t backends[2] = { m_impl->backend.get(), effectiveCpuBackend };
+	int nBackends = (m_impl->backend.get() == effectiveCpuBackend) ? 1 : 2;
 	guardedGgmlCall([&]() {
-		m_impl->sched = ggml_backend_sched_new(
+		ggml_backend_sched_t s = ggml_backend_sched_new(
 			backends, nullptr, nBackends,
 			static_cast<size_t>(m_impl->settings.graphSize), false, true);
+		m_impl->sched.reset(s);
 	}, "scheduler creation");
 
 	if (!m_impl->sched) {
 		m_impl->state = ofxGgmlState::Error;
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to create backend scheduler\n");
-		const bool sameBackend = (m_impl->backend == m_impl->cpuBackend);
-		ggml_backend_free(m_impl->backend);
-		if (!sameBackend) {
-			ggml_backend_free(m_impl->cpuBackend);
-		}
-		m_impl->backend = nullptr;
-		m_impl->cpuBackend = nullptr;
+		// RAII guards will handle cleanup automatically
+		m_impl->backend.reset();
+		m_impl->cpuBackend.reset();
 		return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
 			"Failed to create backend scheduler.");
 	}
@@ -559,7 +569,7 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 	auto tSetup1 = std::chrono::steady_clock::now();
 	m_impl->timings.setupMs = std::chrono::duration<float, std::milli>(tSetup1 - tSetup0).count();
 	std::string readyMsg = "ofxGgml: ready (backend: ";
-	readyMsg += ggml_backend_name(m_impl->backend);
+	readyMsg += ggml_backend_name(m_impl->backend.get());
 	readyMsg += ")\n";
 	m_impl->log(GGML_LOG_LEVEL_INFO, readyMsg);
 	return Result<void>();
@@ -568,11 +578,9 @@ Result<void> ofxGgml::setup(const ofxGgmlSettings & settings) {
 void ofxGgml::close() {
 	synchronizePendingAsync(m_impl.get(), "shutdown");
 
-	// Free in proper order: scheduler first, then buffers, then backends.
-	if (m_impl->sched) {
-		ggml_backend_sched_free(m_impl->sched);
-		m_impl->sched = nullptr;
-	}
+	// RAII guards handle cleanup automatically in proper order.
+	// Reset in explicit order: scheduler first, then buffers, then backends.
+	m_impl->sched.reset();
 
 	// Graph tracking is tied to scheduler lifetime; after close(), any
 	// previously tracked graph allocations/reservations are invalid.
@@ -583,22 +591,12 @@ void ofxGgml::close() {
 	m_impl->hasPendingAsync = false;
 
 	// Free model weight buffer before backends.
-	if (m_impl->modelWeightBuf) {
-		ggml_backend_buffer_free(m_impl->modelWeightBuf);
-		m_impl->modelWeightBuf = nullptr;
-	}
+	m_impl->modelWeightBuf.reset();
 
-	// Free backends. When both point to the same allocation (CPU-only mode),
-	// cpuBackend will be the same as backend; only free backend in that case.
-	if (m_impl->cpuBackend && m_impl->cpuBackend != m_impl->backend) {
-		ggml_backend_free(m_impl->cpuBackend);
-	}
-	m_impl->cpuBackend = nullptr;
-
-	if (m_impl->backend) {
-		ggml_backend_free(m_impl->backend);
-	}
-	m_impl->backend = nullptr;
+	// Free backends. RAII guards handle the cleanup automatically.
+	// cpuBackend and backend are separate guards, so no double-free risk.
+	m_impl->cpuBackend.reset();
+	m_impl->backend.reset();
 
 	// ggml logging is process-global, so only unregister this instance and
 	// reactivate the previous live owner if one still exists.
@@ -639,7 +637,7 @@ std::vector<ofxGgmlDeviceInfo> ofxGgml::listDevices() const {
 
 std::string ofxGgml::getBackendName() const {
 	if (!m_impl->backend) return "none";
-	return ggml_backend_name(m_impl->backend);
+	return ggml_backend_name(m_impl->backend.get());
 }
 
 // --------------------------------------------------------------------------
@@ -711,12 +709,12 @@ static bool allocGraphInternal(
 
 	auto t0 = std::chrono::steady_clock::now();
 
-	ggml_backend_sched_reset(impl->sched);
+	ggml_backend_sched_reset(impl->sched.get());
 	impl->allocatedGraphToken = 0;
 	impl->allocatedGraph = nullptr;
 
 	if (impl->reservedGraphToken != graphToken || impl->reservedGraph != graph) {
-		if (!ggml_backend_sched_reserve(impl->sched, graph)) {
+		if (!ggml_backend_sched_reserve(impl->sched.get(), graph)) {
 			impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: scheduler reserve failed\n");
 			return false;
 		}
@@ -724,7 +722,7 @@ static bool allocGraphInternal(
 		impl->reservedGraph = graph;
 	}
 
-	if (!ggml_backend_sched_alloc_graph(impl->sched, graph)) {
+	if (!ggml_backend_sched_alloc_graph(impl->sched.get(), graph)) {
 		impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: graph allocation failed\n");
 		return false;
 	}
@@ -793,7 +791,7 @@ ofxGgmlComputeResult ofxGgml::computeGraphAsync(ofxGgmlGraph & graph) {
 
 	auto t0 = std::chrono::steady_clock::now();
 
-	enum ggml_status status = ggml_backend_sched_graph_compute_async(m_impl->sched, rawGraph);
+	enum ggml_status status = ggml_backend_sched_graph_compute_async(m_impl->sched.get(), rawGraph);
 
 	auto t1 = std::chrono::steady_clock::now();
 	result.elapsedMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
@@ -819,7 +817,7 @@ ofxGgmlComputeResult ofxGgml::synchronize() {
 		return result;
 	}
 
-	ggml_backend_sched_synchronize(m_impl->sched);
+	ggml_backend_sched_synchronize(m_impl->sched.get());
 	auto t1 = std::chrono::steady_clock::now();
 	m_impl->timings.computeTotalMs =
 		std::chrono::duration<float, std::milli>(t1 - m_impl->asyncStart).count();
@@ -904,16 +902,14 @@ Result<void> ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 
 	// Step 2 - allocate a backend buffer for all context tensors.
 	// Free any previously allocated model weight buffer.
-	if (m_impl->modelWeightBuf) {
-		ggml_backend_buffer_free(m_impl->modelWeightBuf);
-		m_impl->modelWeightBuf = nullptr;
-	}
+	m_impl->modelWeightBuf.reset();
+
 	ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors_from_buft(
-		modelCtx, ggml_backend_get_default_buffer_type(m_impl->backend));
+		modelCtx, ggml_backend_get_default_buffer_type(m_impl->backend.get()));
 	if (!buf) {
 		m_impl->log(GGML_LOG_LEVEL_WARN,
 			"ofxGgml: alloc_ctx_tensors_from_buft failed, falling back to alloc_ctx_tensors\n");
-		buf = ggml_backend_alloc_ctx_tensors(modelCtx, m_impl->backend);
+		buf = ggml_backend_alloc_ctx_tensors(modelCtx, m_impl->backend.get());
 	}
 	if (!buf) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: failed to allocate backend buffer for model weights\n");
@@ -921,10 +917,12 @@ Result<void> ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 			"Failed to allocate backend buffer for model weights");
 	}
 	ggml_backend_buffer_set_usage(buf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
-	m_impl->modelWeightBuf = buf;
+	m_impl->modelWeightBuf.reset(buf);
 
 	// Step 3 - copy host data into the (possibly GPU-resident) buffer.
-	ggml_backend_t uploadBackend = m_impl->backend ? m_impl->backend : m_impl->cpuBackend;
+	ggml_backend_t uploadBackend = m_impl->backend.get() ?
+		m_impl->backend.get() :
+		(m_impl->cpuBackend.get() ? m_impl->cpuBackend.get() : nullptr);
 	if (!uploadBackend) {
 		m_impl->log(GGML_LOG_LEVEL_ERROR, "ofxGgml: no backend available for model weight upload\n");
 		return ofxGgmlError(ofxGgmlErrorCode::BackendInitFailed,
@@ -941,7 +939,7 @@ Result<void> ofxGgml::loadModelWeights(ofxGgmlModel & model) {
 	std::string loadMsg = "ofxGgml: model weights loaded (";
 	loadMsg += std::to_string(snapshots.size());
 	loadMsg += " tensors on backend: ";
-	loadMsg += ggml_backend_name(m_impl->backend);
+	loadMsg += ggml_backend_name(m_impl->backend.get());
 	loadMsg += ")\n";
 	m_impl->log(GGML_LOG_LEVEL_INFO, loadMsg);
 	return Result<void>();
@@ -971,11 +969,11 @@ ofxGgmlMemoryUsage ofxGgml::getMemoryUsage() const {
 	}
 
 	// Get backend name
-	usage.backendName = ggml_backend_name(m_impl->backend);
+	usage.backendName = ggml_backend_name(m_impl->backend.get());
 
 	// Get model weight buffer size if available
 	if (m_impl->modelWeightBuf) {
-		usage.modelWeightBytes = ggml_backend_buffer_get_size(m_impl->modelWeightBuf);
+		usage.modelWeightBytes = ggml_backend_buffer_get_size(m_impl->modelWeightBuf.get());
 	}
 
 	// Estimate graph allocation size from scheduler if available
@@ -991,7 +989,7 @@ ofxGgmlMemoryUsage ofxGgml::getMemoryUsage() const {
 
 	// Query backend memory info if available
 	// Note: Not all backends expose memory stats; CPU backends typically return 0
-	ggml_backend_dev_t dev = ggml_backend_get_device(m_impl->backend);
+	ggml_backend_dev_t dev = ggml_backend_get_device(m_impl->backend.get());
 	if (dev) {
 		size_t free = 0, total = 0;
 		ggml_backend_dev_memory(dev, &free, &total);
@@ -1007,13 +1005,14 @@ ofxGgmlMemoryUsage ofxGgml::getMemoryUsage() const {
 // --------------------------------------------------------------------------
 
 struct ggml_backend * ofxGgml::getBackend() {
-	return m_impl->backend;
+	return m_impl->backend.get();
 }
 
 struct ggml_backend * ofxGgml::getCpuBackend() {
-	return m_impl->cpuBackend;
+	// Return cpuBackend if it exists, otherwise return backend (for CPU-only mode)
+	return m_impl->cpuBackend.get() ? m_impl->cpuBackend.get() : m_impl->backend.get();
 }
 
 struct ggml_backend_sched * ofxGgml::getScheduler() {
-	return m_impl->sched;
+	return m_impl->sched.get();
 }
