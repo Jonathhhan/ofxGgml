@@ -326,7 +326,16 @@ static bool parseEmbeddingJson(const ofJson & json, std::vector<float> & out) {
 }
 
 static size_t normalizedConcurrencyLimit(size_t requestedLimit) {
-	return std::max<size_t>(1, requestedLimit);
+	// Ensure at least 1 thread
+	const size_t minLimit = std::max<size_t>(1, requestedLimit);
+
+	// Cap at hardware concurrency to prevent resource exhaustion
+	const size_t hardwareConcurrency = std::thread::hardware_concurrency();
+	// Use 2x hardware concurrency as a reasonable upper bound for I/O-bound workloads
+	// (server requests spend most time waiting on network I/O)
+	const size_t maxReasonableLimit = hardwareConcurrency > 0 ? hardwareConcurrency * 2 : 32;
+
+	return std::min(minLimit, maxReasonableLimit);
 }
 
 static size_t recommendedServerEmbeddingConcurrency(size_t requestCount) {
