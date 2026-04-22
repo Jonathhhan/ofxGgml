@@ -47,10 +47,10 @@ This document outlines architectural improvements identified during code review 
 
 ---
 
-## Planned Improvements 🔄
+## Completed Improvements ✅
 
 ### 4. RAII Wrappers for ggml Resources
-**Status**: 🔄 In Progress (guards defined, integration pending)
+**Status**: ✅ Completed in commit 672af0f
 
 **Location**: `src/core/ofxGgmlResourceGuards.h` (new file)
 
@@ -67,28 +67,28 @@ All guards follow modern C++ RAII patterns:
 - `reset()` for explicit cleanup
 - `get()` for raw pointer access
 
-**Integration Plan**:
-1. Update `ofxGgml::Impl` to use guard classes instead of raw pointers
-2. Remove manual cleanup in `close()` method
-3. Remove double-free prevention logic (guards handle this automatically)
-4. Update error paths to rely on RAII cleanup
+**Implementation Summary**:
+1. ✅ Updated `ofxGgml::Impl` to use guard classes instead of raw pointers
+2. ✅ Simplified `close()` method - RAII guards handle cleanup automatically
+3. ✅ Removed double-free prevention logic (guards handle this automatically)
+4. ✅ Updated error paths to rely on RAII cleanup
+5. ✅ Solved the CPU-only mode case: cpuBackend guard stays empty, backend guard owns it
 
-**Current Blockers**:
-- Need to handle the special case where `backend` and `cpuBackend` point to same allocation
-- Requires careful testing to ensure no behavioral changes
-- May need reference counting or shared ownership for the dual-pointer case
+**Solution to Shared Backend Case**:
+When main backend is CPU, the `cpuBackend` guard remains empty (nullptr), and only `backend` guard owns the resource. The `getCpuBackend()` accessor returns the correct pointer in both modes.
 
-**Estimated Impact**:
+**Actual Impact**:
 - Eliminates 30+ lines of manual cleanup code
 - Prevents resource leaks on error paths
 - Simplifies exception safety
 - Makes ownership semantics explicit
 
-**Files to Modify**:
-- `src/core/ofxGgmlCore.cpp` (struct Impl, close(), error paths)
-- `src/core/ofxGgmlCore.h` (include new guards)
+**Files Modified**:
+- `src/core/ofxGgmlCore.cpp` (struct Impl, close(), setup(), all accessors)
 
 ---
+
+## Planned Improvements 🔄
 
 ### 5. Standardize Error Handling on Result<T>
 **Status**: 📋 Planned (requires API design)
@@ -301,4 +301,5 @@ All improvements should be validated with:
 
 - 2026-04-16: Initial improvements completed (path traversal, temp files, log callback)
 - 2026-04-16: RAII guards defined, integration planned
+- 2026-04-22: RAII guards integration completed
 - Future: Error handling standardization roadmap defined
