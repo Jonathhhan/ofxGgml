@@ -463,27 +463,64 @@ bool isPathWithinRoot(
 			candidateString[rootString.size()] == '/');
 }
 
+bool isRelativeSubpath(const std::filesystem::path & relativePath) {
+	if (relativePath.empty() || relativePath.is_absolute()) {
+		return false;
+	}
+	for (const auto & part : relativePath) {
+		const auto text = part.generic_string();
+		if (text.empty() || text == ".") {
+			continue;
+		}
+		if (text == "..") {
+			return false;
+		}
+	}
+	return true;
+}
+
 std::filesystem::path resolveTargetPath(
 	const std::filesystem::path & root,
 	const std::string & relativePath,
 	std::string * error) {
-	const std::filesystem::path relative(relativePath);
-	if (relative.empty() || relative.is_absolute()) {
+	const std::filesystem::path relative =
+		std::filesystem::path(relativePath).lexically_normal();
+	if (!isRelativeSubpath(relative)) {
 		if (error != nullptr) {
 			*error = "Patch path must be a relative path inside the workspace.";
 		}
 		return {};
 	}
 
-	const std::filesystem::path normalized = (root / relative).lexically_normal();
-	if (!isPathWithinRoot(normalized, root)) {
-		if (error != nullptr) {
-			*error = "Patch path escapes the workspace root: " + relativePath;
+	std::filesystem::path current = root;
+	std::error_code ec;
+	for (const auto & part : relative) {
+		const auto text = part.generic_string();
+		if (text.empty() || text == ".") {
+			continue;
 		}
-		return {};
+		const std::filesystem::path next = current / part;
+		if (std::filesystem::exists(next, ec) && !ec) {
+			const auto canonical = std::filesystem::weakly_canonical(next, ec);
+			if (ec || canonical.empty() || !isPathWithinRoot(canonical, root)) {
+				if (error != nullptr) {
+					*error = "Patch path escapes the workspace root: " + relativePath;
+				}
+				return {};
+			}
+			current = canonical;
+		} else {
+			ec.clear();
+			current = next.lexically_normal();
+			if (!isPathWithinRoot(current, root)) {
+				if (error != nullptr) {
+					*error = "Patch path escapes the workspace root: " + relativePath;
+				}
+				return {};
+			}
+		}
 	}
-
-	return normalized;
+	return current;
 }
 
 std::set<std::string> normalizeAllowedFiles(
@@ -943,13 +980,15 @@ std::string normalizeTouchedPathRelativeToRoot(
 	std::error_code ec;
 	const std::filesystem::path input(filePath);
 	if (!input.is_absolute()) {
-		return input.generic_string();
+		const auto normalized = input.lexically_normal();
+		return isRelativeSubpath(normalized) ? normalized.generic_string() : std::string();
 	}
 	const auto relative = std::filesystem::relative(input, root, ec);
-	if (ec) {
+	const auto normalized = relative.lexically_normal();
+	if (ec || !isRelativeSubpath(normalized)) {
 		return {};
 	}
-	return relative.generic_string();
+	return normalized.generic_string();
 }
 
 std::vector<std::string> collectUnifiedDiffChangedFiles(
@@ -971,7 +1010,9 @@ ofxGgmlWorkspaceCommandResult runDefaultCommand(
 	result.command = command;
 	const auto start = std::chrono::steady_clock::now();
 
-	if (!isValidExecutablePath(command.executable)) {
+	if (!ofxGgmlProcessSecurity::isValidExecutablePath(
+			command.executable,
+			command.workingDirectory)) {
 		result.output = "Invalid executable: " + command.executable;
 		result.exitCode = -1;
 		result.elapsedMs = std::chrono::duration<float, std::milli>(
@@ -1782,12 +1823,24 @@ bool ofxGgmlWorkspaceAssistant::synchronizeShadowWorkspace(
 	for (const auto & touched : touchedFiles) {
 		const std::string relative =
 			normalizeTouchedPathRelativeToRoot(touched, shadowRoot);
-		if (!trimCopy(relative).empty()) {
-			uniqueFiles.insert(relative);
+		if (trimCopy(relative).empty()) {
+			success = false;
+			if (messages != nullptr) {
+				messages->push_back("Refused to sync path outside shadow workspace: " + touched);
+			}
+			continue;
 		}
+		uniqueFiles.insert(relative);
 	}
 
 	for (const auto & relative : uniqueFiles) {
+		if (!isRelativeSubpath(std::filesystem::path(relative))) {
+			success = false;
+			if (messages != nullptr) {
+				messages->push_back("Refused to sync path outside shadow workspace: " + relative);
+			}
+			continue;
+		}
 		const auto source = shadowRoot / std::filesystem::path(relative);
 		const auto target = destRoot / std::filesystem::path(relative);
 		if (std::filesystem::exists(source, ec) && !ec) {

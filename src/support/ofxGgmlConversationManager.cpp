@@ -72,14 +72,15 @@ std::string jsonUnescape(const std::string & escaped) {
 
 // Tiny parser: extract "key":"value" pairs from a JSON object string.
 // Only handles string values (sufficient for our serialization format).
-std::string extractJsonString(
+bool extractJsonString(
 	const std::string & json,
 	const std::string & key,
-	size_t & searchPos) {
+	size_t & searchPos,
+	std::string * valueOut) {
 	const std::string needle = "\"" + key + "\":\"";
 	const size_t keyPos = json.find(needle, searchPos);
 	if (keyPos == std::string::npos) {
-		return {};
+		return false;
 	}
 	const size_t valueStart = keyPos + needle.size();
 	std::string value;
@@ -90,12 +91,15 @@ std::string extractJsonString(
 			++i;
 		} else if (json[i] == '"') {
 			searchPos = i + 1;
-			return jsonUnescape(value);
+			if (valueOut != nullptr) {
+				*valueOut = jsonUnescape(value);
+			}
+			return true;
 		} else {
 			value.push_back(json[i]);
 		}
 	}
-	return {};
+	return false;
 }
 
 ofxGgmlConversationRole roleFromString(const std::string & label) {
@@ -243,9 +247,11 @@ bool ofxGgmlConversationManager::fromJson(
 		if (objStart == std::string::npos) break;
 		pos = objStart + 1;
 
-		std::string role = extractJsonString(text, "role", pos);
-		std::string content = extractJsonString(text, "content", pos);
-		if (!role.empty() && !content.empty()) {
+		std::string role;
+		std::string content;
+		const bool hasRole = extractJsonString(text, "role", pos, &role);
+		const bool hasContent = extractJsonString(text, "content", pos, &content);
+		if (hasRole && hasContent && !role.empty()) {
 			target.m_turns.push_back({roleFromString(role), content});
 		}
 	}

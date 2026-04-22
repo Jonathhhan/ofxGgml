@@ -186,6 +186,33 @@ TEST_CASE("Workspace assistant validates, applies, and rolls back transactions",
 	REQUIRE_FALSE(rollbackMessages.empty());
 }
 
+#ifndef _WIN32
+TEST_CASE("Workspace assistant rejects patch paths that escape through symlinked directories", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("symlink_escape");
+	const auto outside = makeWorkspaceTestDir("symlink_escape_outside");
+	std::filesystem::create_directories(root);
+	std::filesystem::create_directories(outside);
+	{
+		std::ofstream out(outside / "secret.txt");
+		out << "secret";
+	}
+	std::filesystem::create_directory_symlink(outside, root / "linked");
+
+	ofxGgmlWorkspaceAssistant assistant;
+	ofxGgmlCodeAssistantPatchOperation writeOp;
+	writeOp.kind = ofxGgmlCodeAssistantPatchKind::WriteFile;
+	writeOp.filePath = "linked/secret.txt";
+	writeOp.summary = "attempt escape";
+	writeOp.content = "patched";
+
+	const auto validation = assistant.validatePatchOperations(
+		{writeOp},
+		root.string());
+	REQUIRE_FALSE(validation.success);
+	REQUIRE(readFile(outside / "secret.txt") == "secret");
+}
+#endif
+
 TEST_CASE("Workspace assistant validates and applies unified diffs with drift-aware matching", "[workspace_assistant]") {
 	const auto root = makeWorkspaceTestDir("unified_diff");
 	std::filesystem::create_directories(root / "src");
@@ -245,6 +272,63 @@ TEST_CASE("Workspace assistant suggests verification commands from changed files
 		commands.back().expectedOutcome.find("assistant tests") != std::string::npos ||
 		commands.back().expectedOutcome.find("full addon test suite") != std::string::npos;
 	REQUIRE(hasExpectedAssistantOutcome);
+}
+
+TEST_CASE("Workspace assistant verification resolves workspace-relative executables", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("relative_exec");
+	std::filesystem::create_directories(root / "bin");
+#ifdef _WIN32
+	const auto executable = root / "bin" / "verify.bat";
+	{
+		std::ofstream out(executable);
+		out << "@echo off\r\nexit /b 0\r\n";
+	}
+	const std::string commandPath = "bin\\verify.bat";
+#else
+	const auto executable = root / "bin" / "verify.sh";
+	{
+		std::ofstream out(executable);
+		out << "#!/usr/bin/env bash\nexit 0\n";
+	}
+	chmod(executable.c_str(), 0755);
+	const std::string commandPath = "./bin/verify.sh";
+#endif
+
+	ofxGgmlWorkspaceAssistant assistant;
+	ofxGgmlCodeAssistantCommandSuggestion command;
+	command.label = "relative-verify";
+	command.workingDirectory = root.string();
+	command.executable = commandPath;
+	command.expectedOutcome = "verification succeeds";
+
+	const auto result = assistant.runVerification({command});
+	REQUIRE(result.success);
+	REQUIRE(result.commandResults.size() == 1);
+	REQUIRE(result.commandResults.front().success);
+}
+
+TEST_CASE("Workspace assistant refuses to sync touched files outside the shadow root", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("shadow_dest");
+	const auto shadow = makeWorkspaceTestDir("shadow_src");
+	const auto outside = makeWorkspaceTestDir("shadow_outside");
+	std::filesystem::create_directories(root / "src");
+	std::filesystem::create_directories(shadow / "src");
+	{
+		std::ofstream out(outside / "outside.txt");
+		out << "original";
+	}
+
+	ofxGgmlWorkspaceAssistant assistant;
+	std::vector<std::string> messages;
+	const bool ok = assistant.synchronizeShadowWorkspace(
+		shadow.string(),
+		root.string(),
+		{(outside / "outside.txt").string()},
+		&messages);
+	REQUIRE_FALSE(ok);
+	REQUIRE(readFile(outside / "outside.txt") == "original");
+	REQUIRE_FALSE(messages.empty());
+	REQUIRE(messages.front().find("outside shadow workspace") != std::string::npos);
 }
 
 TEST_CASE("Workspace assistant typed verification results expose success and failure payloads", "[workspace_assistant]") {

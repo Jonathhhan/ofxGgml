@@ -7,7 +7,9 @@
 namespace ofxGgmlProcessSecurity {
 
 std::string getEnvVarString(const char * name);
-bool isValidExecutablePath(const std::string & path);
+bool isValidExecutablePath(
+	const std::string & path,
+	const std::string & workingDirectory = {});
 
 /// Control whether PATH lookup is allowed when validating executables.
 /// Default is false for stricter security; set to true only when you
