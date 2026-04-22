@@ -31,7 +31,18 @@ bool writeMonoWavFile(
 	const std::string & path,
 	const std::vector<float> & samples,
 	int sampleRate) {
-	if (path.empty() || samples.empty() || sampleRate <= 0) {
+	return writeWavFile(path, samples, sampleRate, 1);
+}
+
+bool writeWavFile(
+	const std::string & path,
+	const std::vector<float> & samples,
+	int sampleRate,
+	int channels) {
+	if (path.empty() || samples.empty() || sampleRate <= 0 || channels <= 0) {
+		return false;
+	}
+	if ((samples.size() % static_cast<size_t>(channels)) != 0) {
 		return false;
 	}
 	std::ofstream out(path, std::ios::binary);
@@ -39,10 +50,10 @@ bool writeMonoWavFile(
 		return false;
 	}
 
-	const uint16_t channels = 1;
+	const uint16_t wavChannels = static_cast<uint16_t>(channels);
 	const uint16_t bitsPerSample = 16;
-	const uint32_t byteRate = static_cast<uint32_t>(sampleRate) * channels * (bitsPerSample / 8);
-	const uint16_t blockAlign = channels * (bitsPerSample / 8);
+	const uint32_t byteRate = static_cast<uint32_t>(sampleRate) * wavChannels * (bitsPerSample / 8);
+	const uint16_t blockAlign = wavChannels * (bitsPerSample / 8);
 	const uint32_t dataSize = static_cast<uint32_t>(samples.size() * sizeof(int16_t));
 	const uint32_t riffSize = 36u + dataSize;
 
@@ -59,7 +70,7 @@ bool writeMonoWavFile(
 	out.write("fmt ", 4);
 	writeU32(16);
 	writeU16(1);
-	writeU16(channels);
+	writeU16(wavChannels);
 	writeU32(static_cast<uint32_t>(sampleRate));
 	writeU32(byteRate);
 	writeU16(blockAlign);

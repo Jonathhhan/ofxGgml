@@ -1061,66 +1061,40 @@ void ofApp::drawTtsPanel() {
 
 	ImGui::Separator();
 	ImGui::TextDisabled("Voice routing");
-	if (ImGui::Checkbox("Use different voice for chat replies", &chatUseCustomTtsVoice)) {
+	if (ImGui::Checkbox("Use different bot voice for chat replies", &chatUseCustomTtsVoice)) {
 		if (!chatUseCustomTtsVoice) {
-			chatUseSecondaryTtsVoice = false;
-			chatAlternateTtsVoices = false;
-			chatUseSecondaryTtsVoiceNext = false;
+			chatUseUserTtsVoice = false;
 		}
 		autoSaveSession();
 	}
 	if (chatUseCustomTtsVoice) {
 		drawVoiceOverrideFields(
-			"Chat voice A",
+			"Bot voice",
 			chatTtsModelPath,
 			sizeof(chatTtsModelPath),
 			chatTtsSpeakerPath,
 			sizeof(chatTtsSpeakerPath),
-			"Chat voice A##Piper",
-			"Select chat voice A",
-			"Chat voice A model path",
-			"Chat voice A speaker/profile",
-			"Use current TTS voice for chat A");
-		if (ImGui::Checkbox("Enable second chat voice", &chatUseSecondaryTtsVoice)) {
-			if (!chatUseSecondaryTtsVoice) {
-				chatAlternateTtsVoices = false;
-				chatUseSecondaryTtsVoiceNext = false;
-			}
+			"Bot voice##Piper",
+			"Select bot voice",
+			"Bot voice model path",
+			"Bot voice speaker/profile",
+			"Use current TTS voice for bot replies");
+		if (ImGui::Checkbox("Enable user voice for chat dialog playback", &chatUseUserTtsVoice)) {
 			autoSaveSession();
 		}
-		if (chatUseSecondaryTtsVoice) {
+		if (chatUseUserTtsVoice) {
 			drawVoiceOverrideFields(
-				"Chat voice B",
-				chatSecondaryTtsModelPath,
-				sizeof(chatSecondaryTtsModelPath),
-				chatSecondaryTtsSpeakerPath,
-				sizeof(chatSecondaryTtsSpeakerPath),
-				"Chat voice B##Piper",
-				"Select chat voice B",
-				"Chat voice B model path",
-				"Chat voice B speaker/profile",
-				"Use current TTS voice for chat B");
-			if (ImGui::Checkbox("Alternate between chat voices A and B", &chatAlternateTtsVoices)) {
-				autoSaveSession();
-			}
+				"User voice",
+				chatUserTtsModelPath,
+				sizeof(chatUserTtsModelPath),
+				chatUserTtsSpeakerPath,
+				sizeof(chatUserTtsSpeakerPath),
+				"User voice##Piper",
+				"Select user voice",
+				"User voice model path",
+				"User voice speaker/profile",
+				"Use current TTS voice for user dialog");
 		}
-	}
-
-	if (ImGui::Checkbox("Use different voice for summaries", &summarizeUseCustomTtsVoice)) {
-		autoSaveSession();
-	}
-	if (summarizeUseCustomTtsVoice) {
-		drawVoiceOverrideFields(
-			"Summary voice",
-			summarizeTtsModelPath,
-			sizeof(summarizeTtsModelPath),
-			summarizeTtsSpeakerPath,
-			sizeof(summarizeTtsSpeakerPath),
-			"Summary voice##Piper",
-			"Select summary voice",
-			"Summary model path",
-			"Summary speaker/profile",
-			"Use current TTS voice for summaries");
 	}
 
 	if (ImGui::Checkbox("Use different voice for translated output", &translateUseCustomTtsVoice)) {

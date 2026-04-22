@@ -259,6 +259,30 @@ void ofApp::drawChatPanel() {
 	if (ImGui::IsItemHovered()) {
 		showWrappedTooltip("Send the most recent assistant reply into the TTS pipeline and mirror it into the TTS panel.");
 	}
+	ImGui::SameLine();
+	const bool hasChatExchange = [&]() {
+		bool foundUser = false;
+		bool foundAssistant = false;
+		for (auto it = chatMessages.rbegin(); it != chatMessages.rend(); ++it) {
+			if (!foundAssistant && it->role == "assistant" && !trim(it->text).empty()) {
+				foundAssistant = true;
+				continue;
+			}
+			if (foundAssistant && it->role == "user" && !trim(it->text).empty()) {
+				foundUser = true;
+				break;
+			}
+		}
+		return foundUser && foundAssistant;
+	}();
+	ImGui::BeginDisabled(generating.load() || !hasChatExchange);
+	if (ImGui::SmallButton("Speak last exchange")) {
+		speakLatestChatExchange(false);
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Synthesize the latest user + assistant pair as a two-voice chat dialog preview.");
+	}
 	if (!chatTtsPreview.statusMessage.empty()) {
 		ImGui::TextDisabled("%s", chatTtsPreview.statusMessage.c_str());
 	}

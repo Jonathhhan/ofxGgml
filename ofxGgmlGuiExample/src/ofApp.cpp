@@ -244,6 +244,84 @@ void stopPreviewAudioPlayback(
 	previewState.stopPlayback(clearLoadedPath);
 }
 
+std::string makeTempTtsSegmentPath(const std::string & label) {
+	std::error_code ec;
+	std::filesystem::path base = std::filesystem::temp_directory_path(ec);
+	if (ec) {
+		base = std::filesystem::current_path();
+	}
+	const auto now = std::chrono::system_clock::now();
+	const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+		now.time_since_epoch()).count();
+	const uint64_t nonceHi = static_cast<uint64_t>(std::random_device{}());
+	const uint64_t nonceLo = static_cast<uint64_t>(std::random_device{}());
+	const uint64_t nonce = (nonceHi << 32) | nonceLo;
+	std::ostringstream name;
+	name << "ofxggml_tts_" << label << "_" << millis << "_" << std::hex << nonce << ".wav";
+	return (base / name.str()).string();
+}
+
+bool buildDialogWav(
+	const std::vector<std::string> & inputPaths,
+	const std::string & outputPath,
+	ofxGgmlTtsAudioArtifact & artifactOut,
+	std::string * errorMessage = nullptr) {
+	if (errorMessage != nullptr) {
+		*errorMessage = "";
+	}
+	if (inputPaths.empty() || trim(outputPath).empty()) {
+		if (errorMessage != nullptr) {
+			*errorMessage = "Dialog audio needs input clips and an output path.";
+		}
+		return false;
+	}
+
+	std::vector<float> mergedSamples;
+	int sampleRate = 0;
+	int channels = 0;
+	for (const auto & path : inputPaths) {
+		LoadedWavAudio audio;
+		std::string localError;
+		if (!loadWavFile(path, audio, &localError)) {
+			if (errorMessage != nullptr) {
+				*errorMessage = localError;
+			}
+			return false;
+		}
+		if (sampleRate == 0) {
+			sampleRate = audio.sampleRate;
+			channels = audio.channels;
+		} else if (sampleRate != audio.sampleRate || channels != audio.channels) {
+			if (errorMessage != nullptr) {
+				*errorMessage =
+					"Chat dialog audio clips used different sample formats and could not be stitched.";
+			}
+			return false;
+		}
+		mergedSamples.insert(
+			mergedSamples.end(),
+			audio.samples.begin(),
+			audio.samples.end());
+	}
+
+	if (!writeWavFile(outputPath, mergedSamples, sampleRate, channels)) {
+		if (errorMessage != nullptr) {
+			*errorMessage = "Failed to write stitched chat dialog WAV file.";
+		}
+		return false;
+	}
+
+	artifactOut.path = outputPath;
+	artifactOut.sampleRate = sampleRate;
+	artifactOut.channels = channels;
+	artifactOut.durationSeconds = sampleRate > 0
+		? static_cast<float>(
+			mergedSamples.size() /
+			static_cast<double>(std::max(1, channels) * sampleRate))
+		: 0.0f;
+	return true;
+}
+
 bool ensurePreviewAudioLoaded(
 	TtsPreviewState & previewState,
 	std::string & statusMessage,
@@ -6676,41 +6754,275 @@ void ofApp::speakLatestChatReply(bool mirrorIntoTtsInput) {
 	}
 	chatTtsPreview.request.pending = true;
 	chatTtsPreview.statusMessage = "Synthesizing latest chat reply...";
-	const std::string primaryModelPath = chatUseCustomTtsVoice
+	const std::string botModelPath = chatUseCustomTtsVoice
 		? trim(chatTtsModelPath)
 		: std::string();
-	const std::string primarySpeakerPath = chatUseCustomTtsVoice
+	const std::string botSpeakerPath = chatUseCustomTtsVoice
 		? trim(chatTtsSpeakerPath)
 		: std::string();
-	const std::string secondaryModelPath =
-		(chatUseCustomTtsVoice && chatUseSecondaryTtsVoice)
-			? trim(chatSecondaryTtsModelPath)
-			: std::string();
-	const std::string secondarySpeakerPath =
-		(chatUseCustomTtsVoice && chatUseSecondaryTtsVoice)
-			? trim(chatSecondaryTtsSpeakerPath)
-			: std::string();
-	const bool primaryAvailable = !primaryModelPath.empty() || !primarySpeakerPath.empty();
-	const bool secondaryAvailable = !secondaryModelPath.empty() || !secondarySpeakerPath.empty();
-	bool useSecondaryVoice = false;
-	if (chatAlternateTtsVoices && primaryAvailable && secondaryAvailable) {
-		useSecondaryVoice = chatUseSecondaryTtsVoiceNext;
-		chatUseSecondaryTtsVoiceNext = !chatUseSecondaryTtsVoiceNext;
-	} else if (!primaryAvailable && secondaryAvailable) {
-		useSecondaryVoice = true;
-	}
-	const std::string chatModelPath = useSecondaryVoice
-		? secondaryModelPath
-		: primaryModelPath;
-	const std::string chatSpeakerPath = useSecondaryVoice
-		? secondarySpeakerPath
-		: primarySpeakerPath;
 	runTtsInferenceForText(
 		reply,
-		useSecondaryVoice ? "Synthesized chat reply (voice B)" : "Synthesized chat reply",
+		"Synthesized chat reply",
 		mirrorIntoTtsInput,
-		chatModelPath,
-		chatSpeakerPath);
+		botModelPath,
+		botSpeakerPath);
+}
+
+void ofApp::speakLatestChatExchange(bool mirrorIntoTtsInput) {
+	if (generating.load()) {
+		return;
+	}
+
+	std::string assistantText;
+	std::string userText;
+	for (auto it = chatMessages.rbegin(); it != chatMessages.rend(); ++it) {
+		if (assistantText.empty() && it->role == "assistant") {
+			assistantText = trim(it->text);
+			continue;
+		}
+		if (!assistantText.empty() && it->role == "user") {
+			userText = trim(it->text);
+			break;
+		}
+	}
+	if (assistantText.empty() || userText.empty()) {
+		chatTtsPreview.statusMessage = "A user message and assistant reply are both needed for chat dialog playback.";
+		return;
+	}
+
+	ensureTtsProfilesLoaded();
+	if (mirrorIntoTtsInput) {
+		copyStringToBuffer(ttsInput, sizeof(ttsInput), assistantText);
+	}
+
+	generating.store(true);
+	cancelRequested.store(false);
+	activeGenerationMode = AiMode::Tts;
+	generationStartTime = ofGetElapsedTimef();
+	chatTtsPreview.request.pending = true;
+	chatTtsPreview.statusMessage = "Synthesizing latest chat exchange...";
+	{
+		std::lock_guard<std::mutex> lock(streamMutex);
+		streamingOutput = "Preparing chat dialog synthesis...";
+	}
+
+	if (workerThread.joinable()) {
+		workerThread.join();
+	}
+
+	const ofxGgmlTtsModelProfile profileBase = getSelectedTtsProfile();
+	const std::string executablePath = trim(ttsExecutablePath);
+	const std::string botModelPath = chatUseCustomTtsVoice ? trim(chatTtsModelPath) : std::string();
+	const std::string botSpeakerPath = chatUseCustomTtsVoice ? trim(chatTtsSpeakerPath) : std::string();
+	const std::string userModelPath = chatUseUserTtsVoice ? trim(chatUserTtsModelPath) : std::string();
+	const std::string userSpeakerPath = chatUseUserTtsVoice ? trim(chatUserTtsSpeakerPath) : std::string();
+	const std::string speakerReferencePath = trim(ttsSpeakerReferencePath);
+	const std::string promptAudioPath = trim(ttsPromptAudioPath);
+	const std::string language = trim(ttsLanguage);
+	const int requestSeed = ttsSeed;
+	const int requestMaxTokens = std::max(0, ttsMaxTokens);
+	const float requestTemperature = std::isfinite(ttsTemperature)
+		? std::clamp(ttsTemperature, 0.0f, 2.0f)
+		: 0.4f;
+	const float requestPenalty = std::isfinite(ttsRepetitionPenalty)
+		? std::clamp(ttsRepetitionPenalty, 1.0f, 3.0f)
+		: 1.1f;
+	const int requestRange = std::clamp(ttsRepetitionRange, 0, 512);
+	const int requestTopK = std::clamp(ttsTopK, 0, 200);
+	const float requestTopP = std::isfinite(ttsTopP)
+		? std::clamp(ttsTopP, 0.0f, 1.0f)
+		: 0.9f;
+	const float requestMinP = std::isfinite(ttsMinP)
+		? std::clamp(ttsMinP, 0.0f, 1.0f)
+		: 0.05f;
+	const bool requestNormalizeText = ttsNormalizeText;
+	const auto backend = createConfiguredTtsBackend(profileBase, executablePath);
+	const std::string backendLabel =
+		backend ? backend->backendName() : std::string("TTS backend");
+	const std::string configuredOutputPath = trim(ttsOutputPath);
+
+	workerThread = std::thread([this,
+		backend,
+		backendLabel,
+		profileBase,
+		assistantText,
+		userText,
+		botModelPath,
+		botSpeakerPath,
+		userModelPath,
+		userSpeakerPath,
+		speakerReferencePath,
+		promptAudioPath,
+		language,
+		requestSeed,
+		requestMaxTokens,
+		requestTemperature,
+		requestPenalty,
+		requestRange,
+		requestTopK,
+		requestTopP,
+		requestMinP,
+		requestNormalizeText,
+		configuredOutputPath]() {
+		auto setPending = [this](const std::string & textValue) {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingOutput = textValue;
+			pendingRole = "assistant";
+			pendingMode = AiMode::Tts;
+		};
+
+		auto clearPendingTtsArtifacts = [this]() {
+			std::lock_guard<std::mutex> lock(outputMutex);
+			pendingTtsBackendName.clear();
+			pendingTtsElapsedMs = 0.0f;
+			pendingTtsResolvedSpeakerPath.clear();
+			pendingTtsAudioFiles.clear();
+			pendingTtsMetadata.clear();
+		};
+
+		auto synthesizeSegment =
+			[&](const std::string & text,
+				const std::string & modelOverride,
+				const std::string & speakerOverride,
+				const std::string & outputPath) -> ofxGgmlTtsResult {
+				ofxGgmlTtsRequest request;
+				request.task = ofxGgmlTtsTask::Synthesize;
+				request.text = text;
+				request.modelPath = modelOverride.empty()
+					? suggestedModelPath(profileBase.modelPath, profileBase.modelFileHint)
+					: modelOverride;
+				request.speakerPath = speakerOverride.empty()
+					? suggestedModelPath(profileBase.speakerPath, profileBase.speakerFileHint)
+					: speakerOverride;
+				request.speakerReferencePath = speakerReferencePath;
+				request.language = language;
+				request.outputPath = outputPath;
+				request.promptAudioPath = promptAudioPath;
+				request.seed = requestSeed;
+				request.maxTokens = requestMaxTokens;
+				request.temperature = requestTemperature;
+				request.repetitionPenalty = requestPenalty;
+				request.repetitionRange = requestRange;
+				request.topK = requestTopK;
+				request.topP = requestTopP;
+				request.minP = requestMinP;
+				request.streamAudio = false;
+				request.normalizeText = requestNormalizeText;
+				return backend->synthesize(request);
+			};
+
+		try {
+			if (!backend) {
+				clearPendingTtsArtifacts();
+				setPending("[Error] TTS backend is not available.");
+				generating.store(false);
+				return;
+			}
+
+			const std::string userOutputPath = makeTempTtsSegmentPath("chat_user");
+			const std::string botOutputPath = makeTempTtsSegmentPath("chat_bot");
+			std::string dialogOutputPath = configuredOutputPath;
+			if (dialogOutputPath.empty()) {
+				dialogOutputPath = makeTempTtsSegmentPath("chat_dialog");
+			}
+
+			const std::filesystem::path outputDir =
+				std::filesystem::path(dialogOutputPath).parent_path();
+			if (!outputDir.empty()) {
+				std::error_code dirEc;
+				std::filesystem::create_directories(outputDir, dirEc);
+				if (dirEc) {
+					clearPendingTtsArtifacts();
+					setPending("[Error] Failed to create chat dialog output directory: " + outputDir.string());
+					generating.store(false);
+					return;
+				}
+			}
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = "Synthesizing user side of the chat...";
+			}
+			const ofxGgmlTtsResult userResult =
+				synthesizeSegment(userText, userModelPath, userSpeakerPath, userOutputPath);
+			if (!userResult.success) {
+				clearPendingTtsArtifacts();
+				setPending("[Error] " +
+					(userResult.error.empty() ? std::string("Failed to synthesize the user side of the chat dialog.") : userResult.error));
+				generating.store(false);
+				return;
+			}
+
+			{
+				std::lock_guard<std::mutex> lock(streamMutex);
+				streamingOutput = "Synthesizing bot side of the chat...";
+			}
+			const ofxGgmlTtsResult botResult =
+				synthesizeSegment(assistantText, botModelPath, botSpeakerPath, botOutputPath);
+			if (!botResult.success) {
+				clearPendingTtsArtifacts();
+				setPending("[Error] " +
+					(botResult.error.empty() ? std::string("Failed to synthesize the bot side of the chat dialog.") : botResult.error));
+				generating.store(false);
+				return;
+			}
+
+			std::vector<ofxGgmlTtsAudioArtifact> audioFiles;
+			std::vector<std::pair<std::string, std::string>> metadata;
+			ofxGgmlTtsAudioArtifact dialogArtifact;
+			std::string stitchError;
+			if (buildDialogWav({userOutputPath, botOutputPath}, dialogOutputPath, dialogArtifact, &stitchError)) {
+				audioFiles.push_back(dialogArtifact);
+			} else {
+				metadata.emplace_back("dialogStitchWarning", stitchError);
+			}
+			audioFiles.push_back({userOutputPath, 0, 0, 0.0f});
+			audioFiles.push_back({botOutputPath, 0, 0, 0.0f});
+			metadata.emplace_back("dialogUserText", userText);
+			metadata.emplace_back("dialogBotText", assistantText);
+			if (!userResult.speakerPath.empty()) {
+				metadata.emplace_back("dialogUserSpeaker", userResult.speakerPath);
+			}
+			if (!botResult.speakerPath.empty()) {
+				metadata.emplace_back("dialogBotSpeaker", botResult.speakerPath);
+			}
+
+			{
+				std::lock_guard<std::mutex> lock(outputMutex);
+				pendingTtsBackendName = botResult.backendName.empty() ? backendLabel : botResult.backendName;
+				pendingTtsElapsedMs = userResult.elapsedMs + botResult.elapsedMs;
+				pendingTtsResolvedSpeakerPath = botResult.speakerPath;
+				pendingTtsAudioFiles = audioFiles;
+				pendingTtsMetadata = metadata;
+			}
+
+			std::ostringstream summary;
+			summary << "Synthesized chat dialog";
+			if (!botResult.backendName.empty()) {
+				summary << " via " << botResult.backendName;
+			}
+			if ((userResult.elapsedMs + botResult.elapsedMs) > 0.0f) {
+				summary << " in "
+					<< ofxGgmlHelpers::formatDurationMs(userResult.elapsedMs + botResult.elapsedMs);
+			}
+			summary << ".";
+			if (!audioFiles.empty()) {
+				summary << "\n\nGenerated audio:";
+				for (const auto & artifact : audioFiles) {
+					summary << "\n- " << artifact.path;
+				}
+			}
+			setPending(summary.str());
+		} catch (const std::exception & e) {
+			clearPendingTtsArtifacts();
+			setPending(std::string("[Error] Chat dialog synthesis failed: ") + e.what());
+		} catch (...) {
+			clearPendingTtsArtifacts();
+			setPending("[Error] Chat dialog synthesis failed.");
+		}
+
+		generating.store(false);
+	});
 }
 
 void ofApp::speakLatestSummary(bool mirrorIntoTtsInput) {
@@ -6721,12 +7033,7 @@ void ofApp::speakLatestSummary(bool mirrorIntoTtsInput) {
 	}
 	summarizeTtsPreview.request.pending = true;
 	summarizeTtsPreview.statusMessage = "Synthesizing current summary...";
-	runTtsInferenceForText(
-		summary,
-		"Synthesized summary",
-		mirrorIntoTtsInput,
-		summarizeUseCustomTtsVoice ? trim(summarizeTtsModelPath) : std::string(),
-		summarizeUseCustomTtsVoice ? trim(summarizeTtsSpeakerPath) : std::string());
+	runTtsInferenceForText(summary, "Synthesized summary", mirrorIntoTtsInput);
 }
 
 void ofApp::speakTranslatedReply(bool mirrorIntoTtsInput) {

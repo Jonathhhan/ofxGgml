@@ -27,9 +27,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 GGML_DIR="$ADDON_ROOT/libs/ggml"
-DOWNLOAD_DIR="$GGML_DIR/.download"
-SRC_DIR="$DOWNLOAD_DIR/ggml"
-BUILD_DIR="$GGML_DIR/build"
 INCLUDE_DIR="$GGML_DIR/include"
 LIB_DIR="$GGML_DIR/lib"
 GGML_REPO="https://github.com/ggml-org/ggml.git"
@@ -40,6 +37,26 @@ ENABLE_VULKAN=""
 ENABLE_METAL=""
 AUTO_DETECT=1
 CLEAN=0
+
+OS_NAME="$(uname -s 2>/dev/null || echo unknown)"
+
+if [[ "$OS_NAME" == MINGW* || "$OS_NAME" == MSYS* || "$OS_NAME" == CYGWIN* ]]; then
+	WINDOWS_CACHE_ROOT=""
+	if [[ -n "${LOCALAPPDATA:-}" ]]; then
+		WINDOWS_CACHE_ROOT="$(cygpath -u "$LOCALAPPDATA" 2>/dev/null || true)"
+	fi
+	if [[ -z "$WINDOWS_CACHE_ROOT" ]]; then
+		WINDOWS_CACHE_ROOT="/tmp"
+	fi
+	WORK_ROOT="$WINDOWS_CACHE_ROOT/ofxGgml/ggml"
+	DOWNLOAD_DIR="$WORK_ROOT/download"
+	SRC_DIR="$DOWNLOAD_DIR/ggml"
+	BUILD_DIR="$WORK_ROOT/build"
+else
+	DOWNLOAD_DIR="$GGML_DIR/.download"
+	SRC_DIR="$DOWNLOAD_DIR/ggml"
+	BUILD_DIR="$GGML_DIR/build"
+fi
 
 write_step() {
 	printf '==> %s\n' "$1"

@@ -231,14 +231,10 @@ private:
 	bool chatUseCustomTtsVoice = false;
 	char chatTtsModelPath[1024] = {};
 	char chatTtsSpeakerPath[1024] = {};
-	bool chatUseSecondaryTtsVoice = false;
-	bool chatAlternateTtsVoices = false;
-	char chatSecondaryTtsModelPath[1024] = {};
-	char chatSecondaryTtsSpeakerPath[1024] = {};
+	bool chatUseUserTtsVoice = false;
+	char chatUserTtsModelPath[1024] = {};
+	char chatUserTtsSpeakerPath[1024] = {};
 	bool summarizeSpeakOutput = false;
-	bool summarizeUseCustomTtsVoice = false;
-	char summarizeTtsModelPath[1024] = {};
-	char summarizeTtsSpeakerPath[1024] = {};
 	char easyPrimaryInput[4096] = {};
 	char easySecondaryInput[2048] = {};
 	int easyActionIndex = 0;
@@ -457,7 +453,6 @@ private:
 	std::deque<Message> chatMessages;
 	std::string chatLastAssistantReply;
 	TtsPreviewState chatTtsPreview;
-	bool chatUseSecondaryTtsVoiceNext = false;
 	TtsPreviewState ttsPanelPreview;
 	std::string easyOutput;
 	std::string scriptOutput;
@@ -1037,6 +1032,7 @@ private:
 		const std::string & modelPathOverride = std::string(),
 		const std::string & speakerPathOverride = std::string());
 	void speakLatestChatReply(bool mirrorIntoTtsInput = true);
+	void speakLatestChatExchange(bool mirrorIntoTtsInput = false);
 	void speakLatestSummary(bool mirrorIntoTtsInput = true);
 	void speakTranslatedReply(bool mirrorIntoTtsInput = true);
 	void speakVideoEssayReply(bool mirrorIntoTtsInput = true);

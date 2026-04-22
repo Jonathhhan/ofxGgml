@@ -121,10 +121,8 @@ bool ofApp::saveSession(const std::string & path) {
 		{"chatInput", std::string(chatInput)},
 		{"chatTtsModelPath", std::string(chatTtsModelPath)},
 		{"chatTtsSpeakerPath", std::string(chatTtsSpeakerPath)},
-		{"chatSecondaryTtsModelPath", std::string(chatSecondaryTtsModelPath)},
-		{"chatSecondaryTtsSpeakerPath", std::string(chatSecondaryTtsSpeakerPath)},
-		{"summarizeTtsModelPath", std::string(summarizeTtsModelPath)},
-		{"summarizeTtsSpeakerPath", std::string(summarizeTtsSpeakerPath)},
+		{"chatUserTtsModelPath", std::string(chatUserTtsModelPath)},
+		{"chatUserTtsSpeakerPath", std::string(chatUserTtsSpeakerPath)},
 		{"easyPrimaryInput", std::string(easyPrimaryInput)},
 		{"easySecondaryInput", std::string(easySecondaryInput)},
 		{"scriptInput", std::string(scriptInput)},
@@ -292,10 +290,8 @@ bool ofApp::saveSession(const std::string & path) {
 	session["bools"] = {
 		{"chatSpeakReplies", chatSpeakReplies},
 		{"chatUseCustomTtsVoice", chatUseCustomTtsVoice},
-		{"chatUseSecondaryTtsVoice", chatUseSecondaryTtsVoice},
-		{"chatAlternateTtsVoices", chatAlternateTtsVoices},
+		{"chatUseUserTtsVoice", chatUseUserTtsVoice},
 		{"summarizeSpeakOutput", summarizeSpeakOutput},
-		{"summarizeUseCustomTtsVoice", summarizeUseCustomTtsVoice},
 		{"easyUseCrawler", easyUseCrawler},
 		{"translateUseCustomTtsVoice", translateUseCustomTtsVoice},
 		{"voiceTranslatorSpeakOutput", voiceTranslatorSpeakOutput},
@@ -592,25 +588,15 @@ bool ofApp::loadSession(const std::string & path) {
 	copyJsonString(chatTtsModelPath, sizeof(chatTtsModelPath), buffers, "chatTtsModelPath");
 	copyJsonString(chatTtsSpeakerPath, sizeof(chatTtsSpeakerPath), buffers, "chatTtsSpeakerPath");
 	copyJsonString(
-		chatSecondaryTtsModelPath,
-		sizeof(chatSecondaryTtsModelPath),
+		chatUserTtsModelPath,
+		sizeof(chatUserTtsModelPath),
 		buffers,
-		"chatSecondaryTtsModelPath");
+		"chatUserTtsModelPath");
 	copyJsonString(
-		chatSecondaryTtsSpeakerPath,
-		sizeof(chatSecondaryTtsSpeakerPath),
+		chatUserTtsSpeakerPath,
+		sizeof(chatUserTtsSpeakerPath),
 		buffers,
-		"chatSecondaryTtsSpeakerPath");
-	copyJsonString(
-		summarizeTtsModelPath,
-		sizeof(summarizeTtsModelPath),
-		buffers,
-		"summarizeTtsModelPath");
-	copyJsonString(
-		summarizeTtsSpeakerPath,
-		sizeof(summarizeTtsSpeakerPath),
-		buffers,
-		"summarizeTtsSpeakerPath");
+		"chatUserTtsSpeakerPath");
 	copyJsonString(easyPrimaryInput, sizeof(easyPrimaryInput), buffers, "easyPrimaryInput");
 	copyJsonString(easySecondaryInput, sizeof(easySecondaryInput), buffers, "easySecondaryInput");
 	copyJsonString(scriptInput, sizeof(scriptInput), buffers, "scriptInput");
@@ -863,19 +849,11 @@ bool ofApp::loadSession(const std::string & path) {
 
 	chatSpeakReplies = getBool(bools, "chatSpeakReplies", chatSpeakReplies);
 	chatUseCustomTtsVoice = getBool(bools, "chatUseCustomTtsVoice", chatUseCustomTtsVoice);
-	chatUseSecondaryTtsVoice = getBool(
+	chatUseUserTtsVoice = getBool(
 		bools,
-		"chatUseSecondaryTtsVoice",
-		chatUseSecondaryTtsVoice);
-	chatAlternateTtsVoices = getBool(
-		bools,
-		"chatAlternateTtsVoices",
-		chatAlternateTtsVoices);
+		"chatUseUserTtsVoice",
+		chatUseUserTtsVoice);
 	summarizeSpeakOutput = getBool(bools, "summarizeSpeakOutput", summarizeSpeakOutput);
-	summarizeUseCustomTtsVoice = getBool(
-		bools,
-		"summarizeUseCustomTtsVoice",
-		summarizeUseCustomTtsVoice);
 	easyUseCrawler = getBool(bools, "easyUseCrawler", easyUseCrawler);
 	translateUseCustomTtsVoice = getBool(
 		bools,

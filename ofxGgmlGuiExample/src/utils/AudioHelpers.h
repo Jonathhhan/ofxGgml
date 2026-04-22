@@ -31,6 +31,13 @@ bool writeMonoWavFile(
 	const std::vector<float> & samples,
 	int sampleRate);
 
+// Write an interleaved WAV file from float samples
+bool writeWavFile(
+	const std::string & path,
+	const std::vector<float> & samples,
+	int sampleRate,
+	int channels);
+
 // Load a PCM/float WAV file into normalized floating-point samples
 bool loadWavFile(
 	const std::string & path,
