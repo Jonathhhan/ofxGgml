@@ -1041,6 +1041,7 @@ ofxGgmlRAGResult ofxGgmlEasy::ragQuery(
 	request.query.topK = topK;
 	request.query.chunkSize = chunkSize;
 	request.query.chunkOverlap = chunkOverlap;
+	request.query.embeddingModelPath = m_textConfig.modelPath;
 	request.modelPath = m_textConfig.modelPath;
 	request.promptPrefix = promptPrefix;
 	request.inferenceSettings = makeTextSettings();

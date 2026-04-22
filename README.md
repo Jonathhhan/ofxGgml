@@ -289,6 +289,10 @@ auto interceptedCitations = ai.findCitationsFromInput(
     "https://example.com/weather",
     4);
 
+// Citation search now rewrites/refines the topic and reuses the shared
+// RAG retrieval path for hybrid lexical + embedding-aware source chunk ranking
+// when embeddings are configured, with lexical fallback otherwise.
+
 auto montage = ai.planMontageFromSrt(
     "data/subtitles/scene.srt",
     "Build a concise recap montage.");

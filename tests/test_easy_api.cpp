@@ -377,6 +377,8 @@ TEST_CASE("Easy API exposes citation and video edit helpers", "[easy_api]") {
 	if (interceptedCitationResult.success) {
 		REQUIRE(interceptedCitationResult.requestedTopic == "Berlin weather");
 		REQUIRE(interceptedCitationResult.inputTriggerWord == "find");
+		REQUIRE(interceptedCitationResult.queryRewrite.originalTopic == "Berlin weather");
+		REQUIRE_FALSE(interceptedCitationResult.queryRewrite.queriesUsed.empty());
 		REQUIRE(interceptedCitationResult.citations.size() == 1);
 		REQUIRE(interceptedCitationResult.citations.front().quote ==
 			"Icy weather halted flights.");

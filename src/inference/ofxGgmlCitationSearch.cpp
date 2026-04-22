@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cctype>
 #include <iomanip>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -375,6 +376,199 @@ ofJson parseLooseJson(const std::string & rawText) {
 	return ofJson();
 }
 
+std::vector<std::string> dedupeStrings(const std::vector<std::string> & values) {
+	std::vector<std::string> out;
+	std::unordered_set<std::string> seen;
+	for (const auto & value : values) {
+		const std::string trimmed = trimCopy(value);
+		if (trimmed.empty()) {
+			continue;
+		}
+		const std::string normalized = toLowerCopy(trimmed);
+		if (!seen.insert(normalized).second) {
+			continue;
+		}
+		out.push_back(trimmed);
+	}
+	return out;
+}
+
+std::vector<std::string> tokenizeLongTerms(const std::string & text) {
+	std::vector<std::string> terms;
+	std::unordered_set<std::string> seen;
+	std::string current;
+	for (char c : text) {
+		const unsigned char uc = static_cast<unsigned char>(c);
+		if (std::isalnum(uc) || c == '-' || c == '_') {
+			current.push_back(static_cast<char>(std::tolower(uc)));
+		} else if (!current.empty()) {
+			if (current.size() >= 4 && seen.insert(current).second) {
+				terms.push_back(current);
+			}
+			current.clear();
+		}
+	}
+	if (!current.empty() && current.size() >= 4 && seen.insert(current).second) {
+		terms.push_back(current);
+	}
+	return terms;
+}
+
+std::vector<std::string> buildHeuristicAlternateQueries(
+	const std::string & topic,
+	size_t maxAlternateQueries) {
+	std::vector<std::string> queries;
+	if (maxAlternateQueries == 0) {
+		return queries;
+	}
+	const auto terms = tokenizeLongTerms(topic);
+	if (!terms.empty()) {
+		std::ostringstream focused;
+		for (size_t i = 0; i < terms.size(); ++i) {
+			if (i > 0) {
+				focused << ' ';
+			}
+			focused << terms[i];
+		}
+		queries.push_back(focused.str());
+	}
+	if (queries.size() < maxAlternateQueries && terms.size() >= 2) {
+		queries.push_back(terms.front() + " " + terms.back());
+	}
+	if (queries.size() > maxAlternateQueries) {
+		queries.resize(maxAlternateQueries);
+	}
+	return dedupeStrings(queries);
+}
+
+std::vector<std::string> extractHeuristicDomainHints(
+	const std::string & topic,
+	bool allowDomainHints) {
+	std::vector<std::string> hints;
+	if (!allowDomainHints) {
+		return hints;
+	}
+	const std::string lowered = toLowerCopy(topic);
+	if (lowered.find("wikipedia") != std::string::npos) {
+		hints.push_back("wikipedia.org");
+	}
+	if (lowered.find("github") != std::string::npos) {
+		hints.push_back("github.com");
+	}
+	if (lowered.find("api") != std::string::npos || lowered.find("docs") != std::string::npos) {
+		hints.push_back("official docs");
+	}
+	if (lowered.find("official") != std::string::npos) {
+		hints.push_back("official sources");
+	}
+	return dedupeStrings(hints);
+}
+
+std::string buildQueryRewritePrompt(const std::string & topic) {
+	std::ostringstream prompt;
+	prompt
+		<< "Rewrite the research topic below for better grounded web retrieval.\n"
+		<< "Return JSON only with this shape:\n"
+		<< "{\"topic\":\"clean topic\",\"alternateQueries\":[\"...\"],\"domainHints\":[\"...\"]}\n"
+		<< "Rules:\n"
+		<< "- Keep the same intent\n"
+		<< "- Make `topic` concise and specific\n"
+		<< "- Return at most 2 alternateQueries\n"
+		<< "- Return only high-signal domainHints like wikipedia.org, github.com, or official docs\n"
+		<< "- Do not include commentary\n\n"
+		<< "Topic: " << topic << "\n";
+	return prompt.str();
+}
+
+ofxGgmlCitationSearchResult::QueryRewriteResult rewriteTopicForSearch(
+	const ofxGgmlInference & inference,
+	const std::string & modelPath,
+	const std::string & topic,
+	const ofxGgmlInferenceSettings & inferenceSettings,
+	const ofxGgmlCitationSearchRequest::QueryRewriteSettings & settings) {
+	ofxGgmlCitationSearchResult::QueryRewriteResult result;
+	result.originalTopic = topic;
+	result.rewrittenTopic = stripCitationLeadIn(topic);
+	if (result.rewrittenTopic.empty()) {
+		result.rewrittenTopic = topic;
+	}
+
+	if (!settings.enabled) {
+		result.queriesUsed = {result.rewrittenTopic};
+		return result;
+	}
+
+	if (settings.useInference && !modelPath.empty()) {
+		const auto rewriteInference = inference.generate(
+			modelPath,
+			buildQueryRewritePrompt(topic),
+			inferenceSettings);
+		result.rawResponse = rewriteInference.text;
+		if (rewriteInference.success) {
+			const ofJson parsed = parseLooseJson(rewriteInference.text);
+			if (parsed.is_object()) {
+				const std::string parsedTopic = trimCopy(parsed.value("topic", std::string()));
+				if (!parsedTopic.empty()) {
+					result.rewrittenTopic = parsedTopic;
+					result.applied = true;
+					result.usedInference = true;
+				}
+				if (parsed.contains("alternateQueries") && parsed["alternateQueries"].is_array()) {
+					for (const auto & value : parsed["alternateQueries"]) {
+						if (value.is_string()) {
+							result.alternateQueries.push_back(value.get<std::string>());
+						}
+					}
+				}
+				if (parsed.contains("domainHints") && parsed["domainHints"].is_array()) {
+					for (const auto & value : parsed["domainHints"]) {
+						if (value.is_string()) {
+							result.domainHints.push_back(value.get<std::string>());
+						}
+					}
+				}
+			} else {
+				result.error = "Query rewrite did not return valid JSON.";
+			}
+		} else if (!rewriteInference.error.empty()) {
+			result.error = rewriteInference.error;
+		}
+	}
+
+	if (settings.allowFallbackHeuristics) {
+		if (result.rewrittenTopic.empty()) {
+			result.rewrittenTopic = stripCitationLeadIn(topic);
+		}
+		const auto heuristicQueries =
+			buildHeuristicAlternateQueries(result.rewrittenTopic, settings.maxAlternateQueries);
+		result.alternateQueries.insert(
+			result.alternateQueries.end(),
+			heuristicQueries.begin(),
+			heuristicQueries.end());
+		const auto heuristicHints =
+			extractHeuristicDomainHints(result.rewrittenTopic, settings.allowDomainHints);
+		result.domainHints.insert(
+			result.domainHints.end(),
+			heuristicHints.begin(),
+			heuristicHints.end());
+		result.usedFallback =
+			!heuristicQueries.empty() || !heuristicHints.empty() || !result.rewrittenTopic.empty();
+	}
+
+	result.alternateQueries = dedupeStrings(result.alternateQueries);
+	if (result.alternateQueries.size() > settings.maxAlternateQueries) {
+		result.alternateQueries.resize(settings.maxAlternateQueries);
+	}
+	result.domainHints = dedupeStrings(result.domainHints);
+	result.queriesUsed.push_back(result.rewrittenTopic.empty() ? topic : result.rewrittenTopic);
+	result.queriesUsed.insert(
+		result.queriesUsed.end(),
+		result.alternateQueries.begin(),
+		result.alternateQueries.end());
+	result.queriesUsed = dedupeStrings(result.queriesUsed);
+	return result;
+}
+
 bool isLikelyYamlFrontMatter(const std::vector<std::string> & lines) {
 	if (lines.empty() || trimCopy(lines.front()) != "---") {
 		return false;
@@ -557,6 +751,38 @@ std::vector<std::string> normalizeSourceUrls(
 		normalized.push_back(url);
 	}
 	return normalized;
+}
+
+std::vector<ofxGgmlPromptSource> mergeUniqueSources(
+	const std::vector<ofxGgmlPromptSource> & sources,
+	size_t maxSources = std::numeric_limits<size_t>::max()) {
+	std::vector<ofxGgmlPromptSource> merged;
+	std::unordered_set<std::string> seen;
+	for (const auto & source : sources) {
+		const std::string key = trimCopy(source.uri) + "\n---\n" + trimCopy(source.content);
+		if (key == "\n---\n" || !seen.insert(key).second) {
+			continue;
+		}
+		merged.push_back(source);
+		if (merged.size() >= maxSources) {
+			break;
+		}
+	}
+	return merged;
+}
+
+std::vector<ofxGgmlPromptSource> fetchRealtimeSourcesForQueries(
+	const std::vector<std::string> & queries,
+	const ofxGgmlRealtimeInfoSettings & settings) {
+	std::vector<ofxGgmlPromptSource> collected;
+	for (const auto & query : dedupeStrings(queries)) {
+		auto sources = ofxGgmlInference::fetchRealtimeSources(query, settings);
+		collected.insert(collected.end(), sources.begin(), sources.end());
+		if (collected.size() >= settings.maxSources) {
+			break;
+		}
+	}
+	return mergeUniqueSources(collected, settings.maxSources);
 }
 
 std::vector<ofxGgmlCitationItem> dedupeCitationItems(
@@ -900,15 +1126,27 @@ std::vector<ofxGgmlPromptSource> selectRetrievedSources(
 	const ofxGgmlInference & inference,
 	const std::string & modelPath,
 	const std::string & topic,
+	const ofxGgmlCitationSearchResult::QueryRewriteResult & queryRewrite,
 	const ofxGgmlInferenceSettings & inferenceSettings,
-	const std::vector<ofxGgmlPromptSource> & sources) {
+	const std::vector<ofxGgmlPromptSource> & sources,
+	ofxGgmlRAGRetrievalResult * retrievalOut = nullptr) {
 	if (sources.size() <= 3) {
+		if (retrievalOut) {
+			retrievalOut->success = true;
+		}
 		return sources;
 	}
 
-	const auto chunks = chunkSourcesForRetrieval(sources);
-	if (chunks.size() <= 3) {
-		return buildSourcesFromChunks(chunks);
+	ofxGgmlRAGPipeline pipeline;
+	for (size_t i = 0; i < sources.size(); ++i) {
+		ofxGgmlRAGDocument document;
+		document.id = "source-" + std::to_string(i + 1);
+		document.content = sources[i].content;
+		document.sourceLabel = appendHostToLabel(sources[i].label, sources[i].uri);
+		document.sourceUri = sources[i].uri;
+		document.byteSize = sources[i].content.size();
+		document.qualityHint = sources[i].isWebSource ? 0.1f : 0.0f;
+		pipeline.addDocument(document);
 	}
 
 	ofxGgmlEmbeddingSettings embeddingSettings;
@@ -916,64 +1154,38 @@ std::vector<ofxGgmlPromptSource> selectRetrievedSources(
 	embeddingSettings.serverUrl = inferenceSettings.serverUrl;
 	embeddingSettings.serverModel = inferenceSettings.serverModel;
 
-	const auto queryEmbeddingResult = inference.embed(modelPath, topic, embeddingSettings);
-	if (!queryEmbeddingResult.success || queryEmbeddingResult.embedding.empty()) {
-		return sources;
-	}
+	ofxGgmlRAGQuery query;
+	query.query = topic;
+	query.queryVariants = queryRewrite.alternateQueries;
+	query.topK = std::max<size_t>(std::min<size_t>(sources.size(), 8), 3);
+	query.chunkSize = 900;
+	query.chunkOverlap = 180;
+	query.includeSourceHeaders = false;
+	query.embeddingModelPath = modelPath;
+	query.embeddingSettings = embeddingSettings;
+	query.rerankTopN = std::max<size_t>(query.topK, 12);
+	query.maxRefinementSteps = std::max<size_t>(1, queryRewrite.alternateQueries.size());
 
-	std::vector<std::string> chunkTexts;
-	chunkTexts.reserve(chunks.size());
-	for (const auto & chunk : chunks) {
-		chunkTexts.push_back(chunk.content);
+	const auto retrieval = pipeline.retrieve(query);
+	if (retrievalOut) {
+		*retrievalOut = retrieval;
 	}
-	const auto chunkEmbeddingResults = inference.embedBatch(modelPath, chunkTexts, embeddingSettings);
-	if (chunkEmbeddingResults.size() != chunks.size()) {
-		return sources;
-	}
-
-	ofxGgmlEmbeddingIndex index;
-	std::vector<size_t> indexedChunkPositions;
-	indexedChunkPositions.reserve(chunks.size());
-	for (size_t i = 0; i < chunkEmbeddingResults.size(); ++i) {
-		if (!chunkEmbeddingResults[i].success || chunkEmbeddingResults[i].embedding.empty()) {
-			continue;
-		}
-		index.add(chunks[i].id, chunkTexts[i], chunkEmbeddingResults[i].embedding);
-		indexedChunkPositions.push_back(i);
-	}
-	if (indexedChunkPositions.size() < 2) {
-		return sources;
-	}
-
-	const size_t topK = std::min<size_t>(16, indexedChunkPositions.size());
-	const auto hits = index.search(queryEmbeddingResult.embedding, topK);
-	if (hits.empty()) {
+	if (!retrieval.success || retrieval.chunks.empty()) {
 		return sources;
 	}
 
 	std::vector<ofxGgmlPromptSource> selected;
-	selected.reserve(hits.size());
-	std::unordered_set<std::string> seenChunkIds;
-	for (const auto & hit : hits) {
-		if (hit.score < 0.15f) {
-			continue;
-		}
-		if (!seenChunkIds.insert(hit.id).second) {
-			continue;
-		}
-		auto it = std::find_if(
-			chunks.begin(),
-			chunks.end(),
-			[&hit](const CitationSourceChunk & chunk) {
-				return chunk.id == hit.id;
-			});
-		if (it == chunks.end()) {
+	selected.reserve(retrieval.chunks.size());
+	std::unordered_set<std::string> seen;
+	for (const auto & chunk : retrieval.chunks) {
+		const std::string key = chunk.sourceUri + "\n---\n" + chunk.text;
+		if (!seen.insert(key).second) {
 			continue;
 		}
 		ofxGgmlPromptSource source;
-		source.label = it->label;
-		source.uri = it->uri;
-		source.content = it->content;
+		source.label = chunk.sourceLabel;
+		source.uri = chunk.sourceUri;
+		source.content = chunk.text;
 		source.isWebSource = true;
 		selected.push_back(std::move(source));
 	}
@@ -1156,13 +1368,25 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		return result;
 	}
 
-	const std::string prompt = buildCitationPrompt(topic, request.maxCitations);
+	result.queryRewrite = rewriteTopicForSearch(
+		m_inference,
+		request.modelPath,
+		topic,
+		request.inferenceSettings,
+		request.queryRewriteSettings);
+	const std::string effectiveTopic = trimCopy(
+		result.queryRewrite.rewrittenTopic.empty()
+			? topic
+			: result.queryRewrite.rewrittenTopic);
+	result.requestedTopic = effectiveTopic.empty() ? topic : effectiveTopic;
+
+	const std::string prompt = buildCitationPrompt(result.requestedTopic, request.maxCitations);
 	ofxGgmlInferenceResult inferenceResult;
 
 	if (request.useCrawler) {
 		ofxGgmlWebCrawlerRequest crawlerRequest = request.crawlerRequest;
 		crawlerRequest.startUrl =
-			resolveTopicAwareCrawlerUrl(crawlerRequest.startUrl, topic);
+			resolveTopicAwareCrawlerUrl(crawlerRequest.startUrl, result.requestedTopic);
 		result.crawlerResult = m_webCrawler.crawl(crawlerRequest);
 		if (!result.crawlerResult.success) {
 			result.error = result.crawlerResult.error.empty()
@@ -1181,9 +1405,14 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		sources = selectRetrievedSources(
 			m_inference,
 			request.modelPath,
-			topic,
+			result.requestedTopic,
+			result.queryRewrite,
 			request.inferenceSettings,
-			sources);
+			sources,
+			&result.retrieval);
+		if (!result.retrieval.queriesUsed.empty()) {
+			result.queryRewrite.queriesUsed = result.retrieval.queriesUsed;
+		}
 		inferenceResult = m_inference.generateWithSources(
 			request.modelPath,
 			prompt,
@@ -1193,9 +1422,12 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 	} else {
 		const auto normalizedUrls = normalizeSourceUrls(request.sourceUrls);
 		if (normalizedUrls.empty()) {
-			auto sources = ofxGgmlInference::fetchRealtimeSources(
-				topic,
-				makeRealtimeCitationSettings(request.sourceSettings));
+			auto realtimeSettings = makeRealtimeCitationSettings(request.sourceSettings);
+			auto queries = result.queryRewrite.queriesUsed;
+			if (queries.empty()) {
+				queries.push_back(result.requestedTopic);
+			}
+			auto sources = fetchRealtimeSourcesForQueries(queries, realtimeSettings);
 			if (sources.empty()) {
 				result.error = "No usable web sources were found for the citation topic.";
 				result.elapsedMs = elapsedMsSince(start);
@@ -1204,9 +1436,14 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 			sources = selectRetrievedSources(
 				m_inference,
 				request.modelPath,
-				topic,
+				result.requestedTopic,
+				result.queryRewrite,
 				request.inferenceSettings,
-				sources);
+				sources,
+				&result.retrieval);
+			result.queryRewrite.queriesUsed = result.retrieval.queriesUsed.empty()
+				? queries
+				: result.retrieval.queriesUsed;
 			inferenceResult = m_inference.generateWithSources(
 				request.modelPath,
 				prompt,
@@ -1226,9 +1463,14 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 			sources = selectRetrievedSources(
 				m_inference,
 				request.modelPath,
-				topic,
+				result.requestedTopic,
+				result.queryRewrite,
 				request.inferenceSettings,
-				sources);
+				sources,
+				&result.retrieval);
+			if (!result.retrieval.queriesUsed.empty()) {
+				result.queryRewrite.queriesUsed = result.retrieval.queriesUsed;
+			}
 			inferenceResult = m_inference.generateWithSources(
 				request.modelPath,
 				prompt,
@@ -1242,7 +1484,7 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 	result.sourcesUsed = inferenceResult.sourcesUsed;
 	if (!inferenceResult.success) {
 		result.citations = fallbackExtractExactCitations(
-			topic,
+			result.requestedTopic,
 			result.sourcesUsed,
 			std::max<size_t>(1, request.maxCitations));
 		if (!result.citations.empty()) {
@@ -1261,7 +1503,7 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 	const ofJson parsed = parseLooseJson(inferenceResult.text);
 	if (!parsed.is_object()) {
 		result.citations = fallbackExtractExactCitations(
-			topic,
+			result.requestedTopic,
 			result.sourcesUsed,
 			std::max<size_t>(1, request.maxCitations));
 		result.success = !result.citations.empty();
@@ -1296,7 +1538,7 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 	}
 	if (result.citations.empty()) {
 		result.citations = fallbackExtractExactCitations(
-			topic,
+			result.requestedTopic,
 			result.sourcesUsed,
 			std::max<size_t>(1, request.maxCitations));
 		if (result.citations.empty()) {

@@ -12,6 +12,9 @@ struct ofxGgmlRAGDocument {
 	std::string content;
 	std::string sourceLabel;
 	std::string sourceUri;
+	int crawlDepth = -1;
+	size_t byteSize = 0;
+	float qualityHint = 0.0f;
 };
 
 /// A scored text passage retrieved from a document.
@@ -22,6 +25,12 @@ struct ofxGgmlRAGChunk {
 	std::string text;
 	int chunkIndex = 0;
 	float score = 0.0f;
+	float keywordScore = 0.0f;
+	float semanticScore = 0.0f;
+	float qualityScore = 0.0f;
+	int crawlDepth = -1;
+	size_t sourceByteSize = 0;
+	float sourceQualityHint = 0.0f;
 };
 
 /// Retrieval query parameters.
@@ -31,6 +40,16 @@ struct ofxGgmlRAGQuery {
 	size_t chunkSize = 400;
 	size_t chunkOverlap = 80;
 	bool includeSourceHeaders = true;
+	bool enableSemanticRanking = true;
+	bool allowQueryRefinement = true;
+	float keywordWeight = 0.55f;
+	float semanticWeight = 0.35f;
+	float qualityWeight = 0.10f;
+	size_t rerankTopN = 12;
+	size_t maxRefinementSteps = 1;
+	std::string embeddingModelPath;
+	ofxGgmlEmbeddingSettings embeddingSettings;
+	std::vector<std::string> queryVariants;
 };
 
 /// Result from the retrieval step only (no generation).
@@ -39,6 +58,9 @@ struct ofxGgmlRAGRetrievalResult {
 	std::string error;
 	std::vector<ofxGgmlRAGChunk> chunks;
 	std::string augmentedContext;
+	bool usedSemanticRanking = false;
+	size_t refinementCount = 0;
+	std::vector<std::string> queriesUsed;
 };
 
 /// Full RAG request: retrieval + generation.

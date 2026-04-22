@@ -1,6 +1,7 @@
 #pragma once
 
 #include "inference/ofxGgmlInference.h"
+#include "inference/ofxGgmlRAGPipeline.h"
 #include "inference/ofxGgmlWebCrawler.h"
 
 #include <string>
@@ -23,6 +24,13 @@ struct ofxGgmlCitationSearchRequest {
 	std::vector<std::string> sourceUrls;
 	ofxGgmlInferenceSettings inferenceSettings;
 	ofxGgmlPromptSourceSettings sourceSettings;
+	struct QueryRewriteSettings {
+		bool enabled = true;
+		bool useInference = true;
+		bool allowFallbackHeuristics = true;
+		bool allowDomainHints = true;
+		size_t maxAlternateQueries = 2;
+	} queryRewriteSettings;
 };
 
 struct ofxGgmlCitationSearchInputSettings {
@@ -58,9 +66,22 @@ struct ofxGgmlCitationSearchResult {
 	std::string rawResponse;
 	std::string summary;
 	std::string error;
+	struct QueryRewriteResult {
+		bool applied = false;
+		bool usedInference = false;
+		bool usedFallback = false;
+		std::string originalTopic;
+		std::string rewrittenTopic;
+		std::vector<std::string> alternateQueries;
+		std::vector<std::string> domainHints;
+		std::vector<std::string> queriesUsed;
+		std::string rawResponse;
+		std::string error;
+	} queryRewrite;
 	std::vector<ofxGgmlCitationItem> citations;
 	std::vector<ofxGgmlPromptSource> sourcesUsed;
 	ofxGgmlWebCrawlerResult crawlerResult;
+	ofxGgmlRAGRetrievalResult retrieval;
 };
 
 namespace ofxGgmlCitationSearchInternal {
