@@ -21,7 +21,8 @@ The implemented work follows a small set of recurring ideas:
 2. **Move duplicated logic into shared helpers**
 3. **Keep security-sensitive code centralized**
 4. **Document the intended usage, not just the API**
-5. **Reuse bridge patterns instead of coupling features together**
+5. **Improve existing backends before adding new ones**
+6. **Reuse bridge patterns instead of coupling features together**
 
 The sections below walk through those ideas one by one.
 
@@ -164,6 +165,8 @@ Everything generic can stay in one reusable place.
 
 This shows another important implemented idea: **backend integration should use a shared scaffold when the family of backends has recurring needs**.
 
+It also supports the current project priority: **improve the quality, consistency, and reuse of the existing backends before expanding the backend list**.
+
 That idea is especially important in this repository because there are multiple bridge-style systems:
 
 - text inference helpers
@@ -178,11 +181,51 @@ When you notice two adapters sharing the same prep/cleanup behavior:
 
 - extract the common mechanics
 - keep only backend-specific policy in the adapter itself
-- avoid creating a new backend if the existing backend family can be improved instead
+- prefer improving the current backend family before proposing another backend
 
 ---
 
-## 5. Consolidate planner logic instead of letting workflows drift apart
+## 5. Improve existing backends before adding new ones
+
+### The idea
+
+This repo already has several backend and bridge surfaces. At this stage, the bigger win is usually to make those existing paths more reliable, more consistent, and easier to use.
+
+### What this means in practice
+
+For now, the preferred direction is:
+
+- improve adapter quality
+- reduce duplication across current backends
+- make behavior more consistent across platforms
+- strengthen docs, defaults, and shared utilities
+
+Instead of:
+
+- introducing more backend types
+- widening the maintenance surface too early
+- splitting effort across too many partially mature integrations
+
+### Why it matters
+
+Improving the current backend set has compounding value:
+
+- every fix helps real users immediately
+- shared improvements benefit multiple workflows
+- maintenance stays more manageable
+- architectural drift is reduced
+
+### What to keep in mind when extending the repo
+
+Before proposing a new backend, first ask:
+
+- can the current backend do the job with a better wrapper?
+- is the missing piece really an adapter, or is it tooling, docs, or configuration?
+- would a shared improvement help more users than a new integration?
+
+---
+
+## 6. Consolidate planner logic instead of letting workflows drift apart
 
 ### The idea
 
@@ -217,7 +260,7 @@ If you add or change a planning/export workflow:
 
 ---
 
-## 6. Documentation is part of the implementation
+## 7. Documentation is part of the implementation
 
 ### The idea
 
@@ -249,7 +292,7 @@ When you make a user-visible change:
 
 ---
 
-## 7. How these ideas connect to the current architecture
+## 8. How these ideas connect to the current architecture
 
 The implemented ideas are not isolated fixes. Together, they support the repo's broader architecture:
 
@@ -289,6 +332,7 @@ The main implemented ideas in `ofxGgml` are:
 - make good defaults faster and easier to use
 - centralize shared logic instead of duplicating it
 - keep security-sensitive infrastructure in one place
+- improve existing backends before expanding the backend surface
 - build reusable scaffolding for related backends
 - unify workflow utilities where outputs need consistency
 - document the intended way to use the improvements
