@@ -162,7 +162,7 @@ bool isPreservedTurn(
 bool extractConversationTurn(
 	const std::string & json,
 	size_t & searchPos,
-	ofxGgmlConversationTurn * turnOut) {
+	ofxGgmlConversationTurn & turnOut) {
 	std::string role;
 	std::string content;
 	const bool hasRole = extractJsonString(json, "role", searchPos, &role);
@@ -170,9 +170,7 @@ bool extractConversationTurn(
 	if (!hasRole || !hasContent || role.empty()) {
 		return false;
 	}
-	if (turnOut != nullptr) {
-		*turnOut = {roleFromString(role), content};
-	}
+	turnOut = {roleFromString(role), content};
 	return true;
 }
 
@@ -297,7 +295,7 @@ bool ofxGgmlConversationManager::fromJson(
 		pos = objStart + 1;
 
 		ofxGgmlConversationTurn turn;
-		if (extractConversationTurn(text, pos, &turn)) {
+		if (extractConversationTurn(text, pos, turn)) {
 			target.m_turns.push_back(std::move(turn));
 		}
 	}
