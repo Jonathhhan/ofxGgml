@@ -1,8 +1,10 @@
 #include "inference/ofxGgmlRAGPipeline.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <chrono>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -64,6 +66,188 @@ const std::unordered_set<std::string> & stopWords() {
 	return kStopWords;
 }
 
+std::vector<std::string> dedupeQueries(const std::vector<std::string> & queries) {
+	std::vector<std::string> out;
+	std::unordered_set<std::string> seen;
+	for (const auto & query : queries) {
+		const std::string trimmed = trimCopy(query);
+		if (trimmed.empty()) {
+			continue;
+		}
+		const std::string normalized = toLowerCopy(trimmed);
+		if (!seen.insert(normalized).second) {
+			continue;
+		}
+		out.push_back(trimmed);
+	}
+	return out;
+}
+
+std::vector<std::string> buildRefinedQueries(
+	const std::string & query,
+	size_t maxAdditionalQueries) {
+	std::vector<std::string> refined;
+	if (maxAdditionalQueries == 0) {
+		return refined;
+	}
+
+	const auto tokens = tokenize(query);
+	std::vector<std::string> filtered;
+	filtered.reserve(tokens.size());
+	for (const auto & token : tokens) {
+		if (token.size() < 4 || stopWords().find(token) != stopWords().end()) {
+			continue;
+		}
+		filtered.push_back(token);
+	}
+	if (!filtered.empty()) {
+		std::ostringstream focused;
+		for (size_t i = 0; i < filtered.size(); ++i) {
+			if (i > 0) {
+				focused << ' ';
+			}
+			focused << filtered[i];
+		}
+		refined.push_back(focused.str());
+	}
+	if (refined.size() < maxAdditionalQueries && filtered.size() >= 2) {
+		refined.push_back(filtered.front() + " " + filtered.back());
+	}
+	if (refined.size() > maxAdditionalQueries) {
+		refined.resize(maxAdditionalQueries);
+	}
+	return dedupeQueries(refined);
+}
+
+float clampUnit(float value) {
+	return std::max(0.0f, std::min(1.0f, value));
+}
+
+float lexicalScoreForQueries(
+	const ofxGgmlRAGChunk & chunk,
+	const std::vector<std::string> & queries) {
+	float best = 0.0f;
+	for (const auto & query : queries) {
+		best = std::max(best, ofxGgmlRAGPipeline::scoreChunk(chunk, query));
+	}
+	return best;
+}
+
+float qualityScoreForChunk(
+	const ofxGgmlRAGChunk & chunk,
+	const std::vector<std::string> & queries) {
+	const std::string loweredText = toLowerCopy(chunk.text);
+	float score = 0.18f;
+
+	if (!chunk.sourceLabel.empty()) {
+		score += 0.08f;
+	}
+	if (!chunk.sourceUri.empty()) {
+		score += 0.06f;
+	}
+	if (chunk.crawlDepth >= 0) {
+		score += std::max(0.0f, 0.10f - static_cast<float>(chunk.crawlDepth) * 0.02f);
+	}
+	if (chunk.sourceByteSize > 512) {
+		score += 0.04f;
+	}
+	score += clampUnit(chunk.sourceQualityHint) * 0.16f;
+
+	const size_t length = chunk.text.size();
+	if (length >= 180 && length <= 950) {
+		score += 0.18f;
+	} else if (length >= 90) {
+		score += 0.10f;
+	}
+
+	size_t navigationHits = 0;
+	for (const std::string marker : {"cookie", "privacy", "terms", "menu", "navigation"}) {
+		if (loweredText.find(marker) != std::string::npos) {
+			++navigationHits;
+		}
+	}
+	score -= std::min(0.20f, static_cast<float>(navigationHits) * 0.05f);
+
+	size_t topicalHits = 0;
+	for (const auto & query : queries) {
+		for (const auto & token : tokenize(query)) {
+			if (token.size() < 4 || stopWords().find(token) != stopWords().end()) {
+				continue;
+			}
+			if (loweredText.find(token) != std::string::npos) {
+				++topicalHits;
+			}
+		}
+	}
+	score += std::min(0.18f, static_cast<float>(topicalHits) * 0.02f);
+	return clampUnit(score);
+}
+
+std::vector<float> computeSemanticScores(
+	const ofxGgmlInference & inference,
+	const std::string & embeddingModelPath,
+	const ofxGgmlEmbeddingSettings & embeddingSettings,
+	const std::vector<std::string> & queries,
+	const std::vector<ofxGgmlRAGChunk> & chunks,
+	bool * usedSemanticRanking) {
+	if (usedSemanticRanking) {
+		*usedSemanticRanking = false;
+	}
+	std::vector<float> semanticScores(chunks.size(), 0.0f);
+	if (embeddingModelPath.empty() || queries.empty() || chunks.empty()) {
+		return semanticScores;
+	}
+
+	const auto queryEmbeddings = inference.embedBatch(
+		embeddingModelPath,
+		queries,
+		embeddingSettings);
+	if (queryEmbeddings.size() != queries.size()) {
+		return semanticScores;
+	}
+
+	std::vector<std::string> chunkTexts;
+	chunkTexts.reserve(chunks.size());
+	for (const auto & chunk : chunks) {
+		chunkTexts.push_back(chunk.text);
+	}
+	const auto chunkEmbeddings = inference.embedBatch(
+		embeddingModelPath,
+		chunkTexts,
+		embeddingSettings);
+	if (chunkEmbeddings.size() != chunks.size()) {
+		return semanticScores;
+	}
+
+	bool anySemantic = false;
+	for (size_t chunkIndex = 0; chunkIndex < chunks.size(); ++chunkIndex) {
+		if (!chunkEmbeddings[chunkIndex].success ||
+			chunkEmbeddings[chunkIndex].embedding.empty()) {
+			continue;
+		}
+		float best = 0.0f;
+		for (const auto & queryEmbedding : queryEmbeddings) {
+			if (!queryEmbedding.success || queryEmbedding.embedding.empty()) {
+				continue;
+			}
+			best = std::max(
+				best,
+				ofxGgmlEmbeddingIndex::cosineSimilarity(
+					queryEmbedding.embedding,
+					chunkEmbeddings[chunkIndex].embedding));
+		}
+		if (best > 0.0f) {
+			anySemantic = true;
+			semanticScores[chunkIndex] = best;
+		}
+	}
+
+	if (usedSemanticRanking) {
+		*usedSemanticRanking = anySemantic;
+	}
+	return semanticScores;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -120,6 +304,20 @@ ofxGgmlRAGRetrievalResult ofxGgmlRAGPipeline::retrieve(
 	const size_t chunkSize = std::max(size_t(64), query.chunkSize);
 	const size_t overlap = std::min(query.chunkOverlap, chunkSize / 2);
 
+	std::vector<std::string> candidateQueries = {query.query};
+	if (query.allowQueryRefinement) {
+		for (const auto & variant : query.queryVariants) {
+			candidateQueries.push_back(variant);
+		}
+		const auto refined = buildRefinedQueries(query.query, query.maxRefinementSteps);
+		candidateQueries.insert(candidateQueries.end(), refined.begin(), refined.end());
+	}
+	candidateQueries = dedupeQueries(candidateQueries);
+	result.queriesUsed = candidateQueries;
+	if (candidateQueries.size() > 1) {
+		result.refinementCount = candidateQueries.size() - 1;
+	}
+
 	std::vector<ofxGgmlRAGChunk> allChunks;
 	for (const auto & doc : m_documents) {
 		auto docChunks = chunkDocument(doc, chunkSize, overlap);
@@ -128,9 +326,41 @@ ofxGgmlRAGRetrievalResult ofxGgmlRAGPipeline::retrieve(
 			std::make_move_iterator(docChunks.begin()),
 			std::make_move_iterator(docChunks.end()));
 	}
+	const size_t rerankTopN =
+		query.rerankTopN > query.topK ? query.rerankTopN : allChunks.size();
 
-	for (auto & chunk : allChunks) {
-		chunk.score = scoreChunk(chunk, query.query);
+	std::vector<float> semanticScores;
+	if (query.enableSemanticRanking) {
+		semanticScores = computeSemanticScores(
+			m_inference,
+			query.embeddingModelPath,
+			query.embeddingSettings,
+			candidateQueries,
+			allChunks,
+			&result.usedSemanticRanking);
+	}
+	if (semanticScores.size() != allChunks.size()) {
+		semanticScores.assign(allChunks.size(), 0.0f);
+	}
+
+	float maxKeywordScore = 0.0f;
+	for (size_t i = 0; i < allChunks.size(); ++i) {
+		allChunks[i].keywordScore = lexicalScoreForQueries(allChunks[i], candidateQueries);
+		maxKeywordScore = std::max(maxKeywordScore, allChunks[i].keywordScore);
+	}
+	if (maxKeywordScore <= 0.0f) {
+		maxKeywordScore = 1.0f;
+	}
+
+	for (size_t i = 0; i < allChunks.size(); ++i) {
+		auto & chunk = allChunks[i];
+		chunk.keywordScore /= maxKeywordScore;
+		chunk.semanticScore = clampUnit((semanticScores[i] + 1.0f) * 0.5f);
+		chunk.qualityScore = qualityScoreForChunk(chunk, candidateQueries);
+		chunk.score =
+			chunk.keywordScore * std::max(0.0f, query.keywordWeight) +
+			(result.usedSemanticRanking ? chunk.semanticScore * std::max(0.0f, query.semanticWeight) : 0.0f) +
+			chunk.qualityScore * std::max(0.0f, query.qualityWeight);
 	}
 
 	std::stable_sort(
@@ -140,6 +370,9 @@ ofxGgmlRAGRetrievalResult ofxGgmlRAGPipeline::retrieve(
 			return a.score > b.score;
 		});
 
+	if (rerankTopN < allChunks.size()) {
+		allChunks.resize(rerankTopN);
+	}
 	const size_t k = std::min(query.topK, allChunks.size());
 	result.chunks.assign(allChunks.begin(), allChunks.begin() + static_cast<std::ptrdiff_t>(k));
 	result.augmentedContext = buildAugmentedContext(result.chunks, query.includeSourceHeaders);
@@ -222,6 +455,9 @@ std::vector<ofxGgmlRAGChunk> ofxGgmlRAGPipeline::chunkDocument(
 		chunk.sourceUri = doc.sourceUri;
 		chunk.text = trimCopy(text.substr(start, end - start));
 		chunk.chunkIndex = idx++;
+		chunk.crawlDepth = doc.crawlDepth;
+		chunk.sourceByteSize = doc.byteSize > 0 ? doc.byteSize : doc.content.size();
+		chunk.sourceQualityHint = doc.qualityHint;
 		if (!chunk.text.empty()) {
 			chunks.push_back(std::move(chunk));
 		}

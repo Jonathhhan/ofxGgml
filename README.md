@@ -283,6 +283,16 @@ auto citations = ai.findCitations(
     "https://example.com/weather",
     4);
 
+auto interceptedCitations = ai.findCitationsFromInput(
+    "find sources about Berlin airport winter disruption",
+    {},
+    "https://example.com/weather",
+    4);
+
+// Citation search now rewrites/refines the topic and reuses the shared
+// RAG retrieval path for hybrid lexical + embedding-aware source chunk ranking
+// when embeddings are configured, with lexical fallback otherwise.
+
 auto montage = ai.planMontageFromSrt(
     "data/subtitles/scene.srt",
     "Build a concise recap montage.");
@@ -417,6 +427,8 @@ Features:
 - Per-request settings and streaming callbacks
 - Built-in metrics tracking via `ofxGgmlMetrics`
 - Batch embeddings support, now with bounded concurrent server requests instead of a purely sequential loop
+
+Default text-generation settings now lean toward smoother general-purpose prose out of the box (`temperature = 0.8`, `topP = 0.95`, `minP = 0.03`, `repeatPenalty = 1.05`), while CLI and server backends share the same cleanup and completion-finishing behavior.
 
 See `docs/BATCH_INFERENCE.md` for comprehensive documentation.
 

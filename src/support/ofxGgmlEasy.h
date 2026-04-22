@@ -211,6 +211,12 @@ public:
 		const std::vector<std::string> & sourceUrls = {},
 		const std::string & crawlerUrl = "",
 		size_t maxCitations = 5) const;
+	ofxGgmlCitationSearchResult findCitationsFromInput(
+		const std::string & userInput,
+		const std::vector<std::string> & sourceUrls = {},
+		const std::string & crawlerUrl = "",
+		size_t maxCitations = 5,
+		const ofxGgmlCitationSearchInputSettings & inputSettings = {}) const;
 	ofxGgmlVideoEssayResult planVideoEssay(
 		const ofxGgmlVideoEssayRequest & request) const;
 	ofxGgmlLongVideoPlanResult planLongVideo(

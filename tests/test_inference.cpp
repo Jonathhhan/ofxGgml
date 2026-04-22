@@ -167,6 +167,58 @@ std::string createCompletionFlagSensitiveExecutable(const std::string & flag, co
 	return exe.string();
 }
 
+std::string createPromptAwareContinuationExecutable(
+	const std::string & initialOutput,
+	const std::string & continuationOutput) {
+	const auto dir = makeUniqueTestDir("continuation_exec");
+#ifdef _WIN32
+	const auto exe = dir / "fake_llama_continuation.bat";
+	std::ofstream out(exe);
+	out << "@echo off\r\n";
+	out << "set \"promptfile=\"\r\n";
+	out << ":parse\r\n";
+	out << "if \"%~1\"==\"\" goto done\r\n";
+	out << "if /I \"%~1\"==\"--file\" (\r\n";
+	out << "  shift\r\n";
+	out << "  set \"promptfile=%~1\"\r\n";
+	out << ")\r\n";
+	out << "shift\r\n";
+	out << "goto parse\r\n";
+	out << ":done\r\n";
+	out << "if not defined promptfile goto initial\r\n";
+	out << "findstr /C:\"Continue exactly from where the previous answer stopped.\" \"%promptfile%\" >nul\r\n";
+	out << "if %errorlevel%==0 goto continuation\r\n";
+	out << ":initial\r\n";
+	out << "echo " << escapeBatchEcho(initialOutput) << "\r\n";
+	out << "exit /b 0\r\n";
+	out << ":continuation\r\n";
+	out << "echo " << escapeBatchEcho(continuationOutput) << "\r\n";
+	out << "exit /b 0\r\n";
+	out.close();
+#else
+	const auto exe = dir / "fake_llama_continuation.sh";
+	std::ofstream out(exe);
+	out << "#!/usr/bin/env bash\nset -euo pipefail\n";
+	out << "promptfile=''\n";
+	out << "while [[ $# -gt 0 ]]; do\n";
+	out << "  if [[ \"$1\" == \"--file\" && $# -ge 2 ]]; then\n";
+	out << "    promptfile=\"$2\"\n";
+	out << "    shift 2\n";
+	out << "    continue\n";
+	out << "  fi\n";
+	out << "  shift\n";
+	out << "done\n";
+	out << "if [[ -n \"$promptfile\" ]] && grep -Fq \"Continue exactly from where the previous answer stopped.\" \"$promptfile\"; then\n";
+	out << "  printf '%s\\n' \"" << continuationOutput << "\"\n";
+	out << "else\n";
+	out << "  printf '%s\\n' \"" << initialOutput << "\"\n";
+	out << "fi\n";
+	out.close();
+	chmod(exe.c_str(), 0755);
+#endif
+	return exe.string();
+}
+
 void setEnvVar(const std::string & key, const std::string & value) {
 #ifdef _WIN32
 	_putenv_s(key.c_str(), value.c_str());
@@ -331,14 +383,14 @@ TEST_CASE("Inference settings", "[inference]") {
 		ofxGgmlInferenceSettings settings;
 
 		REQUIRE(settings.maxTokens == 256);
-		REQUIRE(settings.temperature == 0.7f);
+		REQUIRE(settings.temperature == 0.8f);
 		REQUIRE(settings.topK == 40);
-		REQUIRE(settings.minP == 0.05f);
+		REQUIRE(settings.minP == 0.03f);
 		REQUIRE(settings.mirostat == 0);
 		REQUIRE(settings.mirostatTau == 5.0f);
 		REQUIRE(settings.mirostatEta == 0.1f);
-		REQUIRE(settings.topP == 0.9f);
-		REQUIRE(settings.repeatPenalty == 1.1f);
+		REQUIRE(settings.topP == 0.95f);
+		REQUIRE(settings.repeatPenalty == 1.05f);
 		REQUIRE(settings.contextSize == 2048);
 		REQUIRE(settings.batchSize == 512);
 		REQUIRE(settings.gpuLayers == 0);
@@ -561,6 +613,7 @@ TEST_CASE("Inference helper utilities", "[inference]") {
 		const std::string request = ofxGgmlInference::buildCutoffContinuationRequest(
 			"partial tail");
 		REQUIRE(request.find("Continue exactly from where the previous answer stopped.") != std::string::npos);
+		REQUIRE(request.find("Do not restart or repeat earlier lines.") != std::string::npos);
 		REQUIRE(request.find("partial tail") != std::string::npos);
 	}
 
@@ -569,6 +622,20 @@ TEST_CASE("Inference helper utilities", "[inference]") {
 			"hello! How can I assist you today? [end of text]",
 			"hello");
 		REQUIRE(cleaned == "hello! How can I assist you today?");
+	}
+
+	SECTION("Role headers and echoed prompts are stripped together") {
+		const std::string cleaned = ofxGgmlInference::sanitizeGeneratedText(
+			"### Assistant\nQuestion: hello\nSure, here is the cleaned answer. <|eot_id|>",
+			"Question: hello");
+		REQUIRE(cleaned == "Sure, here is the cleaned answer.");
+	}
+
+	SECTION("Trailing stream artifacts are removed from sanitized text") {
+		const std::string cleaned = ofxGgmlInference::sanitizeGeneratedText(
+			"Assistant: Final answer [DONE] <|end_of_text|>",
+			"ignored");
+		REQUIRE(cleaned == "Final answer");
 	}
 
 	SECTION("Realtime prompt helper is a no-op when disabled") {
@@ -818,6 +885,65 @@ exit 0
 	REQUIRE(result.text.find("ofxGgml [INFO]") == std::string::npos);
 	REQUIRE(result.text.find("warning: no usable GPU found") == std::string::npos);
 	REQUIRE(result.text.find("Device 0:") == std::string::npos);
+}
+
+TEST_CASE("Inference generation strips role headers and echoed prompts from final text", "[inference]") {
+	const std::string modelPath = createDummyModel();
+	const std::string completionScript = createExecutableScript(R"(
+echo "### Assistant"
+echo "Question: hello"
+echo "Final cleaned answer <|eot_id|>"
+exit 0
+)");
+
+	ofxGgmlInference inf;
+	inf.setCompletionExecutable(completionScript);
+
+	const auto result = inf.generate(modelPath, "Question: hello");
+	REQUIRE(result.success);
+	REQUIRE(result.text == "Final cleaned answer");
+}
+
+TEST_CASE("Inference natural-boundary trimming keeps only completed sections", "[inference]") {
+	const std::string modelPath = createDummyModel();
+	const std::string completionScript = createExecutableScript(R"(
+echo "Completed first item"
+echo "Completed second item"
+echo "Partial trailing fragment without closure"
+exit 0
+)");
+
+	ofxGgmlInference inf;
+	inf.setCompletionExecutable(completionScript);
+
+	const auto result = inf.generate(modelPath, "hello");
+	REQUIRE(result.success);
+	REQUIRE(result.text.find("Completed first item") != std::string::npos);
+	REQUIRE(result.text.find("Completed second item") != std::string::npos);
+	REQUIRE(result.text.find("Partial trailing fragment without closure") == std::string::npos);
+}
+
+TEST_CASE("Inference auto-continue merges overlapping continuation text", "[inference]") {
+	const std::string modelPath = createDummyModel();
+	const std::string initial =
+		"This answer stops mid-thought because it keeps describing the situation without reaching a final sentence or conclusion";
+	const std::string continuation =
+		"because it keeps describing the situation without reaching a final sentence or conclusion. It now finishes cleanly.";
+
+	ofxGgmlInference inf;
+	inf.setCompletionExecutable(createPromptAwareContinuationExecutable(initial, continuation));
+
+	ofxGgmlInferenceSettings settings;
+	settings.autoContinueCutoff = true;
+	settings.autoPromptCache = false;
+
+	const auto result = inf.generate(modelPath, "hello", settings);
+	REQUIRE(result.success);
+	REQUIRE(result.continuationCount == 1);
+	REQUIRE(result.outputLikelyCutoff == false);
+	REQUIRE(result.text.find(initial) != std::string::npos);
+	REQUIRE(result.text.find("It now finishes cleanly.") != std::string::npos);
+	REQUIRE(result.text.find(initial + "\nbecause it keeps describing") == std::string::npos);
 }
 
 TEST_CASE("Source-aware generation returns source metadata", "[inference]") {

@@ -2,6 +2,8 @@
 
 This document tracks the improvements implemented in the ofxGgml codebase as part of the optimization and consolidation effort.
 
+If you want a gentler walkthrough of the same work, see [IMPLEMENTED_IDEAS_TUTORIAL.md](IMPLEMENTED_IDEAS_TUTORIAL.md).
+
 ## Overview
 
 **Goal**: Combine and simplify features, optimize inference performance, and reduce code duplication.
