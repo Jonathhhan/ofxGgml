@@ -168,6 +168,7 @@ New-Utf8File -Path $wrapperShPath -Content $wrapperSh
 New-Utf8File -Path $wrapperBatPath -Content $wrapperBat
 
 $setupScript = @'
+#!/usr/bin/env bash
 set -euo pipefail
 if ! command -v curl >/dev/null 2>&1; then
   echo "[Error] curl is required inside WSL to install Mojo dependencies." >&2
