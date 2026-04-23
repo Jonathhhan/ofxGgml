@@ -235,7 +235,13 @@ public:
 		bool preserveChronology = true,
 		const std::string & reelName = "AX",
 		const std::string & edlTitle = "MONTAGE",
-		int fps = 25) const;
+		int fps = 25,
+		double targetDurationSeconds = 12.0,
+		double minSpacingSeconds = 1.5,
+		double preRollSeconds = 0.25,
+		double postRollSeconds = 0.35,
+		bool dropFrameTimecode = false,
+		const std::string & sourceFilePath = "") const;
 	ofxGgmlEasyVideoEditResult planVideoEdit(
 		const std::string & sourcePrompt,
 		const std::string & editGoal,

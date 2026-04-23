@@ -1,6 +1,7 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -316,6 +317,41 @@ TEST_CASE("Easy API wraps crawler and montage helpers", "[easy_api]") {
 	REQUIRE_FALSE(montageResult.edlText.empty());
 	REQUIRE_FALSE(montageResult.srtText.empty());
 	REQUIRE(montageResult.previewBundle.montageTrack.cues.size() == montageResult.montageTrack.cues.size());
+
+	const auto tunedMontage = easy.planMontageFromSrt(
+		srtPath.string(),
+		"Keep the strongest train hits.",
+		3,
+		0.0,
+		true,
+		"AX",
+		"TRAIN_ADVANCED",
+		30,
+		5.0,
+		0.75,
+		0.25,
+		0.50,
+		true,
+		"/media/train_source.mp4");
+	REQUIRE(tunedMontage.success);
+	REQUIRE(tunedMontage.previewBundle.sourceVideoPath == "/media/train_source.mp4");
+	REQUIRE_FALSE(tunedMontage.planning.plan.clips.empty());
+	REQUIRE(tunedMontage.planning.plan.clips.front().sourceFilePath == "/media/train_source.mp4");
+	REQUIRE(tunedMontage.edlText.find("DROP FRAME") != std::string::npos);
+	REQUIRE(std::any_of(
+		tunedMontage.planning.plan.notes.begin(),
+		tunedMontage.planning.plan.notes.end(),
+		[](const std::string & note) { return note.find("0.75 s") != std::string::npos; }));
+	REQUIRE(std::any_of(
+		tunedMontage.planning.plan.notes.begin(),
+		tunedMontage.planning.plan.notes.end(),
+		[](const std::string & note) { return note.find("pre-roll 0.25 s") != std::string::npos; }));
+	REQUIRE(std::any_of(
+		tunedMontage.planning.plan.notes.begin(),
+		tunedMontage.planning.plan.notes.end(),
+		[](const std::string & note) { return note.find("target montage duration") != std::string::npos; }));
+	REQUIRE_FALSE(tunedMontage.montageTrack.cues.empty());
+	REQUIRE(tunedMontage.montageTrack.cues.front().endSeconds == Approx(2.5));
 }
 
 TEST_CASE("Easy API exposes citation and video edit helpers", "[easy_api]") {

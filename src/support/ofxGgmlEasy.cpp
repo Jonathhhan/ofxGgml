@@ -729,7 +729,13 @@ ofxGgmlEasyMontageResult ofxGgmlEasy::planMontageFromSrt(
 	bool preserveChronology,
 	const std::string & reelName,
 	const std::string & edlTitle,
-	int fps) const {
+	int fps,
+	double targetDurationSeconds,
+	double minSpacingSeconds,
+	double preRollSeconds,
+	double postRollSeconds,
+	bool dropFrameTimecode,
+	const std::string & sourceFilePath) const {
 	ofxGgmlEasyMontageResult result;
 	const auto segmentsResult = ofxGgmlMontagePlanner::loadSegmentsFromSrt(srtPath, reelName);
 	if (!segmentsResult.isOk()) {
@@ -742,8 +748,14 @@ ofxGgmlEasyMontageResult ofxGgmlEasy::planMontageFromSrt(
 	request.segments = segmentsResult.value();
 	request.maxClips = maxClips;
 	request.minScore = minScore;
+	request.targetDurationSeconds = targetDurationSeconds;
+	request.minSpacingSeconds = minSpacingSeconds;
+	request.preRollSeconds = preRollSeconds;
+	request.postRollSeconds = postRollSeconds;
 	request.preserveChronology = preserveChronology;
 	request.fallbackReelName = reelName;
+	request.sourceFilePath = sourceFilePath;
+	request.dropFrameTimecode = dropFrameTimecode;
 	result.planning = ofxGgmlMontagePlanner::plan(request);
 	if (!result.planning.success) {
 		result.error = result.planning.error;
@@ -754,10 +766,17 @@ ofxGgmlEasyMontageResult ofxGgmlEasy::planMontageFromSrt(
 	result.editorBrief = ofxGgmlMontagePlanner::buildEditorBrief(result.planning.plan);
 	result.montageTrack = ofxGgmlMontagePlanner::buildSubtitleTrack(result.planning.plan, edlTitle);
 	result.sourceTrack = ofxGgmlMontagePlanner::buildSourceSubtitleTrack(result.planning.plan, edlTitle);
-	result.edlText = ofxGgmlMontagePlanner::buildEdl(result.planning.plan, edlTitle, fps);
+	result.edlText = ofxGgmlMontagePlanner::buildEdl(
+		result.planning.plan,
+		edlTitle,
+		fps,
+		dropFrameTimecode);
 	result.srtText = ofxGgmlMontagePlanner::buildSrt(result.montageTrack);
 	result.vttText = ofxGgmlMontagePlanner::buildVtt(result.montageTrack);
-	result.previewBundle = ofxGgmlMontagePreviewBridge::buildBundle(result.planning.plan, edlTitle);
+	result.previewBundle = ofxGgmlMontagePreviewBridge::buildBundle(
+		result.planning.plan,
+		edlTitle,
+		sourceFilePath);
 	return result;
 }
 
