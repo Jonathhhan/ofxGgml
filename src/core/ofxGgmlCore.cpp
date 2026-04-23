@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <mutex>
+#include <unordered_set>
 #include <vector>
 
 // --------------------------------------------------------------------------
