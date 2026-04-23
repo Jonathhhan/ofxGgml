@@ -197,7 +197,8 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         test_clip_inference.cpp
         test_diffusion_inference.cpp
         test_rag_pipeline.cpp
-        test_conversation_manager.cpp)
+        test_conversation_manager.cpp
+        test_feature_synergies.cpp)
 endif()
 
 # LiveSpeechTranscriber requires full openFrameworks
