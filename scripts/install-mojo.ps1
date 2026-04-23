@@ -192,6 +192,12 @@ __INSTALL_COMMAND__
 '@
 $setupScript = $setupScript.Replace('__PROJECT_DIR__', $projectDirWsl)
 $setupScript = $setupScript.Replace('__INSTALL_COMMAND__', $mojoInstallCommand)
+
+# Validate that the script starts correctly
+if (-not $setupScript.StartsWith("#!/usr/bin/env bash`nset -euo pipefail")) {
+    throw "Generated install script has invalid header. Please report this bug."
+}
+
 New-Utf8File -Path $setupShPath -Content $setupScript
 $setupShPathWsl = Get-WslPath $setupShPath
 
