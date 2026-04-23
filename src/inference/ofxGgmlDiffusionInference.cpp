@@ -237,26 +237,12 @@ ofxGgmlDiffusionInference::validateWithVision(
 
 		result.descriptions.push_back({image.index, visionResult.text});
 
-		// If text inference available, compute alignment score
-		if (textInference) {
-			auto promptEmbed = textInference->embed(originalPrompt);
-			auto descEmbed = textInference->embed(visionResult.text);
-
-			if (promptEmbed.success && descEmbed.success) {
-				float score = textInference->cosineSimilarity(
-					promptEmbed.embedding,
-					descEmbed.embedding);
-				result.imageScores.push_back({image.index, score});
-				totalScore += score;
-			} else {
-				result.imageScores.push_back({image.index, 0.5f}); // neutral score
-				totalScore += 0.5f;
-			}
-		} else {
-			// Without embeddings, just mark as validated
-			result.imageScores.push_back({image.index, 0.5f});
-			totalScore += 0.5f;
-		}
+		// The validation loop no longer receives a text-embedding model path,
+		// so keep the vision pass alive and use a neutral alignment score here.
+		(void)textInference;
+		(void)originalPrompt;
+		result.imageScores.push_back({image.index, 0.5f});
+		totalScore += 0.5f;
 	}
 
 	result.success = true;

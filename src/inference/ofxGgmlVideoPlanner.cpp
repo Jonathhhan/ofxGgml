@@ -1,6 +1,7 @@
 #include "ofxGgmlVideoPlanner.h"
 #include "ofxGgmlPlannerCommon.h"
 #include "ofxGgmlClipInference.h"
+#include "ofxGgmlVideoInference.h"
 
 #ifndef OFXGGML_HEADLESS_STUBS
 #include "ofJson.h"
