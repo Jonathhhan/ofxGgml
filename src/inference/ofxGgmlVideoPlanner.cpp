@@ -1,5 +1,6 @@
 #include "ofxGgmlVideoPlanner.h"
 #include "ofxGgmlPlannerCommon.h"
+#include "ofxGgmlClipInference.h"
 
 #ifndef OFXGGML_HEADLESS_STUBS
 #include "ofJson.h"
@@ -1296,4 +1297,152 @@ ofxGgmlVideoEditPlannerResult ofxGgmlVideoPlanner::planEdits(
 	result.success = true;
 	result.plan = parsedPlan.value();
 	return result;
+}
+
+ofxGgmlVideoPlanner::SceneCoherenceResult
+ofxGgmlVideoPlanner::validateSceneCoherence(
+	const ofxGgmlVideoPlan & plan,
+	ofxGgmlClipInference * clipInference) {
+	SceneCoherenceResult result;
+
+	if (!clipInference || !clipInference->getBackend()) {
+		result.error = "CLIP inference backend not configured";
+		return result;
+	}
+
+	if (plan.scenes.empty()) {
+		result.success = true;
+		result.averageScore = 1.0f;
+		return result;
+	}
+
+	// Embed the overall scene description as reference
+	auto overallEmbed = clipInference->embedText(
+		plan.overallScene.empty() ? plan.originalPrompt : plan.overallScene,
+		true);
+	if (!overallEmbed.success) {
+		result.error = "Failed to embed overall scene: " + overallEmbed.error;
+		return result;
+	}
+
+	// Check each scene's coherence with the overall vision
+	float totalScore = 0.0f;
+	for (const auto & scene : plan.scenes) {
+		std::string scenePrompt = scene.eventPrompt;
+		if (scenePrompt.empty()) {
+			scenePrompt = scene.title + " " + scene.summary;
+		}
+
+		auto sceneEmbed = clipInference->embedText(scenePrompt, true);
+		if (!sceneEmbed.success) {
+			result.warnings.push_back(
+				"Failed to validate scene " + std::to_string(scene.index) +
+				": " + sceneEmbed.error);
+			result.sceneScores.push_back(0.0f);
+			continue;
+		}
+
+		float score = ofxGgmlClipInference::cosineSimilarity(
+			overallEmbed.embedding,
+			sceneEmbed.embedding);
+		result.sceneScores.push_back(score);
+		totalScore += score;
+
+		// Warn about low coherence scenes
+		if (score < 0.5f) {
+			result.warnings.push_back(
+				"Scene " + std::to_string(scene.index) + " (" + scene.title +
+				") has low coherence with overall vision (score: " +
+				std::to_string(score) + ")");
+		}
+	}
+
+	result.success = true;
+	result.averageScore = plan.scenes.empty() ? 1.0f : totalScore / plan.scenes.size();
+	return result;
+}
+
+ofxGgmlVideoPlanner::VideoAnalysisHints
+ofxGgmlVideoPlanner::extractHintsFromVideoAnalysis(
+	const ofxGgmlVideoStructuredAnalysis & analysis) {
+	VideoAnalysisHints hints;
+
+	// Extract emotion data
+	hints.primaryEmotion = analysis.primaryLabel;
+	hints.emotionConfidence = analysis.confidence;
+
+	// Extract actions
+	hints.actionLabels = analysis.secondaryLabels;
+
+	// Extract timeline
+	hints.timeline = analysis.timeline;
+
+	// Suggest pacing based on analysis type and content
+	if (analysis.analysisType == "Action") {
+		// High-action content suggests faster pacing
+		if (!hints.actionLabels.empty()) {
+			hints.suggestedPacing = "dynamic and fast-paced";
+		} else {
+			hints.suggestedPacing = "moderate";
+		}
+	} else if (analysis.analysisType == "Emotion") {
+		// Emotional content suggests slower, more contemplative pacing
+		const std::string valence = toLower(analysis.valence);
+		const std::string arousal = toLower(analysis.arousal);
+
+		if (valence.find("negative") != std::string::npos ||
+			arousal.find("low") != std::string::npos) {
+			hints.suggestedPacing = "slow and contemplative";
+			hints.suggestedTone = "reflective";
+		} else if (arousal.find("high") != std::string::npos) {
+			hints.suggestedPacing = "energetic";
+			hints.suggestedTone = "intense";
+		} else {
+			hints.suggestedPacing = "moderate";
+			hints.suggestedTone = "balanced";
+		}
+	}
+
+	return hints;
+}
+
+std::string ofxGgmlVideoPlanner::enrichPlanningPromptWithHints(
+	const std::string & basePrompt,
+	const VideoAnalysisHints & hints) {
+	std::ostringstream enriched;
+	enriched << basePrompt;
+
+	if (!hints.primaryEmotion.empty()) {
+		enriched << "\n\nVideo analysis hints:";
+		enriched << "\n- Detected primary emotion/action: " << hints.primaryEmotion;
+		if (hints.emotionConfidence > 0.0f) {
+			enriched << " (confidence: " << hints.emotionConfidence << ")";
+		}
+	}
+
+	if (!hints.actionLabels.empty()) {
+		enriched << "\n- Secondary elements:";
+		for (const auto & action : hints.actionLabels) {
+			enriched << " " << action << ",";
+		}
+	}
+
+	if (!hints.suggestedPacing.empty()) {
+		enriched << "\n- Suggested pacing: " << hints.suggestedPacing;
+	}
+
+	if (!hints.suggestedTone.empty()) {
+		enriched << "\n- Suggested tone: " << hints.suggestedTone;
+	}
+
+	if (!hints.timeline.empty()) {
+		enriched << "\n- Timeline progression:";
+		for (const auto & moment : hints.timeline) {
+			enriched << "\n  * " << moment;
+		}
+	}
+
+	enriched << "\n\nUse these hints to inform scene pacing, tone, and progression.";
+
+	return enriched.str();
 }

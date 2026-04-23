@@ -240,6 +240,126 @@ auto result = imageSearch.search(request);
 
 ---
 
+### 3.3 CLIP Scene Coherence Validation (2026-04-23) ✨
+
+**Implementation:** `ofxGgmlVideoPlanner::validateSceneCoherence()`
+
+**Problem:** Video planning generated multi-scene plans without verifying that scenes aligned with the overall vision.
+
+**Solution:** Use CLIP text embeddings to validate scene coherence.
+
+**How it works:**
+1. Embed the overall scene description/prompt as reference
+2. For each scene, embed its event prompt or title+summary
+3. Compute cosine similarity between overall and scene embeddings
+4. Warn about scenes with low coherence (<0.5 similarity)
+5. Return average coherence score and per-scene warnings
+
+**Usage:**
+```cpp
+auto planResult = videoPlanner.plan(modelPath, request, settings, inference);
+if (planResult.success && clipInference) {
+    auto coherence = ofxGgmlVideoPlanner::validateSceneCoherence(
+        planResult.plan, &clipInference);
+    if (coherence.success && coherence.averageScore < 0.6f) {
+        // Warn user about low overall coherence
+        for (const auto& warning : coherence.warnings) {
+            ofLogWarning() << warning;
+        }
+    }
+}
+```
+
+**Benefits:**
+- Early detection of off-topic scenes before generation
+- Quantitative coherence metrics for plan quality
+- Leverages existing CLIP infrastructure
+
+---
+
+### 3.4 Vision-Based Diffusion Validation (2026-04-23) ✨
+
+**Implementation:** `ofxGgmlDiffusionInference::validateWithVision()`
+
+**Problem:** Diffusion generates images but doesn't verify they match the prompt.
+
+**Solution:** Use vision inference to describe generated images, then compute semantic alignment.
+
+**How it works:**
+1. For each generated image, use vision model to create description
+2. If text inference available, embed both original prompt and description
+3. Compute cosine similarity for alignment score
+4. Return per-image scores and descriptions
+
+**Usage:**
+```cpp
+auto genResult = diffusion.generate(request);
+if (genResult.success && visionInference && textInference) {
+    auto validation = ofxGgmlDiffusionInference::validateWithVision(
+        genResult, request.prompt, &visionInference,
+        visionProfile, &textInference);
+
+    for (const auto& [idx, score] : validation.imageScores) {
+        if (score < 0.6f) {
+            // This image poorly matches the prompt
+            ofLogWarning() << "Image " << idx << " alignment: " << score;
+        }
+    }
+}
+```
+
+**Benefits:**
+- Automated quality checking for generated images
+- Close the generate→analyze→verify loop
+- Enable prompt refinement based on analysis
+
+---
+
+### 3.5 Video Analysis Hints for Planning (2026-04-23) ✨
+
+**Implementation:** `ofxGgmlVideoPlanner::extractHintsFromVideoAnalysis()` + `enrichPlanningPromptWithHints()`
+
+**Problem:** Video analysis produces insights (emotion, action, pacing) but scene planning doesn't use them.
+
+**Solution:** Extract structured hints from video analysis and inject them into planning prompts.
+
+**How it works:**
+1. `extractHintsFromVideoAnalysis()` extracts:
+   - Primary emotion/action with confidence
+   - Secondary action labels
+   - Suggested pacing (dynamic, slow, moderate)
+   - Suggested tone (reflective, intense, balanced)
+   - Timeline progression
+2. `enrichPlanningPromptWithHints()` augments planning prompt with these hints
+3. Planner uses hints to inform scene tone, pacing, and progression
+
+**Usage:**
+```cpp
+// Analyze source video first
+auto videoResult = videoInference.runTemporalSidecarRequest(videoRequest);
+if (videoResult.success && !videoResult.structured.primaryLabel.empty()) {
+    // Extract hints from analysis
+    auto hints = ofxGgmlVideoPlanner::extractHintsFromVideoAnalysis(
+        videoResult.structured);
+
+    // Build base planning prompt
+    std::string basePrompt = ofxGgmlVideoPlanner::buildPlanningPrompt(planRequest);
+
+    // Enrich with analysis hints
+    std::string enrichedPrompt =
+        ofxGgmlVideoPlanner::enrichPlanningPromptWithHints(basePrompt, hints);
+
+    // Use enriched prompt for planning (modifies request prompt)
+}
+```
+
+**Benefits:**
+- Context-aware planning based on actual video content
+- Better pacing and tone decisions informed by analysis
+- Connects analytical and generative pipelines
+
+---
+
 ## 4. ARCHITECTURAL PATTERNS ENABLING SYNERGY
 
 ### 4.1 Bridge Backend Pattern ✅
@@ -431,13 +551,13 @@ class ofxGgmlUnifiedSemanticIndex {
 | Speech | Montage | ✅ Complete | ~150 | Format conversion |
 | Citation | Video Essay | ✅ Complete | ~300 | Workflow orchestration |
 | CLIP | Diffusion | ✅ Complete | ~100 | Reranking logic |
-| **CLIP** | **Image Search** | **✅ New (3374df3)** | **~85** | **Semantic ranking** |
+| **CLIP** | **Image Search** | **✅ Complete (3374df3)** | **~85** | **Semantic ranking** |
+| **CLIP** | **Video Planning** | **✅ Complete (new)** | **~70** | **Scene coherence validation** |
+| **Vision** | **Diffusion** | **✅ Complete (new)** | **~65** | **Quality validation loop** |
+| **Video Analysis** | **Video Planning** | **✅ Complete (new)** | **~90** | **Context hints for generation** |
 | Inference Embeddings | Citation | ✅ Complete | ~200 | RAG retrieval |
 | Web Crawler | Citation | ✅ Complete | ~150 | Source ingestion |
 | Media Prompt | Diffusion | ✅ Complete | ~80 | Prompt translation |
-| CLIP | Video Planning | ⚠️ Missing | N/A | Scene validation |
-| Vision | Diffusion | ⚠️ Missing | N/A | Quality validation |
-| Video Analysis | Video Planning | ⚠️ Missing | N/A | Context hints |
 | Speech | Music Gen | ⚠️ Missing | N/A | Emotion-driven prompts |
 | Vision | Code Review | ⚠️ Missing | N/A | Screenshot analysis |
 
@@ -453,12 +573,12 @@ class ofxGgmlUnifiedSemanticIndex {
 1. ✅ Add CLIP reranking to image search (~85 lines, 1-2h) - **DONE: commit 3374df3**
 2. ✅ Enhance citation search coverage (~13 lines, 30m) - **DONE: commit 905bf3d**
 
-### Near-Term (High Value, 2-4 hours each)
-3. Expand CLIP to video planning scene validation (~50 lines)
-4. Add vision validation to diffusion outputs (~40 lines)
-5. Connect video analysis to scene planning (~60 lines)
+### Near-Term (Completed in this session) ✅
+3. ✅ Expand CLIP to video planning scene validation (~50 lines) - **DONE: validateSceneCoherence()**
+4. ✅ Add vision validation to diffusion outputs (~40 lines) - **DONE: validateWithVision()**
+5. ✅ Connect video analysis to scene planning (~60 lines) - **DONE: extractHintsFromVideoAnalysis() + enrichPlanningPromptWithHints()**
 
-### Medium-Term (Architectural, 6-12 hours each)
+### Medium-Term (High Value, 6-12 hours each)
 6. Create `ofxGgmlUnifiedSemanticIndex` (~200 lines, 6-8h)
 7. Build validation loop framework (~150 lines, 4-6h)
 8. Extend code assistants with vision/speech (~200 lines, 8-12h)
@@ -479,7 +599,10 @@ ofxGgml demonstrates **strong architectural foundations** with excellent shared 
 - Complete speech-montage-preview pipeline
 - End-to-end video essay orchestration
 - CLIP + diffusion semantic scoring
-- **NEW: CLIP + image search semantic ranking**
+- **CLIP + image search semantic ranking (commit 3374df3)**
+- **CLIP + video planning scene coherence validation (NEW)**
+- **Vision + diffusion quality validation loops (NEW)**
+- **Video analysis → scene planning context hints (NEW)**
 
 **Architectural Enablers:**
 - Bridge backend pattern (flexible adapters)
@@ -487,17 +610,18 @@ ofxGgml demonstrates **strong architectural foundations** with excellent shared 
 - Source grounding system (URL/repo context)
 - SRT standardization (universal subtitle format)
 
-**Highest Value Opportunities:**
-1. **CLIP expansion** - 3 more features could benefit (video planning, media translation, vision pre-filtering)
-2. **Validation loops** - Close generative→analytical cycles for quality
-3. **Unified semantic index** - Share embeddings across features
+**Highest Value Remaining Opportunities:**
+1. **Unified semantic index** - Share embeddings across features
+2. **Validation loop framework** - Reusable generative→analytical patterns
+3. **Code assistant multimodal extensions** - Vision for UI review, speech for meetings
 
-**Strategic Priority:** Continue expanding CLIP integration (proven infrastructure, high ROI), then build validation loops to transform from "generate and hope" to "generate, verify, refine."
+**Strategic Priority:** The three near-term synergies implemented in this session demonstrate the value of closing generative→analytical loops. The validation patterns established here (CLIP scene coherence, vision-based diffusion validation, analysis-driven planning hints) provide templates for future synergies and transform ofxGgml from "generate and hope" to "generate, verify, refine."
 
 ---
 
 ## Change Log
 
+- **2026-04-23**: Implemented three near-term synergies (CLIP video validation, vision diffusion validation, video analysis hints)
 - **2026-04-21**: Initial synergy analysis and documentation
 - **2026-04-21**: Implemented CLIP semantic ranking for image search (commit 3374df3)
 - **Earlier**: Enhanced citation search with broader source coverage (commit 905bf3d)
