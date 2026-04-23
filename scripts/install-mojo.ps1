@@ -60,6 +60,9 @@ function New-Utf8File {
         New-Item -ItemType Directory -Force -Path $parent | Out-Null
     }
 
+    # Normalize line endings to LF for Unix/WSL compatibility
+    $Content = $Content -replace "`r`n", "`n"
+
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($Path, $Content, $encoding)
 }
