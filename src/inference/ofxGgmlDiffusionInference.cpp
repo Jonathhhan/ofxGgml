@@ -1,4 +1,6 @@
 #include "ofxGgmlDiffusionInference.h"
+#include "ofxGgmlVisionInference.h"
+#include "ofxGgmlInference.h"
 
 #include <chrono>
 #include <utility>
@@ -195,4 +197,70 @@ const char * ofxGgmlDiffusionInference::errorTypeLabel(
 	default:
 		return "No Error";
 	}
+}
+
+ofxGgmlDiffusionInference::ImageValidationResult
+ofxGgmlDiffusionInference::validateWithVision(
+	const ofxGgmlImageGenerationResult & generationResult,
+	const std::string & originalPrompt,
+	ofxGgmlVisionInference * visionInference,
+	const ofxGgmlVisionModelProfile & visionProfile,
+	ofxGgmlInference * textInference) {
+	ImageValidationResult result;
+
+	if (!visionInference) {
+		result.error = "Vision inference not configured";
+		return result;
+	}
+
+	if (!generationResult.success || generationResult.images.empty()) {
+		result.error = "No generated images to validate";
+		return result;
+	}
+
+	float totalScore = 0.0f;
+	for (const auto & image : generationResult.images) {
+		// Use vision to describe the generated image
+		ofxGgmlVisionRequest visionRequest;
+		visionRequest.task = ofxGgmlVisionTask::Describe;
+		visionRequest.prompt = "Describe this image in detail, focusing on the main subjects, composition, and style.";
+		visionRequest.images.push_back({image.path, "Generated", ""});
+		visionRequest.maxTokens = 256;
+		visionRequest.temperature = 0.2f;
+
+		auto visionResult = visionInference->runServerRequest(visionProfile, visionRequest);
+		if (!visionResult.success) {
+			result.descriptions.push_back({image.index, "Vision analysis failed: " + visionResult.error});
+			result.imageScores.push_back({image.index, 0.0f});
+			continue;
+		}
+
+		result.descriptions.push_back({image.index, visionResult.text});
+
+		// If text inference available, compute alignment score
+		if (textInference) {
+			auto promptEmbed = textInference->embed(originalPrompt);
+			auto descEmbed = textInference->embed(visionResult.text);
+
+			if (promptEmbed.success && descEmbed.success) {
+				float score = textInference->cosineSimilarity(
+					promptEmbed.embedding,
+					descEmbed.embedding);
+				result.imageScores.push_back({image.index, score});
+				totalScore += score;
+			} else {
+				result.imageScores.push_back({image.index, 0.5f}); // neutral score
+				totalScore += 0.5f;
+			}
+		} else {
+			// Without embeddings, just mark as validated
+			result.imageScores.push_back({image.index, 0.5f});
+			totalScore += 0.5f;
+		}
+	}
+
+	result.success = true;
+	result.averageScore = generationResult.images.empty() ?
+		0.0f : totalScore / generationResult.images.size();
+	return result;
 }

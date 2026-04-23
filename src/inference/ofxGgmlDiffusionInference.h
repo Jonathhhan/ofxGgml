@@ -205,6 +205,21 @@ public:
 
 	ofxGgmlImageGenerationCapabilities getCapabilities() const;
 
+	// Vision-based validation (feature synergy)
+	struct ImageValidationResult {
+		bool success = false;
+		float averageScore = 0.0f;
+		std::vector<std::pair<int, float>> imageScores; // (index, score)
+		std::vector<std::pair<int, std::string>> descriptions; // (index, description)
+		std::string error;
+	};
+	static ImageValidationResult validateWithVision(
+		const ofxGgmlImageGenerationResult & generationResult,
+		const std::string & originalPrompt,
+		class ofxGgmlVisionInference * visionInference,
+		const struct ofxGgmlVisionModelProfile & visionProfile,
+		class ofxGgmlInference * textInference = nullptr);
+
 	static const char * errorTypeLabel(ofxGgmlImageGenerationErrorType errorType);
 
 private:

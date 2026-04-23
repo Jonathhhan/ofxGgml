@@ -198,4 +198,31 @@ public:
 		const ofxGgmlVideoEditPlannerRequest & request,
 		const ofxGgmlInferenceSettings & settings,
 		const ofxGgmlInference & inference) const;
+
+	// CLIP-based scene validation (feature synergy)
+	struct SceneCoherenceResult {
+		bool success = false;
+		float averageScore = 0.0f;
+		std::vector<float> sceneScores;
+		std::vector<std::string> warnings;
+		std::string error;
+	};
+	static SceneCoherenceResult validateSceneCoherence(
+		const ofxGgmlVideoPlan & plan,
+		class ofxGgmlClipInference * clipInference);
+
+	// Video analysis hints for scene planning (feature synergy)
+	struct VideoAnalysisHints {
+		std::string primaryEmotion;
+		float emotionConfidence = 0.0f;
+		std::vector<std::string> actionLabels;
+		std::string suggestedPacing;
+		std::string suggestedTone;
+		std::vector<std::string> timeline;
+	};
+	static VideoAnalysisHints extractHintsFromVideoAnalysis(
+		const struct ofxGgmlVideoStructuredAnalysis & analysis);
+	static std::string enrichPlanningPromptWithHints(
+		const std::string & basePrompt,
+		const VideoAnalysisHints & hints);
 };
