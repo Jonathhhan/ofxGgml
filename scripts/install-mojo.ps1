@@ -115,6 +115,14 @@ $crawlerScriptPath = Join-Path $BinDir 'mojo_crawl.py'
 $crawlerTemplatePath = Join-Path $scriptRoot 'mojo-crawl.py'
 $crawlerScriptWsl = Get-WslPath $crawlerScriptPath
 
+# Clean up any potentially corrupted old files
+if (-not $DryRun) {
+    if (Test-Path $setupShPath) {
+        Write-Host "Removing old install-mojo-wsl.sh to ensure clean generation..."
+        Remove-Item $setupShPath -Force
+    }
+}
+
 $wrapperSh = @'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -202,7 +210,19 @@ New-Utf8File -Path $setupShPath -Content $setupScript
 $setupShPathWsl = Get-WslPath $setupShPath
 
 Write-Step "Installing Mojo in the local WSL environment"
-Invoke-LoggedCommand 'wsl.exe' @('-e', 'bash', $setupShPathWsl)
+try {
+    Invoke-LoggedCommand 'wsl.exe' @('-e', 'bash', $setupShPathWsl)
+} catch {
+    Write-Host ""
+    Write-Host "[Error] Failed to install Mojo in WSL. This may be due to:"
+    Write-Host "  1. Missing dependencies (curl, python3) in WSL"
+    Write-Host "  2. Network connectivity issues"
+    Write-Host "  3. WSL configuration problems"
+    Write-Host ""
+    Write-Host "To diagnose, you can manually run:"
+    Write-Host "  wsl.exe -e bash `"$setupShPathWsl`""
+    throw
+}
 
 Write-Step "Mojo is ready at $wrapperBatPath"
 Write-Host "  runtime: $ProjectDir"
