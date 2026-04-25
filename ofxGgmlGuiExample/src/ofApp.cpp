@@ -3668,29 +3668,39 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 	const auto submitPendingToolApproval = [&](bool approved) {
 		std::string toolName;
 		uint64_t requestId = 0;
+		bool shouldUpdateStatus = false;
+		bool shouldNotify = false;
 		{
 			std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
 			if (!scriptAssistantApprovalPending ||
 				scriptAssistantApprovalDecisionReady) {
-				return;
+				// Always notify even on early return to wake waiting threads
+				shouldNotify = true;
+			} else {
+				requestId = scriptAssistantApprovalRequestId;
+				toolName = scriptAssistantPendingApprovalToolCall.toolName;
+				scriptAssistantApprovalDecisionApproved = approved;
+				scriptAssistantApprovalDecisionReady = true;
+				scriptAssistantApprovalDecisionRequestId = requestId;
+				scriptAssistantApprovalPending = false;
+				shouldUpdateStatus = true;
+				shouldNotify = true;
 			}
-			requestId = scriptAssistantApprovalRequestId;
-			toolName = scriptAssistantPendingApprovalToolCall.toolName;
-			scriptAssistantApprovalDecisionApproved = approved;
-			scriptAssistantApprovalDecisionReady = true;
-			scriptAssistantApprovalDecisionRequestId = requestId;
-			scriptAssistantApprovalPending = false;
 		}
-		{
-			std::lock_guard<std::mutex> streamLock(streamMutex);
-			streamingOutput =
-				(approved ? "Approved tool request" : "Denied tool request") +
-				(toolName.empty() ? std::string(".") : ": " + toolName + ".");
+		if (shouldUpdateStatus) {
+			{
+				std::lock_guard<std::mutex> streamLock(streamMutex);
+				streamingOutput =
+					(approved ? "Approved tool request" : "Denied tool request") +
+					(toolName.empty() ? std::string(".") : ": " + toolName + ".");
+			}
+			generatingStatus = approved
+				? "Running approved tool request..."
+				: "Skipping denied tool request...";
 		}
-		generatingStatus = approved
-			? "Running approved tool request..."
-			: "Skipping denied tool request...";
-		scriptAssistantApprovalCv.notify_all();
+		if (shouldNotify) {
+			scriptAssistantApprovalCv.notify_all();
+		}
 	};
 	if (hasPendingApproval) {
 		ImGui::Spacing();
