@@ -33,6 +33,7 @@
 #include <regex>
 #include <sstream>
 #include <system_error>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 
@@ -816,6 +817,115 @@ bool isFileUrl(const std::string & url) {
 	return toLowerCopy(url).rfind("file://", 0) == 0;
 }
 
+std::string normalizeUrlForDeduplication(const std::string & url) {
+	if (url.empty()) {
+		return {};
+	}
+
+	std::string normalized = trimCopy(url);
+
+	// Remove fragment
+	const size_t fragmentPos = normalized.find('#');
+	if (fragmentPos != std::string::npos) {
+		normalized = normalized.substr(0, fragmentPos);
+	}
+
+	// Parse scheme
+	const size_t schemePos = normalized.find("://");
+	if (schemePos == std::string::npos) {
+		return normalized;
+	}
+
+	std::string scheme = normalized.substr(0, schemePos);
+	std::transform(scheme.begin(), scheme.end(), scheme.begin(),
+		[](unsigned char c) { return std::tolower(c); });
+
+	// Parse authority (host + port)
+	const size_t authorityStart = schemePos + 3;
+	const size_t authorityEnd = normalized.find_first_of("/?", authorityStart);
+	const size_t authorityLen = authorityEnd == std::string::npos
+		? normalized.size() - authorityStart
+		: authorityEnd - authorityStart;
+
+	std::string authority = normalized.substr(authorityStart, authorityLen);
+	std::transform(authority.begin(), authority.end(), authority.begin(),
+		[](unsigned char c) { return std::tolower(c); });
+
+	// Remove default ports
+	if ((scheme == "http" && authority.size() > 3 &&
+		 authority.substr(authority.size() - 3) == ":80")) {
+		authority = authority.substr(0, authority.size() - 3);
+	} else if ((scheme == "https" && authority.size() > 4 &&
+				authority.substr(authority.size() - 4) == ":443")) {
+		authority = authority.substr(0, authority.size() - 4);
+	}
+
+	// Remove trailing dot from host
+	if (!authority.empty() && authority.back() == '.') {
+		authority.pop_back();
+	}
+
+	// Parse path and query
+	std::string pathAndQuery;
+	if (authorityEnd != std::string::npos) {
+		pathAndQuery = normalized.substr(authorityEnd);
+	}
+
+	// Separate path from query
+	const size_t queryPos = pathAndQuery.find('?');
+	std::string path = queryPos == std::string::npos
+		? pathAndQuery
+		: pathAndQuery.substr(0, queryPos);
+	std::string query = queryPos == std::string::npos
+		? std::string()
+		: pathAndQuery.substr(queryPos + 1);
+
+	// Normalize path: remove trailing slash except for root
+	if (path.size() > 1 && path.back() == '/') {
+		path.pop_back();
+	}
+	if (path.empty()) {
+		path = "/";
+	}
+
+	// Sort query parameters for consistent ordering
+	if (!query.empty()) {
+		std::vector<std::string> params;
+		size_t start = 0;
+		while (start < query.size()) {
+			const size_t ampPos = query.find('&', start);
+			const size_t end = ampPos == std::string::npos ? query.size() : ampPos;
+			const std::string param = query.substr(start, end - start);
+			if (!param.empty()) {
+				params.push_back(param);
+			}
+			if (ampPos == std::string::npos) {
+				break;
+			}
+			start = ampPos + 1;
+		}
+		std::sort(params.begin(), params.end());
+
+		std::ostringstream sortedQuery;
+		for (size_t i = 0; i < params.size(); i++) {
+			if (i > 0) {
+				sortedQuery << '&';
+			}
+			sortedQuery << params[i];
+		}
+		query = sortedQuery.str();
+	}
+
+	// Reconstruct URL
+	std::ostringstream result;
+	result << scheme << "://" << authority << path;
+	if (!query.empty()) {
+		result << '?' << query;
+	}
+
+	return result.str();
+}
+
 std::string stripUrlFragment(const std::string & url) {
 	const size_t fragmentPos = url.find('#');
 	return fragmentPos == std::string::npos ? url : url.substr(0, fragmentPos);
@@ -915,7 +1025,91 @@ std::string decodeBasicHtmlEntities(std::string text) {
 	replaceAllInPlace(text, "&reg;", "®");
 	replaceAllInPlace(text, "&trade;", "™");
 
-	return text;
+	// Decode numeric entities (&#NNN; decimal and &#xHHH; hexadecimal)
+	std::string result;
+	result.reserve(text.size());
+	size_t pos = 0;
+	while (pos < text.size()) {
+		const size_t ampPos = text.find("&#", pos);
+		if (ampPos == std::string::npos) {
+			result.append(text, pos, text.size() - pos);
+			break;
+		}
+		result.append(text, pos, ampPos - pos);
+		pos = ampPos + 2;
+
+		if (pos >= text.size()) {
+			result.append("&#");
+			break;
+		}
+
+		bool isHex = (text[pos] == 'x' || text[pos] == 'X');
+		if (isHex) {
+			++pos;
+		}
+
+		size_t semicolon = text.find(';', pos);
+		if (semicolon == std::string::npos || semicolon - pos > 8) {
+			result.append("&#");
+			if (isHex) {
+				result.push_back(text[pos - 1]);
+			}
+			continue;
+		}
+
+		const std::string numStr = text.substr(pos, semicolon - pos);
+		if (numStr.empty()) {
+			result.append("&#");
+			if (isHex) {
+				result.push_back(text[pos - 1]);
+			}
+			continue;
+		}
+
+		try {
+			const int base = isHex ? 16 : 10;
+			const unsigned long codepoint = std::stoul(numStr, nullptr, base);
+
+			// Valid Unicode range check
+			if (codepoint > 0x10FFFF) {
+				result.append("&#");
+				if (isHex) {
+					result.push_back(text[pos - 1]);
+				}
+				result.append(numStr);
+				result.push_back(';');
+			} else if (codepoint <= 0x7F) {
+				// ASCII range - direct conversion
+				result.push_back(static_cast<char>(codepoint));
+			} else if (codepoint <= 0x7FF) {
+				// 2-byte UTF-8
+				result.push_back(static_cast<char>(0xC0 | (codepoint >> 6)));
+				result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+			} else if (codepoint <= 0xFFFF) {
+				// 3-byte UTF-8
+				result.push_back(static_cast<char>(0xE0 | (codepoint >> 12)));
+				result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+				result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+			} else {
+				// 4-byte UTF-8
+				result.push_back(static_cast<char>(0xF0 | (codepoint >> 18)));
+				result.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+				result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+				result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+			}
+			pos = semicolon + 1;
+		} catch (...) {
+			result.append("&#");
+			if (isHex) {
+				result.push_back(text[pos - 1]);
+			}
+			result.append(numStr);
+			result.push_back(';');
+			pos = semicolon + 1;
+		}
+	}
+
+	return result;
 }
 
 std::string extractHtmlTitleFallback(const std::string & htmlText) {
@@ -1314,7 +1508,22 @@ struct NativeFetchResult {
 	long httpStatus = 0;
 };
 
-NativeFetchResult fetchUrlWithCurl(const std::string & url) {
+bool isTransientNetworkError(const NativeFetchResult & result) {
+	if (result.success) {
+		return false;
+	}
+	const std::string errorLower = toLowerCopy(result.error);
+	return errorLower.find("timeout") != std::string::npos ||
+		errorLower.find("timed out") != std::string::npos ||
+		errorLower.find("connection") != std::string::npos ||
+		errorLower.find("network") != std::string::npos ||
+		errorLower.find("temporary failure") != std::string::npos ||
+		(result.httpStatus >= 500 && result.httpStatus < 600) ||
+		result.httpStatus == 408 ||
+		result.httpStatus == 429;
+}
+
+NativeFetchResult fetchUrlWithCurl(const std::string & url, int timeoutSeconds = 300) {
 	NativeFetchResult result;
 	const std::string curlExe = resolveCurlExecutable();
 	if (curlExe.empty()) {
@@ -1338,6 +1547,8 @@ NativeFetchResult fetchUrlWithCurl(const std::string & url) {
 		"--location",
 		"--silent",
 		"--show-error",
+		"--max-time",
+		std::to_string(timeoutSeconds > 0 ? timeoutSeconds : 300),
 		"--output",
 		bodyPath.string(),
 		"--dump-header",
@@ -1403,6 +1614,43 @@ NativeFetchResult fetchUrlWithCurl(const std::string & url) {
 	}
 
 	result.success = true;
+	return result;
+}
+
+NativeFetchResult fetchUrlWithRetry(
+	const std::string & url,
+	int timeoutSeconds,
+	int maxRetries,
+	int retryDelayMs) {
+	NativeFetchResult result;
+	int attempts = 0;
+	const int maxAttempts = std::max(1, maxRetries + 1);
+
+	while (attempts < maxAttempts) {
+		result = fetchUrlWithCurl(url, timeoutSeconds);
+
+		if (result.success) {
+			return result;
+		}
+
+		attempts++;
+		if (attempts >= maxAttempts) {
+			break;
+		}
+
+		if (!isTransientNetworkError(result)) {
+			break;
+		}
+
+		if (retryDelayMs > 0) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(retryDelayMs));
+		}
+	}
+
+	if (attempts > 1) {
+		result.error += " (failed after " + std::to_string(attempts) + " attempts)";
+	}
+
 	return result;
 }
 
@@ -1868,7 +2116,7 @@ public:
 			const auto [currentUrlRaw, currentDepth] = pending.front();
 			pending.pop();
 
-			const std::string currentUrl = stripUrlFragment(currentUrlRaw);
+			const std::string currentUrl = normalizeUrlForDeduplication(currentUrlRaw);
 			if (currentUrl.empty() || !visited.insert(currentUrl).second) {
 				continue;
 			}
@@ -1878,7 +2126,11 @@ public:
 				continue;
 			}
 
-			NativeFetchResult fetched = fetchUrlWithCurl(currentUrl);
+			NativeFetchResult fetched = fetchUrlWithRetry(
+			currentUrl,
+			request.timeoutSeconds,
+			request.maxRetries,
+			request.retryDelayMs);
 			if (!fetched.success) {
 				result.commandOutput +=
 					"Native fetch failed for " + currentUrl + ": " + fetched.error + "\n";
@@ -1949,15 +2201,16 @@ public:
 				continue;
 			}
 			for (const auto & link : parsed.links) {
-				if (link.empty() || visited.find(link) != visited.end()) {
+				const std::string normalizedLink = normalizeUrlForDeduplication(link);
+				if (normalizedLink.empty() || visited.find(normalizedLink) != visited.end()) {
 					continue;
 				}
 				if (!request.allowedDomains.empty() &&
-					!isFileUrl(link) &&
-					!isUrlAllowedForDomains(link, request.allowedDomains)) {
+					!isFileUrl(normalizedLink) &&
+					!isUrlAllowedForDomains(normalizedLink, request.allowedDomains)) {
 					continue;
 				}
-				pending.push({link, currentDepth + 1});
+				pending.push({normalizedLink, currentDepth + 1});
 			}
 		}
 
