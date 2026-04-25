@@ -3726,16 +3726,6 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			ImGui::TextWrapped("%s", pendingApprovalToolCall.payload.c_str());
 			ImGui::EndChild();
 		}
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-		if (ImGui::Button("Approve Tool", ImVec2(120, 0))) {
-			submitPendingToolApproval(true);
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Deny Tool", ImVec2(120, 0))) {
-			submitPendingToolApproval(false);
-		}
 	}
 
 	const auto requestFocusedInlineCompletion = [&]() {
