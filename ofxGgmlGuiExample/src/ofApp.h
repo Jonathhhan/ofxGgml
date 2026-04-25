@@ -814,6 +814,7 @@ private:
 	bool liveContextAllowPromptUrls = true;
 	bool liveContextAllowDomainProviders = true;
 	bool liveContextAllowGenericSearch = true;
+	bool scriptSimpleUi = true;
 	bool scriptIncludeRepoContext = true;
 	bool stopAtNaturalBoundary = true;
 	bool cliCapabilitiesProbed = false;
