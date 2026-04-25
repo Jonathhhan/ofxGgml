@@ -1380,6 +1380,52 @@ if (key == 27) stopGeneration();  // Escape cancels generation
 // Menu bar
 // ---------------------------------------------------------------------------
 
+void ofApp::clearAllOutputs() {
+	chatMessages.clear();
+	scriptMessages.clear();
+	scriptOutput.clear();
+	summarizeOutput.clear();
+	summarizeTtsPreview.clearPreviewArtifacts();
+	writeOutput.clear();
+	translateOutput.clear();
+	voiceTranslatorStatus.clear();
+	voiceTranslatorTranscript.clear();
+	translateTtsPreview.clearPreviewArtifacts();
+	customOutput.clear();
+	citationOutput.clear();
+	visionOutput.clear();
+	visionSampledVideoFrames.clear();
+	speechOutput.clear();
+	chatLastAssistantReply.clear();
+	chatTtsPreview.clearPreviewArtifacts();
+	ttsOutput.clear();
+	diffusionOutput.clear();
+	musicToImagePromptOutput.clear();
+	musicToImageStatus.clear();
+	clipOutput.clear();
+	citationResults.clear();
+	speechDetectedLanguage.clear();
+	speechTranscriptPath.clear();
+	speechSrtPath.clear();
+	speechSegmentCount = 0;
+	ttsBackendName.clear();
+	ttsElapsedMs = 0.0f;
+	ttsResolvedSpeakerPath.clear();
+	ttsAudioFiles.clear();
+	ttsMetadata.clear();
+	stopTtsPanelPlayback(true);
+	stopSummaryTtsPlayback(true);
+	stopTranslateTtsPlayback(true);
+	diffusionBackendName.clear();
+	diffusionElapsedMs = 0.0f;
+	diffusionGeneratedImages.clear();
+	diffusionMetadata.clear();
+	clipBackendName.clear();
+	clipElapsedMs = 0.0f;
+	clipEmbeddingDimension = 0;
+	clipHits.clear();
+}
+
 void ofApp::drawMenuBar() {
 if (ImGui::BeginMainMenuBar()) {
 if (ImGui::BeginMenu("File")) {
@@ -1399,49 +1445,7 @@ loadSession(result.getPath());
 }
 ImGui::Separator();
 if (ImGui::MenuItem("Clear All Output")) {
-chatMessages.clear();
-scriptMessages.clear();
-	scriptOutput.clear();
-  summarizeOutput.clear();
-  summarizeTtsPreview.clearPreviewArtifacts();
-  writeOutput.clear();
-  translateOutput.clear();
-  voiceTranslatorStatus.clear();
-  voiceTranslatorTranscript.clear();
-  translateTtsPreview.clearPreviewArtifacts();
-  customOutput.clear();
-	citationOutput.clear();
-  visionOutput.clear();
-visionSampledVideoFrames.clear();
-	speechOutput.clear();
-	chatLastAssistantReply.clear();
-	chatTtsPreview.clearPreviewArtifacts();
-	ttsOutput.clear();
-    diffusionOutput.clear();
-	musicToImagePromptOutput.clear();
-	musicToImageStatus.clear();
-    clipOutput.clear();
-	citationResults.clear();
-  speechDetectedLanguage.clear();
-	speechTranscriptPath.clear();
-	speechSrtPath.clear();
-	speechSegmentCount = 0;
-	ttsBackendName.clear();
-	ttsElapsedMs = 0.0f;
-	ttsResolvedSpeakerPath.clear();
-	ttsAudioFiles.clear();
-	ttsMetadata.clear();
-	stopTtsPanelPlayback(true);
-	stopSummaryTtsPlayback(true);
-	stopTranslateTtsPlayback(true);
-	diffusionBackendName.clear();
-diffusionElapsedMs = 0.0f;
-diffusionGeneratedImages.clear();
-diffusionMetadata.clear();
-clipBackendName.clear();
-clipElapsedMs = 0.0f;
-clipEmbeddingDimension = 0;
-clipHits.clear();
+	clearAllOutputs();
 }
 ImGui::Separator();
 if (ImGui::MenuItem("Quit", "Ctrl+Q")) {

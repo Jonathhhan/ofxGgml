@@ -1143,6 +1143,7 @@ private:
 
 	// -- UI panels --
 	void drawMenuBar();
+	void clearAllOutputs();
 	void drawSidebar();
 	void drawMainPanel();
 	void drawChatPanel();
