@@ -467,6 +467,66 @@ std::vector<std::string> buildHeuristicAlternateQueries(
 	return dedupeStrings(queries);
 }
 
+struct ValidationResult {
+	bool valid = true;
+	std::string error;
+};
+
+ValidationResult validateCitationSearchRequest(const ofxGgmlCitationSearchRequest & request) {
+	ValidationResult result;
+	result.valid = true;
+
+	const std::string topic = trimCopy(request.topic);
+	if (topic.empty()) {
+		result.valid = false;
+		result.error = "Citation topic cannot be empty. Please provide a search topic.";
+		return result;
+	}
+
+	if (topic.size() < 3) {
+		result.valid = false;
+		result.error = "Citation topic is too short (minimum 3 characters). Current: \"" + topic + "\"";
+		return result;
+	}
+
+	const std::string modelPath = trimCopy(request.modelPath);
+	if (modelPath.empty()) {
+		result.valid = false;
+		result.error = "Model path is required for citation search. Please specify a valid model path.";
+		return result;
+	}
+
+	if (request.maxCitations == 0) {
+		result.valid = false;
+		result.error = "maxCitations must be at least 1.";
+		return result;
+	}
+
+	if (request.maxCitations > 1000) {
+		result.valid = false;
+		result.error = "maxCitations is too large (maximum 1000). Current: " + std::to_string(request.maxCitations);
+		return result;
+	}
+
+	if (request.minimumConfidenceThreshold < 0.0f || request.minimumConfidenceThreshold > 1.0f) {
+		result.valid = false;
+		result.error = "minimumConfidenceThreshold must be between 0.0 and 1.0. Current: " +
+			std::to_string(request.minimumConfidenceThreshold);
+		return result;
+	}
+
+	if (request.useCrawler) {
+		const std::string crawlerUrl = trimCopy(request.crawlerRequest.startUrl);
+		if (crawlerUrl.empty()) {
+			result.valid = false;
+			result.error = "Crawler URL is required when useCrawler is true. Please specify crawlerRequest.startUrl.";
+			return result;
+		}
+	}
+
+	return result;
+}
+
 std::vector<std::string> extractHeuristicDomainHints(
 	const std::string & topic,
 	bool allowDomainHints) {
@@ -1511,17 +1571,14 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 	result.backendName = request.useCrawler ? "Mojo+Inference" : "Inference";
 	result.requestedTopic = trimCopy(request.topic);
 
+	const auto validation = validateCitationSearchRequest(request);
+	if (!validation.valid) {
+		result.error = validation.error;
+		result.elapsedMs = elapsedMsSince(start);
+		return result;
+	}
+
 	const std::string topic = trimCopy(request.topic);
-	if (topic.empty()) {
-		result.error = "Citation topic is empty.";
-		result.elapsedMs = elapsedMsSince(start);
-		return result;
-	}
-	if (trimCopy(request.modelPath).empty()) {
-		result.error = "Citation search requires a model path.";
-		result.elapsedMs = elapsedMsSince(start);
-		return result;
-	}
 
 	result.queryRewrite = rewriteTopicForSearch(
 		m_inference,

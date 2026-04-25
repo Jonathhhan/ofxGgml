@@ -179,3 +179,85 @@ TEST_CASE("Source diversity score penalizes over-reliance on single source", "[c
 	REQUIRE(singleSourceCitations.size() == 5);
 }
 
+TEST_CASE("Citation search validates empty topic", "[citation_search]") {
+	ofxGgmlCitationSearch citationSearch;
+	ofxGgmlCitationSearchRequest request;
+	request.modelPath = "test_model.gguf";
+	request.topic = "";
+
+	auto result = citationSearch.search(request);
+
+	REQUIRE_FALSE(result.success);
+	REQUIRE(!result.error.empty());
+	REQUIRE(result.error.find("empty") != std::string::npos);
+}
+
+TEST_CASE("Citation search validates short topic", "[citation_search]") {
+	ofxGgmlCitationSearch citationSearch;
+	ofxGgmlCitationSearchRequest request;
+	request.modelPath = "test_model.gguf";
+	request.topic = "ab";
+
+	auto result = citationSearch.search(request);
+
+	REQUIRE_FALSE(result.success);
+	REQUIRE(!result.error.empty());
+	REQUIRE(result.error.find("too short") != std::string::npos);
+}
+
+TEST_CASE("Citation search validates missing model path", "[citation_search]") {
+	ofxGgmlCitationSearch citationSearch;
+	ofxGgmlCitationSearchRequest request;
+	request.modelPath = "";
+	request.topic = "valid topic";
+
+	auto result = citationSearch.search(request);
+
+	REQUIRE_FALSE(result.success);
+	REQUIRE(!result.error.empty());
+	REQUIRE(result.error.find("model path") != std::string::npos);
+}
+
+TEST_CASE("Citation search validates confidence threshold range", "[citation_search]") {
+	ofxGgmlCitationSearch citationSearch;
+	ofxGgmlCitationSearchRequest request;
+	request.modelPath = "test_model.gguf";
+	request.topic = "valid topic";
+	request.minimumConfidenceThreshold = 1.5f;
+
+	auto result = citationSearch.search(request);
+
+	REQUIRE_FALSE(result.success);
+	REQUIRE(!result.error.empty());
+	REQUIRE(result.error.find("between 0.0 and 1.0") != std::string::npos);
+}
+
+TEST_CASE("Citation search validates max citations bounds", "[citation_search]") {
+	ofxGgmlCitationSearch citationSearch;
+	ofxGgmlCitationSearchRequest request;
+	request.modelPath = "test_model.gguf";
+	request.topic = "valid topic";
+	request.maxCitations = 0;
+
+	auto result = citationSearch.search(request);
+
+	REQUIRE_FALSE(result.success);
+	REQUIRE(!result.error.empty());
+	REQUIRE(result.error.find("at least 1") != std::string::npos);
+}
+
+TEST_CASE("Citation search validates crawler URL when enabled", "[citation_search]") {
+	ofxGgmlCitationSearch citationSearch;
+	ofxGgmlCitationSearchRequest request;
+	request.modelPath = "test_model.gguf";
+	request.topic = "valid topic";
+	request.useCrawler = true;
+	request.crawlerRequest.startUrl = "";
+
+	auto result = citationSearch.search(request);
+
+	REQUIRE_FALSE(result.success);
+	REQUIRE(!result.error.empty());
+	REQUIRE(result.error.find("Crawler URL") != std::string::npos);
+}
+

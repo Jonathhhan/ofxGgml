@@ -69,6 +69,17 @@ Citations are now sorted by:
 2. Relevance score (if confidence is equal)
 3. Quote length (shorter preferred, if scores are equal)
 
+### 6. Comprehensive Input Validation
+
+Added robust validation with helpful error messages:
+- Topic must not be empty and at least 3 characters
+- Model path is required
+- maxCitations must be between 1 and 1000
+- minimumConfidenceThreshold must be between 0.0 and 1.0
+- Crawler URL required when useCrawler is enabled
+
+Validation happens early with clear, actionable error messages.
+
 ## API Changes
 
 ### Updated Structures
@@ -166,6 +177,43 @@ if (result.success) {
 }
 ```
 
+### Handling Validation Errors
+
+```cpp
+ofxGgmlCitationSearchRequest request;
+request.topic = "ai";  // Too short!
+request.modelPath = "";  // Missing!
+
+auto result = citationSearch.search(request);
+
+if (!result.success) {
+    // Clear error message explains the problem
+    std::cerr << "Error: " << result.error << "\n";
+    // Output: "Citation topic is too short (minimum 3 characters). Current: "ai""
+    return;
+}
+```
+
+### Safe Parameter Configuration
+
+```cpp
+ofxGgmlCitationSearchRequest request;
+request.modelPath = "path/to/model.gguf";
+request.topic = "machine learning";
+
+// Validate ranges
+request.maxCitations = std::min(request.maxCitations, size_t(1000));
+request.minimumConfidenceThreshold = std::clamp(
+    request.minimumConfidenceThreshold, 0.0f, 1.0f);
+
+// Use crawler safely
+if (request.useCrawler && request.crawlerRequest.startUrl.empty()) {
+    request.crawlerRequest.startUrl = "https://en.wikipedia.org/wiki/Machine_learning";
+}
+
+auto result = citationSearch.search(request);
+```
+
 ## Benefits
 
 1. **Better Citation Quality**: Confidence scoring helps identify the most reliable citations
@@ -173,6 +221,8 @@ if (result.success) {
 3. **Academic Rigor**: Favors authoritative sources (.edu, .gov, academic publishers)
 4. **Transparency**: Users can see quality metrics for each citation
 5. **Flexible Filtering**: Configurable threshold allows quality control
+6. **Robust Validation**: Early parameter validation with helpful error messages prevents invalid requests
+7. **Better User Experience**: Clear, actionable error messages guide users to fix issues
 
 ## Test Coverage
 
@@ -182,6 +232,11 @@ New comprehensive tests added in `tests/test_citation_search.cpp`:
 - Source credibility scoring favors academic domains
 - Confidence score combines match quality, relevance, and credibility
 - Source diversity score penalizes over-reliance on single source
+- Input validation for empty/short topics
+- Input validation for missing model path
+- Input validation for confidence threshold range
+- Input validation for maxCitations bounds
+- Input validation for crawler URL when enabled
 
 ## Future Enhancements
 
