@@ -2472,6 +2472,7 @@ ImGui::EndChild();
 	ImGui::EndChild();
 
 	// --- 4. Multiline Chat Input ---
+	ImGui::TextDisabled("Tip: Enter sends, Ctrl+Enter for new line");
 	const bool scriptChatSubmitted = ImGui::InputTextMultiline(
 		"##ScriptIn", scriptInput, sizeof(scriptInput), ImVec2(-1, 50),
 		ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine);
