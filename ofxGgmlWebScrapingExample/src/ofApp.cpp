@@ -1,6 +1,7 @@
 #include "ofApp.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <future>
 #include <sstream>
@@ -10,7 +11,6 @@ namespace {
 constexpr float kMargin = 20.0f;
 constexpr float kPanelGap = 16.0f;
 constexpr float kHeaderHeight = 164.0f;
-constexpr float kLineHeight = 16.0f;
 
 std::string trimCopy(const std::string & text) {
 	size_t start = 0;
@@ -189,6 +189,7 @@ void ofApp::startCrawl() {
 	request.extraArgs = ai.getWebCrawlerConfig().extraArgs;
 	request.allowedDomains = ai.getWebCrawlerConfig().allowedDomains;
 
+	lastResult = {};
 	documents.clear();
 	selectedDocumentIndex = 0;
 	statusMessage = "Crawling " + startUrl + "...";
