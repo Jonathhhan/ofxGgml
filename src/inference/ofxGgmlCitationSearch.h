@@ -13,6 +13,10 @@ struct ofxGgmlCitationItem {
 	std::string sourceLabel;
 	std::string sourceUri;
 	int sourceIndex = -1;
+	float confidenceScore = 0.0f;
+	bool isExactMatch = false;
+	float relevanceScore = 0.0f;
+	float sourceCredibility = 0.0f;
 };
 
 struct ofxGgmlCitationSearchRequest {
@@ -82,6 +86,8 @@ struct ofxGgmlCitationSearchResult {
 	std::vector<ofxGgmlPromptSource> sourcesUsed;
 	ofxGgmlWebCrawlerResult crawlerResult;
 	ofxGgmlRAGRetrievalResult retrieval;
+	float sourceDiversityScore = 0.0f;
+	float averageConfidence = 0.0f;
 };
 
 namespace ofxGgmlCitationSearchInternal {

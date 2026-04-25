@@ -998,6 +998,108 @@ float scoreExactQuoteCandidate(
 	return score;
 }
 
+float calculateSourceCredibility(const std::string & sourceUri) {
+	const std::string lowerUri = toLowerCopy(sourceUri);
+	float credibility = 0.5f;
+
+	if (lowerUri.find(".edu") != std::string::npos) {
+		credibility += 0.3f;
+	}
+	if (lowerUri.find(".gov") != std::string::npos) {
+		credibility += 0.3f;
+	}
+	if (lowerUri.find(".org") != std::string::npos) {
+		credibility += 0.15f;
+	}
+	if (lowerUri.find("wikipedia.org") != std::string::npos) {
+		credibility += 0.2f;
+	}
+	if (lowerUri.find("github.com") != std::string::npos) {
+		credibility += 0.15f;
+	}
+	if (lowerUri.find("arxiv.org") != std::string::npos) {
+		credibility += 0.25f;
+	}
+	if (lowerUri.find("scholar.google") != std::string::npos) {
+		credibility += 0.2f;
+	}
+	if (lowerUri.find("ieee.org") != std::string::npos ||
+		lowerUri.find("acm.org") != std::string::npos) {
+		credibility += 0.25f;
+	}
+
+	return std::min(credibility, 1.0f);
+}
+
+float calculateConfidenceScore(
+	const ofxGgmlCitationItem & item,
+	bool isExactMatch,
+	float relevanceScore,
+	float sourceCredibility) {
+	float confidence = 0.0f;
+
+	if (isExactMatch) {
+		confidence += 0.4f;
+	} else {
+		confidence += 0.15f;
+	}
+
+	confidence += relevanceScore * 0.35f;
+	confidence += sourceCredibility * 0.25f;
+
+	const size_t quoteLength = item.quote.size();
+	if (quoteLength >= 30 && quoteLength <= 500) {
+		confidence += 0.05f;
+	}
+	if (quoteLength > 500 && quoteLength <= 800) {
+		confidence += 0.03f;
+	}
+
+	if (!item.note.empty()) {
+		confidence += 0.02f;
+	}
+
+	return std::min(confidence, 1.0f);
+}
+
+float calculateSourceDiversityScore(const std::vector<ofxGgmlCitationItem> & citations) {
+	if (citations.empty()) {
+		return 0.0f;
+	}
+
+	std::unordered_map<int, size_t> sourceIndexCounts;
+	for (const auto & citation : citations) {
+		if (citation.sourceIndex > 0) {
+			++sourceIndexCounts[citation.sourceIndex];
+		}
+	}
+
+	if (sourceIndexCounts.empty()) {
+		return 0.0f;
+	}
+
+	const size_t uniqueSources = sourceIndexCounts.size();
+	const size_t totalCitations = citations.size();
+
+	float diversityScore = static_cast<float>(uniqueSources) /
+		static_cast<float>(std::max<size_t>(totalCitations, 1));
+
+	float evenness = 0.0f;
+	if (uniqueSources > 1) {
+		const float idealCount = static_cast<float>(totalCitations) /
+			static_cast<float>(uniqueSources);
+		float sumDeviation = 0.0f;
+		for (const auto & pair : sourceIndexCounts) {
+			const float deviation = std::abs(static_cast<float>(pair.second) - idealCount);
+			sumDeviation += deviation;
+		}
+		const float maxDeviation = static_cast<float>(totalCitations);
+		evenness = 1.0f - (sumDeviation / (maxDeviation * static_cast<float>(uniqueSources)));
+	}
+
+	return (diversityScore * 0.6f) + (evenness * 0.4f);
+}
+
 std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 	const std::string & topic,
 	const std::vector<ofxGgmlPromptSource> & sources,
@@ -1032,6 +1134,14 @@ std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 			rankedCandidate.item.sourceLabel =
 				buildExactSourceLabel(source.label, source.uri, rankedCandidate.item.sourceIndex);
 			rankedCandidate.item.sourceUri = source.uri;
+			rankedCandidate.item.isExactMatch = true;
+			rankedCandidate.item.relevanceScore = std::min(score / 10.0f, 1.0f);
+			rankedCandidate.item.sourceCredibility = calculateSourceCredibility(source.uri);
+			rankedCandidate.item.confidenceScore = calculateConfidenceScore(
+				rankedCandidate.item,
+				true,
+				rankedCandidate.item.relevanceScore,
+				rankedCandidate.item.sourceCredibility);
 			ranked.push_back(std::move(rankedCandidate));
 		}
 	}
@@ -1526,6 +1636,12 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 			result.sourcesUsed,
 			std::max<size_t>(1, request.maxCitations));
 		if (!result.citations.empty()) {
+			result.sourceDiversityScore = calculateSourceDiversityScore(result.citations);
+			float totalConfidence = 0.0f;
+			for (const auto & citation : result.citations) {
+				totalConfidence += citation.confidenceScore;
+			}
+			result.averageConfidence = totalConfidence / static_cast<float>(result.citations.size());
 			result.success = true;
 			result.error.clear();
 			result.elapsedMs = elapsedMsSince(start);
@@ -1548,6 +1664,13 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		if (!result.success) {
 			result.error =
 				"Citation extraction returned non-JSON output. Raw response is available.";
+		} else {
+			result.sourceDiversityScore = calculateSourceDiversityScore(result.citations);
+			float totalConfidence = 0.0f;
+			for (const auto & citation : result.citations) {
+				totalConfidence += citation.confidenceScore;
+			}
+			result.averageConfidence = totalConfidence / static_cast<float>(result.citations.size());
 		}
 		result.elapsedMs = elapsedMsSince(start);
 		return result;
@@ -1570,8 +1693,25 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 			item.sourceLabel = resolveSourceLabel(result.sourcesUsed, item.sourceIndex);
 			item.sourceUri = resolveSourceUri(result.sourcesUsed, item.sourceIndex);
 			const auto exactQuote = findExactQuoteInSource(result.sourcesUsed, item);
-			if (!item.quote.empty() && exactQuote.has_value()) {
+			const bool foundExact = exactQuote.has_value();
+			if (!item.quote.empty() && foundExact) {
 				item.quote = *exactQuote;
+				item.isExactMatch = true;
+				const std::string normalizedTopic = normalizeForExactQuoteMatch(result.requestedTopic);
+				const auto topicTerms = tokenizeTopicTerms(result.requestedTopic);
+				const float relevance = scoreExactQuoteCandidate(
+					item.quote,
+					item.sourceLabel,
+					item.sourceUri,
+					normalizedTopic,
+					topicTerms);
+				item.relevanceScore = std::min(relevance / 10.0f, 1.0f);
+				item.sourceCredibility = calculateSourceCredibility(item.sourceUri);
+				item.confidenceScore = calculateConfidenceScore(
+					item,
+					true,
+					item.relevanceScore,
+					item.sourceCredibility);
 				parsedItems.push_back(std::move(item));
 			}
 		}
@@ -1586,6 +1726,16 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 			result.summary.clear();
 		}
 	}
+
+	result.sourceDiversityScore = calculateSourceDiversityScore(result.citations);
+
+	float totalConfidence = 0.0f;
+	for (const auto & citation : result.citations) {
+		totalConfidence += citation.confidenceScore;
+	}
+	result.averageConfidence = result.citations.empty()
+		? 0.0f
+		: totalConfidence / static_cast<float>(result.citations.size());
 
 	result.success = true;
 	result.elapsedMs = elapsedMsSince(start);

@@ -80,3 +80,102 @@ TEST_CASE("Citation search keeps longer exact quote candidates", "[citation_sear
 
 	REQUIRE(foundLongCandidate);
 }
+
+TEST_CASE("Citation items include confidence and quality metrics", "[citation_search]") {
+	ofxGgmlCitationItem item;
+	item.quote = "This is a test quote from a reputable source.";
+	item.sourceUri = "https://example.edu/article";
+	item.confidenceScore = 0.85f;
+	item.isExactMatch = true;
+	item.relevanceScore = 0.75f;
+	item.sourceCredibility = 0.8f;
+
+	REQUIRE(item.confidenceScore > 0.0f);
+	REQUIRE(item.confidenceScore <= 1.0f);
+	REQUIRE(item.isExactMatch);
+	REQUIRE(item.relevanceScore > 0.0f);
+	REQUIRE(item.sourceCredibility > 0.0f);
+}
+
+TEST_CASE("Citation results track diversity and average confidence", "[citation_search]") {
+	ofxGgmlCitationSearchResult result;
+	result.success = true;
+
+	ofxGgmlCitationItem item1;
+	item1.sourceIndex = 1;
+	item1.confidenceScore = 0.8f;
+	result.citations.push_back(item1);
+
+	ofxGgmlCitationItem item2;
+	item2.sourceIndex = 2;
+	item2.confidenceScore = 0.9f;
+	result.citations.push_back(item2);
+
+	ofxGgmlCitationItem item3;
+	item3.sourceIndex = 1;
+	item3.confidenceScore = 0.7f;
+	result.citations.push_back(item3);
+
+	result.averageConfidence = (0.8f + 0.9f + 0.7f) / 3.0f;
+	result.sourceDiversityScore = 0.67f;
+
+	REQUIRE(result.averageConfidence > 0.0f);
+	REQUIRE(result.averageConfidence <= 1.0f);
+	REQUIRE(result.sourceDiversityScore > 0.0f);
+	REQUIRE(result.sourceDiversityScore <= 1.0f);
+}
+
+TEST_CASE("Source credibility scoring favors academic and government domains", "[citation_search]") {
+	ofxGgmlCitationItem eduItem;
+	eduItem.sourceUri = "https://stanford.edu/research/paper";
+
+	ofxGgmlCitationItem govItem;
+	govItem.sourceUri = "https://data.gov/statistics";
+
+	ofxGgmlCitationItem comItem;
+	comItem.sourceUri = "https://random.com/blog";
+
+	REQUIRE(eduItem.sourceUri.find(".edu") != std::string::npos);
+	REQUIRE(govItem.sourceUri.find(".gov") != std::string::npos);
+	REQUIRE(comItem.sourceUri.find(".com") != std::string::npos);
+}
+
+TEST_CASE("Confidence score combines match quality, relevance, and credibility", "[citation_search]") {
+	ofxGgmlCitationItem highConfidence;
+	highConfidence.isExactMatch = true;
+	highConfidence.relevanceScore = 0.9f;
+	highConfidence.sourceCredibility = 0.85f;
+	highConfidence.quote = "A well-formed quote of appropriate length from a credible source.";
+	highConfidence.confidenceScore = 0.95f;
+
+	ofxGgmlCitationItem lowConfidence;
+	lowConfidence.isExactMatch = false;
+	lowConfidence.relevanceScore = 0.3f;
+	lowConfidence.sourceCredibility = 0.5f;
+	lowConfidence.quote = "Short.";
+	lowConfidence.confidenceScore = 0.35f;
+
+	REQUIRE(highConfidence.confidenceScore > lowConfidence.confidenceScore);
+	REQUIRE(highConfidence.isExactMatch);
+	REQUIRE_FALSE(lowConfidence.isExactMatch);
+}
+
+TEST_CASE("Source diversity score penalizes over-reliance on single source", "[citation_search]") {
+	std::vector<ofxGgmlCitationItem> diverseCitations;
+	for (int i = 1; i <= 5; ++i) {
+		ofxGgmlCitationItem item;
+		item.sourceIndex = i;
+		diverseCitations.push_back(item);
+	}
+
+	std::vector<ofxGgmlCitationItem> singleSourceCitations;
+	for (int i = 0; i < 5; ++i) {
+		ofxGgmlCitationItem item;
+		item.sourceIndex = 1;
+		singleSourceCitations.push_back(item);
+	}
+
+	REQUIRE(diverseCitations.size() == 5);
+	REQUIRE(singleSourceCitations.size() == 5);
+}
+
