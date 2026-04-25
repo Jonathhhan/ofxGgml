@@ -461,3 +461,4 @@ videoPlanner.planMusicVideo(musicPrompt.prompt, beatCount);
   - Vision mode: Music video workflow
   - Summarize mode: Citation research
   - MilkDrop mode: Preset generation
+- `ofxGgmlWebScrapingExample` - Focused website crawling and Markdown preview

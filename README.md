@@ -144,6 +144,7 @@ Supporting areas:
 - `ofxGgmlBasicExample/`
 - `ofxGgmlGuiExample/`
 - `ofxGgmlNeuralExample/`
+- `ofxGgmlWebScrapingExample/`
 
 Developer tooling:
 
@@ -758,6 +759,7 @@ See [docs/getting-started/CHOOSING_FEATURES.md](docs/getting-started/CHOOSING_FE
 - `ofxGgmlChatExample`: **Simple chat application** (~200 lines, uses `ofxGgmlBasic.h`)
 - `ofxGgmlBasicExample`: Interactive matrix demo plus steady-state matmul benchmark
 - `ofxGgmlNeuralExample`: Reusable inference graph with live class bars and latency view
+- `ofxGgmlWebScrapingExample`: Keyboard-driven website crawl viewer for `ofxGgmlWebCrawler`
 
 ### Comprehensive Example
 
