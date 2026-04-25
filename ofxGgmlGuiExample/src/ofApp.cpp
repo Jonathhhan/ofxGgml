@@ -3954,8 +3954,7 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 		ImGui::SameLine();
 		ImGui::TextDisabled("Load a local project to unlock grounded edit plans and dry runs.");
 	} else if (hasBuildErrors) {
-		ImGui::BeginDisabled(generating.load());
-		if (ImGui::Button("Fix Build Plan", ImVec2(150, 0))) {
+		if (drawDisabledButton("Fix Build Plan", generating.load(), ImVec2(150, 0))) {
 			submitScriptRequest(
 				ofxGgmlCodeAssistantAction::FixBuild,
 				scriptInput,
@@ -3967,17 +3966,14 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 				scriptBuildErrors,
 				buildWorkspaceAllowedFiles());
 		}
-		ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::TextDisabled("You already have compiler output loaded, so start with a grounded build fix.");
 	} else if (hasScriptOutput) {
 		const auto lastStructuredOutput = ofxGgmlCodeAssistant::parseStructuredResult(scriptOutput);
 		if (!lastStructuredOutput.unifiedDiff.empty() || !lastStructuredOutput.patchOperations.empty()) {
-			ImGui::BeginDisabled(generating.load());
-			if (ImGui::Button("Workspace Dry Run", ImVec2(150, 0))) {
+			if (drawDisabledButton("Workspace Dry Run", generating.load(), ImVec2(150, 0))) {
 				previewWorkspacePlan("Workspace dry run");
 			}
-			ImGui::EndDisabled();
 			ImGui::SameLine();
 			ImGui::TextDisabled("Preview the latest structured edit plan before applying anything manually.");
 		} else if (hasSelectedFile && !hasUserInput) {
@@ -3991,8 +3987,7 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			ImGui::TextDisabled("Seed the input from the selected file instead of starting from a blank prompt.");
 		}
 	} else if (hasWorkspaceSource && hasUserInput) {
-		ImGui::BeginDisabled(generating.load());
-		if (ImGui::Button("Grounded Edit Plan", ImVec2(150, 0))) {
+		if (drawDisabledButton("Grounded Edit Plan", generating.load(), ImVec2(150, 0))) {
 			submitScriptRequest(
 				ofxGgmlCodeAssistantAction::Edit,
 				scriptInput,
@@ -4004,15 +3999,12 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 				"",
 				buildWorkspaceAllowedFiles());
 		}
-		ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::TextDisabled("You have a workspace and a request loaded, so the strongest next step is a structured edit plan.");
 	} else if (hasWorkspaceSource) {
-		ImGui::BeginDisabled(generating.load());
-		if (ImGui::Button("Review workspace", ImVec2(150, 0))) {
+		if (drawDisabledButton("Review workspace", generating.load(), ImVec2(150, 0))) {
 			runHierarchicalReview();
 		}
-		ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::TextDisabled("No prompt yet. Start with a workspace review to surface the next useful change.");
 	}

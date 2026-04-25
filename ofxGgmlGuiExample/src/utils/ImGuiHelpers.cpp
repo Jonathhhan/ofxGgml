@@ -86,6 +86,13 @@ void drawSectionSeparator() {
 	ImGui::Spacing();
 }
 
+bool drawDisabledButton(const char * label, bool disabled, const ImVec2 & size) {
+	ImGui::BeginDisabled(disabled);
+	const bool clicked = ImGui::Button(label, size);
+	ImGui::EndDisabled();
+	return !disabled && clicked;
+}
+
 // ---------------------------------------------------------------------------
 // Log Level Support
 // ---------------------------------------------------------------------------

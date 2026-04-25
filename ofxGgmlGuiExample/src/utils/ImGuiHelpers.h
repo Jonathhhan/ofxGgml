@@ -15,6 +15,7 @@ void drawHelpMarker(const char * helpText);
 void showWrappedTooltip(const std::string & tooltipText);
 void showWrappedTooltipf(const char * fmt, ...);
 void drawSectionSeparator();
+bool drawDisabledButton(const char * label, bool disabled, const ImVec2 & size = ImVec2(0, 0));
 
 // ---------------------------------------------------------------------------
 // Log Level Support
