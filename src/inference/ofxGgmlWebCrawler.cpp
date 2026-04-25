@@ -1015,8 +1015,8 @@ std::string decodeBasicHtmlEntities(std::string text) {
 	replaceAllInPlace(text, "&hellip;", "…");
 	replaceAllInPlace(text, "&laquo;", "«");
 	replaceAllInPlace(text, "&raquo;", "»");
-	replaceAllInPlace(text, "&ldquo;", """);
-	replaceAllInPlace(text, "&rdquo;", """);
+	replaceAllInPlace(text, "&ldquo;", "\"");
+	replaceAllInPlace(text, "&rdquo;", "\"");
 	replaceAllInPlace(text, "&lsquo;", "'");
 	replaceAllInPlace(text, "&rsquo;", "'");
 	replaceAllInPlace(text, "&bull;", "•");

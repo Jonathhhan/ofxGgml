@@ -3504,27 +3504,29 @@ if (showScriptPromptHelpers) {
 	ImGui::TextDisabled("Slash command detected. Open Prompt helpers to inspect it.");
 }
 
-ImGui::BeginDisabled(generating.load());
-if (canSendScriptChat) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.3f, 1.0f));
-if ((ImGui::Button("Send to Chat", ImVec2(110, 0)) || effectiveScriptChatSubmitted) && canSendScriptChat) {
-	if (slashCommand.kind != ScriptSlashCommandKind::None) {
-		if (executeScriptSlashCommand(slashCommand)) {
-			std::memset(scriptInput, 0, sizeof(scriptInput));
+{
+	const ScopedImGuiDisabled sendControlsDisabled(generating.load());
+	if (canSendScriptChat) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.3f, 1.0f));
+	if ((ImGui::Button("Send to Chat", ImVec2(110, 0)) || effectiveScriptChatSubmitted) && canSendScriptChat) {
+		if (slashCommand.kind != ScriptSlashCommandKind::None) {
+			if (executeScriptSlashCommand(slashCommand)) {
+				std::memset(scriptInput, 0, sizeof(scriptInput));
+			}
+		} else {
+			submitScriptRequest(
+				ofxGgmlCodeAssistantAction::Ask,
+				scriptInput,
+				"",
+				"",
+				true);
 		}
-	} else {
-		submitScriptRequest(
-			ofxGgmlCodeAssistantAction::Ask,
-			scriptInput,
-			"",
-			"",
-			true);
 	}
-}
-if (canSendScriptChat) ImGui::PopStyleColor();
-ImGui::SameLine();
+	if (canSendScriptChat) ImGui::PopStyleColor();
+	ImGui::SameLine();
 	if (ImGui::Button("Clear Chat", ImVec2(90, 0))) {
 		clearScriptConversation();
 	}
+}
 ImGui::SameLine();
 
 ImGui::BeginDisabled(generating.load() || !lastScriptOutputLikelyCutoff || lastScriptOutputTail.empty());
@@ -4217,9 +4219,6 @@ if (!scriptSimpleUi &&
 				scriptSource.saveToLocalSource(filename, scriptOutput);
 			}
 		}
-
-		ImGui::EndDisabled();
-
 		ImGui::Separator();
 		ImGui::TextDisabled("Editor-style inline completion");
 		if (hasSelectedFile) {
