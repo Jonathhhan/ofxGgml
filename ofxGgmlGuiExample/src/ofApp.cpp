@@ -2285,6 +2285,9 @@ ImGui::SetNextItemWidth(140);
 	}
 	ImGui::EndCombo();
 	}
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Select programming language for code generation and file filtering.");
+	}
 }
 
 ImGui::SameLine();
@@ -2306,6 +2309,9 @@ if (drawStyledToggleButton("None", isNone, ImVec4(0.3f, 0.3f, 0.35f, 1.0f))) {
 	scriptSource.clear();
 	selectedScriptFileIndex = -1;
 }
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Clear source code reference. Use for standalone code generation.");
+}
 
 if (drawStyledToggleButton("Local Folder", isLocal, ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) {
 ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
@@ -2318,6 +2324,9 @@ if (result.bSuccess) {
 	}
 	scriptSource.setLocalFolder(result.getPath());
 }
+}
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Load a local project folder for workspace-aware code assistance.");
 }
 
 const auto localWorkspaceInfo = scriptSource.getWorkspaceInfo();
@@ -2337,17 +2346,26 @@ if (drawStyledToggleButton("Visual Studio", isVisualStudioWorkspace, ImVec4(0.45
 		scriptSource.setVisualStudioWorkspace(result.getPath());
 	}
 }
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Load Visual Studio solution or project for C/C++ workspace context.");
+}
 
 if (drawStyledToggleButton("GitHub", isGitHub, ImVec4(0.3f, 0.3f, 0.6f, 1.0f))) {
 	clearDeferredScriptSourceRestore();
 	selectedScriptFileIndex = -1;
 	scriptSource.setGitHubMode();
 }
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Load code from a GitHub repository (owner/repo or full URL).");
+}
 
 if (drawStyledToggleButton("Internet", isInternet, ImVec4(0.25f, 0.5f, 0.7f, 1.0f), false)) {
 	clearDeferredScriptSourceRestore();
 	selectedScriptFileIndex = -1;
 	scriptSource.setInternetMode();
+}
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Load code from arbitrary URLs for reference and context.");
 }
 
 if (deferredScriptSourceRestorePending &&
