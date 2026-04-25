@@ -83,7 +83,7 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlCodeAssistant` for coding-oriented prompts, structured task plans, unified diff output, compile-database-aware semantic retrieval, inline completion, repo context, focused-file assistance, and follow-up scripting actions
 - `ofxGgmlCodeAssistant` now also exposes lightweight assistant sessions, a typed tool registry, approval callbacks for risky proposals, and streamed assistant events so apps can build safer IDE-style coding flows without reimplementing orchestration
 - `ofxGgmlCodingAgent` as a thin orchestration layer on top of the code and workspace assistants, with persistent session memory, a read-only `Plan` mode, optional patch application, and verification-aware coding runs
-- the GUI example Script mode now surfaces that assistant runtime directly with `Build` / `Plan` agent switching, `@` references including read-oriented `@general`, quick slash/intents chips, streamed tool/approval status, and explicit approve/deny handling for risky proposals
+- the GUI example Script mode now surfaces that assistant runtime directly with a default simple ChatPilot-style UI plus optional full `Build` / `Plan` controls, `@` references including read-oriented `@general`, quick slash/intents chips, streamed tool/approval status, and explicit approve/deny handling for risky proposals
 - `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, shadow-workspace safe apply, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
 - coding workflows now carry lightweight task memory such as active mode, selected backend, recent files, and last failure reason so retries and follow-up prompts stay more grounded
 - structured coding prompts now push a clearer inspect -> patch -> verify loop, stronger self-check instructions, and recovery from weak unstructured model replies
@@ -144,6 +144,7 @@ Supporting areas:
 - `ofxGgmlBasicExample/`
 - `ofxGgmlGuiExample/`
 - `ofxGgmlNeuralExample/`
+- `ofxGgmlWebScrapingExample/`
 
 Developer tooling:
 
@@ -758,6 +759,7 @@ See [docs/getting-started/CHOOSING_FEATURES.md](docs/getting-started/CHOOSING_FE
 - `ofxGgmlChatExample`: **Simple chat application** (~200 lines, uses `ofxGgmlBasic.h`)
 - `ofxGgmlBasicExample`: Interactive matrix demo plus steady-state matmul benchmark
 - `ofxGgmlNeuralExample`: Reusable inference graph with live class bars and latency view
+- `ofxGgmlWebScrapingExample`: Keyboard-driven website crawl viewer for `ofxGgmlWebCrawler`
 
 ### Comprehensive Example
 

@@ -55,6 +55,7 @@ bool ofApp::saveSession(const std::string & path) {
 		{"liveContextAllowPromptUrls", liveContextAllowPromptUrls},
 		{"liveContextAllowDomainProviders", liveContextAllowDomainProviders},
 		{"liveContextAllowGenericSearch", liveContextAllowGenericSearch},
+		{"scriptSimpleUi", scriptSimpleUi},
 		{"scriptIncludeRepoContext", scriptIncludeRepoContext},
 		{"selectedVisionProfileIndex", selectedVisionProfileIndex},
 		{"selectedSpeechProfileIndex", selectedSpeechProfileIndex},
@@ -525,6 +526,7 @@ bool ofApp::loadSession(const std::string & path) {
 	liveContextAllowPromptUrls = getBool(settings, "liveContextAllowPromptUrls", liveContextAllowPromptUrls);
 	liveContextAllowDomainProviders = getBool(settings, "liveContextAllowDomainProviders", liveContextAllowDomainProviders);
 	liveContextAllowGenericSearch = getBool(settings, "liveContextAllowGenericSearch", liveContextAllowGenericSearch);
+	scriptSimpleUi = getBool(settings, "scriptSimpleUi", scriptSimpleUi);
 	scriptIncludeRepoContext = getBool(settings, "scriptIncludeRepoContext", scriptIncludeRepoContext);
 	selectedVisionProfileIndex = std::max(0, getInt(settings, "selectedVisionProfileIndex", selectedVisionProfileIndex));
 	selectedSpeechProfileIndex = std::max(0, getInt(settings, "selectedSpeechProfileIndex", selectedSpeechProfileIndex));

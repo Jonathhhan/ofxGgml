@@ -2257,7 +2257,42 @@ ImGui::End();
 // ---------------------------------------------------------------------------
 
 void ofApp::drawScriptPanel() {
-drawPanelHeader("Script Generation", "generate or explain code");
+drawPanelHeader("Script Assistant", "simple coding chat with optional advanced workspace tools");
+
+ImGui::TextDisabled("UI:");
+ImGui::SameLine();
+if (drawStyledToggleButton(
+		"Simple",
+		scriptSimpleUi,
+		ImVec4(0.23f, 0.52f, 0.78f, 1.0f))) {
+	if (!scriptSimpleUi) {
+		scriptSimpleUi = true;
+		autoSaveSession();
+	}
+}
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("ChatPilot-style layout: keep the main coding chat visible and tuck advanced tools behind collapsible sections.");
+}
+ImGui::SameLine();
+if (drawStyledToggleButton(
+		"Advanced",
+		!scriptSimpleUi,
+		ImVec4(0.38f, 0.34f, 0.58f, 1.0f),
+		false)) {
+	if (scriptSimpleUi) {
+		scriptSimpleUi = false;
+		autoSaveSession();
+	}
+}
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Full Script mode with inline completion, workspace tooling, semantic search, approvals, and project memory surfaced at once.");
+}
+ImGui::SameLine();
+ImGui::TextDisabled(
+	"%s",
+	scriptSimpleUi
+		? "Simple ChatPilot-style coding surface"
+		: "Full workspace-aware coding surface");
 
 // Language selector and source controls on same row.
 ImGui::Text("Language:");
@@ -2400,34 +2435,79 @@ if (deferredScriptSourceRestorePending &&
 
 // Script source file browser (inline when active).
 const auto scriptSourceFiles = scriptSource.getFiles();
-if (scriptSource.getSourceType() != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
-ImGui::BeginChild("##ScriptFiles", ImVec2(-1, 80), true);
-if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder) {
-const std::string localPath = scriptSource.getLocalFolderPath();
-ImGui::TextDisabled("Folder: %s", localPath.c_str());
-} else if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::GitHubRepo) {
-const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
-const std::string branch = scriptSource.getGitHubBranch();
-ImGui::TextDisabled("GitHub: %s (%s)", ownerRepo.c_str(), branch.c_str());
-} else {
-ImGui::TextDisabled("Internet sources");
-}
-for (int i = 0; i < static_cast<int>(scriptSourceFiles.size()); i++) {
-const auto & entry = scriptSourceFiles[static_cast<size_t>(i)];
-ImGui::PushID(i);
-std::string icon = entry.isDirectory ? "[dir] " : "      ";
-bool isSelected = (selectedScriptFileIndex == i);
-if (ImGui::Selectable((icon + entry.name).c_str(), isSelected) && !entry.isDirectory) {
-selectedScriptFileIndex = i;
-}
-ImGui::PopID();
-}
-ImGui::EndChild();
-}
+const auto drawScriptSourceBrowserAndDetails = [&]() {
+	if (scriptSource.getSourceType() != ofxGgmlScriptSourceType::None &&
+		!scriptSourceFiles.empty()) {
+		ImGui::BeginChild("##ScriptFiles", ImVec2(-1, 80), true);
+		if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder) {
+			const std::string localPath = scriptSource.getLocalFolderPath();
+			ImGui::TextDisabled("Folder: %s", localPath.c_str());
+		} else if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::GitHubRepo) {
+			const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
+			const std::string branch = scriptSource.getGitHubBranch();
+			ImGui::TextDisabled("GitHub: %s (%s)", ownerRepo.c_str(), branch.c_str());
+		} else {
+			ImGui::TextDisabled("Internet sources");
+		}
+		for (int i = 0; i < static_cast<int>(scriptSourceFiles.size()); i++) {
+			const auto & entry = scriptSourceFiles[static_cast<size_t>(i)];
+			ImGui::PushID(i);
+			std::string icon = entry.isDirectory ? "[dir] " : "      ";
+			bool isSelected = (selectedScriptFileIndex == i);
+			if (ImGui::Selectable((icon + entry.name).c_str(), isSelected) &&
+				!entry.isDirectory) {
+				selectedScriptFileIndex = i;
+			}
+			ImGui::PopID();
+		}
+		ImGui::EndChild();
+	}
 
 	if (scriptSource.getSourceType() != ofxGgmlScriptSourceType::None) {
 		drawScriptSourcePanel();
 	}
+};
+
+const auto formatScriptSourceSummary = [&]() {
+	switch (scriptSource.getSourceType()) {
+	case ofxGgmlScriptSourceType::LocalFolder:
+		return std::string("Workspace attached: local folder");
+	case ofxGgmlScriptSourceType::GitHubRepo:
+		return std::string("Workspace attached: GitHub repository");
+	case ofxGgmlScriptSourceType::Internet:
+		return std::string("Workspace attached: internet reference sources");
+	case ofxGgmlScriptSourceType::None:
+	default:
+		return std::string("No workspace attached yet");
+	}
+};
+
+if (scriptSimpleUi) {
+	ImGui::Separator();
+	ImGui::TextDisabled("%s", formatScriptSourceSummary().c_str());
+	if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder &&
+		!scriptSource.getLocalFolderPath().empty()) {
+		ImGui::TextWrapped("Path: %s", scriptSource.getLocalFolderPath().c_str());
+	} else if (scriptSource.getSourceType() == ofxGgmlScriptSourceType::GitHubRepo) {
+		const std::string ownerRepo = scriptSource.getGitHubOwnerRepo();
+		ImGui::TextWrapped(
+			"Repo: %s",
+			ownerRepo.empty() ? "not loaded yet" : ownerRepo.c_str());
+	}
+	ImGui::TextDisabled(
+		"Files: %d | Focused file: %s",
+		static_cast<int>(scriptSourceFiles.size()),
+		(selectedScriptFileIndex >= 0 &&
+		 selectedScriptFileIndex < static_cast<int>(scriptSourceFiles.size()) &&
+		 !scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].isDirectory)
+			? scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].name.c_str()
+			: "none");
+	if (ImGui::CollapsingHeader("Workspace files & source details")) {
+		drawScriptSourceBrowserAndDetails();
+	}
+} else {
+	drawScriptSourceBrowserAndDetails();
+}
 
 	ImGui::Spacing();
 
@@ -3324,26 +3404,45 @@ if (showScriptAutocompletePopup) {
 }
 const bool effectiveScriptChatSubmitted = scriptChatSubmitted && !scriptAutocompleteAccepted;
 
-if (slashCommand.kind != ScriptSlashCommandKind::None) {
-	ImGui::TextDisabled("Detected slash action. Send will execute a structured Script command.");
-}
+auto clearScriptConversation = [&]() {
+	scriptMessages.clear();
+	scriptOutput.clear();
+	scriptInlineCompletionOutput.clear();
+	scriptInlineCompletionTargetPath.clear();
+	lastScriptFailureReason.clear();
+	recentScriptTouchedFiles.clear();
+	scriptAssistantEvents.clear();
+	scriptAssistantToolCalls.clear();
+	scriptAssistantSession = {};
+	scriptCodingAgent.resetSession();
+	lastScriptOutputLikelyCutoff = false;
+	lastScriptOutputTail.clear();
+};
 
-	struct ScriptQuickChip {
-		const char * label;
-		const char * commandText;
-		const char * tooltip;
-	};
-	const ScriptQuickChip quickChips[] = {
-		{ "/review", "/review ", "Review the loaded workspace or current request." },
-		{ "/reviewfix", "/reviewfix ", "Review and ask for an actionable fix plan." },
-		{ "/nextedit", "/nextedit ", "Predict the most likely next change." },
-		{ "/tests", "/tests ", "Plan the highest-value tests." },
-		{ "@focused", "@focused ", "Reference the currently selected file." },
-		{ "@recent", "@recent ", "Reference recent touched files." },
-		{ "@general", "@general ", "Broaden into read-only workspace exploration." },
-		{ "@workspace", "@workspace ", "Bias toward whole-workspace context." },
-		{ "@symbol:", "@symbol:", "Reference a symbol, for example @symbol:update." }
-	};
+struct ScriptQuickChip {
+	const char * label;
+	const char * commandText;
+	const char * tooltip;
+};
+const ScriptQuickChip quickChips[] = {
+	{ "/review", "/review ", "Review the loaded workspace or current request." },
+	{ "/reviewfix", "/reviewfix ", "Review and ask for an actionable fix plan." },
+	{ "/nextedit", "/nextedit ", "Predict the most likely next change." },
+	{ "/tests", "/tests ", "Plan the highest-value tests." },
+	{ "@focused", "@focused ", "Reference the currently selected file." },
+	{ "@recent", "@recent ", "Reference recent touched files." },
+	{ "@general", "@general ", "Broaden into read-only workspace exploration." },
+	{ "@workspace", "@workspace ", "Bias toward whole-workspace context." },
+	{ "@symbol:", "@symbol:", "Reference a symbol, for example @symbol:update." }
+};
+
+const bool showScriptPromptHelpers =
+	!scriptSimpleUi || ImGui::CollapsingHeader("Prompt helpers & references");
+if (showScriptPromptHelpers) {
+	if (slashCommand.kind != ScriptSlashCommandKind::None) {
+		ImGui::TextDisabled("Detected slash action. Send will execute a structured Script command.");
+	}
+
 	ImGui::TextDisabled("Quick actions:");
 	for (size_t chipIndex = 0; chipIndex < std::size(quickChips); ++chipIndex) {
 		ImGui::PushID(static_cast<int>(chipIndex));
@@ -3355,7 +3454,7 @@ if (slashCommand.kind != ScriptSlashCommandKind::None) {
 			updatedInput += quickChips[chipIndex].commandText;
 			copyStringToBuffer(scriptInput, sizeof(scriptInput), updatedInput);
 		}
-	if (ImGui::IsItemHovered()) {
+		if (ImGui::IsItemHovered()) {
 			showWrappedTooltip(quickChips[chipIndex].tooltip);
 		}
 		ImGui::PopID();
@@ -3364,40 +3463,45 @@ if (slashCommand.kind != ScriptSlashCommandKind::None) {
 		}
 	}
 
-if (scriptHasAutocompleteToken) {
-	ImGui::TextDisabled("Autocomplete:");
-	if (showScriptAutocompletePopup) {
-		if (ImGui::BeginChild("##ScriptAutocompletePopup", ImVec2(-1, 110), true)) {
-			for (size_t suggestionIndex = 0; suggestionIndex < autocompleteSuggestions.size(); ++suggestionIndex) {
-				const auto & suggestion = autocompleteSuggestions[suggestionIndex];
-				const bool isSelected =
-					static_cast<int>(suggestionIndex) == scriptAutocompleteSelectedIndex;
-				ImGui::PushID(static_cast<int>(suggestionIndex + 200));
-				if (ImGui::Selectable(suggestion.label.c_str(), isSelected)) {
-					scriptAutocompleteSelectedIndex = static_cast<int>(suggestionIndex);
-					replaceTrailingScriptToken(suggestion.replacement);
+	if (scriptHasAutocompleteToken) {
+		ImGui::TextDisabled("Autocomplete:");
+		if (showScriptAutocompletePopup) {
+			if (ImGui::BeginChild("##ScriptAutocompletePopup", ImVec2(-1, 110), true)) {
+				for (size_t suggestionIndex = 0;
+					 suggestionIndex < autocompleteSuggestions.size();
+					 ++suggestionIndex) {
+					const auto & suggestion = autocompleteSuggestions[suggestionIndex];
+					const bool isSelected =
+						static_cast<int>(suggestionIndex) == scriptAutocompleteSelectedIndex;
+					ImGui::PushID(static_cast<int>(suggestionIndex + 200));
+					if (ImGui::Selectable(suggestion.label.c_str(), isSelected)) {
+						scriptAutocompleteSelectedIndex = static_cast<int>(suggestionIndex);
+						replaceTrailingScriptToken(suggestion.replacement);
+					}
+					if (isSelected) {
+						ImGui::SetScrollHereY(0.5f);
+					}
+					if (ImGui::IsItemHovered() && !suggestion.tooltip.empty()) {
+						showWrappedTooltip(suggestion.tooltip);
+					}
+					ImGui::PopID();
 				}
-				if (isSelected) {
-					ImGui::SetScrollHereY(0.5f);
-				}
-				if (ImGui::IsItemHovered() && !suggestion.tooltip.empty()) {
-					showWrappedTooltip(suggestion.tooltip);
-				}
-				ImGui::PopID();
 			}
+			ImGui::EndChild();
+			ImGui::TextDisabled("Use Up/Down + Enter, Tab, or click a suggestion.");
+		} else if (!autocompleteHint.empty()) {
+			ImGui::TextDisabled("%s", autocompleteHint.c_str());
 		}
-		ImGui::EndChild();
-		ImGui::TextDisabled("Use Up/Down + Enter, Tab, or click a suggestion.");
-	} else if (!autocompleteHint.empty()) {
-		ImGui::TextDisabled("%s", autocompleteHint.c_str());
 	}
-}
 
-if (!scriptReferences.empty()) {
-	ImGui::TextDisabled("Detected @ references:");
-	for (const auto & reference : scriptReferences) {
-		ImGui::BulletText("%s", reference.displayLabel.c_str());
+	if (!scriptReferences.empty()) {
+		ImGui::TextDisabled("Detected @ references:");
+		for (const auto & reference : scriptReferences) {
+			ImGui::BulletText("%s", reference.displayLabel.c_str());
+		}
 	}
+} else if (slashCommand.kind != ScriptSlashCommandKind::None) {
+	ImGui::TextDisabled("Slash command detected. Open Prompt helpers to inspect it.");
 }
 
 ImGui::BeginDisabled(generating.load());
@@ -3419,18 +3523,7 @@ if ((ImGui::Button("Send to Chat", ImVec2(110, 0)) || effectiveScriptChatSubmitt
 if (canSendScriptChat) ImGui::PopStyleColor();
 ImGui::SameLine();
 	if (ImGui::Button("Clear Chat", ImVec2(90, 0))) {
-		scriptMessages.clear();
-		scriptOutput.clear();
-		scriptInlineCompletionOutput.clear();
-		scriptInlineCompletionTargetPath.clear();
-		lastScriptFailureReason.clear();
-		recentScriptTouchedFiles.clear();
-		scriptAssistantEvents.clear();
-		scriptAssistantToolCalls.clear();
-		scriptAssistantSession = {};
-		scriptCodingAgent.resetSession();
-		lastScriptOutputLikelyCutoff = false;
-		lastScriptOutputTail.clear();
+		clearScriptConversation();
 	}
 ImGui::SameLine();
 
@@ -3443,10 +3536,103 @@ if (ImGui::Button("Continue cutoff", ImVec2(120, 0))) {
 		"Continue from cutoff.");
 }
 ImGui::EndDisabled();
-ImGui::SameLine();
+if (!scriptSimpleUi) {
+	ImGui::SameLine();
+}
+
+if (scriptSimpleUi) {
+	ImGui::Spacing();
+	ImGui::TextDisabled("Primary actions:");
+	ImGui::BeginDisabled(generating.load());
+	if (ImGui::Button("Explain", ImVec2(90, 0)) && hasUserInput) {
+		submitScriptRequest(
+			ofxGgmlCodeAssistantAction::Explain,
+			scriptInput,
+			"",
+			"",
+			false);
+	}
+	ImGui::SameLine();
+	if (hasWorkspaceSource) {
+		if (ImGui::Button("Grounded Edit", ImVec2(120, 0)) && hasUserInput) {
+			submitScriptRequest(
+				ofxGgmlCodeAssistantAction::Edit,
+				scriptInput,
+				"",
+				"",
+				false,
+				true,
+				true,
+				"",
+				buildWorkspaceAllowedFiles());
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Review", ImVec2(90, 0))) {
+			if (hasUserInput) {
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::Review,
+					scriptInput,
+					"",
+					"",
+					false);
+			} else {
+				scriptMessages.push_back({
+					"user",
+					"Review all files in loaded " +
+						std::string(sourceType == ofxGgmlScriptSourceType::LocalFolder
+							? "folder"
+							: "repo") +
+						".",
+					ofGetElapsedTimef()});
+				runHierarchicalReview();
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Plan Tests", ImVec2(100, 0))) {
+			std::ostringstream body;
+			body << "Propose the highest-value tests for this workspace and request. "
+				<< "Prefer concrete test names, likely files, and verification commands. "
+				<< "If no additional tests are needed, say so clearly.";
+			if (hasUserInput) {
+				body << "\n\nFocus: " << trim(scriptInput);
+			}
+			submitScriptRequest(
+				ofxGgmlCodeAssistantAction::Generate,
+				scriptInput,
+				body.str(),
+				"Plan tests.",
+				false,
+				true,
+				false,
+				"",
+				buildWorkspaceAllowedFiles());
+		}
+	} else {
+		if (ImGui::Button("Load workspace", ImVec2(130, 0))) {
+			ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
+			if (result.bSuccess) {
+				clearDeferredScriptSourceRestore();
+				selectedScriptFileIndex = -1;
+				if (!scriptLanguages.empty()) {
+					scriptSource.setPreferredExtension(
+						scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
+				}
+				scriptSource.setLocalFolder(result.getPath());
+			}
+		}
+	}
+	ImGui::EndDisabled();
+	ImGui::TextDisabled(
+		"%s",
+		hasWorkspaceSource
+			? "Keep the main coding chat focused here; open Advanced Script Controls only when you need reviews, semantic tools, or inline completion."
+			: "Attach a workspace for grounded edits, file-aware reviews, and semantic symbol lookup.");
+}
 
 // Review all files button (enabled when folder/repo is loaded)
-if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
+if (!scriptSimpleUi &&
+	sourceType != ofxGgmlScriptSourceType::None &&
+	!scriptSourceFiles.empty()) {
 	if (ImGui::Button("Review All Files", ImVec2(120, 0))) {
 		scriptMessages.push_back({"user", "Review all files in loaded " + std::string(sourceType == ofxGgmlScriptSourceType::LocalFolder ? "folder" : "repo") + ".", ofGetElapsedTimef()});
 		runHierarchicalReview();
@@ -3515,21 +3701,22 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 	}();
 
 	ImGui::Separator();
-	ImGui::TextDisabled("Assistant context");
-	ImGui::TextWrapped(
+	ImGui::TextDisabled(
 		"Backend: %s | Source: %s | Focused file: %s",
 		scriptBackendLabel.c_str(),
 		scriptSourceLabel.c_str(),
 		focusedScriptFileLabel.empty() ? "none" : focusedScriptFileLabel.c_str());
-	ImGui::TextDisabled(
-		"Repo context: %s | Recent touched files: %d",
-		scriptIncludeRepoContext ? "on" : "off",
-		static_cast<int>(recentScriptTouchedFiles.size()));
-	if (!lastScriptFailureReason.empty()) {
-		ImGui::TextColored(
-			ImVec4(0.95f, 0.68f, 0.35f, 1.0f),
-			"Last failure: %s",
-			lastScriptFailureReason.c_str());
+	if (!scriptSimpleUi || ImGui::CollapsingHeader("Assistant internals")) {
+		ImGui::TextDisabled(
+			"Repo context: %s | Recent touched files: %d",
+			scriptIncludeRepoContext ? "on" : "off",
+			static_cast<int>(recentScriptTouchedFiles.size()));
+		if (!lastScriptFailureReason.empty()) {
+			ImGui::TextColored(
+				ImVec4(0.95f, 0.68f, 0.35f, 1.0f),
+				"Last failure: %s",
+				lastScriptFailureReason.c_str());
+		}
 	}
 
 	const auto describeScriptAssistantEventKind =
@@ -3568,7 +3755,10 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			verificationSuggestionCount++;
 		}
 	}
-	if (!scriptAssistantEvents.empty() || !scriptAssistantToolCalls.empty()) {
+	const bool hasAssistantWorkflowData =
+		!scriptAssistantEvents.empty() || !scriptAssistantToolCalls.empty();
+	if (hasAssistantWorkflowData &&
+		(!scriptSimpleUi || ImGui::CollapsingHeader("Assistant workflow"))) {
 		ImGui::Spacing();
 		ImGui::TextDisabled(
 			"Assistant workflow: rev %llu | tools: %d | approvals: %d | verification: %d",
@@ -3684,6 +3874,13 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			ImGui::TextWrapped("%s", pendingApprovalToolCall.payload.c_str());
 			ImGui::EndChild();
 		}
+		if (ImGui::Button("Approve Tool", ImVec2(120, 0))) {
+			submitPendingToolApproval(true);
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Deny Tool", ImVec2(120, 0))) {
+			submitPendingToolApproval(false);
+		}
 	}
 
 	const auto requestFocusedInlineCompletion = [&]() {
@@ -3715,46 +3912,235 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			inlineInstruction);
 	};
 
-	ImGui::Spacing();
-	ImGui::TextDisabled("Assistant intents:");
-	auto drawIntentButton =
-		[&](const char * label,
-			const char * tooltip,
-			bool enabled,
-			const auto & onClick) {
-			ImGui::BeginDisabled(!enabled);
-			if (ImGui::SmallButton(label) && enabled) {
-				onClick();
-			}
-			if (ImGui::IsItemHovered() && tooltip != nullptr && tooltip[0] != '\0') {
-				showWrappedTooltip(tooltip);
-			}
-			ImGui::EndDisabled();
-			ImGui::SameLine();
-		};
+	const bool showAdvancedScriptControls =
+		!scriptSimpleUi || ImGui::CollapsingHeader("Advanced Script Controls");
+	if (showAdvancedScriptControls) {
+		ImGui::Spacing();
+		ImGui::TextDisabled("Assistant intents:");
+		auto drawIntentButton =
+			[&](const char * label,
+				const char * tooltip,
+				bool enabled,
+				const auto & onClick) {
+				ImGui::BeginDisabled(!enabled);
+				if (ImGui::SmallButton(label) && enabled) {
+					onClick();
+				}
+				if (ImGui::IsItemHovered() && tooltip != nullptr && tooltip[0] != '\0') {
+					showWrappedTooltip(tooltip);
+				}
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+			};
 
-	if (hasPendingApproval) {
-		drawIntentButton(
-			"Approve",
-			"Allow the currently proposed tool call.",
-			true,
-			[&]() {
-				submitPendingToolApproval(true);
-			});
-		drawIntentButton(
-			"Deny",
-			"Reject the currently proposed tool call.",
-			true,
-			[&]() {
-				submitPendingToolApproval(false);
-			});
-		ImGui::TextDisabled("Pending tool approval comes first.");
-	} else if (!hasWorkspaceSource) {
-		drawIntentButton(
-			"Load workspace",
-			"Pick a local project so Script mode can ground edits and reviews.",
-			!generating.load(),
-			[&]() {
+		if (hasPendingApproval) {
+			drawIntentButton(
+				"Approve",
+				"Allow the currently proposed tool call.",
+				true,
+				[&]() { submitPendingToolApproval(true); });
+			drawIntentButton(
+				"Deny",
+				"Reject the currently proposed tool call.",
+				true,
+				[&]() { submitPendingToolApproval(false); });
+			ImGui::TextDisabled("Pending tool approval comes first.");
+		} else if (!hasWorkspaceSource) {
+			drawIntentButton(
+				"Load workspace",
+				"Pick a local project so Script mode can ground edits and reviews.",
+				!generating.load(),
+				[&]() {
+					ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
+					if (result.bSuccess) {
+						clearDeferredScriptSourceRestore();
+						selectedScriptFileIndex = -1;
+						if (!scriptLanguages.empty()) {
+							scriptSource.setPreferredExtension(
+								scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
+						}
+						scriptSource.setLocalFolder(result.getPath());
+					}
+				});
+			drawIntentButton(
+				"Explain prompt",
+				"Turn the current Script prompt into an explanation request.",
+				!generating.load() && hasUserInput,
+				[&]() {
+					submitScriptRequest(
+						ofxGgmlCodeAssistantAction::Explain,
+						scriptInput,
+						"",
+						"",
+						false);
+				});
+			ImGui::TextDisabled("Load a workspace to unlock grounded plans, symbol search, and dry runs.");
+		} else if (hasBuildErrors) {
+			drawIntentButton(
+				"Fix build",
+				"Use compiler output to propose the safest next build fix.",
+				!generating.load(),
+				[&]() {
+					submitScriptRequest(
+						ofxGgmlCodeAssistantAction::FixBuild,
+						scriptInput,
+						"",
+						"",
+						false,
+						true,
+						true,
+						scriptBuildErrors,
+						buildWorkspaceAllowedFiles());
+				});
+			drawIntentButton(
+				"Review fix",
+				"Review the workspace and return a grounded fix plan.",
+				!generating.load(),
+				[&]() {
+					std::ostringstream body;
+					body << "Review the current workspace and return an actionable fix plan. "
+						<< "Only include concrete, evidence-backed issues. Prefer a structured plan and unified diff.";
+					if (hasUserInput) {
+						body << "\n\nFocus: " << trim(scriptInput);
+					}
+					submitScriptRequest(
+						ofxGgmlCodeAssistantAction::Review,
+						scriptInput,
+						body.str(),
+						"Review with fix plan.",
+						true,
+						true,
+						true,
+						"",
+						buildWorkspaceAllowedFiles());
+				});
+			drawIntentButton(
+				"Dry run",
+				"Preview the latest structured patch plan against the workspace.",
+				!generating.load(),
+				[&]() { previewWorkspacePlan("Workspace dry run"); });
+			ImGui::TextDisabled("Compiler output is loaded, so build repair is the strongest next move.");
+		} else if (hasSelectedFile && !hasUserInput) {
+			drawIntentButton(
+				"Explain file",
+				"Seed the Script prompt from the currently focused file.",
+				!generating.load(),
+				[&]() {
+					copyStringToBuffer(
+						scriptInput,
+						sizeof(scriptInput),
+						("Explain how " + focusedScriptFileLabel +
+							" works, including key functions, data flow, and risks.").c_str());
+				});
+			drawIntentButton(
+				"Inline continue",
+				"Use editor-style continuation against the focused file instead of a chat request.",
+				!generating.load(),
+				[&]() { requestFocusedInlineCompletion(); });
+			drawIntentButton(
+				"Symbol context",
+				"Inspect semantic symbol context around the focused file or prompt.",
+				!generating.load(),
+				[&]() {
+					ofxGgmlCodeAssistantSymbolQuery query;
+					query.query = focusedScriptFileLabel;
+					query.includeCallers = true;
+					query.maxDefinitions = 6;
+					query.maxReferences = 8;
+					const auto symbolContext =
+						scriptAssistant.buildSymbolContext(query, buildScriptAssistantContext());
+					appendScriptAssistantOutput("Inspect symbol context", formatSymbolContext(symbolContext));
+				});
+			ImGui::TextDisabled("No chat prompt yet, so start from the focused file.");
+		} else if (hasWorkspaceSource && hasUserInput) {
+			drawIntentButton(
+				"Grounded edit",
+				"Build a structured edit plan using the loaded workspace.",
+				!generating.load(),
+				[&]() {
+					submitScriptRequest(
+						ofxGgmlCodeAssistantAction::Edit,
+						scriptInput,
+						"",
+						"",
+						false,
+						true,
+						true,
+						"",
+						buildWorkspaceAllowedFiles());
+				});
+			drawIntentButton(
+				"Review",
+				"Review the loaded workspace using the current Script prompt as focus.",
+				!generating.load(),
+				[&]() {
+					submitScriptRequest(
+						ofxGgmlCodeAssistantAction::Review,
+						scriptInput,
+						"",
+						"",
+						false);
+				});
+			drawIntentButton(
+				"Tests",
+				"Plan the highest-value verification steps for the current request.",
+				!generating.load(),
+				[&]() {
+					std::ostringstream body;
+					body << "Propose the highest-value tests for this workspace and request. "
+						<< "Prefer concrete test names, likely files, and verification commands. "
+						<< "If no additional tests are needed, say so clearly.";
+					if (hasUserInput) {
+						body << "\n\nFocus: " << trim(scriptInput);
+					}
+					submitScriptRequest(
+						ofxGgmlCodeAssistantAction::Generate,
+						scriptInput,
+						body.str(),
+						"Plan tests.",
+						false,
+						true,
+						false,
+						"",
+						buildWorkspaceAllowedFiles());
+				});
+			ImGui::TextDisabled("You have both a workspace and a request, so use grounded planning instead of freeform chat.");
+		} else {
+			drawIntentButton(
+				"Review workspace",
+				"Run the hierarchical workspace review flow.",
+				!generating.load(),
+				[&]() { runHierarchicalReview(); });
+			drawIntentButton(
+				"Next edit",
+				"Predict the highest-value next change for the workspace.",
+				!generating.load(),
+				[&]() {
+					submitScriptRequest(
+						ofxGgmlCodeAssistantAction::NextEdit,
+						scriptInput,
+						"",
+						"",
+						false,
+						true,
+						true,
+						"",
+						buildWorkspaceAllowedFiles());
+				});
+			drawIntentButton(
+				"Change summary",
+				"Summarize local Git changes professionally for reviewers.",
+				!generating.load() &&
+					sourceType == ofxGgmlScriptSourceType::LocalFolder &&
+					!scriptSource.getLocalFolderPath().empty(),
+				[&]() { summarizeLocalChanges(scriptInput); });
+			ImGui::TextDisabled("No prompt yet. Start with a review or next-edit prediction.");
+		}
+
+		ImGui::Spacing();
+		ImGui::TextDisabled("Suggested next step:");
+		if (!hasWorkspaceSource) {
+			if (ImGui::Button("Load local workspace...", ImVec2(170, 0))) {
 				ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
 				if (result.bSuccess) {
 					clearDeferredScriptSourceRestore();
@@ -3765,26 +4151,11 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 					}
 					scriptSource.setLocalFolder(result.getPath());
 				}
-			});
-		drawIntentButton(
-			"Explain prompt",
-			"Turn the current Script prompt into an explanation request.",
-			!generating.load() && hasUserInput,
-			[&]() {
-				submitScriptRequest(
-					ofxGgmlCodeAssistantAction::Explain,
-					scriptInput,
-					"",
-					"",
-					false);
-			});
-		ImGui::TextDisabled("Load a workspace to unlock grounded plans, symbol search, and dry runs.");
-	} else if (hasBuildErrors) {
-		drawIntentButton(
-			"Fix build",
-			"Use compiler output to propose the safest next build fix.",
-			!generating.load(),
-			[&]() {
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("Load a local project to unlock grounded edit plans and dry runs.");
+		} else if (hasBuildErrors) {
+			if (drawDisabledButton("Fix Build Plan", generating.load(), ImVec2(150, 0))) {
 				submitScriptRequest(
 					ofxGgmlCodeAssistantAction::FixBuild,
 					scriptInput,
@@ -3795,73 +4166,29 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 					true,
 					scriptBuildErrors,
 					buildWorkspaceAllowedFiles());
-			});
-		drawIntentButton(
-			"Review fix",
-			"Review the workspace and return a grounded fix plan.",
-			!generating.load(),
-			[&]() {
-				std::ostringstream body;
-				body << "Review the current workspace and return an actionable fix plan. "
-					<< "Only include concrete, evidence-backed issues. Prefer a structured plan and unified diff.";
-				if (hasUserInput) {
-					body << "\n\nFocus: " << trim(scriptInput);
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("You already have compiler output loaded, so start with a grounded build fix.");
+		} else if (hasScriptOutput) {
+			const auto lastStructuredOutput = ofxGgmlCodeAssistant::parseStructuredResult(scriptOutput);
+			if (!lastStructuredOutput.unifiedDiff.empty() || !lastStructuredOutput.patchOperations.empty()) {
+				if (drawDisabledButton("Workspace Dry Run", generating.load(), ImVec2(150, 0))) {
+					previewWorkspacePlan("Workspace dry run");
 				}
-				submitScriptRequest(
-					ofxGgmlCodeAssistantAction::Review,
-					scriptInput,
-					body.str(),
-					"Review with fix plan.",
-					true,
-					true,
-					true,
-					"",
-					buildWorkspaceAllowedFiles());
-			});
-		drawIntentButton(
-			"Dry run",
-			"Preview the latest structured patch plan against the workspace.",
-			!generating.load(),
-			[&]() { previewWorkspacePlan("Workspace dry run"); });
-		ImGui::TextDisabled("Compiler output is loaded, so build repair is the strongest next move.");
-	} else if (hasSelectedFile && !hasUserInput) {
-		drawIntentButton(
-			"Explain file",
-			"Seed the Script prompt from the currently focused file.",
-			!generating.load(),
-			[&]() {
-				copyStringToBuffer(
-					scriptInput,
-					sizeof(scriptInput),
-					("Explain how " + focusedScriptFileLabel +
-						" works, including key functions, data flow, and risks.").c_str());
-			});
-		drawIntentButton(
-			"Inline continue",
-			"Use editor-style continuation against the focused file instead of a chat request.",
-			!generating.load(),
-			[&]() { requestFocusedInlineCompletion(); });
-		drawIntentButton(
-			"Symbol context",
-			"Inspect semantic symbol context around the focused file or prompt.",
-			!generating.load(),
-			[&]() {
-				ofxGgmlCodeAssistantSymbolQuery query;
-				query.query = focusedScriptFileLabel;
-				query.includeCallers = true;
-				query.maxDefinitions = 6;
-				query.maxReferences = 8;
-				const auto symbolContext =
-					scriptAssistant.buildSymbolContext(query, buildScriptAssistantContext());
-				appendScriptAssistantOutput("Inspect symbol context", formatSymbolContext(symbolContext));
-			});
-		ImGui::TextDisabled("No chat prompt yet, so start from the focused file.");
-	} else if (hasWorkspaceSource && hasUserInput) {
-		drawIntentButton(
-			"Grounded edit",
-			"Build a structured edit plan using the loaded workspace.",
-			!generating.load(),
-			[&]() {
+				ImGui::SameLine();
+				ImGui::TextDisabled("Preview the latest structured edit plan before applying anything manually.");
+			} else if (hasSelectedFile && !hasUserInput) {
+				if (ImGui::Button("Explain focused file", ImVec2(150, 0))) {
+					copyStringToBuffer(
+						scriptInput,
+						sizeof(scriptInput),
+						("Explain how " + focusedScriptFileLabel + " works, including key functions, data flow, and risks.").c_str());
+				}
+				ImGui::SameLine();
+				ImGui::TextDisabled("Seed the input from the selected file instead of starting from a blank prompt.");
+			}
+		} else if (hasWorkspaceSource && hasUserInput) {
+			if (drawDisabledButton("Grounded Edit Plan", generating.load(), ImVec2(150, 0))) {
 				submitScriptRequest(
 					ofxGgmlCodeAssistantAction::Edit,
 					scriptInput,
@@ -3872,374 +4199,243 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 					true,
 					"",
 					buildWorkspaceAllowedFiles());
-			});
-		drawIntentButton(
-			"Review",
-			"Review the loaded workspace using the current Script prompt as focus.",
-			!generating.load(),
-			[&]() {
-				submitScriptRequest(
-					ofxGgmlCodeAssistantAction::Review,
-					scriptInput,
-					"",
-					"",
-					false);
-			});
-		drawIntentButton(
-			"Tests",
-			"Plan the highest-value verification steps for the current request.",
-			!generating.load(),
-			[&]() {
-				std::ostringstream body;
-				body << "Propose the highest-value tests for this workspace and request. "
-					<< "Prefer concrete test names, likely files, and verification commands. "
-					<< "If no additional tests are needed, say so clearly.";
-				if (hasUserInput) {
-					body << "\n\nFocus: " << trim(scriptInput);
-				}
-				submitScriptRequest(
-					ofxGgmlCodeAssistantAction::Generate,
-					scriptInput,
-					body.str(),
-					"Plan tests.",
-					false,
-					true,
-					false,
-					"",
-					buildWorkspaceAllowedFiles());
-			});
-		ImGui::TextDisabled("You have both a workspace and a request, so use grounded planning instead of freeform chat.");
-	} else {
-		drawIntentButton(
-			"Review workspace",
-			"Run the hierarchical workspace review flow.",
-			!generating.load(),
-			[&]() { runHierarchicalReview(); });
-		drawIntentButton(
-			"Next edit",
-			"Predict the highest-value next change for the workspace.",
-			!generating.load(),
-			[&]() {
-				submitScriptRequest(
-					ofxGgmlCodeAssistantAction::NextEdit,
-					scriptInput,
-					"",
-					"",
-					false,
-					true,
-					true,
-					"",
-					buildWorkspaceAllowedFiles());
-			});
-		drawIntentButton(
-			"Change summary",
-			"Summarize local Git changes professionally for reviewers.",
-			!generating.load() &&
-				sourceType == ofxGgmlScriptSourceType::LocalFolder &&
-				!scriptSource.getLocalFolderPath().empty(),
-			[&]() { summarizeLocalChanges(scriptInput); });
-		ImGui::TextDisabled("No prompt yet. Start with a review or next-edit prediction.");
-	}
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("You have a workspace and a request loaded, so the strongest next step is a structured edit plan.");
+		} else if (hasWorkspaceSource) {
+			if (drawDisabledButton("Review workspace", generating.load(), ImVec2(150, 0))) {
+				runHierarchicalReview();
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("No prompt yet. Start with a workspace review to surface the next useful change.");
+		}
 
-	ImGui::Spacing();
-	ImGui::TextDisabled("Suggested next step:");
-	if (!hasWorkspaceSource) {
-		if (ImGui::Button("Load local workspace...", ImVec2(170, 0))) {
-			ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
-			if (result.bSuccess) {
-				clearDeferredScriptSourceRestore();
-				selectedScriptFileIndex = -1;
-				if (!scriptLanguages.empty()) {
-					scriptSource.setPreferredExtension(
-						scriptLanguages[static_cast<size_t>(selectedLanguageIndex)].fileExtension);
-				}
-				scriptSource.setLocalFolder(result.getPath());
+		if (hasScriptOutput && sourceType == ofxGgmlScriptSourceType::LocalFolder) {
+			ImGui::SameLine();
+			if (ImGui::Button("Save Output", ImVec2(120, 0))) {
+				std::string filename = buildScriptFilename();
+				scriptSource.saveToLocalSource(filename, scriptOutput);
 			}
 		}
-		ImGui::SameLine();
-		ImGui::TextDisabled("Load a local project to unlock grounded edit plans and dry runs.");
-	} else if (hasBuildErrors) {
-		if (drawDisabledButton("Fix Build Plan", generating.load(), ImVec2(150, 0))) {
-			submitScriptRequest(
-				ofxGgmlCodeAssistantAction::FixBuild,
-				scriptInput,
-				"",
-				"",
-				false,
-				true,
-				true,
-				scriptBuildErrors,
-				buildWorkspaceAllowedFiles());
+
+		ImGui::EndDisabled();
+
+		ImGui::Separator();
+		ImGui::TextDisabled("Editor-style inline completion");
+		if (hasSelectedFile) {
+			ImGui::TextWrapped(
+				"Focused file: %s",
+				scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].name.c_str());
+		} else {
+			ImGui::TextDisabled("Select a file in the workspace list to use inline completion.");
+		}
+		if (ImGui::SmallButton("Use Script Prompt##Inline")) {
+			const std::string fallbackInstruction = trim(std::string(scriptInput));
+			if (!fallbackInstruction.empty()) {
+				copyStringToBuffer(
+					scriptInlineInstruction,
+					sizeof(scriptInlineInstruction),
+					fallbackInstruction);
+			}
+		}
+		if (ImGui::IsItemHovered()) {
+			showWrappedTooltip("Seed the inline-completion instruction from the current Script prompt.");
 		}
 		ImGui::SameLine();
-		ImGui::TextDisabled("You already have compiler output loaded, so start with a grounded build fix.");
-	} else if (hasScriptOutput) {
-		const auto lastStructuredOutput = ofxGgmlCodeAssistant::parseStructuredResult(scriptOutput);
-		if (!lastStructuredOutput.unifiedDiff.empty() || !lastStructuredOutput.patchOperations.empty()) {
-			if (drawDisabledButton("Workspace Dry Run", generating.load(), ImVec2(150, 0))) {
+		ImGui::TextDisabled("If blank, inline completion falls back to the current Script prompt.");
+		ImGui::InputText(
+			"Inline instruction",
+			scriptInlineInstruction,
+			sizeof(scriptInlineInstruction));
+		ImGui::BeginDisabled(generating.load() || !hasSelectedFile);
+		if (ImGui::Button("Inline Complete", ImVec2(130, 0))) {
+			requestFocusedInlineCompletion();
+		}
+		if (ImGui::IsItemHovered()) {
+			showWrappedTooltip("Run editor-style continuation against the focused file instead of a chat request.");
+		}
+		ImGui::EndDisabled();
+		if (!scriptInlineCompletionOutput.empty()) {
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Copy Completion##Inline")) {
+				copyToClipboard(scriptInlineCompletionOutput);
+			}
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Use in Chat##Inline")) {
+				copyStringToBuffer(scriptInput, sizeof(scriptInput), scriptInlineCompletionOutput);
+			}
+			const std::string inlineTargetLabel = trim(scriptInlineCompletionTargetPath);
+			if (!inlineTargetLabel.empty()) {
+				ImGui::TextDisabled("Target: %s", inlineTargetLabel.c_str());
+			}
+			if (ImGui::BeginChild("##InlineCompletionPreview", ImVec2(-1, 120), true)) {
+				ImGui::TextWrapped("%s", scriptInlineCompletionOutput.c_str());
+			}
+			ImGui::EndChild();
+		}
+
+		ImGui::Spacing();
+		ImGui::TextDisabled("Quick Actions:");
+		ImGui::TextDisabled("%s", "Tip: /review /reviewfix /nextedit /summary /tests /fix /docs");
+		if (ImGui::IsItemHovered()) {
+			showWrappedTooltip(buildScriptCommandHelpText());
+		}
+		ImGui::BeginDisabled(generating.load() || (!hasUserInput && !hasSelectedFile));
+		for (size_t i = 0; i < std::size(actionSpecs); i++) {
+			const auto & spec = actionSpecs[i];
+			if (ImGui::Button(spec.label, spec.size)) {
+				if (spec.action == ofxGgmlCodeAssistantAction::NextEdit) {
+					submitScriptRequest(
+						spec.action,
+						scriptInput,
+						"",
+						"",
+						true,
+						true,
+						true,
+						"",
+						buildWorkspaceAllowedFiles());
+				} else {
+					submitScriptRequest(
+						spec.action,
+						scriptInput,
+						"",
+						"",
+						true);
+				}
+			}
+			if (i + 1 < std::size(actionSpecs)) {
+				ImGui::SameLine();
+			}
+		}
+		ImGui::EndDisabled();
+		ImGui::BeginDisabled(
+			generating.load() ||
+			sourceType != ofxGgmlScriptSourceType::LocalFolder ||
+			scriptSource.getLocalFolderPath().empty());
+		if (ImGui::Button("Change Summary", ImVec2(120, 0))) {
+			summarizeLocalChanges(scriptInput);
+			std::memset(scriptInput, 0, sizeof(scriptInput));
+		}
+		if (ImGui::IsItemHovered()) {
+			showWrappedTooltip("Summarize local Git changes professionally for reviewers.");
+		}
+		ImGui::EndDisabled();
+
+		if (ImGui::CollapsingHeader("Semantic & Workspace")) {
+			ImGui::Checkbox("Restrict workspace previews to focused file", &restrictWorkspaceToFocusedFile);
+			if (ImGui::IsItemHovered()) {
+				showWrappedTooltip("When enabled, structured edit previews stay inside the currently selected file.");
+			}
+
+			ImGui::BeginDisabled(generating.load() || (!hasUserInput && !hasSelectedFile));
+			if (ImGui::Button("Symbol Context", ImVec2(120, 0))) {
+				ofxGgmlCodeAssistantSymbolQuery query;
+				query.query = hasUserInput ? std::string(scriptInput) : lastScriptRequest;
+				query.includeCallers = true;
+				query.maxDefinitions = 6;
+				query.maxReferences = 8;
+				const auto symbolContext =
+					scriptAssistant.buildSymbolContext(query, buildScriptAssistantContext());
+				appendScriptAssistantOutput("Inspect symbol context", formatSymbolContext(symbolContext));
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Edit Plan", ImVec2(100, 0))) {
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::Edit,
+					scriptInput,
+					"",
+					"",
+					true,
+					true,
+					true,
+					"",
+					buildWorkspaceAllowedFiles());
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Grounded Docs", ImVec2(120, 0))) {
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::GroundedDocs,
+					scriptInput,
+					"",
+					"",
+					true);
+			}
+			ImGui::EndDisabled();
+
+			ImGui::InputTextMultiline(
+				"Build errors / compiler output",
+				scriptBuildErrors,
+				sizeof(scriptBuildErrors),
+				ImVec2(-1, 90));
+			ImGui::BeginDisabled(generating.load() || std::strlen(scriptBuildErrors) == 0);
+			if (ImGui::Button("Fix Build Plan", ImVec2(120, 0))) {
+				submitScriptRequest(
+					ofxGgmlCodeAssistantAction::FixBuild,
+					scriptInput,
+					"",
+					"",
+					false,
+					true,
+					true,
+					scriptBuildErrors,
+					buildWorkspaceAllowedFiles());
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Workspace Dry Run", ImVec2(140, 0))) {
 				previewWorkspacePlan("Workspace dry run");
 			}
-			ImGui::SameLine();
-			ImGui::TextDisabled("Preview the latest structured edit plan before applying anything manually.");
-		} else if (hasSelectedFile && !hasUserInput) {
-			if (ImGui::Button("Explain focused file", ImVec2(150, 0))) {
-				copyStringToBuffer(
-					scriptInput,
-					sizeof(scriptInput),
-					("Explain how " + focusedScriptFileLabel + " works, including key functions, data flow, and risks.").c_str());
+			ImGui::EndDisabled();
+		}
+
+		if (ImGui::CollapsingHeader("Tools & Memory")) {
+			bool useProjectMemory = scriptProjectMemory.isEnabled();
+			if (ImGui::Checkbox("Use project memory", &useProjectMemory)) {
+				scriptProjectMemory.setEnabled(useProjectMemory);
 			}
 			ImGui::SameLine();
-			ImGui::TextDisabled("Seed the input from the selected file instead of starting from a blank prompt.");
-		}
-	} else if (hasWorkspaceSource && hasUserInput) {
-		if (drawDisabledButton("Grounded Edit Plan", generating.load(), ImVec2(150, 0))) {
-			submitScriptRequest(
-				ofxGgmlCodeAssistantAction::Edit,
-				scriptInput,
-				"",
-				"",
-				false,
-				true,
-				true,
-				"",
-				buildWorkspaceAllowedFiles());
-		}
-		ImGui::SameLine();
-		ImGui::TextDisabled("You have a workspace and a request loaded, so the strongest next step is a structured edit plan.");
-	} else if (hasWorkspaceSource) {
-		if (drawDisabledButton("Review workspace", generating.load(), ImVec2(150, 0))) {
-			runHierarchicalReview();
-		}
-		ImGui::SameLine();
-		ImGui::TextDisabled("No prompt yet. Start with a workspace review to surface the next useful change.");
-	}
+			ImGui::Checkbox("Include repo context", &scriptIncludeRepoContext);
+			if (ImGui::IsItemHovered()) showWrappedTooltip("Include loaded file list and selected file snippet in script prompts");
 
-	// Save output to source.
-	if (hasScriptOutput && sourceType == ofxGgmlScriptSourceType::LocalFolder) {
-	ImGui::SameLine();
-	if (ImGui::Button("Save Output", ImVec2(120, 0))) {
-		std::string filename = buildScriptFilename();
-		scriptSource.saveToLocalSource(filename, scriptOutput);
-	}
-}
+			ImGui::BeginDisabled(generating.load() || (!hasScriptOutput && !hasLastTask));
+			if (ImGui::Button("Continue Task", ImVec2(120, 0))) {
+				submitScriptRequest(ofxGgmlCodeAssistantAction::ContinueTask);
+			}
+			if (ImGui::IsItemHovered()) showWrappedTooltip("Continue from the latest coding response without rewriting your full prompt.");
+			ImGui::SameLine();
+			if (ImGui::Button("Shorter", ImVec2(80, 0))) {
+				submitScriptRequest(ofxGgmlCodeAssistantAction::Shorter);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("More Detail", ImVec2(90, 0))) {
+				submitScriptRequest(ofxGgmlCodeAssistantAction::MoreDetail);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Long Code Preset", ImVec2(120, 0))) {
+				maxTokens = std::max(maxTokens, 2048);
+				contextSize = std::max(contextSize, 8192);
+				temperature = 0.35f;
+				topP = 0.92f;
+				topK = std::max(topK, 60);
+				minP = std::max(minP, 0.05f);
+				repeatPenalty = 1.05f;
+			}
 
-ImGui::EndDisabled();
+			if (ImGui::Button("Reuse Last Task", ImVec2(120, 0))) {
+				if (hasLastTask) {
+					copyStringToBuffer(scriptInput, sizeof(scriptInput), lastScriptRequest);
+				}
+			}
+			ImGui::EndDisabled();
 
-ImGui::Separator();
-ImGui::TextDisabled("Editor-style inline completion");
-if (hasSelectedFile) {
-	ImGui::TextWrapped(
-		"Focused file: %s",
-		scriptSourceFiles[static_cast<size_t>(selectedScriptFileIndex)].name.c_str());
-} else {
-	ImGui::TextDisabled("Select a file in the workspace list to use inline completion.");
-}
-if (ImGui::SmallButton("Use Script Prompt##Inline")) {
-	const std::string fallbackInstruction = trim(std::string(scriptInput));
-	if (!fallbackInstruction.empty()) {
-		copyStringToBuffer(
-			scriptInlineInstruction,
-			sizeof(scriptInlineInstruction),
-			fallbackInstruction);
-	}
-}
-if (ImGui::IsItemHovered()) {
-	showWrappedTooltip("Seed the inline-completion instruction from the current Script prompt.");
-}
-ImGui::SameLine();
-ImGui::TextDisabled("If blank, inline completion falls back to the current Script prompt.");
-ImGui::InputText(
-	"Inline instruction",
-	scriptInlineInstruction,
-	sizeof(scriptInlineInstruction));
-ImGui::BeginDisabled(generating.load() || !hasSelectedFile);
-if (ImGui::Button("Inline Complete", ImVec2(130, 0))) {
-	requestFocusedInlineCompletion();
-}
-if (ImGui::IsItemHovered()) {
-	showWrappedTooltip("Run editor-style continuation against the focused file instead of a chat request.");
-}
-ImGui::EndDisabled();
-if (!scriptInlineCompletionOutput.empty()) {
-	ImGui::SameLine();
-	if (ImGui::SmallButton("Copy Completion##Inline")) {
-		copyToClipboard(scriptInlineCompletionOutput);
-	}
-	ImGui::SameLine();
-	if (ImGui::SmallButton("Use in Chat##Inline")) {
-		copyStringToBuffer(scriptInput, sizeof(scriptInput), scriptInlineCompletionOutput);
-	}
-	const std::string inlineTargetLabel = trim(scriptInlineCompletionTargetPath);
-	if (!inlineTargetLabel.empty()) {
-		ImGui::TextDisabled("Target: %s", inlineTargetLabel.c_str());
-	}
-	if (ImGui::BeginChild("##InlineCompletionPreview", ImVec2(-1, 120), true)) {
-		ImGui::TextWrapped("%s", scriptInlineCompletionOutput.c_str());
-	}
-	ImGui::EndChild();
-}
-
-ImGui::Spacing();
-ImGui::TextDisabled("Quick Actions:");
-ImGui::TextDisabled("%s", "Tip: /review /reviewfix /nextedit /summary /tests /fix /docs");
-if (ImGui::IsItemHovered()) {
-	showWrappedTooltip(buildScriptCommandHelpText());
-}
-ImGui::BeginDisabled(generating.load() || (!hasUserInput && !hasSelectedFile));
-for (size_t i = 0; i < std::size(actionSpecs); i++) {
-	const auto & spec = actionSpecs[i];
-	if (ImGui::Button(spec.label, spec.size)) {
-		if (spec.action == ofxGgmlCodeAssistantAction::NextEdit) {
-			submitScriptRequest(
-				spec.action,
-				scriptInput,
-				"",
-				"",
-				true,
-				true,
-				true,
-				"",
-				buildWorkspaceAllowedFiles());
-		} else {
-			submitScriptRequest(
-				spec.action,
-				scriptInput,
-				"",
-				"",
-				true);
+			if (ImGui::SmallButton("Clear Project Memory")) scriptProjectMemory.clear();
+			ImGui::SameLine();
+			ImGui::TextDisabled("Learned context (%d chars)", static_cast<int>(scriptProjectMemory.getMemoryText().size()));
+			ImGui::BeginChild("##ProjectMemory", ImVec2(-1, 80), true);
+			ImGui::TextWrapped("%s", scriptProjectMemory.getMemoryText().c_str());
+			ImGui::EndChild();
 		}
 	}
-	if (i + 1 < std::size(actionSpecs)) {
-		ImGui::SameLine();
-	}
-}
-ImGui::EndDisabled();
-ImGui::BeginDisabled(
-	generating.load() ||
-	sourceType != ofxGgmlScriptSourceType::LocalFolder ||
-	scriptSource.getLocalFolderPath().empty());
-if (ImGui::Button("Change Summary", ImVec2(120, 0))) {
-	summarizeLocalChanges(scriptInput);
-	std::memset(scriptInput, 0, sizeof(scriptInput));
-}
-if (ImGui::IsItemHovered()) {
-	showWrappedTooltip("Summarize local Git changes professionally for reviewers.");
-}
-ImGui::EndDisabled();
-
-if (ImGui::CollapsingHeader("Semantic & Workspace")) {
-	ImGui::Checkbox("Restrict workspace previews to focused file", &restrictWorkspaceToFocusedFile);
-	if (ImGui::IsItemHovered()) {
-		showWrappedTooltip("When enabled, structured edit previews stay inside the currently selected file.");
-	}
-
-	ImGui::BeginDisabled(generating.load() || (!hasUserInput && !hasSelectedFile));
-	if (ImGui::Button("Symbol Context", ImVec2(120, 0))) {
-		ofxGgmlCodeAssistantSymbolQuery query;
-		query.query = hasUserInput ? std::string(scriptInput) : lastScriptRequest;
-		query.includeCallers = true;
-		query.maxDefinitions = 6;
-		query.maxReferences = 8;
-		const auto symbolContext =
-			scriptAssistant.buildSymbolContext(query, buildScriptAssistantContext());
-		appendScriptAssistantOutput("Inspect symbol context", formatSymbolContext(symbolContext));
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("Edit Plan", ImVec2(100, 0))) {
-		submitScriptRequest(
-			ofxGgmlCodeAssistantAction::Edit,
-			scriptInput,
-			"",
-			"",
-			true,
-			true,
-			true,
-			"",
-			buildWorkspaceAllowedFiles());
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("Grounded Docs", ImVec2(120, 0))) {
-		submitScriptRequest(
-			ofxGgmlCodeAssistantAction::GroundedDocs,
-			scriptInput,
-			"",
-			"",
-			true);
-	}
-	ImGui::EndDisabled();
-
-	ImGui::InputTextMultiline(
-		"Build errors / compiler output",
-		scriptBuildErrors,
-		sizeof(scriptBuildErrors),
-		ImVec2(-1, 90));
-	ImGui::BeginDisabled(generating.load() || std::strlen(scriptBuildErrors) == 0);
-	if (ImGui::Button("Fix Build Plan", ImVec2(120, 0))) {
-		submitScriptRequest(
-			ofxGgmlCodeAssistantAction::FixBuild,
-			scriptInput,
-			"",
-			"",
-			false,
-			true,
-			true,
-			scriptBuildErrors,
-			buildWorkspaceAllowedFiles());
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("Workspace Dry Run", ImVec2(140, 0))) {
-		previewWorkspacePlan("Workspace dry run");
-	}
-	ImGui::EndDisabled();
-}
-
-if (ImGui::CollapsingHeader("Tools & Memory")) {
-	bool useProjectMemory = scriptProjectMemory.isEnabled();
-	if (ImGui::Checkbox("Use project memory", &useProjectMemory)) {
-		scriptProjectMemory.setEnabled(useProjectMemory);
-	}
-	ImGui::SameLine();
-	ImGui::Checkbox("Include repo context", &scriptIncludeRepoContext);
-	if (ImGui::IsItemHovered()) showWrappedTooltip("Include loaded file list and selected file snippet in script prompts");
-
-	ImGui::BeginDisabled(generating.load() || (!hasScriptOutput && !hasLastTask));
-	if (ImGui::Button("Continue Task", ImVec2(120, 0))) {
-		submitScriptRequest(ofxGgmlCodeAssistantAction::ContinueTask);
-	}
-	if (ImGui::IsItemHovered()) showWrappedTooltip("Continue from the latest coding response without rewriting your full prompt.");
-	ImGui::SameLine();
-	if (ImGui::Button("Shorter", ImVec2(80, 0))) {
-		submitScriptRequest(ofxGgmlCodeAssistantAction::Shorter);
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("More Detail", ImVec2(90, 0))) {
-		submitScriptRequest(ofxGgmlCodeAssistantAction::MoreDetail);
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("Long Code Preset", ImVec2(120, 0))) {
-		maxTokens = std::max(maxTokens, 2048);
-		contextSize = std::max(contextSize, 8192);
-		temperature = 0.35f;
-		topP = 0.92f;
-		topK = std::max(topK, 60);
-		minP = std::max(minP, 0.05f);
-		repeatPenalty = 1.05f;
-	}
-
-	if (ImGui::Button("Reuse Last Task", ImVec2(120, 0))) {
-		if (hasLastTask) {
-			copyStringToBuffer(scriptInput, sizeof(scriptInput), lastScriptRequest);
-		}
-	}
-	ImGui::EndDisabled();
-
-	if (ImGui::SmallButton("Clear Project Memory")) scriptProjectMemory.clear();
-	ImGui::SameLine();
-	ImGui::TextDisabled("Learned context (%d chars)", static_cast<int>(scriptProjectMemory.getMemoryText().size()));
-	ImGui::BeginChild("##ProjectMemory", ImVec2(-1, 80), true);
-	ImGui::TextWrapped("%s", scriptProjectMemory.getMemoryText().c_str());
-	ImGui::EndChild();
-}
 }
 
 // ---------------------------------------------------------------------------
