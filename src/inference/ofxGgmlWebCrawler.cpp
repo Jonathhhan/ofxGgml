@@ -900,52 +900,87 @@ std::string decodeBasicHtmlEntities(std::string text) {
 }
 
 std::string extractHtmlTitleFallback(const std::string & htmlText) {
-	const std::regex titleRegex(
-		"<title[^>]*>([\\s\\S]*?)</title>",
-		std::regex_constants::icase);
-	std::smatch match;
-	if (!std::regex_search(htmlText, match, titleRegex) || match.size() < 2) {
+	constexpr size_t kMaxHtmlSize = 5 * 1024 * 1024;
+	if (htmlText.size() > kMaxHtmlSize) {
 		return {};
 	}
-	return normalizeWhitespace(decodeBasicHtmlEntities(match[1].str()));
+
+	try {
+		const std::regex titleRegex(
+			"<title[^>]*>([\\s\\S]*?)</title>",
+			std::regex_constants::icase);
+		std::smatch match;
+		if (!std::regex_search(htmlText, match, titleRegex) || match.size() < 2) {
+			return {};
+		}
+		return normalizeWhitespace(decodeBasicHtmlEntities(match[1].str()));
+	} catch (const std::regex_error &) {
+		return {};
+	} catch (const std::exception &) {
+		return {};
+	}
 }
 
 std::vector<std::string> extractHtmlLinksFallback(
 	const std::string & sourceUrl,
 	const std::string & htmlText) {
-	const std::regex hrefRegex(
-		"<a[^>]+href\\s*=\\s*[\"']([^\"']+)[\"']",
-		std::regex_constants::icase);
-	std::unordered_set<std::string> seen;
-	std::vector<std::string> links;
-	for (std::sregex_iterator it(htmlText.begin(), htmlText.end(), hrefRegex), end;
-		it != end;
-		++it) {
-		const std::string resolved = resolveRelativeUrl(sourceUrl, (*it)[1].str());
-		if (resolved.empty() || !seen.insert(resolved).second) {
-			continue;
-		}
-		links.push_back(resolved);
+	constexpr size_t kMaxHtmlSize = 5 * 1024 * 1024;
+	if (htmlText.size() > kMaxHtmlSize) {
+		return {};
 	}
-	return links;
+
+	try {
+		const std::regex hrefRegex(
+			"<a[^>]+href\\s*=\\s*[\"']([^\"']+)[\"']",
+			std::regex_constants::icase);
+		std::unordered_set<std::string> seen;
+		std::vector<std::string> links;
+		for (std::sregex_iterator it(htmlText.begin(), htmlText.end(), hrefRegex), end;
+			it != end;
+			++it) {
+			const std::string resolved = resolveRelativeUrl(sourceUrl, (*it)[1].str());
+			if (resolved.empty() || !seen.insert(resolved).second) {
+				continue;
+			}
+			links.push_back(resolved);
+		}
+		return links;
+	} catch (const std::regex_error &) {
+		return {};
+	} catch (const std::exception &) {
+		return {};
+	}
 }
 
 std::string extractHtmlTextFallback(const std::string & htmlText) {
+	constexpr size_t kMaxHtmlSize = 5 * 1024 * 1024;
+	if (htmlText.size() > kMaxHtmlSize) {
+		return {};
+	}
+
 	std::string text = htmlText;
-	text = std::regex_replace(
-		text,
-		std::regex("<script[^>]*>[\\s\\S]*?</script>", std::regex_constants::icase),
-		" ");
-	text = std::regex_replace(
-		text,
-		std::regex("<style[^>]*>[\\s\\S]*?</style>", std::regex_constants::icase),
-		" ");
-	text = std::regex_replace(
-		text,
-		std::regex("</?(p|div|section|article|main|li|ul|ol|h1|h2|h3|h4|h5|h6|blockquote|br)[^>]*>",
-			std::regex_constants::icase),
-		"\n");
-	text = std::regex_replace(text, std::regex("<[^>]+>"), " ");
+
+	try {
+		text = std::regex_replace(
+			text,
+			std::regex("<script[^>]*>[\\s\\S]*?</script>", std::regex_constants::icase),
+			" ");
+		text = std::regex_replace(
+			text,
+			std::regex("<style[^>]*>[\\s\\S]*?</style>", std::regex_constants::icase),
+			" ");
+		text = std::regex_replace(
+			text,
+			std::regex("</?(p|div|section|article|main|li|ul|ol|h1|h2|h3|h4|h5|h6|blockquote|br)[^>]*>",
+				std::regex_constants::icase),
+			"\n");
+		text = std::regex_replace(text, std::regex("<[^>]+>"), " ");
+	} catch (const std::regex_error &) {
+		return {};
+	} catch (const std::exception &) {
+		return {};
+	}
+
 	text = decodeBasicHtmlEntities(text);
 
 	std::istringstream stream(text);
