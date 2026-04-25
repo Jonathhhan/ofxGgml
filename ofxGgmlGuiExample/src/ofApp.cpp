@@ -2301,17 +2301,13 @@ bool isLocal = (sourceType == ofxGgmlScriptSourceType::LocalFolder);
 bool isGitHub = (sourceType == ofxGgmlScriptSourceType::GitHubRepo);
 bool isInternet = (sourceType == ofxGgmlScriptSourceType::Internet);
 
-if (isNone) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.35f, 1.0f));
-if (ImGui::SmallButton("None")) {
+if (drawStyledToggleButton("None", isNone, ImVec4(0.3f, 0.3f, 0.35f, 1.0f))) {
 	clearDeferredScriptSourceRestore();
 	scriptSource.clear();
 	selectedScriptFileIndex = -1;
 }
-if (isNone) ImGui::PopStyleColor();
-ImGui::SameLine();
 
-if (isLocal) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.3f, 1.0f));
-if (ImGui::SmallButton("Local Folder")) {
+if (drawStyledToggleButton("Local Folder", isLocal, ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) {
 ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
 if (result.bSuccess) {
 	clearDeferredScriptSourceRestore();
@@ -2323,16 +2319,13 @@ if (result.bSuccess) {
 	scriptSource.setLocalFolder(result.getPath());
 }
 }
-if (isLocal) ImGui::PopStyleColor();
-ImGui::SameLine();
 
 const auto localWorkspaceInfo = scriptSource.getWorkspaceInfo();
 const bool isVisualStudioWorkspace =
 	(scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder) &&
 	(localWorkspaceInfo.hasVisualStudioSolution ||
 	 !localWorkspaceInfo.visualStudioProjectPaths.empty());
-if (isVisualStudioWorkspace) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.45f, 0.35f, 0.7f, 1.0f));
-if (ImGui::SmallButton("Visual Studio")) {
+if (drawStyledToggleButton("Visual Studio", isVisualStudioWorkspace, ImVec4(0.45f, 0.35f, 0.7f, 1.0f))) {
 	ofFileDialogResult result = ofSystemLoadDialog("Select Visual Studio .sln or .vcxproj", false);
 	if (result.bSuccess) {
 		clearDeferredScriptSourceRestore();
@@ -2344,25 +2337,18 @@ if (ImGui::SmallButton("Visual Studio")) {
 		scriptSource.setVisualStudioWorkspace(result.getPath());
 	}
 }
-if (isVisualStudioWorkspace) ImGui::PopStyleColor();
-ImGui::SameLine();
 
-if (isGitHub) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.6f, 1.0f));
-if (ImGui::SmallButton("GitHub")) {
+if (drawStyledToggleButton("GitHub", isGitHub, ImVec4(0.3f, 0.3f, 0.6f, 1.0f))) {
 	clearDeferredScriptSourceRestore();
 	selectedScriptFileIndex = -1;
 	scriptSource.setGitHubMode();
 }
-if (isGitHub) ImGui::PopStyleColor();
-ImGui::SameLine();
 
-if (isInternet) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.5f, 0.7f, 1.0f));
-if (ImGui::SmallButton("Internet")) {
+if (drawStyledToggleButton("Internet", isInternet, ImVec4(0.25f, 0.5f, 0.7f, 1.0f), false)) {
 	clearDeferredScriptSourceRestore();
 	selectedScriptFileIndex = -1;
 	scriptSource.setInternetMode();
 }
-if (isInternet) ImGui::PopStyleColor();
 
 if (deferredScriptSourceRestorePending &&
 	scriptSource.getSourceType() == ofxGgmlScriptSourceType::None) {

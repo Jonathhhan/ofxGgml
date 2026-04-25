@@ -93,6 +93,20 @@ bool drawDisabledButton(const char * label, bool disabled, const ImVec2 & size) 
 	return !disabled && clicked;
 }
 
+bool drawStyledToggleButton(const char * label, bool isActive, const ImVec4 & activeColor, bool addSameLine) {
+	if (isActive) {
+		ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+	}
+	const bool clicked = ImGui::SmallButton(label);
+	if (isActive) {
+		ImGui::PopStyleColor();
+	}
+	if (addSameLine) {
+		ImGui::SameLine();
+	}
+	return clicked;
+}
+
 // ---------------------------------------------------------------------------
 // Log Level Support
 // ---------------------------------------------------------------------------
