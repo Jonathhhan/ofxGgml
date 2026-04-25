@@ -890,12 +890,31 @@ void replaceAllInPlace(
 }
 
 std::string decodeBasicHtmlEntities(std::string text) {
+	// Named entities (most common ones)
 	replaceAllInPlace(text, "&nbsp;", " ");
 	replaceAllInPlace(text, "&amp;", "&");
 	replaceAllInPlace(text, "&lt;", "<");
 	replaceAllInPlace(text, "&gt;", ">");
 	replaceAllInPlace(text, "&quot;", "\"");
 	replaceAllInPlace(text, "&#39;", "'");
+	replaceAllInPlace(text, "&apos;", "'");
+
+	// Additional common entities
+	replaceAllInPlace(text, "&ndash;", "–");
+	replaceAllInPlace(text, "&mdash;", "—");
+	replaceAllInPlace(text, "&hellip;", "…");
+	replaceAllInPlace(text, "&laquo;", "«");
+	replaceAllInPlace(text, "&raquo;", "»");
+	replaceAllInPlace(text, "&ldquo;", """);
+	replaceAllInPlace(text, "&rdquo;", """);
+	replaceAllInPlace(text, "&lsquo;", "'");
+	replaceAllInPlace(text, "&rsquo;", "'");
+	replaceAllInPlace(text, "&bull;", "•");
+	replaceAllInPlace(text, "&deg;", "°");
+	replaceAllInPlace(text, "&copy;", "©");
+	replaceAllInPlace(text, "&reg;", "®");
+	replaceAllInPlace(text, "&trade;", "™");
+
 	return text;
 }
 
@@ -1299,13 +1318,13 @@ NativeFetchResult fetchUrlWithCurl(const std::string & url) {
 	NativeFetchResult result;
 	const std::string curlExe = resolveCurlExecutable();
 	if (curlExe.empty()) {
-		result.error = "curl executable was not found for native web crawling.";
+		result.error = "curl executable was not found for native web crawling. Please ensure curl is installed and in your PATH, or specify the executable path in the request.";
 		return result;
 	}
 
 	const std::string tempDir = makeTempOutputDir();
 	if (tempDir.empty()) {
-		result.error = "Could not create a temporary directory for curl output.";
+		result.error = "Could not create a temporary directory for curl output. Check disk space and permissions in your temp directory.";
 		return result;
 	}
 
@@ -1379,7 +1398,7 @@ NativeFetchResult fetchUrlWithCurl(const std::string & url) {
 		return result;
 	}
 	if (result.body.empty()) {
-		result.error = "HTTP response body was empty.";
+		result.error = "HTTP response body was empty. The URL may not exist or the server returned no content. HTTP status: " + std::to_string(result.httpStatus);
 		return result;
 	}
 
