@@ -80,6 +80,12 @@ void showWrappedTooltipf(const char * fmt, ...) {
 	showWrappedTooltip(buffer);
 }
 
+void drawSectionSeparator() {
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+}
+
 // ---------------------------------------------------------------------------
 // Log Level Support
 // ---------------------------------------------------------------------------

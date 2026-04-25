@@ -14,6 +14,7 @@ void drawWrappedDisabledText(const std::string & text);
 void drawHelpMarker(const char * helpText);
 void showWrappedTooltip(const std::string & tooltipText);
 void showWrappedTooltipf(const char * fmt, ...);
+void drawSectionSeparator();
 
 // ---------------------------------------------------------------------------
 // Log Level Support

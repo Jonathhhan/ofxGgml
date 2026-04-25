@@ -391,50 +391,11 @@ bool ensurePreviewAudioLoaded(
 	return true;
 }
 
-
-
-
-
-
-
 #ifdef _WIN32
-
-
-
-
 
 #else
 
 #endif
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 constexpr size_t kExePathBufSize = 4096; // buffer for resolving the executable path
 constexpr float kDefaultTemp = 0.7f;
@@ -770,7 +731,6 @@ WorkspaceDiffSnapshot captureWorkspaceDiffSnapshot(const std::string & workspace
 }
 
 }
-
 
 // ---------------------------------------------------------------------------
 // Probe for llama-completion / llama-cli / llama.
@@ -1500,9 +1460,7 @@ if (ImGui::BeginCombo("##ModeSel", modeLabels[activeModeIndex])) {
 }
 ImGui::TextDisabled("Stored backend and token defaults follow the selected mode.");
 
-ImGui::Spacing();
-ImGui::Separator();
-ImGui::Spacing();
+drawSectionSeparator();
 
 // Model preset selector.
 ImGui::Text(activeMode == AiMode::LongVideo ? "Planner model:" : "Model:");
@@ -1856,9 +1814,7 @@ if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 	}
 }
 
-ImGui::Spacing();
-ImGui::Separator();
-ImGui::Spacing();
+drawSectionSeparator();
 ImGui::Text("Settings");
 ImGui::Spacing();
 
@@ -2240,9 +2196,7 @@ if (ImGui::Combo("Theme", &themeIndex, themeLabels, 3)) {
 	applyTheme(themeIndex);
 }
 
-ImGui::Spacing();
-ImGui::Separator();
-ImGui::Spacing();
+drawSectionSeparator();
 
 // Engine status indicator.
 if (engineReady) {
@@ -2301,7 +2255,6 @@ ImGui::End();
 // ---------------------------------------------------------------------------
 // Script panel
 // ---------------------------------------------------------------------------
-
 
 void ofApp::drawScriptPanel() {
 drawPanelHeader("Script Generation", "generate or explain code");
@@ -4536,7 +4489,6 @@ return "generated_" + ofToString(ms) + ext;
 // ---------------------------------------------------------------------------
 // Summarize panel
 // ---------------------------------------------------------------------------
-
 
 void ofApp::ensureVisionPreviewResources() {
 	ensureLocalImagePreview(
