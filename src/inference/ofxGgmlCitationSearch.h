@@ -35,6 +35,7 @@ struct ofxGgmlCitationSearchRequest {
 		bool allowDomainHints = true;
 		size_t maxAlternateQueries = 2;
 	} queryRewriteSettings;
+	float minimumConfidenceThreshold = 0.0f;
 };
 
 struct ofxGgmlCitationSearchInputSettings {

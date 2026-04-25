@@ -1103,7 +1103,8 @@ float calculateSourceDiversityScore(const std::vector<ofxGgmlCitationItem> & cit
 std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 	const std::string & topic,
 	const std::vector<ofxGgmlPromptSource> & sources,
-	size_t maxCitations) {
+	size_t maxCitations,
+	float minimumConfidence = 0.0f) {
 	struct RankedCandidate {
 		float score = 0.0f;
 		ofxGgmlCitationItem item;
@@ -1150,6 +1151,9 @@ std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 		ranked.begin(),
 		ranked.end(),
 		[](const RankedCandidate & a, const RankedCandidate & b) {
+			if (a.item.confidenceScore != b.item.confidenceScore) {
+				return a.item.confidenceScore > b.item.confidenceScore;
+			}
 			if (a.score != b.score) {
 				return a.score > b.score;
 			}
@@ -1160,6 +1164,9 @@ std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 	citations.reserve(std::min(maxCitations, ranked.size()));
 	std::unordered_set<std::string> seen;
 	for (const auto & candidate : ranked) {
+		if (candidate.item.confidenceScore < minimumConfidence) {
+			continue;
+		}
 		const std::string key =
 			normalizeForExactQuoteMatch(candidate.item.quote) + "\n---\n" + candidate.item.sourceUri;
 		if (!seen.insert(key).second) {
@@ -1634,7 +1641,8 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		result.citations = fallbackExtractExactCitations(
 			result.requestedTopic,
 			result.sourcesUsed,
-			std::max<size_t>(1, request.maxCitations));
+			std::max<size_t>(1, request.maxCitations),
+			request.minimumConfidenceThreshold);
 		if (!result.citations.empty()) {
 			result.sourceDiversityScore = calculateSourceDiversityScore(result.citations);
 			float totalConfidence = 0.0f;
@@ -1659,7 +1667,8 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		result.citations = fallbackExtractExactCitations(
 			result.requestedTopic,
 			result.sourcesUsed,
-			std::max<size_t>(1, request.maxCitations));
+			std::max<size_t>(1, request.maxCitations),
+			request.minimumConfidenceThreshold);
 		result.success = !result.citations.empty();
 		if (!result.success) {
 			result.error =
@@ -1721,7 +1730,8 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		result.citations = fallbackExtractExactCitations(
 			result.requestedTopic,
 			result.sourcesUsed,
-			std::max<size_t>(1, request.maxCitations));
+			std::max<size_t>(1, request.maxCitations),
+			request.minimumConfidenceThreshold);
 		if (result.citations.empty()) {
 			result.summary.clear();
 		}
