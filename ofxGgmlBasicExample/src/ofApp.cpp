@@ -2,9 +2,50 @@
 
 #include <algorithm>
 #include <chrono>
+#include <iomanip>
 #include <limits>
 #include <random>
 #include <sstream>
+
+namespace {
+constexpr int kRowsA = 4;
+constexpr int kColsA = 2;
+constexpr int kRowsB = 3;
+constexpr int kColsB = 2;
+
+constexpr float kMargin = 24.0f;
+constexpr float kTopY = 28.0f;
+constexpr float kInfoStartY = 60.0f;
+constexpr float kLineHeight = 18.0f;
+constexpr float kPanelY = 150.0f;
+constexpr float kMatrixPanelWidth = 500.0f;
+constexpr float kMatrixPanelHeight = 320.0f;
+constexpr float kBenchmarkPanelX = 544.0f;
+constexpr float kBenchmarkPanelWidth = 500.0f;
+constexpr float kBenchmarkPanelHeight = 220.0f;
+constexpr float kPanelTextInset = 8.0f;
+
+void appendMatrixBlock(std::vector<std::string> & lines,
+					   const std::string & label,
+					   const std::vector<float> & values,
+					   int rows,
+					   int cols) {
+	lines.push_back(label + " (" + ofToString(rows) + " x " + ofToString(cols) + ")");
+	for (int row = 0; row < rows; ++row) {
+		std::ostringstream line;
+		line << "  [";
+		for (int col = 0; col < cols; ++col) {
+			if (col > 0) {
+				line << ", ";
+			}
+			line << std::fixed << std::setprecision(2)
+				 << values[static_cast<size_t>(row * cols + col)];
+		}
+		line << "]";
+		lines.push_back(line.str());
+	}
+}
+} // namespace
 
 void ofApp::setup() {
 	ofSetWindowTitle("ofxGgml - Basic Example");
@@ -47,14 +88,9 @@ void ofApp::appendDeviceSummary() {
 void ofApp::runMatrixDemo() {
 	matrixLines.clear();
 
-	const int rowsA = 4;
-	const int colsA = 2;
-	const int rowsB = 3;
-	const int colsB = 2;
-
 	std::uniform_real_distribution<float> dist(-2.5f, 2.5f);
-	std::vector<float> matA(static_cast<size_t>(rowsA * colsA));
-	std::vector<float> matB(static_cast<size_t>(rowsB * colsB));
+	std::vector<float> matA(static_cast<size_t>(kRowsA * kColsA));
+	std::vector<float> matB(static_cast<size_t>(kRowsB * kColsB));
 	for (float & value : matA) {
 		value = dist(rng);
 	}
@@ -63,8 +99,8 @@ void ofApp::runMatrixDemo() {
 	}
 
 	ofxGgmlGraph graph;
-	auto a = graph.newTensor2d(ofxGgmlType::F32, colsA, rowsA);
-	auto b = graph.newTensor2d(ofxGgmlType::F32, colsB, rowsB);
+	auto a = graph.newTensor2d(ofxGgmlType::F32, kColsA, kRowsA);
+	auto b = graph.newTensor2d(ofxGgmlType::F32, kColsB, kRowsB);
 	a.setName("A");
 	b.setName("B");
 	graph.setInput(a);
@@ -94,21 +130,14 @@ void ofApp::runMatrixDemo() {
 
 	const int outCols = static_cast<int>(resultTensor.getDimSize(0));
 	const int outRows = static_cast<int>(resultTensor.getDimSize(1));
-	matrixLines.push_back("Matrix demo latency: " + ofxGgmlHelpers::formatDurationMs(result.elapsedMs));
-	matrixLines.push_back("Result shape: " + ofToString(outRows) + " x " + ofToString(outCols));
-
-	for (int row = 0; row < outRows; ++row) {
-		std::ostringstream line;
-		line << "[";
-		for (int col = 0; col < outCols; ++col) {
-			if (col > 0) {
-				line << ", ";
-			}
-			line << ofToString(output[static_cast<size_t>(row * outCols + col)], 2);
-		}
-		line << "]";
-		matrixLines.push_back(line.str());
-	}
+	matrixLines.push_back("Matrix demo");
+	matrixLines.push_back("Latency: " + ofxGgmlHelpers::formatDurationMs(result.elapsedMs));
+	matrixLines.push_back("");
+	appendMatrixBlock(matrixLines, "Input A", matA, kRowsA, kColsA);
+	matrixLines.push_back("");
+	appendMatrixBlock(matrixLines, "Input B", matB, kRowsB, kColsB);
+	matrixLines.push_back("");
+	appendMatrixBlock(matrixLines, "A x B result", output, outRows, outCols);
 }
 
 void ofApp::runBenchmark() {
@@ -171,53 +200,60 @@ void ofApp::draw() {
 	ofBackgroundGradient(ofColor(16, 20, 26), ofColor(8, 10, 14), OF_GRADIENT_CIRCULAR);
 
 	ofSetColor(245);
-	ofDrawBitmapStringHighlight("ofxGgml Basic Example", 24, 28);
+	ofDrawBitmapStringHighlight("ofxGgml Basic Example", kMargin, kTopY);
 
-	float y = 60.0f;
+	float y = kInfoStartY;
 	for (const auto & line : infoLines) {
 		ofSetColor(220);
-		ofDrawBitmapString(line, 24, y);
-		y += 18.0f;
+		ofDrawBitmapString(line, kMargin, y);
+		y += kLineHeight;
 	}
 
 	ofSetColor(32, 40, 52, 220);
-	ofDrawRectangle(20, 150, 420, 180);
-	ofDrawRectangle(460, 150, 460, 220);
+	ofDrawRectangle(20, kPanelY, kMatrixPanelWidth, kMatrixPanelHeight);
+	ofDrawRectangle(kBenchmarkPanelX, kPanelY, kBenchmarkPanelWidth, kBenchmarkPanelHeight);
 
 	ofSetColor(240);
-	ofDrawBitmapStringHighlight("Latest Matrix Result", 28, 172);
+	ofDrawBitmapStringHighlight("Matrix Walkthrough", 20.0f + kPanelTextInset, 172);
 	y = 198.0f;
 	for (const auto & line : matrixLines) {
 		ofSetColor(225);
-		ofDrawBitmapString(line, 28, y);
-		y += 18.0f;
+		ofDrawBitmapString(line, 20.0f + kPanelTextInset, y);
+		y += line.empty() ? 12.0f : kLineHeight;
 	}
 
 	ofSetColor(240);
-	ofDrawBitmapStringHighlight("MatMul Benchmark", 468, 172);
+	ofDrawBitmapStringHighlight("MatMul Benchmark", kBenchmarkPanelX + kPanelTextInset, 172);
 	ofSetColor(205);
-	ofDrawBitmapString("size      avg          min          max          throughput", 468, 198);
+	std::ostringstream header;
+	header << std::left
+		   << std::setw(10) << "size"
+		   << std::setw(12) << "avg"
+		   << std::setw(12) << "min"
+		   << std::setw(12) << "max"
+		   << "throughput";
+	ofDrawBitmapString(header.str(), kBenchmarkPanelX + kPanelTextInset, 198);
 
 	y = 224.0f;
 	for (const auto & sample : benchmarkSamples) {
 		std::ostringstream line;
-		line << sample.size << "x" << sample.size
-			 << "   "
-			 << ofxGgmlHelpers::formatDurationMs(sample.avgMs)
-			 << "   "
-			 << ofxGgmlHelpers::formatDurationMs(sample.minMs)
-			 << "   "
-			 << ofxGgmlHelpers::formatDurationMs(sample.maxMs)
-			 << "   "
+		line << std::left
+			 << std::setw(10) << (ofToString(sample.size) + "x" + ofToString(sample.size))
+			 << std::setw(12) << ofxGgmlHelpers::formatDurationMs(sample.avgMs)
+			 << std::setw(12) << ofxGgmlHelpers::formatDurationMs(sample.minMs)
+			 << std::setw(12) << ofxGgmlHelpers::formatDurationMs(sample.maxMs)
 			 << ofToString(sample.gflops, 2) << " GFLOP/s";
-		ofDrawBitmapString(line.str(), 468, y);
+		ofDrawBitmapString(line.str(), kBenchmarkPanelX + kPanelTextInset, y);
 		y += 20.0f;
 	}
 
 	ofSetColor(170);
 	ofDrawBitmapString(
-		"The benchmark reuses an allocated graph so the numbers reflect steady-state compute rather than setup cost.",
-		24, 364);
+		"SPACE reruns the matrix demo. B reruns the steady-state benchmark on the current backend.",
+		kMargin, 494);
+	ofDrawBitmapString(
+		"The benchmark reuses one allocated graph so the numbers stay focused on compute instead of setup.",
+		kMargin, 514);
 }
 
 void ofApp::keyPressed(int key) {
