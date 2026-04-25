@@ -1066,9 +1066,7 @@ void ofApp::drawLongVideoPanel() {
 		}
 	}
 
-	ImGui::Spacing();
-	ImGui::Separator();
-	ImGui::Spacing();
+	drawSectionSeparator();
 	ImGui::Text("Render Video");
 #if OFXGGML_HAS_OFXSTABLEDIFFUSION
 	ImGui::TextWrapped(

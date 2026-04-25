@@ -391,50 +391,11 @@ bool ensurePreviewAudioLoaded(
 	return true;
 }
 
-
-
-
-
-
-
 #ifdef _WIN32
-
-
-
-
 
 #else
 
 #endif
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 constexpr size_t kExePathBufSize = 4096; // buffer for resolving the executable path
 constexpr float kDefaultTemp = 0.7f;
@@ -770,7 +731,6 @@ WorkspaceDiffSnapshot captureWorkspaceDiffSnapshot(const std::string & workspace
 }
 
 }
-
 
 // ---------------------------------------------------------------------------
 // Probe for llama-completion / llama-cli / llama.
@@ -1380,6 +1340,52 @@ if (key == 27) stopGeneration();  // Escape cancels generation
 // Menu bar
 // ---------------------------------------------------------------------------
 
+void ofApp::clearAllOutputs() {
+	chatMessages.clear();
+	scriptMessages.clear();
+	scriptOutput.clear();
+	summarizeOutput.clear();
+	summarizeTtsPreview.clearPreviewArtifacts();
+	writeOutput.clear();
+	translateOutput.clear();
+	voiceTranslatorStatus.clear();
+	voiceTranslatorTranscript.clear();
+	translateTtsPreview.clearPreviewArtifacts();
+	customOutput.clear();
+	citationOutput.clear();
+	visionOutput.clear();
+	visionSampledVideoFrames.clear();
+	speechOutput.clear();
+	chatLastAssistantReply.clear();
+	chatTtsPreview.clearPreviewArtifacts();
+	ttsOutput.clear();
+	diffusionOutput.clear();
+	musicToImagePromptOutput.clear();
+	musicToImageStatus.clear();
+	clipOutput.clear();
+	citationResults.clear();
+	speechDetectedLanguage.clear();
+	speechTranscriptPath.clear();
+	speechSrtPath.clear();
+	speechSegmentCount = 0;
+	ttsBackendName.clear();
+	ttsElapsedMs = 0.0f;
+	ttsResolvedSpeakerPath.clear();
+	ttsAudioFiles.clear();
+	ttsMetadata.clear();
+	stopTtsPanelPlayback(true);
+	stopSummaryTtsPlayback(true);
+	stopTranslateTtsPlayback(true);
+	diffusionBackendName.clear();
+	diffusionElapsedMs = 0.0f;
+	diffusionGeneratedImages.clear();
+	diffusionMetadata.clear();
+	clipBackendName.clear();
+	clipElapsedMs = 0.0f;
+	clipEmbeddingDimension = 0;
+	clipHits.clear();
+}
+
 void ofApp::drawMenuBar() {
 if (ImGui::BeginMainMenuBar()) {
 if (ImGui::BeginMenu("File")) {
@@ -1399,49 +1405,7 @@ loadSession(result.getPath());
 }
 ImGui::Separator();
 if (ImGui::MenuItem("Clear All Output")) {
-chatMessages.clear();
-scriptMessages.clear();
-	scriptOutput.clear();
-  summarizeOutput.clear();
-  summarizeTtsPreview.clearPreviewArtifacts();
-  writeOutput.clear();
-  translateOutput.clear();
-  voiceTranslatorStatus.clear();
-  voiceTranslatorTranscript.clear();
-  translateTtsPreview.clearPreviewArtifacts();
-  customOutput.clear();
-	citationOutput.clear();
-  visionOutput.clear();
-visionSampledVideoFrames.clear();
-	speechOutput.clear();
-	chatLastAssistantReply.clear();
-	chatTtsPreview.clearPreviewArtifacts();
-	ttsOutput.clear();
-    diffusionOutput.clear();
-	musicToImagePromptOutput.clear();
-	musicToImageStatus.clear();
-    clipOutput.clear();
-	citationResults.clear();
-  speechDetectedLanguage.clear();
-	speechTranscriptPath.clear();
-	speechSrtPath.clear();
-	speechSegmentCount = 0;
-	ttsBackendName.clear();
-	ttsElapsedMs = 0.0f;
-	ttsResolvedSpeakerPath.clear();
-	ttsAudioFiles.clear();
-	ttsMetadata.clear();
-	stopTtsPanelPlayback(true);
-	stopSummaryTtsPlayback(true);
-	stopTranslateTtsPlayback(true);
-	diffusionBackendName.clear();
-diffusionElapsedMs = 0.0f;
-diffusionGeneratedImages.clear();
-diffusionMetadata.clear();
-clipBackendName.clear();
-clipElapsedMs = 0.0f;
-clipEmbeddingDimension = 0;
-clipHits.clear();
+	clearAllOutputs();
 }
 ImGui::Separator();
 if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
@@ -1496,9 +1460,7 @@ if (ImGui::BeginCombo("##ModeSel", modeLabels[activeModeIndex])) {
 }
 ImGui::TextDisabled("Stored backend and token defaults follow the selected mode.");
 
-ImGui::Spacing();
-ImGui::Separator();
-ImGui::Spacing();
+drawSectionSeparator();
 
 // Model preset selector.
 ImGui::Text(activeMode == AiMode::LongVideo ? "Planner model:" : "Model:");
@@ -1852,9 +1814,7 @@ if (textInferenceBackend == TextInferenceBackend::LlamaServer) {
 	}
 }
 
-ImGui::Spacing();
-ImGui::Separator();
-ImGui::Spacing();
+drawSectionSeparator();
 ImGui::Text("Settings");
 ImGui::Spacing();
 
@@ -2236,9 +2196,7 @@ if (ImGui::Combo("Theme", &themeIndex, themeLabels, 3)) {
 	applyTheme(themeIndex);
 }
 
-ImGui::Spacing();
-ImGui::Separator();
-ImGui::Spacing();
+drawSectionSeparator();
 
 // Engine status indicator.
 if (engineReady) {
@@ -2298,7 +2256,6 @@ ImGui::End();
 // Script panel
 // ---------------------------------------------------------------------------
 
-
 void ofApp::drawScriptPanel() {
 drawPanelHeader("Script Generation", "generate or explain code");
 
@@ -2328,6 +2285,9 @@ ImGui::SetNextItemWidth(140);
 	}
 	ImGui::EndCombo();
 	}
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip("Select programming language for code generation and file filtering.");
+	}
 }
 
 ImGui::SameLine();
@@ -2344,17 +2304,16 @@ bool isLocal = (sourceType == ofxGgmlScriptSourceType::LocalFolder);
 bool isGitHub = (sourceType == ofxGgmlScriptSourceType::GitHubRepo);
 bool isInternet = (sourceType == ofxGgmlScriptSourceType::Internet);
 
-if (isNone) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.35f, 1.0f));
-if (ImGui::SmallButton("None")) {
+if (drawStyledToggleButton("None", isNone, ImVec4(0.3f, 0.3f, 0.35f, 1.0f))) {
 	clearDeferredScriptSourceRestore();
 	scriptSource.clear();
 	selectedScriptFileIndex = -1;
 }
-if (isNone) ImGui::PopStyleColor();
-ImGui::SameLine();
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Clear source code reference. Use for standalone code generation.");
+}
 
-if (isLocal) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.3f, 1.0f));
-if (ImGui::SmallButton("Local Folder")) {
+if (drawStyledToggleButton("Local Folder", isLocal, ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) {
 ofFileDialogResult result = ofSystemLoadDialog("Select Script Folder", true);
 if (result.bSuccess) {
 	clearDeferredScriptSourceRestore();
@@ -2366,16 +2325,16 @@ if (result.bSuccess) {
 	scriptSource.setLocalFolder(result.getPath());
 }
 }
-if (isLocal) ImGui::PopStyleColor();
-ImGui::SameLine();
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Load a local project folder for workspace-aware code assistance.");
+}
 
 const auto localWorkspaceInfo = scriptSource.getWorkspaceInfo();
 const bool isVisualStudioWorkspace =
 	(scriptSource.getSourceType() == ofxGgmlScriptSourceType::LocalFolder) &&
 	(localWorkspaceInfo.hasVisualStudioSolution ||
 	 !localWorkspaceInfo.visualStudioProjectPaths.empty());
-if (isVisualStudioWorkspace) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.45f, 0.35f, 0.7f, 1.0f));
-if (ImGui::SmallButton("Visual Studio")) {
+if (drawStyledToggleButton("Visual Studio", isVisualStudioWorkspace, ImVec4(0.45f, 0.35f, 0.7f, 1.0f))) {
 	ofFileDialogResult result = ofSystemLoadDialog("Select Visual Studio .sln or .vcxproj", false);
 	if (result.bSuccess) {
 		clearDeferredScriptSourceRestore();
@@ -2387,25 +2346,27 @@ if (ImGui::SmallButton("Visual Studio")) {
 		scriptSource.setVisualStudioWorkspace(result.getPath());
 	}
 }
-if (isVisualStudioWorkspace) ImGui::PopStyleColor();
-ImGui::SameLine();
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Load Visual Studio solution or project for C/C++ workspace context.");
+}
 
-if (isGitHub) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.3f, 0.6f, 1.0f));
-if (ImGui::SmallButton("GitHub")) {
+if (drawStyledToggleButton("GitHub", isGitHub, ImVec4(0.3f, 0.3f, 0.6f, 1.0f))) {
 	clearDeferredScriptSourceRestore();
 	selectedScriptFileIndex = -1;
 	scriptSource.setGitHubMode();
 }
-if (isGitHub) ImGui::PopStyleColor();
-ImGui::SameLine();
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Load code from a GitHub repository (owner/repo or full URL).");
+}
 
-if (isInternet) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.5f, 0.7f, 1.0f));
-if (ImGui::SmallButton("Internet")) {
+if (drawStyledToggleButton("Internet", isInternet, ImVec4(0.25f, 0.5f, 0.7f, 1.0f), false)) {
 	clearDeferredScriptSourceRestore();
 	selectedScriptFileIndex = -1;
 	scriptSource.setInternetMode();
 }
-if (isInternet) ImGui::PopStyleColor();
+if (ImGui::IsItemHovered()) {
+	showWrappedTooltip("Load code from arbitrary URLs for reference and context.");
+}
 
 if (deferredScriptSourceRestorePending &&
 	scriptSource.getSourceType() == ofxGgmlScriptSourceType::None) {
@@ -2511,6 +2472,7 @@ ImGui::EndChild();
 	ImGui::EndChild();
 
 	// --- 4. Multiline Chat Input ---
+	ImGui::TextDisabled("Tip: Enter sends, Ctrl+Enter for new line");
 	const bool scriptChatSubmitted = ImGui::InputTextMultiline(
 		"##ScriptIn", scriptInput, sizeof(scriptInput), ImVec2(-1, 50),
 		ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine);
@@ -3668,29 +3630,39 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 	const auto submitPendingToolApproval = [&](bool approved) {
 		std::string toolName;
 		uint64_t requestId = 0;
+		bool shouldUpdateStatus = false;
+		bool shouldNotify = false;
 		{
 			std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
 			if (!scriptAssistantApprovalPending ||
 				scriptAssistantApprovalDecisionReady) {
-				return;
+				// Always notify even on early return to wake waiting threads
+				shouldNotify = true;
+			} else {
+				requestId = scriptAssistantApprovalRequestId;
+				toolName = scriptAssistantPendingApprovalToolCall.toolName;
+				scriptAssistantApprovalDecisionApproved = approved;
+				scriptAssistantApprovalDecisionReady = true;
+				scriptAssistantApprovalDecisionRequestId = requestId;
+				scriptAssistantApprovalPending = false;
+				shouldUpdateStatus = true;
+				shouldNotify = true;
 			}
-			requestId = scriptAssistantApprovalRequestId;
-			toolName = scriptAssistantPendingApprovalToolCall.toolName;
-			scriptAssistantApprovalDecisionApproved = approved;
-			scriptAssistantApprovalDecisionReady = true;
-			scriptAssistantApprovalDecisionRequestId = requestId;
-			scriptAssistantApprovalPending = false;
 		}
-		{
-			std::lock_guard<std::mutex> streamLock(streamMutex);
-			streamingOutput =
-				(approved ? "Approved tool request" : "Denied tool request") +
-				(toolName.empty() ? std::string(".") : ": " + toolName + ".");
+		if (shouldUpdateStatus) {
+			{
+				std::lock_guard<std::mutex> streamLock(streamMutex);
+				streamingOutput =
+					(approved ? "Approved tool request" : "Denied tool request") +
+					(toolName.empty() ? std::string(".") : ": " + toolName + ".");
+			}
+			generatingStatus = approved
+				? "Running approved tool request..."
+				: "Skipping denied tool request...";
 		}
-		generatingStatus = approved
-			? "Running approved tool request..."
-			: "Skipping denied tool request...";
-		scriptAssistantApprovalCv.notify_all();
+		if (shouldNotify) {
+			scriptAssistantApprovalCv.notify_all();
+		}
 	};
 	if (hasPendingApproval) {
 		ImGui::Spacing();
@@ -3711,13 +3683,6 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			ImGui::BeginChild("##ScriptApprovalPayload", ImVec2(-1, 90), true);
 			ImGui::TextWrapped("%s", pendingApprovalToolCall.payload.c_str());
 			ImGui::EndChild();
-		}
-		if (ImGui::Button("Approve Tool", ImVec2(120, 0))) {
-			submitPendingToolApproval(true);
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Deny Tool", ImVec2(120, 0))) {
-			submitPendingToolApproval(false);
 		}
 	}
 
@@ -3994,8 +3959,7 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 		ImGui::SameLine();
 		ImGui::TextDisabled("Load a local project to unlock grounded edit plans and dry runs.");
 	} else if (hasBuildErrors) {
-		ImGui::BeginDisabled(generating.load());
-		if (ImGui::Button("Fix Build Plan", ImVec2(150, 0))) {
+		if (drawDisabledButton("Fix Build Plan", generating.load(), ImVec2(150, 0))) {
 			submitScriptRequest(
 				ofxGgmlCodeAssistantAction::FixBuild,
 				scriptInput,
@@ -4007,17 +3971,14 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 				scriptBuildErrors,
 				buildWorkspaceAllowedFiles());
 		}
-		ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::TextDisabled("You already have compiler output loaded, so start with a grounded build fix.");
 	} else if (hasScriptOutput) {
 		const auto lastStructuredOutput = ofxGgmlCodeAssistant::parseStructuredResult(scriptOutput);
 		if (!lastStructuredOutput.unifiedDiff.empty() || !lastStructuredOutput.patchOperations.empty()) {
-			ImGui::BeginDisabled(generating.load());
-			if (ImGui::Button("Workspace Dry Run", ImVec2(150, 0))) {
+			if (drawDisabledButton("Workspace Dry Run", generating.load(), ImVec2(150, 0))) {
 				previewWorkspacePlan("Workspace dry run");
 			}
-			ImGui::EndDisabled();
 			ImGui::SameLine();
 			ImGui::TextDisabled("Preview the latest structured edit plan before applying anything manually.");
 		} else if (hasSelectedFile && !hasUserInput) {
@@ -4031,8 +3992,7 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			ImGui::TextDisabled("Seed the input from the selected file instead of starting from a blank prompt.");
 		}
 	} else if (hasWorkspaceSource && hasUserInput) {
-		ImGui::BeginDisabled(generating.load());
-		if (ImGui::Button("Grounded Edit Plan", ImVec2(150, 0))) {
+		if (drawDisabledButton("Grounded Edit Plan", generating.load(), ImVec2(150, 0))) {
 			submitScriptRequest(
 				ofxGgmlCodeAssistantAction::Edit,
 				scriptInput,
@@ -4044,15 +4004,12 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 				"",
 				buildWorkspaceAllowedFiles());
 		}
-		ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::TextDisabled("You have a workspace and a request loaded, so the strongest next step is a structured edit plan.");
 	} else if (hasWorkspaceSource) {
-		ImGui::BeginDisabled(generating.load());
-		if (ImGui::Button("Review workspace", ImVec2(150, 0))) {
+		if (drawDisabledButton("Review workspace", generating.load(), ImVec2(150, 0))) {
 			runHierarchicalReview();
 		}
-		ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::TextDisabled("No prompt yet. Start with a workspace review to surface the next useful change.");
 	}
@@ -4529,7 +4486,6 @@ return "generated_" + ofToString(ms) + ext;
 // ---------------------------------------------------------------------------
 // Summarize panel
 // ---------------------------------------------------------------------------
-
 
 void ofApp::ensureVisionPreviewResources() {
 	ensureLocalImagePreview(

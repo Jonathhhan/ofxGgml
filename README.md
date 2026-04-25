@@ -862,25 +862,217 @@ The helper normalizes HTML-heavy pages into cleaner text, clips oversized source
 
 ## Code Review Helpers
 
-`ofxGgmlCodeReview` lifts the `GuiExample` multi-pass repository review workflow into the addon. It ranks files with lightweight heuristics plus embeddings, produces first-pass file summaries, then aggregates architecture and integration findings through `ofxGgmlInference`.
+`ofxGgmlCodeReview` provides automated code review with hierarchical analysis, embedding-based ranking, and structured findings. It implements a multi-pass review workflow that examines individual files, then aggregates insights about architecture and integration.
 
-Use it when an app wants a reusable local code-review pipeline instead of wiring `ofxGgmlScriptSource`, embedding calls, and prompt choreography by hand.
+### Quick Start
 
-The scripting-oriented assistant path has also been tightened so it behaves more like an editing agent than a one-shot prompt wrapper:
+```cpp
+#include "ofxGgmlAssistants.h"
 
-- likely edit targets now prefer compiler-reported files, allow-listed files, focused files, and recently touched files
-- symbol retrieval gives extra weight to recently touched files instead of treating all workspace files equally
-- structured prompts ask for inspect -> patch -> verify plans with grounded file paths and symbol names
-- when the model replies in weak freeform prose even though structured output was requested, the assistant now performs one recovery pass to convert that answer into the expected structured tags
-- workspace retries now carry forward the last failure reason and touched files so remediation passes are narrower and more actionable
+ofxGgmlCodeReview reviewer;
+reviewer.setInference(&inference);
 
-Repository-specific instructions can now shape review prompts as well. For local workspaces, the addon reads:
+// Set up workspace
+ofxGgmlScriptSource workspace;
+workspace.setLocalFolder("/path/to/project");
 
-- `.github/copilot-instructions.md`
-- path-specific `.github/instructions/*.instructions.md`
-- nearest `AGENTS.md`
+// Run review
+auto review = reviewer.reviewRepository(
+    workspace,
+    "Focus on error handling and resource management"
+);
 
-Those instruction files are read directly from the workspace, so they still work even when hidden folders such as `.github` would otherwise be excluded from a normal file listing.
+cout << "Architecture Summary:\n" << review.architectureSummary << endl;
+cout << "\nFindings:\n";
+for (auto& finding : review.findings) {
+    cout << "  [" << finding.severity << "] ";
+    cout << finding.file << ":" << finding.line << "\n";
+    cout << "  " << finding.issue << endl;
+}
+```
+
+### Review Workflow
+
+The review process works in multiple passes:
+
+**1. File Ranking:**
+```cpp
+// Rank files by relevance and importance
+auto rankedFiles = reviewer.rankFiles(
+    workspace,
+    "Security vulnerabilities"
+);
+
+for (auto& file : rankedFiles) {
+    cout << file.path << " (score: " << file.relevanceScore << ")\n";
+}
+```
+
+Ranking uses:
+- Lightweight heuristics (file size, type, location)
+- Embedding-based semantic relevance (when configured)
+- Recency and modification frequency
+- Project-specific importance patterns
+
+**2. File-Level Analysis:**
+```cpp
+// Review individual file
+auto fileReview = reviewer.reviewFile(
+    "src/network/client.cpp",
+    workspace,
+    "Check for error handling and thread safety"
+);
+
+for (auto& finding : fileReview.findings) {
+    cout << finding.category << ": " << finding.description << endl;
+    cout << "  Severity: " << finding.severity << endl;
+    cout << "  Confidence: " << finding.confidence << endl;
+    cout << "  Suggestion: " << finding.suggestion << endl;
+}
+```
+
+**3. Architecture Aggregation:**
+```cpp
+// Aggregate cross-file insights
+auto archReview = reviewer.aggregateArchitecture(
+    fileReviews,
+    workspace
+);
+
+cout << "Design Patterns:\n" << archReview.patterns << endl;
+cout << "Integration Issues:\n" << archReview.issues << endl;
+cout << "Recommendations:\n" << archReview.recommendations << endl;
+```
+
+### Structured Findings
+
+Review findings include detailed metadata:
+
+```cpp
+struct CodeReviewFinding {
+    string file;
+    int line;
+    string category;        // "security", "performance", "maintainability"
+    string severity;        // "critical", "high", "medium", "low"
+    float confidence;       // 0.0 to 1.0
+    string issue;           // Description
+    string suggestion;      // Fix recommendation
+    vector<string> relatedFiles;  // Cross-file context
+};
+```
+
+### Review Focus Areas
+
+Specify focused review criteria:
+
+```cpp
+// Security-focused review
+auto securityReview = reviewer.reviewRepository(
+    workspace,
+    "Security audit: check for SQL injection, XSS, "
+    "authentication bypass, and insecure data storage"
+);
+
+// Performance review
+auto perfReview = reviewer.reviewRepository(
+    workspace,
+    "Performance: identify bottlenecks, memory leaks, "
+    "inefficient algorithms, and unnecessary allocations"
+);
+
+// Code quality review
+auto qualityReview = reviewer.reviewRepository(
+    workspace,
+    "Code quality: assess readability, maintainability, "
+    "test coverage, and adherence to best practices"
+);
+```
+
+### Repository-Specific Instructions
+
+The reviewer automatically loads project instructions:
+
+```cpp
+// Reads from workspace:
+// - .github/copilot-instructions.md
+// - .github/instructions/*.instructions.md
+// - AGENTS.md (nearest to workspace root)
+
+auto review = reviewer.reviewRepository(workspace);
+// Instructions are automatically incorporated into prompts
+```
+
+These files shape review behavior:
+- Define project-specific standards
+- Highlight important patterns to check
+- Specify tools and frameworks in use
+- Provide context about architecture decisions
+
+### Review Modes
+
+**Fast Review (Heuristic-based):**
+```cpp
+reviewer.setMode(ofxGgmlCodeReviewMode::Fast);
+auto review = reviewer.reviewRepository(workspace);
+// Uses lightweight heuristics, skips embeddings
+```
+
+**Deep Review (Embedding-enhanced):**
+```cpp
+reviewer.setMode(ofxGgmlCodeReviewMode::Deep);
+auto review = reviewer.reviewRepository(workspace);
+// Uses semantic ranking, more thorough analysis
+```
+
+**Incremental Review (Changed files only):**
+```cpp
+vector<string> changedFiles = {"src/main.cpp", "src/utils.cpp"};
+auto review = reviewer.reviewChangedFiles(
+    changedFiles,
+    workspace,
+    "Review recent changes for regressions"
+);
+```
+
+### Integration with Scripting Workflow
+
+The scripting assistant uses review insights:
+
+```cpp
+// The assistant path has been tightened to behave like an editing agent:
+// - Prefers compiler-reported, allow-listed, and recently touched files
+// - Weights recently touched files in symbol retrieval
+// - Requests structured inspect→patch→verify plans
+// - Performs recovery when model replies in weak prose
+// - Carries forward failure context for remediation
+```
+
+**Compiler Context:**
+```cpp
+// When model produces weak output, recovery pass converts to structured tags
+auto structured = reviewer.recoverStructuredOutput(weakProseReply);
+```
+
+**Workspace Retries:**
+```cpp
+// Retries carry forward context
+ofxGgmlWorkspaceRetryContext context;
+context.lastFailureReason = buildError;
+context.touchedFiles = {"src/network.cpp"};
+auto fixResult = reviewer.requestRemediation(context, workspace);
+```
+
+### When to Use
+
+Use `ofxGgmlCodeReview` when you want:
+- Automated repository analysis
+- Multi-pass hierarchical review
+- Semantic file ranking
+- Structured review findings
+- Integration with coding workflows
+- Repository-aware review prompts
+
+For complete examples and advanced features, see [docs/features/ASSISTANTS.md](docs/features/ASSISTANTS.md).
 
 ## Chat Assistant Helpers
 
@@ -890,47 +1082,441 @@ Use it when an app wants local chat behavior without duplicating prompt assembly
 
 ## Code Assistant Helpers
 
-`ofxGgmlCodeAssistant` lifts the scripting workflow out of the `GuiExample`. It builds coding prompts with language presets, project memory, repo/file context, focused-file snippets, semantic symbol retrieval, and reusable actions such as `Generate`, `Edit`, `Refactor`, `Review`, `FixBuild`, `GroundedDocs`, `ContinueTask`, and `ContinueCutoff`.
+`ofxGgmlCodeAssistant` provides Copilot-style local coding assistance with semantic search, inline completions, and intelligent code generation. It builds coding prompts with language presets, project memory, repo/file context, focused-file snippets, semantic symbol retrieval, and reusable actions.
 
-It can also request structured task output so apps receive a machine-readable plan instead of only free-form prose. Structured responses can include acceptance criteria, file intents, patch operations, unified diffs, synthesized test ideas, verification commands, review findings with severity/confidence, reviewer-simulation passes, risk scoring, open questions, and parsed build-error context.
+### Quick Start
 
-Use it when an app wants Copilot-style local coding assistance without duplicating prompt assembly, retrieval, and follow-up logic in UI code.
+```cpp
+#include "ofxGgmlAssistants.h"
 
-The `GuiExample` now layers higher-level scripting workflows on top of those assistant actions:
+ofxGgmlCodeAssistant codeAssistant;
+codeAssistant.setInference(&inference);
 
-- slash commands such as `/review`, `/reviewfix`, `/nextedit`, `/summary`, `/tests`, `/fix`, `/explain`, and `/docs`
-- one-click `Next Edit`, `Review Fix Plan`, and local `Change Summary` actions
-- server-first code generation with automatic CLI fallback when the server is unavailable
-- clearer Script-mode guidance in the UI, including backend/workspace context, suggested next steps, cached verification commands, and reuse of recent touched files / last failure reason for follow-up prompts
+// Set up workspace
+ofxGgmlScriptSource workspace;
+workspace.setLocalFolder("/path/to/project");
+codeAssistant.setWorkspace(&workspace);
 
-For app-side orchestration, the code assistant now also exposes a lighter agent runtime surface:
+// Generate code with context
+auto result = codeAssistant.generateCode(
+    "Add error handling to the parseConfig function",
+    workspace,
+    settings
+);
 
-- `ofxGgmlCodeAssistantSession` keeps active mode, backend, touched files, last failure, and short prompt/result history
-- `defaultToolRegistry()`, `registerTool()`, and `getToolRegistry()` expose a typed assistant tool catalog for actions such as repo context reads, symbol retrieval, patch application, and verification
-- `runWithSession(...)` adds streamed events plus approval callbacks for risky proposals such as `apply_patch` and `run_verification`
-- `ofxGgmlCodeAssistantEvent` emits phases such as prompt prepared, output chunk, structured result ready, tool proposed, approval requested, and completed/error
+if (result.success) {
+    cout << "Plan:\n" << result.plan << endl;
+    cout << "\nCode:\n" << result.code << endl;
+}
+```
 
-That keeps the addon aligned with editor-style assistant flows without forcing every openFrameworks app to rebuild session memory, tool summaries, and approval UX from scratch.
+### Core Actions
 
-Symbol context is no longer limited to file snippets. Apps can build a semantic index, query relevant definitions of `runInference` and likely callers, and feed that directly into coding or review prompts. When a local workspace exposes `compile_commands.json`, the assistant upgrades retrieval with compile-database-aware file coverage and range-based caller tracking. For planning-heavy flows, `buildCodeMap(...)` exposes a compact semantic code map, while `runSpecToCode(...)` turns a feature specification into a structured implementation plan with tests, review passes, and risk metadata.
+**Code Generation:**
+- `Generate` - Create new code from requirements
+- `Edit` - Modify existing code
+- `Refactor` - Restructure code while preserving behavior
+- `FixBuild` - Fix compilation errors
+- `ContinueTask` - Resume interrupted work
+- `ContinueCutoff` - Continue when response was truncated
 
-For editor-style integrations, `prepareInlineCompletion(...)` and `runInlineCompletion(...)` provide cursor-aware completion prompts built from the text before and after the insertion point.
+**Code Understanding:**
+- `Review` - Analyze code quality and issues
+- `GroundedDocs` - Generate documentation from code
+- `findSymbols()` - Semantic search for definitions
+- `buildCodeMap()` - Create a semantic overview
+
+### Inline Completion
+
+```cpp
+string beforeCursor = "void setup() {\n    ofSetWindowTitle(";
+string afterCursor = ");\n}";
+
+auto completion = codeAssistant.prepareInlineCompletion(
+    beforeCursor,
+    afterCursor,
+    "ofApp.cpp",
+    workspace
+);
+
+// Use completion.text at cursor position
+```
+
+### Semantic Symbol Search
+
+```cpp
+// Find function definitions and callers
+auto symbols = codeAssistant.findSymbols(
+    "runInference",
+    workspace,
+    5  // max results
+);
+
+for (auto& symbol : symbols) {
+    cout << symbol.filePath << ":" << symbol.line << endl;
+    cout << symbol.context << endl;
+}
+```
+
+### Structured Output
+
+The assistant can return structured, machine-readable plans:
+
+```cpp
+auto structured = codeAssistant.generateWithStructure(
+    "Add input validation",
+    workspace,
+    settings
+);
+
+// Access structured components
+cout << "Acceptance criteria:\n";
+for (auto& criterion : structured.acceptanceCriteria) {
+    cout << "- " << criterion << endl;
+}
+
+cout << "\nFiles to modify:\n";
+for (auto& file : structured.fileIntents) {
+    cout << "- " << file.path << ": " << file.intent << endl;
+}
+
+// Apply unified diffs
+if (!structured.unifiedDiff.empty()) {
+    // See Workspace Assistant section
+}
+```
+
+Structured responses include acceptance criteria, file intents, patch operations, unified diffs, test ideas, verification commands, review findings with severity/confidence, risk scoring, and build-error context.
+
+### Advanced Features
+
+**Compile Database Integration:**
+
+When a workspace has `compile_commands.json`, the assistant upgrades retrieval with:
+- Compile-database-aware file coverage
+- Range-based caller tracking
+- More accurate symbol resolution
+
+**Planning Tools:**
+
+```cpp
+// Create semantic code map for planning
+auto codeMap = codeAssistant.buildCodeMap(workspace);
+
+// Turn specification into implementation plan
+auto plan = codeAssistant.runSpecToCode(
+    "Add user authentication with JWT tokens",
+    workspace,
+    settings
+);
+```
+
+### Agent Runtime
+
+For app-side orchestration, the code assistant exposes a session-based runtime:
+
+```cpp
+// Create a coding session
+ofxGgmlCodeAssistantSession session;
+session.mode = ofxGgmlCodingAgentMode::Build;
+session.backend = "llama-server";
+
+// Set approval callback for risky operations
+auto approvalCallback = [](const string& tool, const string& details) {
+    cout << "Approve " << tool << "?\n" << details << endl;
+    return getUserApproval();  // Your UI logic
+};
+
+// Run with streaming events
+codeAssistant.runWithSession(
+    "Add error handling to network code",
+    workspace,
+    session,
+    approvalCallback,
+    [](const ofxGgmlCodeAssistantEvent& event) {
+        switch (event.phase) {
+            case ofxGgmlCodeAssistantPhase::PromptPrepared:
+                cout << "Analyzing code..." << endl;
+                break;
+            case ofxGgmlCodeAssistantPhase::StructuredResultReady:
+                cout << "Generated plan" << endl;
+                break;
+            case ofxGgmlCodeAssistantPhase::ToolProposed:
+                cout << "Requesting approval for: " << event.toolName << endl;
+                break;
+            case ofxGgmlCodeAssistantPhase::Completed:
+                cout << "Task complete" << endl;
+                break;
+        }
+    }
+);
+```
+
+**Session State:**
+- `ofxGgmlCodeAssistantSession` tracks active mode, backend, touched files, last failure, and recent history
+- `defaultToolRegistry()`, `registerTool()`, `getToolRegistry()` expose a typed tool catalog for repo reads, symbol retrieval, patch application, and verification
+
+**Event Phases:**
+- Prompt prepared
+- Output chunk
+- Structured result ready
+- Tool proposed
+- Approval requested
+- Completed/error
+
+### GUI Integration
+
+The `GuiExample` demonstrates production-ready scripting workflows:
+
+- Slash commands: `/review`, `/reviewfix`, `/nextedit`, `/summary`, `/tests`, `/fix`, `/explain`, `/docs`
+- One-click actions: `Next Edit`, `Review Fix Plan`, `Change Summary`
+- Server-first with automatic CLI fallback
+- Backend/workspace context display
+- Cached verification commands
+- Reuse of touched files and failure context for follow-up prompts
+
+### When to Use
+
+Use `ofxGgmlCodeAssistant` when you want:
+- IDE-style coding assistance
+- Semantic code search and symbol resolution
+- Inline completions
+- Structured code generation with plans
+- Local coding without cloud APIs
+- Full control over prompt assembly and retrieval
+
+For complete examples and API details, see [docs/features/ASSISTANTS.md](docs/features/ASSISTANTS.md).
 
 ## Workspace Assistant Helpers
 
-`ofxGgmlWorkspaceAssistant` wraps `ofxGgmlCodeAssistant` with a workspace execution loop. It can validate structured patch operations inside a workspace root, validate and apply unified diffs with hunk matching, enforce an allow-list for edit mode, preview unified diffs, apply transactions with rollback data, run edits inside a shadow workspace before syncing them back, auto-select verification commands from changed files, and request an updated remediation plan when verification fails.
+`ofxGgmlWorkspaceAssistant` extends the Code Assistant with safe workspace execution. It validates patches, applies unified diffs, manages transactions with rollback, runs verification commands, and implements a full "plan → edit → verify → retry" loop.
 
-Use it when an app wants a local coding assistant that can move beyond "suggest code" into "plan, edit, verify, retry" without hardcoding file operations or command orchestration in UI code.
+### Quick Start
 
-The public result types make that loop inspectable:
+```cpp
+#include "ofxGgmlAssistants.h"
 
-- `ofxGgmlCodeAssistantStructuredResult` for plans, patches, and verification commands
-- `ofxGgmlWorkspacePatchValidationResult` for pre-apply safety checks
-- `ofxGgmlWorkspaceUnifiedDiffFile` and `ofxGgmlWorkspaceUnifiedDiffHunk` for parsed diff structure
-- `ofxGgmlWorkspaceTransaction` for transaction state, backups, and rollback-ready previews
-- `ofxGgmlWorkspaceApplyResult` for touched files and apply messages
-- `ofxGgmlWorkspaceVerificationResult` for command-by-command outcomes
-- `ofxGgmlWorkspaceResult` for end-to-end attempts across build/test/retry cycles
+ofxGgmlWorkspaceAssistant wsAssistant;
+wsAssistant.setCodeAssistant(&codeAssistant);
+
+// Validate before applying
+auto validation = wsAssistant.validatePatch(
+    structuredPatch,
+    "/path/to/project"
+);
+
+if (validation.safe) {
+    auto result = wsAssistant.applyPatch(structuredPatch, workspace);
+    cout << "Modified " << result.touchedFiles.size() << " files\n";
+}
+```
+
+### Apply Unified Diffs
+
+```cpp
+string diff = R"(
+--- src/main.cpp
++++ src/main.cpp
+@@ -10,7 +10,9 @@
+ void setup() {
+-    loadConfig("config.json");
++    if (!loadConfig("config.json")) {
++        ofLogError() << "Failed to load config";
++        return;
++    }
+ }
+)";
+
+auto result = wsAssistant.applyUnifiedDiff(diff, "/project/root");
+
+if (result.success) {
+    cout << "Applied successfully\n";
+    cout << "Files modified:\n";
+    for (auto& file : result.touchedFiles) {
+        cout << "  - " << file << endl;
+    }
+} else {
+    cout << "Failed: " << result.error << endl;
+}
+```
+
+### Transaction Rollback
+
+```cpp
+// Begin transaction - saves current state
+auto transaction = wsAssistant.beginTransaction(workspace);
+
+// Apply changes
+auto result = wsAssistant.applyPatch(patch, workspace);
+
+if (!result.success) {
+    // Rollback on failure
+    wsAssistant.rollbackTransaction(transaction);
+    cout << "Changes reverted" << endl;
+} else {
+    // Commit if successful
+    wsAssistant.commitTransaction(transaction);
+}
+```
+
+### Verification Loop
+
+The workspace assistant can automatically verify changes and request fixes:
+
+```cpp
+// Apply patch
+auto applyResult = wsAssistant.applyPatch(patch, workspace);
+
+// Auto-select and run verification commands
+auto verifyResult = wsAssistant.verify(
+    applyResult.touchedFiles,
+    workspace
+);
+
+for (auto& cmd : verifyResult.commands) {
+    cout << "Running: " << cmd.command << endl;
+
+    if (!cmd.success) {
+        cout << "Verification failed:\n" << cmd.output << endl;
+
+        // Request remediation plan
+        auto fixResult = wsAssistant.requestRemediation(
+            applyResult.touchedFiles,
+            cmd.output,  // Failure context
+            workspace
+        );
+    }
+}
+```
+
+### Shadow Workspace
+
+Run edits in a temporary shadow workspace before applying to the real one:
+
+```cpp
+// Create shadow workspace
+auto shadowPath = wsAssistant.createShadowWorkspace(workspace);
+
+// Apply changes to shadow
+auto testResult = wsAssistant.applyPatch(patch, shadowPath);
+
+// Verify in shadow
+auto verifyResult = wsAssistant.verify(testResult.touchedFiles, shadowPath);
+
+if (verifyResult.allPassed) {
+    // Sync back to real workspace
+    wsAssistant.syncFromShadow(shadowPath, workspace);
+    cout << "Changes verified and applied" << endl;
+} else {
+    cout << "Verification failed in shadow workspace" << endl;
+    wsAssistant.cleanupShadow(shadowPath);
+}
+```
+
+### Safety Features
+
+**Pre-Apply Validation:**
+```cpp
+auto validation = wsAssistant.validatePatch(patch, workspace);
+
+if (!validation.safe) {
+    cout << "Safety issues detected:\n";
+    for (auto& issue : validation.issues) {
+        cout << "  - " << issue << endl;
+    }
+    // Issues might include:
+    // - Attempting to modify files outside workspace
+    // - Creating dangerous file paths
+    // - Operations not in the allow-list
+}
+```
+
+**Allow-List Enforcement:**
+```cpp
+// Only permit specific operations
+wsAssistant.setAllowedOperations({
+    "create_file",
+    "modify_file",
+    "delete_file"  // Explicitly allow deletion
+});
+
+// This will be rejected if not in allow-list
+auto result = wsAssistant.applyPatch(patchWithDangerousOps, workspace);
+```
+
+**Hunk Matching:**
+
+The assistant validates unified diff hunks before applying:
+- Ensures context lines match exactly
+- Detects if files have been modified since diff generation
+- Provides clear error messages for failed hunks
+
+### Result Types
+
+Access detailed results for inspection and logging:
+
+```cpp
+// Patch validation results
+ofxGgmlWorkspacePatchValidationResult validation;
+validation.safe;           // bool
+validation.issues;         // vector<string>
+
+// Apply results
+ofxGgmlWorkspaceApplyResult applyResult;
+applyResult.success;       // bool
+applyResult.touchedFiles;  // vector<string>
+applyResult.error;         // string
+applyResult.details;       // string
+
+// Verification results
+ofxGgmlWorkspaceVerificationResult verifyResult;
+verifyResult.allPassed;    // bool
+verifyResult.commands;     // vector<CommandResult>
+
+// Full coding loop result
+ofxGgmlWorkspaceResult workspaceResult;
+workspaceResult.success;          // bool
+workspaceResult.attempts;         // int
+workspaceResult.finalTouchedFiles; // vector<string>
+workspaceResult.buildOutput;      // string
+workspaceResult.testOutput;       // string
+```
+
+### Complete Coding Loop
+
+Execute a full plan-edit-verify-retry cycle:
+
+```cpp
+ofxGgmlWorkspaceRequest request;
+request.task = "Add retry logic to network requests";
+request.workspace = &workspace;
+request.maxRetries = 3;
+request.verifyAfterApply = true;
+
+auto result = wsAssistant.executeWorkflow(request);
+
+cout << "Completed in " << result.attempts << " attempts\n";
+cout << "Files modified:\n";
+for (auto& file : result.finalTouchedFiles) {
+    cout << "  - " << file << endl;
+}
+
+if (result.buildOutput) {
+    cout << "Build output:\n" << result.buildOutput << endl;
+}
+```
+
+### When to Use
+
+Use `ofxGgmlWorkspaceAssistant` when you want:
+- Safe code modifications with validation
+- Transaction support with rollback
+- Automated verification and retry loops
+- Shadow workspace testing
+- Production-ready coding workflows
+- Full "AI pair programmer" experience
+
+For complete examples and API details, see [docs/features/ASSISTANTS.md](docs/features/ASSISTANTS.md).
 
 ## Text Assistant Helpers
 

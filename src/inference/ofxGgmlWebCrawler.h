@@ -24,6 +24,9 @@ struct ofxGgmlWebCrawlerRequest {
 	std::vector<std::string> allowedDomains;
 	std::vector<std::string> extraArgs;
 	std::string executablePath;
+	int timeoutSeconds = 300;  // Default 5 minutes
+	int maxRetries = 3;  // Number of retry attempts for transient failures
+	int retryDelayMs = 1000;  // Delay between retries in milliseconds
 };
 
 struct ofxGgmlWebCrawlerResult {
