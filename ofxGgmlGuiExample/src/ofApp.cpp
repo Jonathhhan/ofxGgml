@@ -2291,7 +2291,7 @@ ImGui::SameLine();
 ImGui::TextDisabled(
 	"%s",
 	scriptSimpleUi
-		? "Simple chatpilot-style coding surface"
+		? "Simple ChatPilot-style coding surface"
 		: "Full workspace-aware coding surface");
 
 // Language selector and source controls on same row.
