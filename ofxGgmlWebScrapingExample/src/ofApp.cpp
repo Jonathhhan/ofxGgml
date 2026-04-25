@@ -11,6 +11,12 @@ namespace {
 constexpr float kMargin = 20.0f;
 constexpr float kPanelGap = 16.0f;
 constexpr float kHeaderHeight = 164.0f;
+constexpr size_t kIntroWrapColumns = 110;
+constexpr size_t kShortcutsWrapColumns = 115;
+constexpr size_t kStatusWrapColumns = 118;
+constexpr size_t kDocumentListWrapColumns = 38;
+constexpr size_t kPreviewWrapColumns = 78;
+constexpr size_t kPreviewMaxCharacters = 2200;
 
 std::string trimCopy(const std::string & text) {
 	size_t start = 0;
@@ -225,7 +231,7 @@ void ofApp::drawControls(float x, float y) const {
 	const std::string intro =
 		"Type a URL, press Enter, and inspect the crawled Markdown output. "
 		"Use J to toggle JavaScript rendering and [ ] to change crawl depth.";
-	ofDrawBitmapString(wrapText(intro, 110), x, y + 42.0f);
+	ofDrawBitmapString(wrapText(intro, kIntroWrapColumns), x, y + 42.0f);
 
 	ofSetColor(32, 40, 52, 220);
 	ofDrawRectangle(x, y + 58.0f, static_cast<float>(ofGetWidth()) - (kMargin * 2.0f), 92.0f);
@@ -245,10 +251,10 @@ void ofApp::drawControls(float x, float y) const {
 
 	const std::string shortcuts =
 		"Enter crawl  |  Up/Down select page  |  [ ] depth  |  J toggle JS render  |  C clear  |  Q quit";
-	ofDrawBitmapString(wrapText(shortcuts, 115), x + 10.0f, y + 132.0f);
+	ofDrawBitmapString(wrapText(shortcuts, kShortcutsWrapColumns), x + 10.0f, y + 132.0f);
 
 	ofSetColor(crawlInFlight ? ofColor(255, 220, 120) : ofColor(160, 220, 180));
-	ofDrawBitmapString(wrapText(statusMessage, 118), x, y + 170.0f);
+	ofDrawBitmapString(wrapText(statusMessage, kStatusWrapColumns), x, y + 170.0f);
 }
 
 void ofApp::drawDocumentsPanel(float x, float y, float width, float height) const {
@@ -277,7 +283,7 @@ void ofApp::drawDocumentsPanel(float x, float y, float width, float height) cons
 
 		ofSetColor(selected ? ofColor(255) : ofColor(210));
 		const std::string label = buildDocumentListLabel(documents[i], i);
-		ofDrawBitmapString(wrapText(label, 38), x + 14.0f, cursorY);
+		ofDrawBitmapString(wrapText(label, kDocumentListWrapColumns), x + 14.0f, cursorY);
 		cursorY += 48.0f;
 
 		if (cursorY > y + height - 16.0f) {
@@ -296,7 +302,7 @@ void ofApp::drawPreviewPanel(float x, float y, float width, float height) const 
 	ofSetColor(220);
 	const std::string previewText = buildPreviewText();
 	ofDrawBitmapString(
-		wrapText(previewText, 78),
+		wrapText(previewText, kPreviewWrapColumns),
 		x + 10.0f,
 		y + 42.0f);
 }
@@ -382,8 +388,10 @@ std::string ofApp::buildPreviewText() const {
 			<< "\n\nSource URL\n" << document.sourceUrl
 			<< "\n\nLocal path\n" << (document.localPath.empty() ? "(kept in memory)" : document.localPath)
 			<< "\n\nMarkdown\n"
-			<< document.markdown.substr(0, std::min<size_t>(document.markdown.size(), 2200));
-		if (document.markdown.size() > 2200) {
+			<< document.markdown.substr(
+				0,
+				std::min<size_t>(document.markdown.size(), kPreviewMaxCharacters));
+		if (document.markdown.size() > kPreviewMaxCharacters) {
 			preview << "\n... (truncated)";
 		}
 	} else if (lastResult.success) {
