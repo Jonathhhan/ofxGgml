@@ -147,12 +147,16 @@ TEST_CASE("Coding agent applies structured edits and verification", "[coding_age
 		};
 
 	std::vector<ofxGgmlCodeAssistantEventKind> eventKinds;
+	std::vector<std::string> approvedToolNames;
 	const auto result = agent.run(
 		createCodingAgentDummyModel(),
 		request,
 		context,
 		settings,
-		nullptr,
+		[&approvedToolNames](const ofxGgmlCodeAssistantToolCall & toolCall) {
+			approvedToolNames.push_back(toolCall.toolName);
+			return true;
+		},
 		[&eventKinds](const ofxGgmlCodeAssistantEvent & event) {
 			eventKinds.push_back(event.kind);
 			return true;
@@ -177,10 +181,111 @@ TEST_CASE("Coding agent applies structured edits and verification", "[coding_age
 	REQUIRE(result.effectiveVerificationCommands.size() == 1);
 	REQUIRE(result.sessionRevision > 0);
 	REQUIRE_FALSE(agent.getSession().recentPrompts.empty());
+	REQUIRE(approvedToolNames.size() == 2);
+	REQUIRE(std::find(
+		approvedToolNames.begin(),
+		approvedToolNames.end(),
+		"apply_patch") != approvedToolNames.end());
+	REQUIRE(std::find(
+		approvedToolNames.begin(),
+		approvedToolNames.end(),
+		"run_verification") != approvedToolNames.end());
+	REQUIRE(std::find(
+		eventKinds.begin(),
+		eventKinds.end(),
+		ofxGgmlCodeAssistantEventKind::ApprovalRequested) != eventKinds.end());
+	REQUIRE(std::find(
+		eventKinds.begin(),
+		eventKinds.end(),
+		ofxGgmlCodeAssistantEventKind::ApprovalGranted) != eventKinds.end());
 	REQUIRE(std::find(
 		eventKinds.begin(),
 		eventKinds.end(),
 		ofxGgmlCodeAssistantEventKind::Completed) != eventKinds.end());
+}
+
+TEST_CASE("Coding agent respects denied tool approvals", "[coding_agent]") {
+	const auto root = makeCodingAgentTestDir("approval_workspace");
+	const auto sourcePath = root / "src.cpp";
+	{
+		std::ofstream out(sourcePath);
+		out << "int answer() { return 50; }\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(root.string()));
+
+	ofxGgmlCodingAgent agent;
+	agent.setCompletionExecutable(createCodingAgentExecutable({
+		"GOAL: Make answer return 51",
+		"APPROACH: Update the helper and run verification after the change",
+		"FILE: src.cpp | update implementation | answer",
+		"PATCH: replace | src.cpp | update return value",
+		"SEARCH: return 50;",
+		"REPLACE: return 51;",
+		"DIFF: --- a/src.cpp\\n+++ b/src.cpp\\n@@ -1,1 +1,1 @@\\n-int answer() { return 50; }\\n+int answer() { return 51; }",
+		"COMMAND: verify | . | fake-runner | --check",
+		"EXPECT: helper verification passes"
+	}));
+
+	ofxGgmlCodingAgentRequest request;
+	request.taskLabel = "Denied helper change";
+	request.assistantRequest.action = ofxGgmlCodeAssistantAction::Edit;
+	request.assistantRequest.language =
+		ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+	request.assistantRequest.userInput =
+		"Update answer() so it returns 51, but require approval before editing.";
+
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+
+	ofxGgmlCodingAgentSettings settings;
+	bool commandRunnerInvoked = false;
+	settings.commandRunner =
+		[&commandRunnerInvoked](const ofxGgmlCodeAssistantCommandSuggestion & command) {
+			commandRunnerInvoked = true;
+			ofxGgmlWorkspaceCommandResult result;
+			result.command = command;
+			result.success = true;
+			result.exitCode = 0;
+			return result;
+		};
+
+	const auto result = agent.run(
+		createCodingAgentDummyModel(),
+		request,
+		context,
+		settings,
+		[](const ofxGgmlCodeAssistantToolCall &) {
+			return false;
+		});
+
+	REQUIRE(result.success);
+	REQUIRE_FALSE(result.appliedChanges);
+	REQUIRE_FALSE(result.verificationAttempted);
+	REQUIRE_FALSE(commandRunnerInvoked);
+	REQUIRE(readFileText(sourcePath).find("return 50;") != std::string::npos);
+	REQUIRE(std::find_if(
+		result.applyResult.messages.begin(),
+		result.applyResult.messages.end(),
+		[](const std::string & message) {
+			return message.find("approval was denied for apply_patch") !=
+				std::string::npos;
+		}) != result.applyResult.messages.end());
+	const bool skippedVerificationForDeniedApproval =
+		result.verificationResult.summary.find(
+			"approval was denied for run_verification") != std::string::npos ||
+		result.verificationResult.summary.find(
+			"proposed patch was not applied") != std::string::npos;
+	REQUIRE(skippedVerificationForDeniedApproval);
+	const auto deniedPatchTool = std::find_if(
+		result.assistantResult.proposedToolCalls.begin(),
+		result.assistantResult.proposedToolCalls.end(),
+		[](const ofxGgmlCodeAssistantToolCall & toolCall) {
+			return toolCall.toolName == "apply_patch";
+		});
+	REQUIRE(deniedPatchTool != result.assistantResult.proposedToolCalls.end());
+	REQUIRE_FALSE(deniedPatchTool->approved);
 }
 
 TEST_CASE("Coding agent plan mode stays read-only", "[coding_agent]") {

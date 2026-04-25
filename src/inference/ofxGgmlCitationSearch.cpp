@@ -320,9 +320,10 @@ std::string buildCitationPrompt(
 		<< "You are a citation extraction assistant.\n"
 		<< "Using only the provided source material, extract up to "
 		<< std::max<size_t>(1, maxCitations)
-		<< " short, relevant citations about the topic below.\n"
+		<< " relevant exact citations about the topic below.\n"
 		<< "CRITICAL REQUIREMENTS:\n"
 		<< "- Each quote MUST be an exact verbatim span copied word-for-word from one provided source\n"
+		<< "- Quotes may be short or longer multi-sentence spans when that better preserves the exact evidence\n"
 		<< "- Each citation MUST include a valid sourceIndex (1-based) matching a [Source N] label\n"
 		<< "- Do NOT paraphrase, summarize, or rewrite source text inside the quote field\n"
 		<< "- Do NOT invent sources, URLs, or quotes\n"
@@ -334,6 +335,31 @@ std::string buildCitationPrompt(
 		<< "Use 1-based sourceIndex values that match the provided [Source N] labels.\n\n"
 		<< "Topic: " << topic << "\n";
 	return prompt.str();
+}
+
+int parseCitationSourceIndex(const ofJson & value) {
+	try {
+		if (value.is_number()) {
+			return value.get<int>();
+		}
+		if (value.is_string()) {
+			const std::string text = trimCopy(value.get<std::string>());
+			if (text.empty()) {
+				return -1;
+			}
+			for (unsigned char ch : text) {
+				if (!std::isdigit(ch)) {
+					return -1;
+				}
+			}
+			const unsigned long parsed = std::stoul(text);
+			return parsed <= static_cast<unsigned long>(std::numeric_limits<int>::max())
+				? static_cast<int>(parsed)
+				: -1;
+		}
+	} catch (...) {
+	}
+	return -1;
 }
 
 ofJson parseLooseJson(const std::string & rawText) {
@@ -833,7 +859,7 @@ std::vector<std::string> splitIntoExactQuoteCandidates(const std::string & conte
 
 	auto appendCandidate = [&candidates](std::string candidate) {
 		candidate = trimCopy(candidate);
-		if (candidate.size() < 24 || candidate.size() > 520) {
+		if (candidate.size() < 24 || candidate.size() > 1100) {
 			return;
 		}
 		candidates.push_back(std::move(candidate));
@@ -874,7 +900,7 @@ std::vector<std::string> splitIntoExactQuoteCandidates(const std::string & conte
 		}
 		std::string candidate = trimCopy(content.substr(start, endExclusive - start));
 		start = endExclusive;
-		if (candidate.size() < 24 || candidate.size() > 420) {
+		if (candidate.size() < 24 || candidate.size() > 900) {
 			return;
 		}
 		sentenceCandidates.push_back(std::move(candidate));
@@ -894,6 +920,12 @@ std::vector<std::string> splitIntoExactQuoteCandidates(const std::string & conte
 	}
 	for (size_t i = 0; i + 1 < sentenceCandidates.size(); ++i) {
 		appendCandidate(sentenceCandidates[i] + " " + sentenceCandidates[i + 1]);
+	}
+	for (size_t i = 0; i + 2 < sentenceCandidates.size(); ++i) {
+		appendCandidate(
+			sentenceCandidates[i] + " " +
+			sentenceCandidates[i + 1] + " " +
+			sentenceCandidates[i + 2]);
 	}
 
 	std::unordered_set<std::string> seen;
@@ -954,7 +986,7 @@ float scoreExactQuoteCandidate(
 		}
 	}
 
-	if (normalizedCandidate.size() >= 40 && normalizedCandidate.size() <= 220) {
+	if (normalizedCandidate.size() >= 40 && normalizedCandidate.size() <= 420) {
 		score += 0.5f;
 	}
 	if (candidate.find('\n') != std::string::npos) {
@@ -1277,6 +1309,12 @@ ofxGgmlRealtimeInfoSettings makeRealtimeCitationSettings(
 
 } // namespace
 
+std::vector<std::string>
+ofxGgmlCitationSearchInternal::extractExactQuoteCandidatesForTesting(
+	const std::string & content) {
+	return splitIntoExactQuoteCandidates(content);
+}
+
 ofxGgmlCitationSearch::ofxGgmlCitationSearch() = default;
 
 ofxGgmlInference & ofxGgmlCitationSearch::getInference() {
@@ -1525,7 +1563,10 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 			ofxGgmlCitationItem item;
 			item.quote = trimCopy(entry.value("quote", std::string()));
 			item.note = trimCopy(entry.value("note", std::string()));
-			item.sourceIndex = entry.value("sourceIndex", -1);
+			item.sourceIndex =
+				entry.contains("sourceIndex")
+					? parseCitationSourceIndex(entry["sourceIndex"])
+					: -1;
 			item.sourceLabel = resolveSourceLabel(result.sourcesUsed, item.sourceIndex);
 			item.sourceUri = resolveSourceUri(result.sourcesUsed, item.sourceIndex);
 			const auto exactQuote = findExactQuoteInSource(result.sourcesUsed, item);

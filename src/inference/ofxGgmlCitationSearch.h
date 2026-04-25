@@ -18,7 +18,7 @@ struct ofxGgmlCitationItem {
 struct ofxGgmlCitationSearchRequest {
 	std::string modelPath;
 	std::string topic;
-	size_t maxCitations = 5;
+	size_t maxCitations = 100;
 	bool useCrawler = false;
 	ofxGgmlWebCrawlerRequest crawlerRequest;
 	std::vector<std::string> sourceUrls;
@@ -87,6 +87,8 @@ struct ofxGgmlCitationSearchResult {
 namespace ofxGgmlCitationSearchInternal {
 
 std::string cleanCrawlerMarkdownForCitations(const std::string & rawMarkdown);
+std::vector<std::string> extractExactQuoteCandidatesForTesting(
+	const std::string & content);
 
 } // namespace ofxGgmlCitationSearchInternal
 

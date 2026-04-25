@@ -288,7 +288,7 @@ void ofApp::drawVideoEssayPanel() {
 	}
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(130);
-	if (ImGui::SliderInt("Citations", &videoEssayCitationCount, 2, 12)) {
+	if (ImGui::SliderInt("Citations", &videoEssayCitationCount, 2, 100)) {
 		autoSaveSession();
 	}
 	ImGui::SameLine();
@@ -716,7 +716,7 @@ void ofApp::runVideoEssayWorkflow() {
 	const AiMode requestMode = AiMode::VideoEssay;
 	const std::string modelPath = getSelectedModelPath();
 	const auto inferenceSettings = buildCurrentTextInferenceSettings(requestMode);
-	const size_t maxCitations = static_cast<size_t>(std::clamp(videoEssayCitationCount, 2, 12));
+	const size_t maxCitations = static_cast<size_t>(std::clamp(videoEssayCitationCount, 2, 100));
 	const double targetDurationSeconds = std::clamp(
 		static_cast<double>(videoEssayTargetDurationSeconds),
 		30.0,

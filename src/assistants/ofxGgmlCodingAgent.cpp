@@ -42,6 +42,33 @@ bool structuredHasProposedChanges(
 		!structured.patchOperations.empty();
 }
 
+const ofxGgmlCodeAssistantToolCall * findToolCall(
+	const std::vector<ofxGgmlCodeAssistantToolCall> & toolCalls,
+	const std::string & toolName) {
+	const auto it = std::find_if(
+		toolCalls.begin(),
+		toolCalls.end(),
+		[&](const ofxGgmlCodeAssistantToolCall & toolCall) {
+			return toolCall.toolName == toolName;
+		});
+	return it == toolCalls.end() ? nullptr : &(*it);
+}
+
+bool isApprovedToolCall(
+	const std::vector<ofxGgmlCodeAssistantToolCall> & toolCalls,
+	const std::string & toolName) {
+	const auto * toolCall = findToolCall(toolCalls, toolName);
+	if (toolCall == nullptr) {
+		return true;
+	}
+	return !toolCall->requiresApproval || toolCall->approved;
+}
+
+bool containsApprovalDenialText(const std::string & text) {
+	return text.find("approval was denied") != std::string::npos ||
+		text.find("Approval denied") != std::string::npos;
+}
+
 const ofxGgmlScriptSourceWorkspaceInfo * getWorkspaceInfoIfLocal(
 	const ofxGgmlCodeAssistantContext & context,
 	ofxGgmlScriptSourceWorkspaceInfo * snapshot) {
@@ -127,6 +154,14 @@ std::string ofxGgmlCodingAgent::summarizeResult(
 	if (!trimCopy(result.error).empty()) {
 		return result.error;
 	}
+	for (const auto & message : result.applyResult.messages) {
+		if (containsApprovalDenialText(message)) {
+			return message;
+		}
+	}
+	if (containsApprovalDenialText(result.verificationResult.summary)) {
+		return result.verificationResult.summary;
+	}
 	if (!result.assistantResult.inference.success) {
 		return "Coding agent failed before producing a usable result.";
 	}
@@ -211,7 +246,14 @@ ofxGgmlCodingAgentResult ofxGgmlCodingAgent::run(
 	const bool hasProposedChanges =
 		structuredHasProposedChanges(result.assistantResult.structured) &&
 		!trimCopy(result.workspaceRoot).empty();
-	if (hasProposedChanges) {
+	const bool patchToolApproved = isApprovedToolCall(
+		result.assistantResult.proposedToolCalls,
+		"apply_patch");
+	const bool patchApplicationDenied =
+		settings.autoApply &&
+		structuredHasProposedChanges(result.assistantResult.structured) &&
+		!patchToolApproved;
+	if (hasProposedChanges && !patchApplicationDenied) {
 		transaction = !trimCopy(result.assistantResult.structured.unifiedDiff).empty()
 			? m_workspaceAssistant.beginUnifiedDiffTransaction(
 				result.assistantResult.structured.unifiedDiff,
@@ -234,7 +276,10 @@ ofxGgmlCodingAgentResult ofxGgmlCodingAgent::run(
 			result.assistantResult.structured,
 			nullptr);
 		result.applyResult.success = true;
-		if (trimCopy(result.workspaceRoot).empty() && structuredHasProposedChanges(result.assistantResult.structured)) {
+		if (patchApplicationDenied) {
+			result.applyResult.messages.push_back(
+				"Patch application skipped because approval was denied for apply_patch.");
+		} else if (trimCopy(result.workspaceRoot).empty() && structuredHasProposedChanges(result.assistantResult.structured)) {
 			result.applyResult.success = false;
 			result.error = "Coding agent could not resolve a workspace root for patch application.";
 		}
@@ -266,23 +311,38 @@ ofxGgmlCodingAgentResult ofxGgmlCodingAgent::run(
 	}
 	result.effectiveVerificationCommands = verificationCommands;
 
+	const bool verificationToolApproved = isApprovedToolCall(
+		result.assistantResult.proposedToolCalls,
+		"run_verification");
+	const bool verificationBlockedByPatchDenial =
+		patchApplicationDenied && !verificationCommands.empty();
 	if (settings.autoVerify && !verificationCommands.empty()) {
-		result.verificationAttempted = true;
-		result.verificationResult = m_workspaceAssistant.runVerification(
-			verificationCommands,
-			workspaceSettings,
-			settings.commandRunner);
-		if (!result.verificationResult.success &&
-			workspaceSettings.rollbackOnVerificationFailure &&
-			transaction.applied) {
-			std::vector<std::string> rollbackMessages;
-			(void)m_workspaceAssistant.rollbackTransaction(
-				transaction,
-				&rollbackMessages);
-			result.applyResult.messages.insert(
-				result.applyResult.messages.end(),
-				rollbackMessages.begin(),
-				rollbackMessages.end());
+		if (!verificationToolApproved) {
+			result.verificationResult.success = true;
+			result.verificationResult.summary =
+				"Verification skipped because approval was denied for run_verification.";
+		} else if (verificationBlockedByPatchDenial) {
+			result.verificationResult.success = true;
+			result.verificationResult.summary =
+				"Verification skipped because the proposed patch was not applied.";
+		} else {
+			result.verificationAttempted = true;
+			result.verificationResult = m_workspaceAssistant.runVerification(
+				verificationCommands,
+				workspaceSettings,
+				settings.commandRunner);
+			if (!result.verificationResult.success &&
+				workspaceSettings.rollbackOnVerificationFailure &&
+				transaction.applied) {
+				std::vector<std::string> rollbackMessages;
+				(void)m_workspaceAssistant.rollbackTransaction(
+					transaction,
+					&rollbackMessages);
+				result.applyResult.messages.insert(
+					result.applyResult.messages.end(),
+					rollbackMessages.begin(),
+					rollbackMessages.end());
+			}
 		}
 	} else {
 		result.verificationResult.success = true;

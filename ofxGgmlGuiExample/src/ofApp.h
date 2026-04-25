@@ -239,7 +239,7 @@ private:
 	char easySecondaryInput[2048] = {};
 	int easyActionIndex = 0;
 	bool easyUseCrawler = false;
-	int easyCitationCount = 5;
+	int easyCitationCount = 100;
 	float easyTargetDurationSeconds = 90.0f;
 	char scriptInput[8192] = {};
 	char scriptInlineInstruction[512] = {};
@@ -264,7 +264,7 @@ private:
 	bool videoEssayUseCustomTtsVoice = false;
 	char videoEssayTtsModelPath[1024] = {};
 	char videoEssayTtsSpeakerPath[1024] = {};
-	int videoEssayCitationCount = 5;
+	int videoEssayCitationCount = 100;
 	float videoEssayTargetDurationSeconds = 90.0f;
 	int videoEssayToneIndex = 0;
 	int videoEssayAudienceIndex = 0;
@@ -871,7 +871,7 @@ private:
 	float citationElapsedMs = 0.0f;
 	std::vector<ofxGgmlCitationItem> citationResults;
 	bool citationUseCrawler = false;
-	int citationMaxResults = 5;
+	int citationMaxResults = 100;
 
 	// -- script source (local folder / GitHub) --
 	ofxGgmlScriptSource scriptSource;
@@ -921,6 +921,8 @@ private:
 	bool scriptAssistantApprovalPending = false;
 	bool scriptAssistantApprovalDecisionReady = false;
 	bool scriptAssistantApprovalDecisionApproved = false;
+	uint64_t scriptAssistantApprovalRequestId = 0;
+	uint64_t scriptAssistantApprovalDecisionRequestId = 0;
 	ofxGgmlCodeAssistantToolCall scriptAssistantPendingApprovalToolCall;
 	std::vector<ofxGgmlCodeAssistantCommandSuggestion> cachedScriptVerificationCommands;
 	uint64_t cachedScriptVerificationGeneration = 0;

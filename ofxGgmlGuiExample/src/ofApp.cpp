@@ -3665,6 +3665,33 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			pendingApprovalToolCall = scriptAssistantPendingApprovalToolCall;
 		}
 	}
+	const auto submitPendingToolApproval = [&](bool approved) {
+		std::string toolName;
+		uint64_t requestId = 0;
+		{
+			std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
+			if (!scriptAssistantApprovalPending ||
+				scriptAssistantApprovalDecisionReady) {
+				return;
+			}
+			requestId = scriptAssistantApprovalRequestId;
+			toolName = scriptAssistantPendingApprovalToolCall.toolName;
+			scriptAssistantApprovalDecisionApproved = approved;
+			scriptAssistantApprovalDecisionReady = true;
+			scriptAssistantApprovalDecisionRequestId = requestId;
+			scriptAssistantApprovalPending = false;
+		}
+		{
+			std::lock_guard<std::mutex> streamLock(streamMutex);
+			streamingOutput =
+				(approved ? "Approved tool request" : "Denied tool request") +
+				(toolName.empty() ? std::string(".") : ": " + toolName + ".");
+		}
+		generatingStatus = approved
+			? "Running approved tool request..."
+			: "Skipping denied tool request...";
+		scriptAssistantApprovalCv.notify_all();
+	};
 	if (hasPendingApproval) {
 		ImGui::Spacing();
 		ImGui::TextColored(
@@ -3686,21 +3713,11 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			ImGui::EndChild();
 		}
 		if (ImGui::Button("Approve Tool", ImVec2(120, 0))) {
-			{
-				std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
-				scriptAssistantApprovalDecisionApproved = true;
-				scriptAssistantApprovalDecisionReady = true;
-			}
-			scriptAssistantApprovalCv.notify_all();
+			submitPendingToolApproval(true);
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Deny Tool", ImVec2(120, 0))) {
-			{
-				std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
-				scriptAssistantApprovalDecisionApproved = false;
-				scriptAssistantApprovalDecisionReady = true;
-			}
-			scriptAssistantApprovalCv.notify_all();
+			submitPendingToolApproval(false);
 		}
 	}
 
@@ -3757,24 +3774,14 @@ if (sourceType != ofxGgmlScriptSourceType::None && !scriptSourceFiles.empty()) {
 			"Allow the currently proposed tool call.",
 			true,
 			[&]() {
-				{
-					std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
-					scriptAssistantApprovalDecisionApproved = true;
-					scriptAssistantApprovalDecisionReady = true;
-				}
-				scriptAssistantApprovalCv.notify_all();
+				submitPendingToolApproval(true);
 			});
 		drawIntentButton(
 			"Deny",
 			"Reject the currently proposed tool call.",
 			true,
 			[&]() {
-				{
-					std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
-					scriptAssistantApprovalDecisionApproved = false;
-					scriptAssistantApprovalDecisionReady = true;
-				}
-				scriptAssistantApprovalCv.notify_all();
+				submitPendingToolApproval(false);
 			});
 		ImGui::TextDisabled("Pending tool approval comes first.");
 	} else if (!hasWorkspaceSource) {

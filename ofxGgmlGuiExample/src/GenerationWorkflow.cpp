@@ -104,6 +104,59 @@ std::string summarizeStructuredScriptResult(
 	return trim(out.str());
 }
 
+bool hasApprovalControlledToolCall(
+	const std::vector<ofxGgmlCodeAssistantToolCall> & toolCalls) {
+	return std::any_of(
+		toolCalls.begin(),
+		toolCalls.end(),
+		[](const ofxGgmlCodeAssistantToolCall & toolCall) {
+			return toolCall.requiresApproval;
+		});
+}
+
+std::string buildScriptToolExecutionSummary(
+	const ofxGgmlCodingAgentResult & result) {
+	if (result.readOnly) {
+		return {};
+	}
+
+	const bool hasExecutionDetails =
+		hasApprovalControlledToolCall(result.assistantResult.proposedToolCalls) ||
+		result.appliedChanges ||
+		!result.applyResult.messages.empty() ||
+		result.verificationAttempted ||
+		!trim(result.verificationResult.summary).empty();
+	if (!hasExecutionDetails) {
+		return {};
+	}
+
+	std::ostringstream out;
+	out << "Tool execution\n";
+	if (!trim(result.summary).empty()) {
+		out << trim(result.summary) << "\n";
+	}
+	if (!result.applyResult.touchedFiles.empty()) {
+		out << "Touched files: ";
+		for (size_t i = 0; i < result.applyResult.touchedFiles.size(); ++i) {
+			if (i > 0) {
+				out << ", ";
+			}
+			out << result.applyResult.touchedFiles[i];
+		}
+		out << "\n";
+	}
+	for (const auto & message : result.applyResult.messages) {
+		const std::string trimmed = trim(message);
+		if (!trimmed.empty()) {
+			out << trimmed << "\n";
+		}
+	}
+	if (!trim(result.verificationResult.summary).empty()) {
+		out << trim(result.verificationResult.summary) << "\n";
+	}
+	return trim(out.str());
+}
+
 } // namespace
 
 ofApp::InferenceModePromptSnapshot ofApp::makeInferenceModePromptSnapshot() const {
@@ -323,6 +376,7 @@ void ofApp::runScriptAssistantRequest(
 		scriptAssistantApprovalPending = false;
 		scriptAssistantApprovalDecisionReady = false;
 		scriptAssistantApprovalDecisionApproved = false;
+		scriptAssistantApprovalDecisionRequestId = 0;
 		scriptAssistantPendingApprovalToolCall = {};
 	}
 
@@ -475,13 +529,16 @@ void ofApp::runScriptAssistantRequest(
 				};
 				auto approvalCallback =
 					[&](const ofxGgmlCodeAssistantToolCall & toolCall) -> bool {
+					uint64_t requestId = 0;
 					{
 						std::lock_guard<std::mutex> approvalLock(
 							scriptAssistantApprovalMutex);
+						requestId = ++scriptAssistantApprovalRequestId;
 						scriptAssistantPendingApprovalToolCall = toolCall;
 						scriptAssistantApprovalPending = true;
 						scriptAssistantApprovalDecisionReady = false;
 						scriptAssistantApprovalDecisionApproved = false;
+						scriptAssistantApprovalDecisionRequestId = 0;
 					}
 					scriptAssistantApprovalCv.notify_all();
 
@@ -491,15 +548,18 @@ void ofApp::runScriptAssistantRequest(
 						approvalLock,
 						[&]() {
 							return cancelRequested.load() ||
-								scriptAssistantApprovalDecisionReady;
+								(scriptAssistantApprovalDecisionReady &&
+								 scriptAssistantApprovalDecisionRequestId == requestId);
 						});
 
 					const bool approved = !cancelRequested.load() &&
 						scriptAssistantApprovalDecisionReady &&
+						scriptAssistantApprovalDecisionRequestId == requestId &&
 						scriptAssistantApprovalDecisionApproved;
 					scriptAssistantApprovalPending = false;
 					scriptAssistantApprovalDecisionReady = false;
 					scriptAssistantApprovalDecisionApproved = false;
+					scriptAssistantApprovalDecisionRequestId = 0;
 					scriptAssistantPendingApprovalToolCall = {};
 					return approved;
 				};
@@ -531,8 +591,10 @@ void ofApp::runScriptAssistantRequest(
 						? ofxGgmlCodingAgentMode::Plan
 						: ofxGgmlCodingAgentMode::Build;
 				agentSettings.inferenceSettings = inferenceSettings;
-				agentSettings.autoApply = false;
-				agentSettings.autoVerify = false;
+				agentSettings.autoApply =
+					(agentSettings.mode == ofxGgmlCodingAgentMode::Build);
+				agentSettings.autoVerify =
+					(agentSettings.mode == ofxGgmlCodingAgentMode::Build);
 				agentSettings.requireStructuredResult = true;
 				agentSettings.preferUnifiedDiff =
 					(agentSettings.mode == ofxGgmlCodingAgentMode::Build);
@@ -575,6 +637,17 @@ void ofApp::runScriptAssistantRequest(
 						result = "[Error] " + assistantError;
 					}
 				}
+				if (!cancelRequested.load() &&
+					agentResult.assistantResult.inference.success) {
+					const std::string toolExecutionSummary =
+						buildScriptToolExecutionSummary(agentResult);
+					if (!toolExecutionSummary.empty()) {
+						if (!trim(result).empty()) {
+							result += "\n\n";
+						}
+						result += toolExecutionSummary;
+					}
+				}
 
 				const bool likelyCutoff =
 					isLikelyCutoffOutput(result, static_cast<int>(AiMode::Script));
@@ -606,6 +679,7 @@ void ofApp::runScriptAssistantRequest(
 					scriptAssistantApprovalPending = false;
 					scriptAssistantApprovalDecisionReady = false;
 					scriptAssistantApprovalDecisionApproved = false;
+					scriptAssistantApprovalDecisionRequestId = 0;
 					scriptAssistantPendingApprovalToolCall = {};
 				}
 				scriptAssistantApprovalCv.notify_all();
@@ -623,10 +697,11 @@ void ofApp::runScriptAssistantRequest(
 				pendingScriptAssistantToolCalls.clear();
 				{
 					std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
-					scriptAssistantApprovalPending = false;
-					scriptAssistantApprovalDecisionReady = false;
-					scriptAssistantApprovalDecisionApproved = false;
-					scriptAssistantPendingApprovalToolCall = {};
+						scriptAssistantApprovalPending = false;
+						scriptAssistantApprovalDecisionReady = false;
+						scriptAssistantApprovalDecisionApproved = false;
+						scriptAssistantApprovalDecisionRequestId = 0;
+						scriptAssistantPendingApprovalToolCall = {};
 				}
 				scriptAssistantApprovalCv.notify_all();
 			} catch (...) {
@@ -640,10 +715,11 @@ void ofApp::runScriptAssistantRequest(
 				pendingScriptAssistantToolCalls.clear();
 				{
 					std::lock_guard<std::mutex> approvalLock(scriptAssistantApprovalMutex);
-					scriptAssistantApprovalPending = false;
-					scriptAssistantApprovalDecisionReady = false;
-					scriptAssistantApprovalDecisionApproved = false;
-					scriptAssistantPendingApprovalToolCall = {};
+						scriptAssistantApprovalPending = false;
+						scriptAssistantApprovalDecisionReady = false;
+						scriptAssistantApprovalDecisionApproved = false;
+						scriptAssistantApprovalDecisionRequestId = 0;
+						scriptAssistantPendingApprovalToolCall = {};
 				}
 				scriptAssistantApprovalCv.notify_all();
 			}

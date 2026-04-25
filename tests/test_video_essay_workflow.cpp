@@ -20,6 +20,22 @@ TEST_CASE("Video essay workflow parses markdown sections", "[video_essay]") {
 	REQUIRE(sections[1].estimatedDurationSeconds > 1.0);
 }
 
+TEST_CASE("Video essay workflow only captures exact source references", "[video_essay]") {
+	const std::string script =
+		"## 2024 Overview\n"
+		"Numbers in the topic should stay plain text, even when followed by bracketed notes like "
+		"[Source 2024 data].\n"
+		"Only exact citations such as [Source 2] should be collected.\n";
+
+	const auto sections =
+		ofxGgmlVideoEssayWorkflow::parseSectionsFromScript(script, 60.0);
+
+	REQUIRE(sections.size() == 1);
+	REQUIRE(sections[0].title == "2024 Overview");
+	REQUIRE(sections[0].sourceIndices.size() == 1);
+	REQUIRE(sections[0].sourceIndices[0] == 2);
+}
+
 TEST_CASE("Video essay workflow builds sequential voice cues and SRT", "[video_essay]") {
 	std::vector<ofxGgmlVideoEssaySection> sections;
 	sections.push_back({

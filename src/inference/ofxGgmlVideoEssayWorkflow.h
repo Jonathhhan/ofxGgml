@@ -10,7 +10,7 @@
 struct ofxGgmlVideoEssayRequest {
 	std::string modelPath;
 	std::string topic;
-	size_t maxCitations = 5;
+	size_t maxCitations = 100;
 	bool useCrawler = false;
 	ofxGgmlWebCrawlerRequest crawlerRequest;
 	std::vector<std::string> sourceUrls;
