@@ -25,6 +25,10 @@ common:
 	ADDON_INCLUDES += src
 	ADDON_INCLUDES += libs/ggml/include
 	ADDON_INCLUDES += libs/libxml2/include
+	# stable-diffusion.cpp requires GGML_MAX_NAME >= 128 when using this
+	# addon as a system GGML provider. Keep consumers ABI-compatible with
+	# the libraries produced by scripts/build-ggml.sh.
+	ADDON_CFLAGS += -DGGML_MAX_NAME=128
 	# Exclude bundled ggml source from the oF build - it is compiled
 	# separately via CMake (scripts/build-ggml.sh).
 	ADDON_SOURCES_EXCLUDE += build/%

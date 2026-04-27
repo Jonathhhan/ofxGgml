@@ -1,6 +1,7 @@
 param(
     [string]$Ref = "v2.13.5",
     [string]$RepositoryUrl = "https://gitlab.gnome.org/GNOME/libxml2.git",
+    [string]$FallbackRepositoryUrl = "https://github.com/GNOME/libxml2.git",
     [string]$SourceDir = "",
     [string]$BuildDir = "",
     [string]$InstallDir = "",
@@ -33,18 +34,28 @@ function Get-CommandPathOrNull {
 function Invoke-LoggedCommand {
     param(
         [string]$Executable,
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [switch]$AllowFailure
     )
 
     if ($DryRun) {
         Write-Host "$Executable $($Arguments -join ' ')"
+        if ($AllowFailure) {
+            return 0
+        }
         return
     }
 
     & $Executable @Arguments | Out-Host
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
+        if ($AllowFailure) {
+            return $exitCode
+        }
         throw "Command failed with exit code ${exitCode}: $Executable $($Arguments -join ' ')"
+    }
+    if ($AllowFailure) {
+        return 0
     }
 }
 
@@ -74,21 +85,69 @@ function Remove-DirectoryIfPresent {
     Remove-Item -LiteralPath $Path -Recurse -Force
 }
 
+function Get-Libxml2RepositoryUrls {
+    $urls = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($RepositoryUrl)) {
+        $urls.Add($RepositoryUrl)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($FallbackRepositoryUrl) -and -not $urls.Contains($FallbackRepositoryUrl)) {
+        $urls.Add($FallbackRepositoryUrl)
+    }
+    return $urls
+}
+
+function Clone-Libxml2Repository {
+    param([string]$Destination)
+
+    foreach ($url in (Get-Libxml2RepositoryUrls)) {
+        Write-Host ("    Trying {0}" -f $url)
+        $exitCode = Invoke-LoggedCommand $git @(
+            'clone',
+            '--depth', '1',
+            $url,
+            $Destination
+        ) -AllowFailure
+
+        if ($exitCode -eq 0) {
+            return
+        }
+
+        Remove-DirectoryIfPresent $Destination
+    }
+
+    throw "Failed to clone libxml2 from $RepositoryUrl or $FallbackRepositoryUrl."
+}
+
+function Fetch-Libxml2Repository {
+    param([string]$RepositoryRoot)
+
+    foreach ($url in (Get-Libxml2RepositoryUrls)) {
+        Invoke-LoggedCommand $git @('-C', $RepositoryRoot, 'remote', 'set-url', 'origin', $url)
+        $exitCode = Invoke-LoggedCommand $git @('-C', $RepositoryRoot, 'fetch', 'origin', '--tags', '--force') -AllowFailure
+        if ($exitCode -eq 0) {
+            return
+        }
+    }
+
+    throw "Failed to fetch libxml2 from $RepositoryUrl or $FallbackRepositoryUrl."
+}
+
 function Copy-DirectoryContents {
     param(
         [string]$Source,
         [string]$Destination
     )
 
+    if ($DryRun) {
+        Write-Host "copy $Source\* -> $Destination"
+        return
+    }
+
     if (-not (Test-Path -LiteralPath $Source)) {
         throw "Source directory was not found: $Source"
     }
 
     Ensure-Directory $Destination
-    if ($DryRun) {
-        Write-Host "copy $Source\* -> $Destination"
-        return
-    }
 
     Copy-Item -Path (Join-Path $Source '*') -Destination $Destination -Recurse -Force
 }
@@ -99,6 +158,11 @@ function Copy-FileIfPresent {
         [string]$Destination
     )
 
+    if ($DryRun) {
+        Write-Host "copy $Source -> $Destination"
+        return
+    }
+
     if (-not (Test-Path -LiteralPath $Source)) {
         throw "Required file was not found: $Source"
     }
@@ -106,11 +170,6 @@ function Copy-FileIfPresent {
     $parent = Split-Path -Parent $Destination
     if (-not [string]::IsNullOrWhiteSpace($parent)) {
         Ensure-Directory $parent
-    }
-
-    if ($DryRun) {
-        Write-Host "copy $Source -> $Destination"
-        return
     }
 
     Copy-Item -LiteralPath $Source -Destination $Destination -Force
@@ -167,15 +226,10 @@ if ($Clean) {
 
 if (-not (Test-Path -LiteralPath $SourceDir)) {
     Ensure-Directory (Split-Path -Parent $SourceDir)
-    Invoke-LoggedCommand $git @(
-        'clone',
-        '--depth', '1',
-        $RepositoryUrl,
-        $SourceDir
-    )
+    Clone-Libxml2Repository -Destination $SourceDir
 }
 
-Invoke-LoggedCommand $git @('-C', $SourceDir, 'fetch', 'origin', '--tags', '--force')
+Fetch-Libxml2Repository -RepositoryRoot $SourceDir
 Invoke-LoggedCommand $git @('-C', $SourceDir, 'checkout', '--force', $Ref)
 
 Write-Step "Configuring libxml2"
