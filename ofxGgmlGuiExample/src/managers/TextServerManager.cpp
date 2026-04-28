@@ -5,12 +5,42 @@
 #include "utils/ImGuiHelpers.h"
 #include "core/ofxGgmlWindowsUtf8.h"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
+#include <string>
 #include <vector>
 
 #ifndef _WIN32
 #include <unistd.h>
 #endif
+
+namespace {
+
+std::string lowerAscii(std::string value) {
+	std::transform(value.begin(), value.end(), value.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return value;
+}
+
+bool isJanV1ModelPath(const std::string & modelPath) {
+	const std::string filename =
+		lowerAscii(std::filesystem::path(modelPath).filename().string());
+	return filename.find("jan-v1") != std::string::npos ||
+		filename.find("jan_v1") != std::string::npos;
+}
+
+void appendJanV1ServerFlagsIfNeeded(
+	const std::string & modelPath,
+	std::vector<std::string> & args) {
+	if (!isJanV1ModelPath(modelPath)) {
+		return;
+	}
+	args.emplace_back("--jinja");
+	args.emplace_back("--no-context-shift");
+}
+
+} // namespace
 
 TextServerManager::TextServerManager() {
 }
@@ -71,6 +101,7 @@ void TextServerManager::startLocalServer(
 		args.emplace_back("-c");
 		args.emplace_back(ofToString(contextSize));
 	}
+	appendJanV1ServerFlagsIfNeeded(modelPath, args);
 
 	std::string cmdLine;
 	for (size_t i = 0; i < args.size(); ++i) {
@@ -140,6 +171,7 @@ void TextServerManager::startLocalServer(
 		args.emplace_back("-c");
 		args.emplace_back(ofToString(contextSize));
 	}
+	appendJanV1ServerFlagsIfNeeded(modelPath, args);
 	pid_t pid = fork();
 	if (pid == 0) {
 		chdir(std::filesystem::path(serverExe).parent_path().string().c_str());

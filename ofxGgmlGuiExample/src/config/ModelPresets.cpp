@@ -42,6 +42,13 @@ void loadModelPresets(
 				"https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
 				"Alibaba Qwen2.5-Coder — stronger local repo review and patch planning",
 				"~4.7 GB", "repo review, larger code edits, architecture analysis"
+			},
+			{
+				"Jan v1 4B Research Q4_K_M",
+				"Jan-v1-4B-Q4_K_M.gguf",
+				"https://huggingface.co/janhq/Jan-v1-4B-GGUF/resolve/main/Jan-v1-4B-Q4_K_M.gguf",
+				"Jan v1 4B - Qwen3-based research model tuned for search and tool use",
+				"~2.5 GB", "web search, citation research, tool-using local assistant"
 			}
 		};
 		// Match the CLI defaults for most modes, but prefer a stronger coder model for Script.
@@ -255,6 +262,12 @@ void loadPromptTemplates(std::vector<PromptTemplate> & promptTemplates) {
 		"Data Analyst",
 		"You are a data analysis expert. Help interpret data, suggest statistical "
 		"methods, write queries, and explain results in plain language."
+	});
+	promptTemplates.push_back({
+		"Research Assistant",
+		"You are a careful web research assistant. Prefer current source-backed "
+		"evidence, separate facts from inference, cite source labels when available, "
+		"and say when the provided material is insufficient."
 	});
 	promptTemplates.push_back({
 		"System Architect",

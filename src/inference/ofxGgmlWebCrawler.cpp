@@ -1222,6 +1222,21 @@ std::string nodeNameLower(xmlNodePtr node) {
 }
 
 #if OFXGGML_HAS_LIBXML2
+struct NativeParsedPage {
+	bool success = false;
+	std::string title;
+	std::string markdown;
+	std::vector<std::string> links;
+	std::string error;
+	std::string parserName;
+};
+
+bool shouldSkipLibXmlSubtree(const std::string & tag);
+std::string formatParsedMarkdown(
+	const std::string & sourceUrl,
+	const std::string & title,
+	const std::string & body);
+
 xmlXPathObjectPtr evaluateXPath(
 	const LibXml2Api & api,
 	xmlDocPtr doc,
@@ -1325,6 +1340,45 @@ bool hasMainLikeRoleOrId(
 	return id == "content" || id == "main" || id == "article";
 }
 
+std::string combinedLibXmlNodeHints(
+	const LibXml2Api & api,
+	xmlNodePtr node) {
+	return toLowerCopy(
+		xmlNodeProperty(api, node, "id") + " " +
+		xmlNodeProperty(api, node, "class") + " " +
+		xmlNodeProperty(api, node, "role"));
+}
+
+bool containsAnyHint(
+	const std::string & hints,
+	std::initializer_list<const char *> needles) {
+	for (const char * needle : needles) {
+		if (hints.find(needle) != std::string::npos) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool hasGoodReadabilityHint(
+	const LibXml2Api & api,
+	xmlNodePtr node) {
+	const std::string hints = combinedLibXmlNodeHints(api, node);
+	return containsAnyHint(
+		hints,
+		{ "article", "content", "entry", "main", "post", "story", "body" });
+}
+
+bool hasBadReadabilityHint(
+	const LibXml2Api & api,
+	xmlNodePtr node) {
+	const std::string hints = combinedLibXmlNodeHints(api, node);
+	return containsAnyHint(
+		hints,
+		{ "banner", "comment", "cookie", "footer", "header", "menu",
+		  "modal", "nav", "promo", "related", "share", "sidebar", "social" });
+}
+
 xmlNodePtr findFirstMainLikeNode(
 	const LibXml2Api & api,
 	xmlNodePtr node) {
@@ -1377,6 +1431,149 @@ std::string extractLibXmlTitle(
 		}
 	}
 	return {};
+}
+
+struct ReadabilityCandidateScore {
+	int blockCount = 0;
+	size_t textChars = 0;
+	size_t commaCount = 0;
+};
+
+void accumulateLibXmlReadabilityScore(
+	const LibXml2Api & api,
+	xmlNodePtr node,
+	ReadabilityCandidateScore & score) {
+	for (xmlNodePtr current = node; current; current = current->next) {
+		if (current->type != XML_ELEMENT_NODE) {
+			if (current->children) {
+				accumulateLibXmlReadabilityScore(api, current->children, score);
+			}
+			continue;
+		}
+
+		const std::string tag = nodeNameLower(current);
+		if (shouldSkipLibXmlSubtree(tag) || hasBadReadabilityHint(api, current)) {
+			continue;
+		}
+
+		if (tag == "p" ||
+			tag == "li" ||
+			tag == "blockquote" ||
+			tag == "pre") {
+			const std::string text = xmlNodeText(api, current);
+			if (text.size() >= 40) {
+				++score.blockCount;
+				score.textChars += text.size();
+				score.commaCount +=
+					static_cast<size_t>(std::count(text.begin(), text.end(), ','));
+			}
+		}
+
+		if (current->children) {
+			accumulateLibXmlReadabilityScore(api, current->children, score);
+		}
+	}
+}
+
+double scoreLibXmlReadableContainer(
+	const LibXml2Api & api,
+	xmlNodePtr node) {
+	if (!node || node->type != XML_ELEMENT_NODE) {
+		return 0.0;
+	}
+
+	const std::string tag = nodeNameLower(node);
+	if (shouldSkipLibXmlSubtree(tag) || hasBadReadabilityHint(api, node)) {
+		return 0.0;
+	}
+	if (tag != "article" &&
+		tag != "main" &&
+		tag != "section" &&
+		tag != "div" &&
+		tag != "body") {
+		return 0.0;
+	}
+
+	ReadabilityCandidateScore score;
+	accumulateLibXmlReadabilityScore(api, node->children, score);
+	if (score.blockCount == 0 || score.textChars < 160) {
+		return 0.0;
+	}
+
+	double weighted =
+		static_cast<double>(score.textChars) +
+		static_cast<double>(score.blockCount * 60) +
+		static_cast<double>(score.commaCount * 8);
+	if (tag == "article" || tag == "main") {
+		weighted *= 1.35;
+	}
+	if (hasGoodReadabilityHint(api, node) || hasMainLikeRoleOrId(api, node)) {
+		weighted *= 1.25;
+	}
+	return weighted;
+}
+
+void findBestLibXmlReadableContainer(
+	const LibXml2Api & api,
+	xmlNodePtr node,
+	xmlNodePtr & bestNode,
+	double & bestScore) {
+	for (xmlNodePtr current = node; current; current = current->next) {
+		if (current->type != XML_ELEMENT_NODE) {
+			if (current->children) {
+				findBestLibXmlReadableContainer(
+					api,
+					current->children,
+					bestNode,
+					bestScore);
+			}
+			continue;
+		}
+
+		const std::string tag = nodeNameLower(current);
+		if (shouldSkipLibXmlSubtree(tag)) {
+			continue;
+		}
+
+		const double score = scoreLibXmlReadableContainer(api, current);
+		if (score > bestScore) {
+			bestScore = score;
+			bestNode = current;
+		}
+
+		if (current->children) {
+			findBestLibXmlReadableContainer(
+				api,
+				current->children,
+				bestNode,
+				bestScore);
+		}
+	}
+}
+
+xmlNodePtr selectLibXmlReadableRoot(
+	const LibXml2Api & api,
+	xmlNodePtr root) {
+	if (!root) {
+		return nullptr;
+	}
+	if (xmlNodePtr article = findFirstElementByTagName(root, { "article" })) {
+		return article;
+	}
+	if (xmlNodePtr mainLike = findFirstMainLikeNode(api, root)) {
+		return mainLike;
+	}
+
+	xmlNodePtr bestNode = nullptr;
+	double bestScore = 0.0;
+	findBestLibXmlReadableContainer(api, root, bestNode, bestScore);
+	if (bestNode && bestScore > 0.0) {
+		return bestNode;
+	}
+	if (xmlNodePtr body = findFirstElementByTagName(root, { "body" })) {
+		return body;
+	}
+	return root;
 }
 
 bool shouldSkipLibXmlSubtree(const std::string & tag) {
@@ -1496,6 +1693,76 @@ void collectLibXmlLinks(
 				links);
 		}
 	}
+}
+
+NativeParsedPage parseHtmlToMarkdownWithLibXml(
+	const std::string & sourceUrl,
+	const std::string & htmlText) {
+	NativeParsedPage parsed;
+	const LibXml2Api & api = getLibXml2Api();
+	if (!api.available) {
+		parsed.error = api.loadError.empty()
+			? "libxml2 runtime is unavailable."
+			: api.loadError;
+		return parsed;
+	}
+	if (!api.htmlReadMemoryFn) {
+		parsed.error = "libxml2 runtime does not expose htmlReadMemory.";
+		return parsed;
+	}
+	if (htmlText.empty() || htmlText.size() > 5 * 1024 * 1024) {
+		parsed.error = htmlText.empty()
+			? "HTML input was empty."
+			: "HTML input was too large for native readability extraction.";
+		return parsed;
+	}
+
+	xmlDocPtr doc = api.htmlReadMemoryFn(
+		htmlText.data(),
+		static_cast<int>(htmlText.size()),
+		sourceUrl.empty() ? nullptr : sourceUrl.c_str(),
+		nullptr,
+		kOfxGgmlXmlParseRecover |
+			kOfxGgmlXmlParseNoError |
+			kOfxGgmlXmlParseNoWarning |
+			kOfxGgmlXmlParseNoNet);
+	if (!doc) {
+		parsed.error = "libxml2 could not parse the HTML document.";
+		return parsed;
+	}
+
+	xmlNodePtr root = api.xmlDocGetRootElementFn(doc);
+	if (!root) {
+		api.xmlFreeDocFn(doc);
+		parsed.error = "libxml2 parsed the document without a root element.";
+		return parsed;
+	}
+
+	parsed.title = extractLibXmlTitle(api, root);
+	std::unordered_set<std::string> seenLinks;
+	collectLibXmlLinks(api, root, sourceUrl, seenLinks, parsed.links);
+
+	xmlNodePtr readableRoot = selectLibXmlReadableRoot(api, root);
+	std::unordered_set<std::string> seenBlocks;
+	std::ostringstream bodyMarkdown;
+	collectLibXmlReadableBlocks(
+		api,
+		readableRoot ? readableRoot : root,
+		seenBlocks,
+		bodyMarkdown);
+	parsed.markdown = formatParsedMarkdown(
+		sourceUrl,
+		parsed.title,
+		bodyMarkdown.str());
+	api.xmlFreeDocFn(doc);
+
+	parsed.success = !parsed.markdown.empty();
+	if (parsed.success) {
+		parsed.parserName = "libxml2 readability HTML";
+		return parsed;
+	}
+	parsed.error = "libxml2 parsed the HTML, but no readable article text was extracted.";
+	return parsed;
 }
 #endif
 
@@ -1749,15 +2016,6 @@ std::string resolveRelativeUrl(
 }
 
 #if OFXGGML_HAS_LIBXML2
-struct NativeParsedPage {
-	bool success = false;
-	std::string title;
-	std::string markdown;
-	std::vector<std::string> links;
-	std::string error;
-	std::string parserName;
-};
-
 std::string formatParsedMarkdown(
 	const std::string & sourceUrl,
 	const std::string & title,
@@ -1784,6 +2042,11 @@ NativeParsedPage parseHtmlToMarkdown(
 	const std::string & sourceUrl,
 	const std::string & htmlText) {
 	NativeParsedPage parsed;
+	NativeParsedPage readable = parseHtmlToMarkdownWithLibXml(sourceUrl, htmlText);
+	if (readable.success) {
+		return readable;
+	}
+
 	const NativeHtmlNormalizationResult normalized =
 		normalizeHtmlWithXmllint(htmlText);
 	if (normalized.success) {
@@ -1819,7 +2082,8 @@ NativeParsedPage parseHtmlToMarkdown(
 	if (parsed.success) {
 		parsed.parserName = "HTML text fallback";
 		if (!parsed.error.empty()) {
-			parsed.error += " Falling back to text extraction.";
+			parsed.error += " Readability extraction failed: " +
+				readable.error + " Falling back to text extraction.";
 		}
 		return parsed;
 	}

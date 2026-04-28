@@ -3,6 +3,7 @@
 #include "utils/ImGuiHelpers.h"
 #include "utils/PathHelpers.h"
 
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <unordered_set>
@@ -21,6 +22,33 @@ std::string trimCopyLocal(const std::string & text) {
 		--end;
 	}
 	return text.substr(start, end - start);
+}
+
+std::string lowerAsciiLocal(std::string value) {
+	std::transform(value.begin(), value.end(), value.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return value;
+}
+
+bool isJanV1ModelPathLocal(const std::string & modelPath) {
+	const std::string filename =
+		lowerAsciiLocal(std::filesystem::path(modelPath).filename().string());
+	return filename.find("jan-v1") != std::string::npos ||
+		filename.find("jan_v1") != std::string::npos;
+}
+
+void applyJanV1ResearchDefaults(
+	const std::string & modelPath,
+	ofxGgmlInferenceSettings & settings) {
+	if (!isJanV1ModelPathLocal(modelPath)) {
+		return;
+	}
+	settings.maxTokens = std::max(settings.maxTokens, 2048);
+	settings.temperature = 0.6f;
+	settings.topP = 0.95f;
+	settings.topK = 20;
+	settings.minP = 0.0f;
+	settings.contextSize = std::max(settings.contextSize, 8192);
 }
 
 std::string parseUrlHostLocal(const std::string & rawUrl) {
@@ -81,6 +109,10 @@ void ofApp::drawCitationSearchSection(
 	ImGui::Text("Citation Research");
 	ImGui::TextDisabled(
 		"Extract source-backed quotes about a topic from loaded URLs, a crawler URL, or topic-only web search.");
+	if (isJanV1ModelPathLocal(getSelectedModelPath())) {
+		ImGui::TextDisabled(
+			"Jan v1 research preset active: using temp 0.6, top_p 0.95, top_k 20, min_p 0.0 for citation runs.");
+	}
 
 	if (hasDeferredCitationTopic) {
 		copyStringToBuffer(
@@ -361,6 +393,7 @@ void ofApp::runCitationSearch() {
 
 	const int maxCitations = std::clamp(citationMaxResults, 1, 100);
 	auto inferenceSettings = buildCurrentTextInferenceSettings(requestMode);
+	applyJanV1ResearchDefaults(modelPath, inferenceSettings);
 	if (!useServerBackend) {
 		inferenceSettings.useServerBackend = false;
 		inferenceSettings.serverUrl.clear();
