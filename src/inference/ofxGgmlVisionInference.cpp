@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <unordered_set>
 
 #ifdef _WIN32
 #include "core/ofxGgmlWindowsUtf8.h"
@@ -46,6 +47,77 @@ bool containsSmolVlm2Token(const std::string & text) {
 	const std::string lower = lowerAsciiCopy(text);
 	return lower.find("smolvlm2") != std::string::npos ||
 		lower.find("smol-vlm2") != std::string::npos;
+}
+
+std::string collapseRepeatedSentences(const std::string & text) {
+	std::string result;
+	std::unordered_set<std::string> seen;
+	std::string sentence;
+	auto flushSentence = [&]() {
+		std::string trimmed = trimCopy(sentence);
+		sentence.clear();
+		if (trimmed.empty()) {
+			return;
+		}
+		const std::string key = lowerAsciiCopy(trimmed);
+		if (!seen.insert(key).second) {
+			return;
+		}
+		if (!result.empty()) {
+			result.push_back(' ');
+		}
+		result += trimmed;
+	};
+
+	for (char ch : text) {
+		sentence.push_back(ch);
+		if (ch == '.' || ch == '!' || ch == '?' || ch == '\n') {
+			flushSentence();
+		}
+	}
+	flushSentence();
+	return result.empty() ? trimCopy(text) : result;
+}
+
+std::string cleanupVisionResponseText(const std::string & text) {
+	const std::string collapsed = collapseRepeatedSentences(text);
+	std::string result;
+	std::string sentence;
+	bool wroteAny = false;
+	for (char ch : collapsed) {
+		sentence.push_back(ch);
+		if (ch != '.' && ch != '!' && ch != '?' && ch != '\n') {
+			continue;
+		}
+
+		const std::string trimmed = trimCopy(sentence);
+		sentence.clear();
+		if (trimmed.empty()) {
+			continue;
+		}
+		const std::string lower = lowerAsciiCopy(trimmed);
+		const bool startsNegativeInventoryTail =
+			lower.find("does not contain any other") != std::string::npos ||
+			lower.find("no other objects") != std::string::npos ||
+			lower.find("no other scenes") != std::string::npos;
+		if (wroteAny && startsNegativeInventoryTail) {
+			break;
+		}
+		if (!result.empty()) {
+			result.push_back(' ');
+		}
+		result += trimmed;
+		wroteAny = true;
+	}
+
+	const std::string tail = trimCopy(sentence);
+	if (!tail.empty()) {
+		if (!result.empty()) {
+			result.push_back(' ');
+		}
+		result += tail;
+	}
+	return trimCopy(result.empty() ? collapsed : result);
 }
 
 bool isSmolVlm2Profile(const ofxGgmlVisionModelProfile & profile) {
@@ -951,6 +1023,7 @@ ofxGgmlVisionResult ofxGgmlVisionInference::runServerRequest(
 				result.text,
 				smolVlm2ServerPrompt(request));
 		}
+		result.text = cleanupVisionResponseText(result.text);
 		if (result.text.empty()) {
 			result.error = "vision server returned no assistant text";
 			return result;

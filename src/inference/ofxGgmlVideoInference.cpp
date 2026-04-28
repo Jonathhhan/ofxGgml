@@ -141,6 +141,12 @@ bool isCompactClassificationTask(ofxGgmlVideoTask task) {
 		task == ofxGgmlVideoTask::Emotion;
 }
 
+std::string lowerCopy(std::string text) {
+	std::transform(text.begin(), text.end(), text.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return text;
+}
+
 std::string collapseRepeatedSentences(const std::string & text) {
 	std::string result;
 	std::unordered_set<std::string> seen;
@@ -171,6 +177,115 @@ std::string collapseRepeatedSentences(const std::string & text) {
 	}
 	flushSentence();
 	return result.empty() ? trimCopy(text) : result;
+}
+
+std::vector<std::string> splitSentences(const std::string & text) {
+	std::vector<std::string> sentences;
+	std::string sentence;
+	for (char ch : text) {
+		sentence.push_back(ch);
+		if (ch == '.' || ch == '!' || ch == '?' || ch == '\n') {
+			const std::string trimmed = trimCopy(sentence);
+			if (!trimmed.empty()) {
+				sentences.push_back(trimmed);
+			}
+			sentence.clear();
+		}
+	}
+	const std::string trimmed = trimCopy(sentence);
+	if (!trimmed.empty()) {
+		sentences.push_back(trimmed);
+	}
+	return sentences;
+}
+
+std::string joinSentences(const std::vector<std::string> & sentences) {
+	std::string result;
+	for (const auto & sentence : sentences) {
+		if (trimCopy(sentence).empty()) {
+			continue;
+		}
+		if (!result.empty()) {
+			result.push_back(' ');
+		}
+		result += trimCopy(sentence);
+	}
+	return result;
+}
+
+int maxVideoResponseSentences(ofxGgmlVideoTask task) {
+	switch (task) {
+	case ofxGgmlVideoTask::Summarize: return 5;
+	case ofxGgmlVideoTask::Ask: return 4;
+	case ofxGgmlVideoTask::Action:
+	case ofxGgmlVideoTask::Emotion: return 4;
+	case ofxGgmlVideoTask::Ocr: return 0;
+	}
+	return 5;
+}
+
+int effectiveVideoMaxTokens(ofxGgmlVideoTask task, int requestedMaxTokens) {
+	switch (task) {
+	case ofxGgmlVideoTask::Action:
+	case ofxGgmlVideoTask::Emotion:
+		return std::min(std::max(32, requestedMaxTokens), 96);
+	case ofxGgmlVideoTask::Summarize:
+		return std::min(std::max(80, requestedMaxTokens), 192);
+	case ofxGgmlVideoTask::Ask:
+		return std::min(std::max(64, requestedMaxTokens), 192);
+	case ofxGgmlVideoTask::Ocr:
+		return requestedMaxTokens;
+	}
+	return requestedMaxTokens;
+}
+
+float effectiveVideoTemperature(ofxGgmlVideoTask task, float requestedTemperature) {
+	if (task == ofxGgmlVideoTask::Summarize ||
+		task == ofxGgmlVideoTask::Ask ||
+		isCompactClassificationTask(task)) {
+		return std::min(requestedTemperature, 0.15f);
+	}
+	return requestedTemperature;
+}
+
+std::string cleanupVideoResponseText(const std::string & text, ofxGgmlVideoTask task) {
+	if (task == ofxGgmlVideoTask::Ocr) {
+		return trimCopy(text);
+	}
+
+	std::vector<std::string> sentences = splitSentences(collapseRepeatedSentences(text));
+	if (sentences.empty()) {
+		return trimCopy(text);
+	}
+
+	std::vector<std::string> kept;
+	const int maxSentences = maxVideoResponseSentences(task);
+	int negativeInventoryCount = 0;
+	for (const auto & sentence : sentences) {
+		const std::string lower = lowerCopy(sentence);
+		const bool isNegativeInventory =
+			lower.find("does not contain") != std::string::npos ||
+			lower.find("no other objects") != std::string::npos ||
+			lower.find("no other scenes") != std::string::npos;
+		const bool isOtherInventory =
+			lower.find("does not contain any other") != std::string::npos ||
+			lower.find("besides the") != std::string::npos;
+
+		if (isNegativeInventory) {
+			++negativeInventoryCount;
+		}
+		if (!kept.empty() && (negativeInventoryCount > 1 || isOtherInventory)) {
+			break;
+		}
+
+		kept.push_back(sentence);
+		if (maxSentences > 0 && static_cast<int>(kept.size()) >= maxSentences) {
+			break;
+		}
+	}
+
+	const std::string cleaned = joinSentences(kept);
+	return cleaned.empty() ? trimCopy(text) : cleaned;
 }
 
 } // namespace
@@ -314,13 +429,20 @@ std::string ofxGgmlVideoInference::buildFrameAwarePrompt(
 	}
 	switch (request.task) {
 	case ofxGgmlVideoTask::Summarize:
-		prompt << "\nUse the frame order and timestamps to explain what changes over time. Prefer a professional summary with a brief timeline or bullet sequence when useful.";
+		prompt << "\nUse the frame order and timestamps to explain what changes over time."
+			<< " Return at most five concise sentences."
+			<< " Mention absent text only once if it matters."
+			<< " Do not list objects, sounds, scenes, or actions that are not visible."
+			<< " Stop after the complete summary.";
 		break;
 	case ofxGgmlVideoTask::Ocr:
 		prompt << "\nGroup extracted text by frame and timestamp. Ignore unreadable regions instead of inventing missing words.";
 		break;
 	case ofxGgmlVideoTask::Ask:
-		prompt << "\nAnswer from the sampled evidence only. If the question depends on unseen moments between frames, say so explicitly.";
+		prompt << "\nAnswer from the sampled evidence only in at most four concise sentences."
+			<< " If the question depends on unseen moments between frames, say so once."
+			<< " Do not list absent objects or scenes."
+			<< " Stop after the complete answer.";
 		break;
 	case ofxGgmlVideoTask::Action:
 		prompt << "\nReturn exactly four short lines:\n"
@@ -569,12 +691,8 @@ ofxGgmlVideoResult ofxGgmlVideoInference::runServerRequest(
 	visionRequest.prompt = buildFrameAwarePrompt(request, result.sampledFrames);
 	visionRequest.systemPrompt = normalized.systemPrompt;
 	visionRequest.responseLanguage = normalized.responseLanguage;
-	visionRequest.maxTokens = isCompactClassificationTask(request.task)
-		? std::min(std::max(32, request.maxTokens), 96)
-		: request.maxTokens;
-	visionRequest.temperature = isCompactClassificationTask(request.task)
-		? std::min(request.temperature, 0.15f)
-		: request.temperature;
+	visionRequest.maxTokens = effectiveVideoMaxTokens(request.task, request.maxTokens);
+	visionRequest.temperature = effectiveVideoTemperature(request.task, request.temperature);
 	visionRequest.images.reserve(result.sampledFrames.size());
 	for (const auto & frame : result.sampledFrames) {
 		visionRequest.images.push_back({
@@ -594,9 +712,7 @@ ofxGgmlVideoResult ofxGgmlVideoInference::runServerRequest(
 	}
 
 	result.success = true;
-	result.text = isCompactClassificationTask(request.task)
-		? collapseRepeatedSentences(result.visionResult.text)
-		: result.visionResult.text;
+	result.text = cleanupVideoResponseText(result.visionResult.text, request.task);
 	return result;
 }
 
