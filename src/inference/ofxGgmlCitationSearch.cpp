@@ -876,7 +876,37 @@ std::vector<ofxGgmlCitationItem> dedupeCitationItems(
 	std::vector<ofxGgmlCitationItem> deduped;
 	deduped.reserve(items.size());
 	std::unordered_set<std::string> seen;
+	std::unordered_map<std::string, size_t> perSourceCounts;
+	constexpr size_t kMaxCitationsPerSource = 4;
 	for (auto & item : items) {
+		const std::string sourceKey = !trimCopy(item.sourceUri).empty()
+			? trimCopy(item.sourceUri)
+			: ("source:" + std::to_string(item.sourceIndex));
+		if (perSourceCounts[sourceKey] >= kMaxCitationsPerSource) {
+			continue;
+		}
+		const std::string normalizedQuote = normalizeForExactQuoteMatch(item.quote);
+		bool overlapsExisting = false;
+		for (const auto & existing : deduped) {
+			const std::string existingSourceKey = !trimCopy(existing.sourceUri).empty()
+				? trimCopy(existing.sourceUri)
+				: ("source:" + std::to_string(existing.sourceIndex));
+			if (existingSourceKey != sourceKey) {
+				continue;
+			}
+			const std::string existingQuote =
+				normalizeForExactQuoteMatch(existing.quote);
+			if (!normalizedQuote.empty() &&
+				!existingQuote.empty() &&
+				(normalizedQuote.find(existingQuote) != std::string::npos ||
+				 existingQuote.find(normalizedQuote) != std::string::npos)) {
+				overlapsExisting = true;
+				break;
+			}
+		}
+		if (overlapsExisting) {
+			continue;
+		}
 		const std::string key = trimCopy(item.quote) + "\n---\n" + item.sourceUri;
 		if (key == "\n---\n") {
 			continue;
@@ -884,6 +914,7 @@ std::vector<ofxGgmlCitationItem> dedupeCitationItems(
 		if (!seen.insert(key).second) {
 			continue;
 		}
+		++perSourceCounts[sourceKey];
 		deduped.push_back(std::move(item));
 	}
 	return deduped;
@@ -1223,8 +1254,41 @@ std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 	std::vector<ofxGgmlCitationItem> citations;
 	citations.reserve(std::min(maxCitations, ranked.size()));
 	std::unordered_set<std::string> seen;
+	std::unordered_map<std::string, size_t> perSourceCounts;
+	const size_t maxPerSource = sources.size() <= 1
+		? maxCitations
+		: (sources.size() <= 3 ? 4 : 3);
 	for (const auto & candidate : ranked) {
 		if (candidate.item.confidenceScore < minimumConfidence) {
+			continue;
+		}
+		const std::string sourceKey = !trimCopy(candidate.item.sourceUri).empty()
+			? trimCopy(candidate.item.sourceUri)
+			: ("source:" + std::to_string(candidate.item.sourceIndex));
+		if (perSourceCounts[sourceKey] >= maxPerSource) {
+			continue;
+		}
+		const std::string normalizedQuote =
+			normalizeForExactQuoteMatch(candidate.item.quote);
+		bool overlapsExisting = false;
+		for (const auto & existing : citations) {
+			const std::string existingSourceKey = !trimCopy(existing.sourceUri).empty()
+				? trimCopy(existing.sourceUri)
+				: ("source:" + std::to_string(existing.sourceIndex));
+			if (existingSourceKey != sourceKey) {
+				continue;
+			}
+			const std::string existingQuote =
+				normalizeForExactQuoteMatch(existing.quote);
+			if (!normalizedQuote.empty() &&
+				!existingQuote.empty() &&
+				(normalizedQuote.find(existingQuote) != std::string::npos ||
+				 existingQuote.find(normalizedQuote) != std::string::npos)) {
+				overlapsExisting = true;
+				break;
+			}
+		}
+		if (overlapsExisting) {
 			continue;
 		}
 		const std::string key =
@@ -1232,6 +1296,7 @@ std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 		if (!seen.insert(key).second) {
 			continue;
 		}
+		++perSourceCounts[sourceKey];
 		citations.push_back(candidate.item);
 		if (citations.size() >= maxCitations) {
 			break;
@@ -1634,14 +1699,39 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 	} else {
 		const auto normalizedUrls = normalizeSourceUrls(request.sourceUrls);
 		if (normalizedUrls.empty()) {
-			auto realtimeSettings = makeRealtimeCitationSettings(request.sourceSettings);
+			std::vector<ofxGgmlPromptSource> sources;
+			if (request.useWebSearch) {
+				ofxGgmlWebSearchRequest webSearchRequest = request.webSearchRequest;
+				webSearchRequest.query = result.requestedTopic;
+				if (webSearchRequest.maxResults == 0) {
+					webSearchRequest.maxResults = request.sourceSettings.maxSources;
+				}
+				if (webSearchRequest.maxResults == 0) {
+					webSearchRequest.maxResults = 8;
+				}
+				webSearchRequest.maxReadablePages = std::min<size_t>(
+					std::max<size_t>(1, request.sourceSettings.maxSources),
+					std::max<size_t>(1, webSearchRequest.maxReadablePages));
+				result.webSearchResult = m_webSearch.search(webSearchRequest);
+				if (result.webSearchResult.success) {
+					sources = ofxGgmlWebSearch::toPromptSources(
+						result.webSearchResult,
+						request.sourceSettings);
+				}
+			}
+
 			auto queries = result.queryRewrite.queriesUsed;
 			if (queries.empty()) {
 				queries.push_back(result.requestedTopic);
 			}
-			auto sources = fetchRealtimeSourcesForQueries(queries, realtimeSettings);
 			if (sources.empty()) {
-				result.error = "No usable web sources were found for the citation topic.";
+				auto realtimeSettings = makeRealtimeCitationSettings(request.sourceSettings);
+				sources = fetchRealtimeSourcesForQueries(queries, realtimeSettings);
+			}
+			if (sources.empty()) {
+				result.error = result.webSearchResult.error.empty()
+					? std::string("No usable web sources were found for the citation topic.")
+					: result.webSearchResult.error;
 				result.elapsedMs = elapsedMsSince(start);
 				return result;
 			}
@@ -1662,7 +1752,9 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 				sources,
 				request.inferenceSettings,
 				request.sourceSettings);
-			result.backendName = "Realtime+Inference";
+			result.backendName = result.webSearchResult.success
+				? "WebSearch+Inference"
+				: "Realtime+Inference";
 		} else {
 			auto sources = ofxGgmlInferenceSourceInternals::fetchUrlSources(
 				normalizedUrls,

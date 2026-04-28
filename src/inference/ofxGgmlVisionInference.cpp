@@ -79,11 +79,40 @@ std::string collapseRepeatedSentences(const std::string & text) {
 	return result.empty() ? trimCopy(text) : result;
 }
 
-std::string cleanupVisionResponseText(const std::string & text) {
+bool startsWith(const std::string & text, const std::string & prefix) {
+	return text.rfind(prefix, 0) == 0;
+}
+
+bool isVisionRecapBoundary(const std::string & lowerSentence) {
+	return startsWith(lowerSentence, "to answer the question quickly") ||
+		startsWith(lowerSentence, "in summary") ||
+		startsWith(lowerSentence, "overall,") ||
+		startsWith(lowerSentence, "this professional summary") ||
+		startsWith(lowerSentence, "this summary") ||
+		lowerSentence.find("provides a clear and concise description") != std::string::npos ||
+		lowerSentence.find("making it easily digestible") != std::string::npos;
+}
+
+int maxVisionResponseSentences(ofxGgmlVisionTask task) {
+	switch (task) {
+	case ofxGgmlVisionTask::Describe: return 8;
+	case ofxGgmlVisionTask::Ask: return 6;
+	case ofxGgmlVisionTask::Ocr: return 0;
+	}
+	return 8;
+}
+
+std::string cleanupVisionResponseText(const std::string & text, ofxGgmlVisionTask task) {
+	if (task == ofxGgmlVisionTask::Ocr) {
+		return trimCopy(text);
+	}
+
 	const std::string collapsed = collapseRepeatedSentences(text);
 	std::string result;
 	std::string sentence;
 	bool wroteAny = false;
+	int sentenceCount = 0;
+	const int maxSentences = maxVisionResponseSentences(task);
 	for (char ch : collapsed) {
 		sentence.push_back(ch);
 		if (ch != '.' && ch != '!' && ch != '?' && ch != '\n') {
@@ -100,7 +129,7 @@ std::string cleanupVisionResponseText(const std::string & text) {
 			lower.find("does not contain any other") != std::string::npos ||
 			lower.find("no other objects") != std::string::npos ||
 			lower.find("no other scenes") != std::string::npos;
-		if (wroteAny && startsNegativeInventoryTail) {
+		if (wroteAny && (startsNegativeInventoryTail || isVisionRecapBoundary(lower))) {
 			break;
 		}
 		if (!result.empty()) {
@@ -108,10 +137,14 @@ std::string cleanupVisionResponseText(const std::string & text) {
 		}
 		result += trimmed;
 		wroteAny = true;
+		++sentenceCount;
+		if (maxSentences > 0 && sentenceCount >= maxSentences) {
+			break;
+		}
 	}
 
 	const std::string tail = trimCopy(sentence);
-	if (!tail.empty()) {
+	if (!tail.empty() && !isVisionRecapBoundary(lowerAsciiCopy(tail))) {
 		if (!result.empty()) {
 			result.push_back(' ');
 		}
@@ -544,11 +577,11 @@ const char * ofxGgmlVisionInference::taskLabel(ofxGgmlVisionTask task) {
 std::string ofxGgmlVisionInference::defaultPromptForTask(ofxGgmlVisionTask task) {
 	switch (task) {
 	case ofxGgmlVisionTask::Describe:
-		return "Describe the image clearly and concretely. Focus on the main subjects, visible text, layout, state, and notable details. Use short sections when that improves readability.";
+		return "Describe the image clearly and concretely in one concise paragraph. Focus on the main subjects, visible text, layout, state, and notable details. Do not add a recap or second summary.";
 	case ofxGgmlVisionTask::Ocr:
 		return "Extract all readable text from the image. Preserve useful line breaks, keep obvious headings together, and mark uncertain regions briefly instead of inventing characters.";
 	case ofxGgmlVisionTask::Ask:
-		return "Answer the user's question about the image. Cite visible evidence from the image when helpful.";
+		return "Answer the user's question about the image directly and concisely. Cite visible evidence from the image when helpful. Do not add a recap or second summary.";
 	}
 	return {};
 }
@@ -556,11 +589,11 @@ std::string ofxGgmlVisionInference::defaultPromptForTask(ofxGgmlVisionTask task)
 std::string ofxGgmlVisionInference::defaultSystemPromptForTask(ofxGgmlVisionTask task) {
 	switch (task) {
 	case ofxGgmlVisionTask::Describe:
-		return "You are a precise multimodal assistant. Describe only what is visually supported by the image and avoid speculation.";
+		return "You are a precise multimodal assistant. Describe only what is visually supported by the image, avoid speculation, and stop after the complete answer.";
 	case ofxGgmlVisionTask::Ocr:
 		return "You are an OCR assistant. Extract text faithfully from the image, preserve reading order when possible, and avoid inventing missing characters.";
 	case ofxGgmlVisionTask::Ask:
-		return "You are a grounded multimodal assistant. Answer using only information visible in the provided image and say when the image is insufficient.";
+		return "You are a grounded multimodal assistant. Answer using only information visible in the provided image, say when the image is insufficient, and stop after the complete answer.";
 	}
 	return {};
 }
@@ -1023,7 +1056,7 @@ ofxGgmlVisionResult ofxGgmlVisionInference::runServerRequest(
 				result.text,
 				smolVlm2ServerPrompt(request));
 		}
-		result.text = cleanupVisionResponseText(result.text);
+		result.text = cleanupVisionResponseText(result.text, request.task);
 		if (result.text.empty()) {
 			result.error = "vision server returned no assistant text";
 			return result;

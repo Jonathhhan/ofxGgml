@@ -3,6 +3,7 @@
 #include "inference/ofxGgmlInference.h"
 #include "inference/ofxGgmlRAGPipeline.h"
 #include "inference/ofxGgmlWebCrawler.h"
+#include "inference/ofxGgmlWebSearch.h"
 
 #include <string>
 #include <vector>
@@ -24,7 +25,9 @@ struct ofxGgmlCitationSearchRequest {
 	std::string topic;
 	size_t maxCitations = 100;
 	bool useCrawler = false;
+	bool useWebSearch = true;
 	ofxGgmlWebCrawlerRequest crawlerRequest;
+	ofxGgmlWebSearchRequest webSearchRequest;
 	std::vector<std::string> sourceUrls;
 	ofxGgmlInferenceSettings inferenceSettings;
 	ofxGgmlPromptSourceSettings sourceSettings;
@@ -85,6 +88,7 @@ struct ofxGgmlCitationSearchResult {
 	} queryRewrite;
 	std::vector<ofxGgmlCitationItem> citations;
 	std::vector<ofxGgmlPromptSource> sourcesUsed;
+	ofxGgmlWebSearchResult webSearchResult;
 	ofxGgmlWebCrawlerResult crawlerResult;
 	ofxGgmlRAGRetrievalResult retrieval;
 	float sourceDiversityScore = 0.0f;
@@ -122,4 +126,5 @@ public:
 private:
 	ofxGgmlInference m_inference;
 	ofxGgmlWebCrawler m_webCrawler;
+	ofxGgmlWebSearch m_webSearch;
 };
