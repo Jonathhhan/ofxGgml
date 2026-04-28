@@ -426,6 +426,23 @@ void ofApp::drawVisionPanel() {
 		}
 		if (profile.mayRequireMmproj) {
 			ImGui::TextDisabled("Note: some variants also need a matching mmproj file on the server side.");
+			if (profile.modelRepoHint == "ggml-org/SmolVLM2-500M-Video-Instruct-GGUF") {
+				const char * smolVlmMmprojFile =
+					"mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf";
+				const std::string smolVlmMmprojPath = suggestedModelPath("", smolVlmMmprojFile);
+				ImGui::TextDisabled("Expected projector: %s", smolVlmMmprojFile);
+				ImGui::TextDisabled(
+					pathExists(smolVlmMmprojPath)
+						? "SmolVLM2 projector is already present."
+						: "Download the SmolVLM2 projector next to the text model.");
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Download projector##SmolVLM2")) {
+					ofLaunchBrowser(
+						"https://huggingface.co/ggml-org/"
+						"SmolVLM2-500M-Video-Instruct-GGUF/resolve/main/"
+						"mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf");
+				}
+			}
 		}
 		ImGui::TextDisabled(
 			"Task-fit hints | OCR: %s | Multi-image: %s",

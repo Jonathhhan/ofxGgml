@@ -352,6 +352,19 @@ std::string extractTextFromOpenAiResponse(const std::string & responseJson) {
 std::vector<ofxGgmlVisionModelProfile> ofxGgmlVisionInference::defaultProfiles() {
 	return {
 		{
+			"SmolVLM2 500M Video (llama-server)",
+			"SmolVLM2 / mtmd video",
+			"ggml-org/SmolVLM2-500M-Video-Instruct-GGUF",
+			"SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
+			"https://huggingface.co/ggml-org/SmolVLM2-500M-Video-Instruct-GGUF/resolve/main/SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
+			"",
+			"",
+			"http://127.0.0.1:8080",
+			true,
+			true,
+			true
+		},
+		{
 			"LFM2.5-VL (llama-server)",
 			"LFM2-VL",
 			"LiquidAI/LFM2.5-VL-1.6B-GGUF",

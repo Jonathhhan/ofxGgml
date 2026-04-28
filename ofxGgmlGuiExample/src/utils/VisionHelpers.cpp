@@ -3,8 +3,62 @@
 #include "ofxGgmlVisionInference.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
+#include <string>
 #include <vector>
+
+namespace {
+std::string lowerAscii(std::string value) {
+	std::transform(value.begin(), value.end(), value.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return value;
+}
+
+std::string stripKnownVisionQuantSuffix(std::string stem) {
+	const std::vector<std::string> suffixes = {
+		"-q8_0",
+		"-q4_k_m",
+		"-q4_k_s",
+		"-q5_k_m",
+		"-q5_k_s",
+		"-f16",
+		"-bf16"
+	};
+	for (const auto & suffix : suffixes) {
+		if (stem.size() >= suffix.size() &&
+			stem.compare(stem.size() - suffix.size(), suffix.size(), suffix) == 0) {
+			stem.resize(stem.size() - suffix.size());
+			break;
+		}
+	}
+	return stem;
+}
+
+int scoreMmprojCandidate(
+	const std::filesystem::path & candidate,
+	const std::string & modelStem,
+	const std::string & modelStemNoQuant) {
+	const std::string candidateStem =
+		lowerAscii(candidate.stem().string());
+	int score = 0;
+	if (!modelStem.empty() && candidateStem.find(modelStem) != std::string::npos) {
+		score += 100;
+	}
+	if (!modelStemNoQuant.empty() &&
+		candidateStem.find(modelStemNoQuant) != std::string::npos) {
+		score += 75;
+	}
+	if (!modelStemNoQuant.empty() &&
+		candidateStem.find("mmproj-" + modelStemNoQuant) != std::string::npos) {
+		score += 25;
+	}
+	if (candidateStem.find("q8_0") != std::string::npos) {
+		score += 5;
+	}
+	return score;
+}
+} // namespace
 
 std::string findMatchingMmprojPath(const std::string & modelPath) {
 	if (trim(modelPath).empty()) {
@@ -13,6 +67,8 @@ std::string findMatchingMmprojPath(const std::string & modelPath) {
 	std::error_code ec;
 	const std::filesystem::path modelFile(modelPath);
 	const std::filesystem::path modelDir = modelFile.parent_path();
+	const std::string modelStem = lowerAscii(modelFile.stem().string());
+	const std::string modelStemNoQuant = stripKnownVisionQuantSuffix(modelStem);
 	if (modelDir.empty() || !std::filesystem::exists(modelDir, ec) || ec) {
 		return {};
 	}
@@ -22,10 +78,7 @@ std::string findMatchingMmprojPath(const std::string & modelPath) {
 		if (ec || !entry.is_regular_file()) {
 			continue;
 		}
-		std::string name = entry.path().filename().string();
-		std::string lowerName = name;
-		std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
-			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		const std::string lowerName = lowerAscii(entry.path().filename().string());
 		if (lowerName.find("mmproj") == std::string::npos &&
 			lowerName.find("projector") == std::string::npos) {
 			continue;
@@ -39,7 +92,17 @@ std::string findMatchingMmprojPath(const std::string & modelPath) {
 	if (mmprojCandidates.empty()) {
 		return {};
 	}
-	std::sort(mmprojCandidates.begin(), mmprojCandidates.end());
+	std::sort(
+		mmprojCandidates.begin(),
+		mmprojCandidates.end(),
+		[&](const auto & lhs, const auto & rhs) {
+			const int lhsScore = scoreMmprojCandidate(lhs, modelStem, modelStemNoQuant);
+			const int rhsScore = scoreMmprojCandidate(rhs, modelStem, modelStemNoQuant);
+			if (lhsScore != rhsScore) {
+				return lhsScore > rhsScore;
+			}
+			return lhs.filename().string() < rhs.filename().string();
+		});
 	return mmprojCandidates.front().string();
 }
 
