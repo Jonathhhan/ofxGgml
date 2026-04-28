@@ -124,7 +124,8 @@ std::string winHttpErrorString(DWORD errorCode) {
 	return "WinHTTP error " + ofToString(static_cast<unsigned long long>(errorCode));
 }
 
-VisionHttpResult winHttpPostJson(
+VisionHttpResult winHttpJsonRequest(
+	const std::wstring & method,
 	const std::string & url,
 	const std::string & requestBody,
 	int timeoutSeconds) {
@@ -194,7 +195,7 @@ VisionHttpResult winHttpPostJson(
 
 	request = WinHttpOpenRequest(
 		connection,
-		L"POST",
+		method.c_str(),
 		path.c_str(),
 		nullptr,
 		WINHTTP_NO_REFERER,
@@ -209,13 +210,17 @@ VisionHttpResult winHttpPostJson(
 
 	const std::wstring headers =
 		L"Content-Type: application/json\r\nAccept: application/json\r\n";
+	LPVOID bodyData = requestBody.empty()
+		? WINHTTP_NO_REQUEST_DATA
+		: reinterpret_cast<LPVOID>(const_cast<char *>(requestBody.data()));
+	const DWORD bodySize = static_cast<DWORD>(requestBody.size());
 	if (!WinHttpSendRequest(
 			request,
 			headers.c_str(),
 			static_cast<DWORD>(headers.size()),
-			reinterpret_cast<LPVOID>(const_cast<char *>(requestBody.data())),
-			static_cast<DWORD>(requestBody.size()),
-			static_cast<DWORD>(requestBody.size()),
+			bodyData,
+			bodySize,
+			bodySize,
 			0)) {
 		result.error = winHttpErrorString(GetLastError());
 		closeHandle(request);
@@ -276,6 +281,19 @@ VisionHttpResult winHttpPostJson(
 	closeHandle(session);
 	return result;
 }
+
+VisionHttpResult winHttpPostJson(
+	const std::string & url,
+	const std::string & requestBody,
+	int timeoutSeconds) {
+	return winHttpJsonRequest(L"POST", url, requestBody, timeoutSeconds);
+}
+
+VisionHttpResult winHttpGetJson(
+	const std::string & url,
+	int timeoutSeconds) {
+	return winHttpJsonRequest(L"GET", url, std::string(), timeoutSeconds);
+}
 #endif
 
 std::string extractTextFromOpenAiResponse(const std::string & responseJson) {
@@ -288,6 +306,9 @@ std::string extractTextFromOpenAiResponse(const std::string & responseJson) {
 #else
 	try {
 		const ofJson parsed = ofJson::parse(responseJson);
+		if (parsed.contains("content") && parsed["content"].is_string()) {
+			return parsed["content"].get<std::string>();
+		}
 		if (parsed.contains("output_text") && parsed["output_text"].is_string()) {
 			return parsed["output_text"].get<std::string>();
 		}
@@ -546,28 +567,87 @@ std::string visionFallbackServerUrl(const std::string & serverUrl) {
 	return std::string();
 }
 
-std::string smolVlm2CompletionsUrl(const std::string & serverUrl) {
+std::string visionServerBaseUrl(const std::string & serverUrl) {
 	std::string normalized = ofxGgmlVisionInference::normalizeServerUrl(serverUrl);
-	const std::string v1ChatSuffix = "/v1/chat/completions";
-	const std::string chatSuffix = "/chat/completions";
-	if (normalized.size() >= v1ChatSuffix.size() &&
-		normalized.compare(normalized.size() - v1ChatSuffix.size(), v1ChatSuffix.size(), v1ChatSuffix) == 0) {
-		return normalized.substr(0, normalized.size() - v1ChatSuffix.size()) + "/v1/completions";
+	const std::vector<std::string> suffixes = {
+		"/v1/chat/completions",
+		"/chat/completions"
+	};
+	for (const auto & suffix : suffixes) {
+		if (normalized.size() >= suffix.size() &&
+			normalized.compare(normalized.size() - suffix.size(), suffix.size(), suffix) == 0) {
+			normalized.erase(normalized.size() - suffix.size());
+			break;
+		}
 	}
-	if (normalized.size() >= chatSuffix.size() &&
-		normalized.compare(normalized.size() - chatSuffix.size(), chatSuffix.size(), chatSuffix) == 0) {
-		return normalized.substr(0, normalized.size() - chatSuffix.size()) + "/v1/completions";
+	while (!normalized.empty() && normalized.back() == '/') {
+		normalized.pop_back();
 	}
 	return normalized;
 }
 
-std::string buildSmolVlm2CompletionsJson(
+std::string smolVlm2CompletionUrl(const std::string & serverUrl) {
+	return visionServerBaseUrl(serverUrl) + "/completion";
+}
+
+std::string smolVlm2PropsUrl(const std::string & serverUrl) {
+	return visionServerBaseUrl(serverUrl) + "/props";
+}
+
+std::string extractMediaMarkerFromProps(const std::string & responseJson) {
+#ifdef OFXGGML_HEADLESS_STUBS
+	(void)responseJson;
+	return {};
+#else
+	try {
+		const ofJson parsed = ofJson::parse(responseJson);
+		if (parsed.contains("media_marker") && parsed["media_marker"].is_string()) {
+			return parsed["media_marker"].get<std::string>();
+		}
+	} catch (...) {
+	}
+	return {};
+#endif
+}
+
+std::string smolVlm2ServerPrompt(const ofxGgmlVisionRequest & request) {
+	const std::string userPrompt = trimCopy(request.prompt);
+	const std::string defaultPrompt =
+		trimCopy(ofxGgmlVisionInference::defaultPromptForTask(request.task));
+	const bool useProfileDefaultPrompt =
+		userPrompt.empty() || userPrompt == defaultPrompt;
+
+	std::string prompt;
+	if (useProfileDefaultPrompt) {
+		switch (request.task) {
+		case ofxGgmlVisionTask::Describe:
+			prompt = "Describe the visible image in one concise sentence.";
+			break;
+		case ofxGgmlVisionTask::Ocr:
+			prompt = "Read any visible text in the image. If no text is visible, say so.";
+			break;
+		case ofxGgmlVisionTask::Ask:
+			prompt = defaultPrompt;
+			break;
+		}
+	} else {
+		prompt = userPrompt;
+	}
+
+	if (!trimCopy(request.responseLanguage).empty() &&
+		request.responseLanguage != "Auto") {
+		prompt += "\nRespond in " + trimCopy(request.responseLanguage) + ".";
+	}
+	return prompt;
+}
+
+std::string buildSmolVlm2CompletionJson(
 	const ofxGgmlVisionRequest & request,
-	const ofxGgmlVisionPreparedPrompt & prepared) {
+	const std::string & mediaMarker) {
 	std::ostringstream prompt;
-	bool hasImageMarker = false;
-	for (size_t imageIndex = 0; imageIndex < request.images.size(); ++imageIndex) {
-		const std::string path = trimCopy(request.images[imageIndex].path);
+	size_t encodedImageCount = 0;
+	for (const auto & image : request.images) {
+		const std::string path = trimCopy(image.path);
 		if (path.empty()) {
 			continue;
 		}
@@ -575,28 +655,19 @@ std::string buildSmolVlm2CompletionsJson(
 		if (encoded.empty()) {
 			continue;
 		}
-		prompt << "<__media__>\n";
-		const std::string imageLabel = trimCopy(request.images[imageIndex].label);
-		if (!imageLabel.empty()) {
-			prompt << "Image " << (imageIndex + 1) << ": " << imageLabel << "\n";
-		}
-		hasImageMarker = true;
+		prompt << mediaMarker << "\n";
+		++encodedImageCount;
 	}
-	if (!trimCopy(prepared.systemPrompt).empty()) {
-		if (hasImageMarker) {
-			prompt << "\n";
-		}
-		prompt << "Instructions:\n" << trimCopy(prepared.systemPrompt) << "\n\n";
-	}
-	prompt << "Request:\n" << prepared.userPrompt;
+	prompt << smolVlm2ServerPrompt(request);
 
 	std::ostringstream json;
 	json << "{";
-	json << "\"prompt\":\"" << jsonEscape(prompt.str()) << "\",";
-	json << "\"image_data\":[";
-	bool firstImage = true;
-	for (size_t imageIndex = 0; imageIndex < request.images.size(); ++imageIndex) {
-		const std::string path = trimCopy(request.images[imageIndex].path);
+	json << "\"prompt\":{";
+	json << "\"prompt_string\":\"" << jsonEscape(prompt.str()) << "\",";
+	json << "\"multimodal_data\":[";
+	size_t imageIndex = 0;
+	for (const auto & image : request.images) {
+		const std::string path = trimCopy(image.path);
 		if (path.empty()) {
 			continue;
 		}
@@ -604,21 +675,45 @@ std::string buildSmolVlm2CompletionsJson(
 		if (encoded.empty()) {
 			continue;
 		}
-		if (!firstImage) {
+		if (imageIndex > 0) {
 			json << ",";
 		}
-		firstImage = false;
-		json << "{"
-			<< "\"id\":" << imageIndex << ","
-			<< "\"data\":\"" << encoded << "\""
-			<< "}";
+		json << "\"" << encoded << "\"";
+		++imageIndex;
 	}
-	json << "],";
+	(void)encodedImageCount;
+	json << "]},";
 	json << "\"n_predict\":" << std::max(1, request.maxTokens) << ",";
 	json << "\"max_tokens\":" << std::max(1, request.maxTokens) << ",";
-	json << "\"temperature\":" << request.temperature;
+	json << "\"temperature\":" << request.temperature << ",";
+	json << "\"stream\":false";
 	json << "}";
 	return json.str();
+}
+
+std::string cleanupServerCompletionText(std::string text, const std::string & prompt) {
+	text = trimCopy(text);
+	if (text.empty()) {
+		return text;
+	}
+
+	const std::string trimmedPrompt = trimCopy(prompt);
+	if (!trimmedPrompt.empty() && text.rfind(trimmedPrompt, 0) == 0) {
+		text = trimCopy(text.substr(trimmedPrompt.size()));
+	}
+
+	const std::vector<std::string> prefixes = {
+		"Assistant:",
+		"assistant:",
+		"ASSISTANT:"
+	};
+	for (const auto & prefix : prefixes) {
+		if (text.rfind(prefix, 0) == 0) {
+			text = trimCopy(text.substr(prefix.size()));
+			break;
+		}
+	}
+	return text;
 }
 }
 
@@ -751,21 +846,48 @@ ofxGgmlVisionResult ofxGgmlVisionInference::runServerRequest(
 	}
 
 	const auto t0 = std::chrono::steady_clock::now();
-	const bool useSmolVlm2Completions = isSmolVlm2Profile(profile);
 	const std::string configuredServerUrl =
 		trimCopy(profile.serverUrl).empty() ? "http://127.0.0.1:8080" : profile.serverUrl;
-	result.usedServerUrl = useSmolVlm2Completions
-		? smolVlm2CompletionsUrl(configuredServerUrl)
+	const bool useSmolVlm2Completion = isSmolVlm2Profile(profile);
+	result.usedServerUrl = useSmolVlm2Completion
+		? smolVlm2CompletionUrl(configuredServerUrl)
 		: normalizeServerUrl(configuredServerUrl);
-	result.requestJson = useSmolVlm2Completions
-		? buildSmolVlm2CompletionsJson(request, preparePrompt(request))
-		: buildChatCompletionsJson(profile, request);
 
 #ifdef OFXGGML_HEADLESS_STUBS
 	result.error = "vision server requests require openFrameworks runtime";
 	return result;
 #else
 	try {
+		if (useSmolVlm2Completion) {
+			const std::string propsUrl = smolVlm2PropsUrl(configuredServerUrl);
+			VisionHttpResult propsResponse;
+#ifdef _WIN32
+			propsResponse = winHttpGetJson(propsUrl, 30);
+#else
+			ofHttpResponse propsHttp = ofLoadURL(propsUrl);
+			propsResponse.status = propsHttp.status;
+			propsResponse.error = propsHttp.error;
+			propsResponse.body = propsHttp.data.getText();
+#endif
+			if (propsResponse.status < 200 || propsResponse.status >= 300) {
+				std::string detail = trimCopy(propsResponse.body);
+				if (detail.empty()) {
+					detail = trimCopy(propsResponse.error);
+				}
+				result.error = "vision server props request failed at " + propsUrl + ": " + detail;
+				return result;
+			}
+			const std::string mediaMarker = extractMediaMarkerFromProps(propsResponse.body);
+			if (mediaMarker.empty()) {
+				result.error = "vision server did not report a media_marker from " + propsUrl;
+				result.responseJson = propsResponse.body;
+				return result;
+			}
+			result.requestJson = buildSmolVlm2CompletionJson(request, mediaMarker);
+		} else {
+			result.requestJson = buildChatCompletionsJson(profile, request);
+		}
+
 		auto performRequest = [&](const std::string & url) {
 			VisionHttpResult httpResponse;
 #ifdef _WIN32
@@ -790,7 +912,7 @@ ofxGgmlVisionResult ofxGgmlVisionInference::runServerRequest(
 		VisionHttpResult httpResponse = performRequest(result.usedServerUrl);
 		result.responseJson = httpResponse.body;
 
-		if (httpResponse.status == 404) {
+		if (!useSmolVlm2Completion && httpResponse.status == 404) {
 			const std::string fallbackUrl = visionFallbackServerUrl(result.usedServerUrl);
 			if (!fallbackUrl.empty() && fallbackUrl != result.usedServerUrl) {
 				ofLogNotice("ofxGgmlVisionInference")
@@ -824,6 +946,11 @@ ofxGgmlVisionResult ofxGgmlVisionInference::runServerRequest(
 		}
 
 		result.text = trimCopy(extractTextFromOpenAiResponse(result.responseJson));
+		if (useSmolVlm2Completion) {
+			result.text = cleanupServerCompletionText(
+				result.text,
+				smolVlm2ServerPrompt(request));
+		}
 		if (result.text.empty()) {
 			result.error = "vision server returned no assistant text";
 			return result;

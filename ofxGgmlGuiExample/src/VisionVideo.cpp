@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <sstream>
@@ -29,6 +30,26 @@ const char * const kVisionWaitingLabels[] = {
 };
 
 constexpr const char * kDefaultManagedTextServerUrl = "http://127.0.0.1:8080";
+
+std::string lowerAsciiCopy(std::string value) {
+	std::transform(value.begin(), value.end(), value.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return value;
+}
+
+bool containsSmolVlm2Token(const std::string & text) {
+	const std::string lower = lowerAsciiCopy(text);
+	return lower.find("smolvlm2") != std::string::npos ||
+		lower.find("smol-vlm2") != std::string::npos;
+}
+
+bool isSmolVlm2VisionProfile(const ofxGgmlVisionModelProfile & profile) {
+	return containsSmolVlm2Token(profile.name) ||
+		containsSmolVlm2Token(profile.architecture) ||
+		containsSmolVlm2Token(profile.modelRepoHint) ||
+		containsSmolVlm2Token(profile.modelFileHint) ||
+		containsSmolVlm2Token(std::filesystem::path(profile.modelPath).filename().string());
+}
 
 void appendPathToBuffer(char * buffer, size_t bufferSize, const std::string & path) {
 	const std::string trimmedPath = trim(path);
@@ -351,8 +372,8 @@ void ofApp::drawVisionPanel() {
 	}
 
 	ImGui::TextWrapped(
-		"Use a llama-server instance that is already running with a multimodal GGUF model. "
-		"This panel sends OpenAI-compatible image requests with local files encoded as data URLs, and can also route sampled video frames through the same server.");
+		"Use a local multimodal GGUF model for image and video understanding. "
+		"Most profiles use OpenAI-compatible llama-server requests; SmolVLM2 image requests use llama.cpp's multimodal /completion endpoint with the server-reported media marker.");
 
 	if (ImGui::CollapsingHeader("Setup & Source", ImGuiTreeNodeFlags_DefaultOpen)) {
 	if (!visionProfiles.empty()) {
@@ -431,6 +452,7 @@ void ofApp::drawVisionPanel() {
 					"mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf";
 				const std::string smolVlmMmprojPath = suggestedModelPath("", smolVlmMmprojFile);
 				ImGui::TextDisabled("Expected projector: %s", smolVlmMmprojFile);
+				ImGui::TextDisabled("SmolVLM2 image mode uses llama-server /props + /completion.");
 				ImGui::TextDisabled(
 					pathExists(smolVlmMmprojPath)
 						? "SmolVLM2 projector is already present."
@@ -3040,8 +3062,9 @@ void ofApp::runVisionInference() {
 
 			{
 				std::lock_guard<std::mutex> lock(streamMutex);
-				streamingOutput =
-					"Contacting " + ofxGgmlVisionInference::normalizeServerUrl(effectiveServerUrl);
+				streamingOutput = isSmolVlm2VisionProfile(profile)
+					? "Contacting llama-server multimodal completion endpoint..."
+					: "Contacting " + ofxGgmlVisionInference::normalizeServerUrl(effectiveServerUrl);
 			}
 
 			const ofxGgmlVisionResult result = visionInference.runServerRequest(profile, request);

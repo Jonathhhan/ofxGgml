@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <random>
 #include <sstream>
+#include <unordered_set>
 
 #ifndef OFXGGML_HEADLESS_STUBS
 #include "ofImage.h"
@@ -135,6 +136,43 @@ NormalizedVideoRequest normalizeVideoRequest(const ofxGgmlVideoRequest & request
 	return normalized;
 }
 
+bool isCompactClassificationTask(ofxGgmlVideoTask task) {
+	return task == ofxGgmlVideoTask::Action ||
+		task == ofxGgmlVideoTask::Emotion;
+}
+
+std::string collapseRepeatedSentences(const std::string & text) {
+	std::string result;
+	std::unordered_set<std::string> seen;
+	std::string sentence;
+	auto flushSentence = [&]() {
+		std::string trimmed = trimCopy(sentence);
+		sentence.clear();
+		if (trimmed.empty()) {
+			return;
+		}
+		std::string key = trimmed;
+		std::transform(key.begin(), key.end(), key.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		if (!seen.insert(key).second) {
+			return;
+		}
+		if (!result.empty()) {
+			result.push_back(' ');
+		}
+		result += trimmed;
+	};
+
+	for (char ch : text) {
+		sentence.push_back(ch);
+		if (ch == '.' || ch == '!' || ch == '?' || ch == '\n') {
+			flushSentence();
+		}
+	}
+	flushSentence();
+	return result.empty() ? trimCopy(text) : result;
+}
+
 } // namespace
 
 ofxGgmlVideoInference::ofxGgmlVideoInference()
@@ -161,9 +199,9 @@ std::string ofxGgmlVideoInference::defaultPromptForTask(ofxGgmlVideoTask task) {
 	case ofxGgmlVideoTask::Ask:
 		return "Answer the user's question about the sampled video frames. Use temporal order when it matters and mention if the answer may depend on unsampled gaps.";
 	case ofxGgmlVideoTask::Action:
-		return "Identify the primary action in this video clip. Return the action label, short evidence, secondary actions if any, and a confidence estimate grounded in the observed motion.";
+		return "Identify the primary action in this video clip. Return one compact answer with primary action, evidence, confidence, and uncertainty.";
 	case ofxGgmlVideoTask::Emotion:
-		return "Analyze the dominant emotional state expressed in this clip. Return the primary emotion, evidence from face/body/context, any secondary emotions, and a confidence estimate.";
+		return "Identify the dominant emotion in this video clip. Return one compact answer with primary emotion, evidence, confidence, and uncertainty.";
 	}
 	return {};
 }
@@ -285,10 +323,20 @@ std::string ofxGgmlVideoInference::buildFrameAwarePrompt(
 		prompt << "\nAnswer from the sampled evidence only. If the question depends on unseen moments between frames, say so explicitly.";
 		break;
 	case ofxGgmlVideoTask::Action:
-		prompt << "\nReturn a professional action analysis with: primary action, secondary actions if present, confidence, evidence frames, and a brief timeline.";
+		prompt << "\nReturn exactly four short lines:\n"
+			<< "Primary action: <one phrase>\n"
+			<< "Evidence: <visible cue from the sampled frames>\n"
+			<< "Confidence: <low|medium|high>\n"
+			<< "Uncertainty: <what the sampled frames cannot prove>\n"
+			<< "Stop after these four lines. Do not repeat any sentence.";
 		break;
 	case ofxGgmlVideoTask::Emotion:
-		prompt << "\nReturn a professional emotion analysis with: dominant emotion, secondary emotions if present, confidence, visible evidence, and valence/arousal if appropriate.";
+		prompt << "\nReturn exactly four short lines:\n"
+			<< "Primary emotion: <one emotion or uncertain>\n"
+			<< "Evidence: <face, posture, gesture, or context cue>\n"
+			<< "Confidence: <low|medium|high>\n"
+			<< "Uncertainty: <what the sampled frames cannot prove>\n"
+			<< "Stop after these four lines. Do not repeat any sentence.";
 		break;
 	}
 	return prompt.str();
@@ -521,8 +569,12 @@ ofxGgmlVideoResult ofxGgmlVideoInference::runServerRequest(
 	visionRequest.prompt = buildFrameAwarePrompt(request, result.sampledFrames);
 	visionRequest.systemPrompt = normalized.systemPrompt;
 	visionRequest.responseLanguage = normalized.responseLanguage;
-	visionRequest.maxTokens = request.maxTokens;
-	visionRequest.temperature = request.temperature;
+	visionRequest.maxTokens = isCompactClassificationTask(request.task)
+		? std::min(std::max(32, request.maxTokens), 96)
+		: request.maxTokens;
+	visionRequest.temperature = isCompactClassificationTask(request.task)
+		? std::min(request.temperature, 0.15f)
+		: request.temperature;
 	visionRequest.images.reserve(result.sampledFrames.size());
 	for (const auto & frame : result.sampledFrames) {
 		visionRequest.images.push_back({
@@ -542,7 +594,9 @@ ofxGgmlVideoResult ofxGgmlVideoInference::runServerRequest(
 	}
 
 	result.success = true;
-	result.text = result.visionResult.text;
+	result.text = isCompactClassificationTask(request.task)
+		? collapseRepeatedSentences(result.visionResult.text)
+		: result.visionResult.text;
 	return result;
 }
 
