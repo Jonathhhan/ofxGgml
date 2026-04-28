@@ -30,6 +30,13 @@ bool isJanV1ModelPath(const std::string & modelPath) {
 		filename.find("jan_v1") != std::string::npos;
 }
 
+bool isSmolVlm2ModelPath(const std::string & modelPath) {
+	const std::string filename =
+		lowerAscii(std::filesystem::path(modelPath).filename().string());
+	return filename.find("smolvlm2") != std::string::npos ||
+		filename.find("smol-vlm2") != std::string::npos;
+}
+
 void appendJanV1ServerFlagsIfNeeded(
 	const std::string & modelPath,
 	std::vector<std::string> & args) {
@@ -38,6 +45,15 @@ void appendJanV1ServerFlagsIfNeeded(
 	}
 	args.emplace_back("--jinja");
 	args.emplace_back("--no-context-shift");
+}
+
+void appendSmolVlm2ServerFlagsIfNeeded(
+	const std::string & modelPath,
+	std::vector<std::string> & args) {
+	if (!isSmolVlm2ModelPath(modelPath)) {
+		return;
+	}
+	args.emplace_back("--jinja");
 }
 
 } // namespace
@@ -102,6 +118,7 @@ void TextServerManager::startLocalServer(
 		args.emplace_back(ofToString(contextSize));
 	}
 	appendJanV1ServerFlagsIfNeeded(modelPath, args);
+	appendSmolVlm2ServerFlagsIfNeeded(modelPath, args);
 
 	std::string cmdLine;
 	for (size_t i = 0; i < args.size(); ++i) {
@@ -172,6 +189,7 @@ void TextServerManager::startLocalServer(
 		args.emplace_back(ofToString(contextSize));
 	}
 	appendJanV1ServerFlagsIfNeeded(modelPath, args);
+	appendSmolVlm2ServerFlagsIfNeeded(modelPath, args);
 	pid_t pid = fork();
 	if (pid == 0) {
 		chdir(std::filesystem::path(serverExe).parent_path().string().c_str());

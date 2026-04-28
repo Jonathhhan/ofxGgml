@@ -36,6 +36,26 @@ std::string trimCopy(const std::string & s) {
 	return s.substr(start, end - start);
 }
 
+std::string lowerAsciiCopy(std::string value) {
+	std::transform(value.begin(), value.end(), value.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return value;
+}
+
+bool containsSmolVlm2Token(const std::string & text) {
+	const std::string lower = lowerAsciiCopy(text);
+	return lower.find("smolvlm2") != std::string::npos ||
+		lower.find("smol-vlm2") != std::string::npos;
+}
+
+bool isSmolVlm2Profile(const ofxGgmlVisionModelProfile & profile) {
+	return containsSmolVlm2Token(profile.name) ||
+		containsSmolVlm2Token(profile.architecture) ||
+		containsSmolVlm2Token(profile.modelRepoHint) ||
+		containsSmolVlm2Token(profile.modelFileHint) ||
+		containsSmolVlm2Token(std::filesystem::path(profile.modelPath).filename().string());
+}
+
 std::string jsonEscape(const std::string & text) {
 	std::string escaped;
 	escaped.reserve(text.size() + 16);
@@ -525,50 +545,136 @@ std::string visionFallbackServerUrl(const std::string & serverUrl) {
 	}
 	return std::string();
 }
+
+std::string smolVlm2CompletionsUrl(const std::string & serverUrl) {
+	std::string normalized = ofxGgmlVisionInference::normalizeServerUrl(serverUrl);
+	const std::string v1ChatSuffix = "/v1/chat/completions";
+	const std::string chatSuffix = "/chat/completions";
+	if (normalized.size() >= v1ChatSuffix.size() &&
+		normalized.compare(normalized.size() - v1ChatSuffix.size(), v1ChatSuffix.size(), v1ChatSuffix) == 0) {
+		return normalized.substr(0, normalized.size() - v1ChatSuffix.size()) + "/v1/completions";
+	}
+	if (normalized.size() >= chatSuffix.size() &&
+		normalized.compare(normalized.size() - chatSuffix.size(), chatSuffix.size(), chatSuffix) == 0) {
+		return normalized.substr(0, normalized.size() - chatSuffix.size()) + "/v1/completions";
+	}
+	return normalized;
+}
+
+std::string buildSmolVlm2CompletionsJson(
+	const ofxGgmlVisionRequest & request,
+	const ofxGgmlVisionPreparedPrompt & prepared) {
+	std::ostringstream prompt;
+	bool hasImageMarker = false;
+	for (size_t imageIndex = 0; imageIndex < request.images.size(); ++imageIndex) {
+		const std::string path = trimCopy(request.images[imageIndex].path);
+		if (path.empty()) {
+			continue;
+		}
+		const std::string encoded = ofxGgmlVisionInference::encodeImageFileBase64(path);
+		if (encoded.empty()) {
+			continue;
+		}
+		prompt << "<__media__>\n";
+		const std::string imageLabel = trimCopy(request.images[imageIndex].label);
+		if (!imageLabel.empty()) {
+			prompt << "Image " << (imageIndex + 1) << ": " << imageLabel << "\n";
+		}
+		hasImageMarker = true;
+	}
+	if (!trimCopy(prepared.systemPrompt).empty()) {
+		if (hasImageMarker) {
+			prompt << "\n";
+		}
+		prompt << "Instructions:\n" << trimCopy(prepared.systemPrompt) << "\n\n";
+	}
+	prompt << "Request:\n" << prepared.userPrompt;
+
+	std::ostringstream json;
+	json << "{";
+	json << "\"prompt\":\"" << jsonEscape(prompt.str()) << "\",";
+	json << "\"image_data\":[";
+	bool firstImage = true;
+	for (size_t imageIndex = 0; imageIndex < request.images.size(); ++imageIndex) {
+		const std::string path = trimCopy(request.images[imageIndex].path);
+		if (path.empty()) {
+			continue;
+		}
+		const std::string encoded = ofxGgmlVisionInference::encodeImageFileBase64(path);
+		if (encoded.empty()) {
+			continue;
+		}
+		if (!firstImage) {
+			json << ",";
+		}
+		firstImage = false;
+		json << "{"
+			<< "\"id\":" << imageIndex << ","
+			<< "\"data\":\"" << encoded << "\""
+			<< "}";
+	}
+	json << "],";
+	json << "\"n_predict\":" << std::max(1, request.maxTokens) << ",";
+	json << "\"max_tokens\":" << std::max(1, request.maxTokens) << ",";
+	json << "\"temperature\":" << request.temperature;
+	json << "}";
+	return json.str();
+}
 }
 
 std::string ofxGgmlVisionInference::buildChatCompletionsJson(
 	const ofxGgmlVisionModelProfile & profile,
 	const ofxGgmlVisionRequest & request) {
 	const ofxGgmlVisionPreparedPrompt prepared = preparePrompt(request);
+	const bool useSmolVlm2Payload = isSmolVlm2Profile(profile);
+
 	std::ostringstream json;
 	json << "{";
 	json << "\"messages\":[";
-	json << "{"
-		<< "\"role\":\"system\","
-		<< "\"content\":\"" << jsonEscape(prepared.systemPrompt) << "\""
-		<< "},";
+	if (!useSmolVlm2Payload) {
+		json << "{"
+			<< "\"role\":\"system\","
+			<< "\"content\":\"" << jsonEscape(prepared.systemPrompt) << "\""
+			<< "},";
+	}
 	json << "{"
 		<< "\"role\":\"user\","
 		<< "\"content\":[";
-	json << "{"
-		<< "\"type\":\"text\","
-		<< "\"text\":\"" << jsonEscape(prepared.userPrompt) << "\""
-		<< "}";
 
-	for (size_t imageIndex = 0; imageIndex < request.images.size(); ++imageIndex) {
-		const auto & image = request.images[imageIndex];
+	bool firstContentPart = true;
+	auto appendContentComma = [&]() {
+		if (!firstContentPart) {
+			json << ",";
+		}
+		firstContentPart = false;
+	};
+
+	auto appendTextPart = [&](const std::string & text) {
+		const std::string trimmedText = trimCopy(text);
+		if (trimmedText.empty()) {
+			return;
+		}
+		appendContentComma();
+		json << "{"
+			<< "\"type\":\"text\","
+			<< "\"text\":\"" << jsonEscape(trimmedText) << "\""
+			<< "}";
+	};
+
+	auto appendImagePart = [&](const ofxGgmlVisionImageInput & image) {
 		const std::string path = trimCopy(image.path);
 		if (path.empty()) {
-			continue;
+			return;
 		}
 		const std::string mimeType = trimCopy(image.mimeType).empty()
 			? detectMimeType(path)
 			: trimCopy(image.mimeType);
 		const std::string encoded = encodeImageFileBase64(path);
 		if (encoded.empty()) {
-			continue;
+			return;
 		}
-		const std::string imageLabel = trimCopy(image.label);
-		if (!imageLabel.empty()) {
-			json << ",{"
-				<< "\"type\":\"text\","
-				<< "\"text\":\""
-				<< jsonEscape("Image " + std::to_string(imageIndex + 1) + ": " + imageLabel)
-				<< "\""
-				<< "}";
-		}
-		json << ",{"
+		appendContentComma();
+		json << "{"
 			<< "\"type\":\"image_url\","
 			<< "\"image_url\":{"
 			<< "\"url\":\"data:" << jsonEscape(mimeType) << ";base64," << encoded << "\"";
@@ -577,6 +683,40 @@ std::string ofxGgmlVisionInference::buildChatCompletionsJson(
 		}
 		json << "}"
 			<< "}";
+	};
+
+	if (!useSmolVlm2Payload) {
+		appendTextPart(prepared.userPrompt);
+	}
+
+	for (size_t imageIndex = 0; imageIndex < request.images.size(); ++imageIndex) {
+		const auto & image = request.images[imageIndex];
+		const std::string imageLabel = trimCopy(image.label);
+		if (!useSmolVlm2Payload && !imageLabel.empty()) {
+			appendTextPart("Image " + std::to_string(imageIndex + 1) + ": " + imageLabel);
+		}
+		appendImagePart(image);
+	}
+
+	if (useSmolVlm2Payload) {
+		std::ostringstream prompt;
+		if (!trimCopy(prepared.systemPrompt).empty()) {
+			prompt << "Instructions:\n" << trimCopy(prepared.systemPrompt) << "\n\n";
+		}
+		prompt << "Request:\n" << prepared.userPrompt;
+		bool wroteImageHeader = false;
+		for (size_t imageIndex = 0; imageIndex < request.images.size(); ++imageIndex) {
+			const std::string imageLabel = trimCopy(request.images[imageIndex].label);
+			if (imageLabel.empty()) {
+				continue;
+			}
+			if (!wroteImageHeader) {
+				prompt << "\n\nImages:";
+				wroteImageHeader = true;
+			}
+			prompt << "\n- Image " << (imageIndex + 1) << ": " << imageLabel;
+		}
+		appendTextPart(prompt.str());
 	}
 
 	json << "]"
@@ -611,9 +751,15 @@ ofxGgmlVisionResult ofxGgmlVisionInference::runServerRequest(
 	}
 
 	const auto t0 = std::chrono::steady_clock::now();
-	result.usedServerUrl = normalizeServerUrl(
-		trimCopy(profile.serverUrl).empty() ? "http://127.0.0.1:8080" : profile.serverUrl);
-	result.requestJson = buildChatCompletionsJson(profile, request);
+	const bool useSmolVlm2Completions = isSmolVlm2Profile(profile);
+	const std::string configuredServerUrl =
+		trimCopy(profile.serverUrl).empty() ? "http://127.0.0.1:8080" : profile.serverUrl;
+	result.usedServerUrl = useSmolVlm2Completions
+		? smolVlm2CompletionsUrl(configuredServerUrl)
+		: normalizeServerUrl(configuredServerUrl);
+	result.requestJson = useSmolVlm2Completions
+		? buildSmolVlm2CompletionsJson(request, preparePrompt(request))
+		: buildChatCompletionsJson(profile, request);
 
 #ifdef OFXGGML_HEADLESS_STUBS
 	result.error = "vision server requests require openFrameworks runtime";
