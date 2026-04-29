@@ -1410,6 +1410,16 @@ ofxGgmlVideoPlanner::extractHintsFromVideoAnalysis(
 std::string ofxGgmlVideoPlanner::enrichPlanningPromptWithHints(
 	const std::string & basePrompt,
 	const VideoAnalysisHints & hints) {
+	const bool hasHints =
+		!hints.primaryEmotion.empty() ||
+		!hints.actionLabels.empty() ||
+		!hints.suggestedPacing.empty() ||
+		!hints.suggestedTone.empty() ||
+		!hints.timeline.empty();
+	if (!hasHints) {
+		return basePrompt;
+	}
+
 	std::ostringstream enriched;
 	enriched << basePrompt;
 

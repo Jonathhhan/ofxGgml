@@ -141,6 +141,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/inference/ofxGgmlVisionInference.cpp
         ../src/inference/ofxGgmlVideoInference.cpp
         ../src/inference/ofxGgmlWebCrawler.cpp
+        ../src/inference/ofxGgmlWebSearch.cpp
         ../src/inference/ofxGgmlTtsInference.cpp
         ../src/inference/ofxGgmlClipInference.cpp
         ../src/inference/ofxGgmlValidationLoop.cpp

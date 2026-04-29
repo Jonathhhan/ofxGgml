@@ -137,7 +137,10 @@ public:
 				}
 
 				// Check if we're improving enough to continue
-				if (attempt > 1 && m_config.enableRefinement) {
+				if (attempt > 1 &&
+					m_config.enableRefinement &&
+					!m_config.collectAllAttempts &&
+					!m_refine) {
 					float improvement = attemptResult.score - previousScore;
 					if (improvement < m_config.improvementThreshold &&
 						attemptResult.score < m_config.qualityThreshold) {
@@ -163,6 +166,7 @@ public:
 			if (m_config.collectAllAttempts) {
 				result.attempts.push_back(attemptResult);
 			}
+			result.totalAttempts++;
 
 			// Progress callback
 			if (m_progressCallback) {
@@ -182,8 +186,6 @@ public:
 					result.warnings.push_back(std::string("Refinement failed: ") + e.what());
 				}
 			}
-
-			result.totalAttempts++;
 		}
 
 		result.success = result.bestScore > 0.0f;

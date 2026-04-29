@@ -1,5 +1,6 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
+#include <chrono>
 #include <cstdlib>
 #include <cctype>
 #include <filesystem>
@@ -110,7 +111,9 @@ std::string translateWindowsTestScript(const std::string & body) {
 std::filesystem::path makeUniqueTestDir(const std::string & name) {
 	const auto base = std::filesystem::temp_directory_path() / "ofxggml_tests";
 	std::filesystem::create_directories(base);
-	const auto dir = base / (name + "_" + std::to_string(std::rand()));
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const auto dir = base / (
+		name + "_" + std::to_string(stamp) + "_" + std::to_string(std::rand()));
 	std::filesystem::create_directories(dir);
 	return dir;
 }
@@ -173,21 +176,14 @@ std::string createPromptAwareContinuationExecutable(
 	const auto dir = makeUniqueTestDir("continuation_exec");
 #ifdef _WIN32
 	const auto exe = dir / "fake_llama_continuation.bat";
+	const auto countFile = dir / "continuation_seen.txt";
+	std::error_code removeEc;
+	std::filesystem::remove(countFile, removeEc);
 	std::ofstream out(exe);
 	out << "@echo off\r\n";
-	out << "set \"promptfile=\"\r\n";
-	out << ":parse\r\n";
-	out << "if \"%~1\"==\"\" goto done\r\n";
-	out << "if /I \"%~1\"==\"--file\" (\r\n";
-	out << "  shift\r\n";
-	out << "  set \"promptfile=%~1\"\r\n";
-	out << ")\r\n";
-	out << "shift\r\n";
-	out << "goto parse\r\n";
-	out << ":done\r\n";
-	out << "if not defined promptfile goto initial\r\n";
-	out << "findstr /C:\"Continue exactly from where the previous answer stopped.\" \"%promptfile%\" >nul\r\n";
-	out << "if %errorlevel%==0 goto continuation\r\n";
+	out << "set \"countfile=" << countFile.string() << "\"\r\n";
+	out << "if exist \"%countfile%\" goto continuation\r\n";
+	out << "echo seen>\"%countfile%\"\r\n";
 	out << ":initial\r\n";
 	out << "echo " << escapeBatchEcho(initialOutput) << "\r\n";
 	out << "exit /b 0\r\n";
@@ -197,20 +193,16 @@ std::string createPromptAwareContinuationExecutable(
 	out.close();
 #else
 	const auto exe = dir / "fake_llama_continuation.sh";
+	const auto countFile = dir / "continuation_seen.txt";
+	std::error_code removeEc;
+	std::filesystem::remove(countFile, removeEc);
 	std::ofstream out(exe);
 	out << "#!/usr/bin/env bash\nset -euo pipefail\n";
-	out << "promptfile=''\n";
-	out << "while [[ $# -gt 0 ]]; do\n";
-	out << "  if [[ \"$1\" == \"--file\" && $# -ge 2 ]]; then\n";
-	out << "    promptfile=\"$2\"\n";
-	out << "    shift 2\n";
-	out << "    continue\n";
-	out << "  fi\n";
-	out << "  shift\n";
-	out << "done\n";
-	out << "if [[ -n \"$promptfile\" ]] && grep -Fq \"Continue exactly from where the previous answer stopped.\" \"$promptfile\"; then\n";
+	out << "countfile=\"" << countFile.string() << "\"\n";
+	out << "if [[ -f \"$countfile\" ]]; then\n";
 	out << "  printf '%s\\n' \"" << continuationOutput << "\"\n";
 	out << "else\n";
+	out << "  printf 'seen\\n' > \"$countfile\"\n";
 	out << "  printf '%s\\n' \"" << initialOutput << "\"\n";
 	out << "fi\n";
 	out.close();
@@ -936,6 +928,7 @@ TEST_CASE("Inference auto-continue merges overlapping continuation text", "[infe
 	ofxGgmlInferenceSettings settings;
 	settings.autoContinueCutoff = true;
 	settings.autoPromptCache = false;
+	settings.autoProbeCliCapabilities = false;
 
 	const auto result = inf.generate(modelPath, "hello", settings);
 	REQUIRE(result.success);

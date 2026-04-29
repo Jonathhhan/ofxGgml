@@ -160,13 +160,14 @@ bool isValidExecutablePath(
 		if (!std::filesystem::is_directory(base)) continue;
 #ifdef _WIN32
 		std::filesystem::path candidate = base / path;
-		if (isRegularExecutableFile(candidate)) return true;
+		if (isRegularExecutableFile(candidate) && isUnderAllowedRoot(candidate)) return true;
 		for (const auto & ext : executableExtensions) {
 			candidate = base / (path + ext);
-			if (isRegularExecutableFile(candidate)) return true;
+			if (isRegularExecutableFile(candidate) && isUnderAllowedRoot(candidate)) return true;
 		}
 #else
-		if (isRegularExecutableFile(base / path)) return true;
+		const std::filesystem::path candidate = base / path;
+		if (isRegularExecutableFile(candidate) && isUnderAllowedRoot(candidate)) return true;
 #endif
 	}
 	return false;

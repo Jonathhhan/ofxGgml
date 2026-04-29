@@ -2042,11 +2042,6 @@ NativeParsedPage parseHtmlToMarkdown(
 	const std::string & sourceUrl,
 	const std::string & htmlText) {
 	NativeParsedPage parsed;
-	NativeParsedPage readable = parseHtmlToMarkdownWithLibXml(sourceUrl, htmlText);
-	if (readable.success) {
-		return readable;
-	}
-
 	const NativeHtmlNormalizationResult normalized =
 		normalizeHtmlWithXmllint(htmlText);
 	if (normalized.success) {
@@ -2064,6 +2059,11 @@ NativeParsedPage parseHtmlToMarkdown(
 		}
 		parsed.error =
 			"xmllint normalized the HTML, but no readable text was extracted.";
+	}
+
+	NativeParsedPage readable = parseHtmlToMarkdownWithLibXml(sourceUrl, htmlText);
+	if (readable.success) {
+		return readable;
 	}
 
 	const std::string fallbackTitle = extractHtmlTitleFallback(htmlText);

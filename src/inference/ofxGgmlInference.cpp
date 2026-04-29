@@ -847,6 +847,9 @@ bool ofxGgmlInference::isLikelyCutoffOutput(
 	const std::string trimmedText = trim(text);
 	if (trimmedText.empty()) return false;
 	if (trimmedText.rfind("[Error]", 0) == 0) return false;
+	if (endsWithWrappedSentencePunctuation(trimmedText)) {
+		return false;
+	}
 
 	const char last = trimmedText.back();
 	if (codeLike) {
@@ -857,9 +860,6 @@ bool ofxGgmlInference::isLikelyCutoffOutput(
 		return trimmedText.size() > 80;
 	}
 
-	if (endsWithWrappedSentencePunctuation(trimmedText)) {
-		return false;
-	}
 	return trimmedText.size() > 80;
 }
 
