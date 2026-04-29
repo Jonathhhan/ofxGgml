@@ -1,5 +1,6 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
+#include "../src/support/ofxGgmlProcessSecurity.h"
 #include <chrono>
 #include <cstdlib>
 #include <cctype>
@@ -251,6 +252,23 @@ struct ScopedEnvVar {
 	}
 };
 
+struct ScopedExecutableSecurityConfig {
+	bool originalAllowPathLookup = false;
+	std::vector<std::string> originalAllowlistRoots;
+
+	ScopedExecutableSecurityConfig() {
+		originalAllowPathLookup =
+			ofxGgmlProcessSecurity::getAllowPathLookupForExecutables();
+		originalAllowlistRoots =
+			ofxGgmlProcessSecurity::getExecutableAllowlistRoots();
+	}
+
+	~ScopedExecutableSecurityConfig() {
+		ofxGgmlProcessSecurity::setAllowPathLookupForExecutables(originalAllowPathLookup);
+		ofxGgmlProcessSecurity::setExecutableAllowlistRoots(originalAllowlistRoots);
+	}
+};
+
 } // namespace
 
 TEST_CASE("Inference initialization", "[inference]") {
@@ -349,6 +367,42 @@ TEST_CASE("Executable resolution accepts absolute path and PATH command", "[infe
 		auto gen = inf.generate(modelPath, "hello");
 		REQUIRE(gen.success);
 		REQUIRE(gen.text.find("path-ok") != std::string::npos);
+	}
+
+	SECTION("PATH lookup still honors executable allowlist roots") {
+		ScopedExecutableSecurityConfig scopedSecurityConfig;
+		const auto allowedDir = makeUniqueTestDir("allowed_exec_root");
+		const auto blockedDir = makeUniqueTestDir("blocked_exec_root");
+#ifdef _WIN32
+		const auto cmdPath = blockedDir / "ofxggml-blocked-path-cmd.bat";
+		std::ofstream out(cmdPath);
+		out << "@echo off\r\necho should-not-run\r\n";
+		out.close();
+		const std::string pathSep = ";";
+#else
+		const auto cmdPath = blockedDir / "ofxggml-blocked-path-cmd";
+		std::ofstream out(cmdPath);
+		out << "#!/usr/bin/env bash\nset -euo pipefail\necho should-not-run\n";
+		out.close();
+		chmod(cmdPath.c_str(), 0755);
+		const std::string pathSep = ":";
+#endif
+		std::string pathValue = blockedDir.string();
+		if (const char * existingPath = std::getenv("PATH")) {
+			pathValue += pathSep;
+			pathValue += existingPath;
+		}
+		ScopedEnvVar scopedPath("PATH", pathValue);
+		ScopedEnvVar scopedAllow("OFXGGML_ALLOW_PATH_EXEC", "1");
+		ofxGgmlProcessSecurity::setAllowPathLookupForExecutables(true);
+		ofxGgmlProcessSecurity::setExecutableAllowlistRoots({allowedDir.string()});
+
+		REQUIRE_FALSE(ofxGgmlProcessSecurity::isValidExecutablePath(
+			"ofxggml-blocked-path-cmd"));
+
+		ofxGgmlProcessSecurity::setExecutableAllowlistRoots({blockedDir.string()});
+		REQUIRE(ofxGgmlProcessSecurity::isValidExecutablePath(
+			"ofxggml-blocked-path-cmd"));
 	}
 
 	SECTION("missing command and non-file path are rejected") {
