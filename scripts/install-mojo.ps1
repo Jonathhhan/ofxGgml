@@ -118,6 +118,14 @@ $crawlerScriptPath = Join-Path $BinDir 'mojo_crawl.py'
 $crawlerTemplatePath = Join-Path $scriptRoot 'mojo-crawl.py'
 $crawlerScriptWsl = Get-WslPath $crawlerScriptPath
 
+# Clean up any potentially corrupted old files
+if (-not $DryRun) {
+    if (Test-Path $setupShPath) {
+        Write-Host "Removing old install-mojo-wsl.sh to ensure clean generation..."
+        Remove-Item $setupShPath -Force
+    }
+}
+
 $wrapperSh = @'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -195,11 +203,29 @@ __INSTALL_COMMAND__
 '@
 $setupScript = $setupScript.Replace('__PROJECT_DIR__', $projectDirWsl)
 $setupScript = $setupScript.Replace('__INSTALL_COMMAND__', $mojoInstallCommand)
+
+# Validate that the script starts correctly
+if (-not $setupScript.StartsWith("#!/usr/bin/env bash`nset -euo pipefail")) {
+    throw "Generated install script has invalid header. Please report this bug."
+}
+
 New-Utf8File -Path $setupShPath -Content $setupScript
 $setupShPathWsl = Get-WslPath $setupShPath
 
 Write-Step "Installing Mojo in the local WSL environment"
-Invoke-LoggedCommand 'wsl.exe' @('-e', 'bash', $setupShPathWsl)
+try {
+    Invoke-LoggedCommand 'wsl.exe' @('-e', 'bash', $setupShPathWsl)
+} catch {
+    Write-Host ""
+    Write-Host "[Error] Failed to install Mojo in WSL. This may be due to:"
+    Write-Host "  1. Missing dependencies (curl, python3) in WSL"
+    Write-Host "  2. Network connectivity issues"
+    Write-Host "  3. WSL configuration problems"
+    Write-Host ""
+    Write-Host "To diagnose, you can manually run:"
+    Write-Host "  wsl.exe -e bash `"$setupShPathWsl`""
+    throw
+}
 
 Write-Step "Mojo is ready at $wrapperBatPath"
 Write-Host "  runtime: $ProjectDir"
