@@ -8,6 +8,7 @@
 #include <functional>
 #include <mutex>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -405,9 +406,32 @@ bool runCommandCapture(
 	int & exitCode,
 	bool mergeStderr,
 	std::function<bool(const std::string &)> onChunk) {
+	return runCommandCapture(
+		args,
+		{},
+		output,
+		exitCode,
+		mergeStderr,
+		std::move(onChunk));
+}
+
+bool runCommandCapture(
+	const std::vector<std::string> & args,
+	const std::string & workingDirectory,
+	std::string & output,
+	int & exitCode,
+	bool mergeStderr,
+	std::function<bool(const std::string &)> onChunk) {
 	output.clear();
 	exitCode = -1;
 	if (args.empty() || args.front().empty()) return false;
+	const std::string resolvedExecutable =
+		resolveExecutablePath(args.front(), workingDirectory);
+	if (resolvedExecutable.empty()) {
+		return false;
+	}
+	std::vector<std::string> launchArgs = args;
+	launchArgs.front() = resolvedExecutable;
 
 	std::string pendingChunk;
 	auto dispatchChunk = [&](const std::string & chunk) -> bool {
@@ -467,7 +491,7 @@ bool runCommandCapture(
 	}
 
 	PROCESS_INFORMATION pi {};
-	const std::string cmdLine = buildWindowsCommandLine(args);
+	const std::string cmdLine = buildWindowsCommandLine(launchArgs);
 	if (cmdLine.empty()) {
 		CloseHandle(readPipe);
 		CloseHandle(writePipe);
@@ -482,6 +506,9 @@ bool runCommandCapture(
 	std::wstring wideCmdLine = ofxGgmlWideFromUtf8(cmdLine);
 	std::vector<wchar_t> mutableCmd(wideCmdLine.begin(), wideCmdLine.end());
 	mutableCmd.push_back(L'\0');
+	const std::wstring wideWorkingDirectory = ofxGgmlWideFromUtf8(workingDirectory);
+	const wchar_t * workDirPtr =
+		workingDirectory.empty() ? nullptr : wideWorkingDirectory.c_str();
 
 	BOOL ok = CreateProcessW(
 		nullptr,
@@ -491,7 +518,7 @@ bool runCommandCapture(
 		TRUE,
 		CREATE_NO_WINDOW,
 		nullptr,
-		nullptr,
+		workDirPtr,
 		&si,
 		&pi);
 	CloseHandle(writePipe);
@@ -552,15 +579,22 @@ bool runCommandCapture(
 		}
 		close(pipeFds[0]);
 		close(pipeFds[1]);
+		if (!workingDirectory.empty() &&
+			chdir(workingDirectory.c_str()) != 0) {
+			const std::string message =
+				"Failed to change working directory: " + workingDirectory + "\n";
+			(void)write(STDERR_FILENO, message.c_str(), message.size());
+			_exit(127);
+		}
 
 		std::vector<char *> argv;
-		argv.reserve(args.size() + 1);
-		for (const auto & arg : args) {
+		argv.reserve(launchArgs.size() + 1);
+		for (const auto & arg : launchArgs) {
 			argv.push_back(const_cast<char *>(arg.c_str()));
 		}
 		argv.push_back(nullptr);
 
-		execvp(argv[0], argv.data());
+		execv(argv[0], argv.data());
 		_exit(127);
 	}
 

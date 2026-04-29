@@ -41,6 +41,14 @@ bool runCommandCapture(
 	bool mergeStderr = true,
 	std::function<bool(const std::string &)> onChunk = nullptr);
 
+bool runCommandCapture(
+	const std::vector<std::string> & args,
+	const std::string & workingDirectory,
+	std::string & output,
+	int & exitCode,
+	bool mergeStderr = true,
+	std::function<bool(const std::string &)> onChunk = nullptr);
+
 #ifdef _WIN32
 std::string quoteWindowsArg(const std::string & arg);
 bool isWindowsBatchScript(const std::string & path);

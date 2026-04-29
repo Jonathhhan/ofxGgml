@@ -426,6 +426,37 @@ TEST_CASE("Executable resolution accepts absolute path and PATH command", "[infe
 		REQUIRE(commandLine.find(std::filesystem::weakly_canonical(blockedCmdPath).string()) ==
 			std::string::npos);
 #endif
+		std::string output;
+		int exitCode = -1;
+		REQUIRE(ofxGgmlProcessSecurity::runCommandCapture(
+			{"ofxggml-blocked-path-cmd"},
+			output,
+			exitCode,
+			true));
+		REQUIRE(exitCode == 0);
+		REQUIRE(output.find("allowed-run") != std::string::npos);
+		REQUIRE(output.find("should-not-run") == std::string::npos);
+
+		const auto missingWorkDir = allowedDir / "missing-working-dir";
+		output.clear();
+		exitCode = -1;
+#ifdef _WIN32
+		REQUIRE_FALSE(ofxGgmlProcessSecurity::runCommandCapture(
+			{allowedCmdPath.string()},
+			missingWorkDir.string(),
+			output,
+			exitCode,
+			true));
+#else
+		REQUIRE(ofxGgmlProcessSecurity::runCommandCapture(
+			{allowedCmdPath.string()},
+			missingWorkDir.string(),
+			output,
+			exitCode,
+			true));
+		REQUIRE(exitCode != 0);
+		REQUIRE(output.find("Failed to change working directory") != std::string::npos);
+#endif
 
 		ofxGgmlProcessSecurity::setExecutableAllowlistRoots({blockedDir.string()});
 		REQUIRE(ofxGgmlProcessSecurity::isValidExecutablePath(

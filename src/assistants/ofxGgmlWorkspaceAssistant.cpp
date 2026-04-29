@@ -21,11 +21,6 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#else
-#include <fcntl.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <unistd.h>
 #endif
 
 namespace {
@@ -268,144 +263,12 @@ bool runCommandCapture(
 	const std::string & workingDirectory,
 	std::string & output,
 	int & exitCode) {
-	output.clear();
-	exitCode = -1;
-	if (args.empty() || args.front().empty()) {
-		return false;
-	}
-
-#ifdef _WIN32
-	SECURITY_ATTRIBUTES sa {};
-	sa.nLength = sizeof(sa);
-	sa.bInheritHandle = TRUE;
-
-	HANDLE readPipe = nullptr;
-	HANDLE writePipe = nullptr;
-	if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) {
-		return false;
-	}
-	if (!SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0)) {
-		CloseHandle(readPipe);
-		CloseHandle(writePipe);
-		return false;
-	}
-
-	STARTUPINFOW si {};
-	si.cb = sizeof(si);
-	si.dwFlags = STARTF_USESTDHANDLES;
-	HANDLE nullInput = CreateFileA("NUL", GENERIC_READ, 0, &sa,
-		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-	si.hStdInput = (nullInput != INVALID_HANDLE_VALUE)
-		? nullInput
-		: GetStdHandle(STD_INPUT_HANDLE);
-	si.hStdOutput = writePipe;
-	si.hStdError = writePipe;
-
-	PROCESS_INFORMATION pi {};
-	const std::string cmdLine =
-		ofxGgmlProcessSecurity::buildWindowsCommandLine(args);
-	if (cmdLine.empty()) {
-		CloseHandle(readPipe);
-		CloseHandle(writePipe);
-		if (nullInput != INVALID_HANDLE_VALUE) {
-			CloseHandle(nullInput);
-		}
-		return false;
-	}
-
-	std::wstring wideCmdLine = ofxGgmlWideFromUtf8(cmdLine);
-	std::vector<wchar_t> mutableCmd(wideCmdLine.begin(), wideCmdLine.end());
-	mutableCmd.push_back(L'\0');
-	const std::wstring wideWorkingDirectory = ofxGgmlWideFromUtf8(workingDirectory);
-	const wchar_t * workDirPtr =
-		workingDirectory.empty() ? nullptr : wideWorkingDirectory.c_str();
-
-	BOOL ok = CreateProcessW(
-		nullptr,
-		mutableCmd.data(),
-		nullptr,
-		nullptr,
-		TRUE,
-		CREATE_NO_WINDOW,
-		nullptr,
-		workDirPtr,
-		&si,
-		&pi);
-	CloseHandle(writePipe);
-	if (nullInput != INVALID_HANDLE_VALUE) {
-		CloseHandle(nullInput);
-	}
-	if (!ok) {
-		CloseHandle(readPipe);
-		return false;
-	}
-
-	std::array<char, 4096> buf {};
-	DWORD bytesRead = 0;
-	while (ReadFile(readPipe, buf.data(), static_cast<DWORD>(buf.size()),
-		&bytesRead, nullptr) && bytesRead > 0) {
-		output.append(buf.data(), bytesRead);
-	}
-	CloseHandle(readPipe);
-
-	WaitForSingleObject(pi.hProcess, INFINITE);
-	DWORD code = 1;
-	GetExitCodeProcess(pi.hProcess, &code);
-	CloseHandle(pi.hProcess);
-	CloseHandle(pi.hThread);
-	exitCode = static_cast<int>(code);
-	return true;
-#else
-	int pipeFds[2] = {-1, -1};
-	if (pipe(pipeFds) != 0) {
-		return false;
-	}
-
-	pid_t pid = fork();
-	if (pid < 0) {
-		close(pipeFds[0]);
-		close(pipeFds[1]);
-		return false;
-	}
-
-	if (pid == 0) {
-		if (!workingDirectory.empty()) {
-			(void)chdir(workingDirectory.c_str());
-		}
-		dup2(pipeFds[1], STDOUT_FILENO);
-		dup2(pipeFds[1], STDERR_FILENO);
-		close(pipeFds[0]);
-		close(pipeFds[1]);
-
-		std::vector<char *> argv;
-		argv.reserve(args.size() + 1);
-		for (const auto & arg : args) {
-			argv.push_back(const_cast<char *>(arg.c_str()));
-		}
-		argv.push_back(nullptr);
-		execvp(argv[0], argv.data());
-		_exit(127);
-	}
-
-	close(pipeFds[1]);
-	std::array<char, 4096> buf {};
-	ssize_t bytesRead = 0;
-	while ((bytesRead = read(pipeFds[0], buf.data(), buf.size())) > 0) {
-		output.append(buf.data(), static_cast<size_t>(bytesRead));
-	}
-	close(pipeFds[0]);
-
-	int status = 0;
-	if (waitpid(pid, &status, 0) < 0) {
-		return false;
-	}
-	if (WIFEXITED(status)) {
-		exitCode = WEXITSTATUS(status);
-	} else if (WIFSIGNALED(status)) {
-		exitCode = 128 + WTERMSIG(status);
-	}
-	return true;
-#endif
+	return ofxGgmlProcessSecurity::runCommandCapture(
+		args,
+		workingDirectory,
+		output,
+		exitCode,
+		true);
 }
 
 std::string summarizeVerification(
