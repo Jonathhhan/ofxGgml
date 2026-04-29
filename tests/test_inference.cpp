@@ -374,20 +374,31 @@ TEST_CASE("Executable resolution accepts absolute path and PATH command", "[infe
 		const auto allowedDir = makeUniqueTestDir("allowed_exec_root");
 		const auto blockedDir = makeUniqueTestDir("blocked_exec_root");
 #ifdef _WIN32
-		const auto cmdPath = blockedDir / "ofxggml-blocked-path-cmd.bat";
-		std::ofstream out(cmdPath);
-		out << "@echo off\r\necho should-not-run\r\n";
-		out.close();
+		const auto blockedCmdPath = blockedDir / "ofxggml-blocked-path-cmd.bat";
+		std::ofstream blockedOut(blockedCmdPath);
+		blockedOut << "@echo off\r\necho should-not-run\r\n";
+		blockedOut.close();
+		const auto allowedCmdPath = allowedDir / "ofxggml-blocked-path-cmd.bat";
+		std::ofstream allowedOut(allowedCmdPath);
+		allowedOut << "@echo off\r\necho allowed-run\r\n";
+		allowedOut.close();
 		const std::string pathSep = ";";
 #else
-		const auto cmdPath = blockedDir / "ofxggml-blocked-path-cmd";
-		std::ofstream out(cmdPath);
-		out << "#!/usr/bin/env bash\nset -euo pipefail\necho should-not-run\n";
-		out.close();
-		chmod(cmdPath.c_str(), 0755);
+		const auto blockedCmdPath = blockedDir / "ofxggml-blocked-path-cmd";
+		std::ofstream blockedOut(blockedCmdPath);
+		blockedOut << "#!/usr/bin/env bash\nset -euo pipefail\necho should-not-run\n";
+		blockedOut.close();
+		chmod(blockedCmdPath.c_str(), 0755);
+		const auto allowedCmdPath = allowedDir / "ofxggml-blocked-path-cmd";
+		std::ofstream allowedOut(allowedCmdPath);
+		allowedOut << "#!/usr/bin/env bash\nset -euo pipefail\necho allowed-run\n";
+		allowedOut.close();
+		chmod(allowedCmdPath.c_str(), 0755);
 		const std::string pathSep = ":";
 #endif
 		std::string pathValue = blockedDir.string();
+		pathValue += pathSep;
+		pathValue += allowedDir.string();
 		if (const char * existingPath = std::getenv("PATH")) {
 			pathValue += pathSep;
 			pathValue += existingPath;
@@ -397,8 +408,24 @@ TEST_CASE("Executable resolution accepts absolute path and PATH command", "[infe
 		ofxGgmlProcessSecurity::setAllowPathLookupForExecutables(true);
 		ofxGgmlProcessSecurity::setExecutableAllowlistRoots({allowedDir.string()});
 
-		REQUIRE_FALSE(ofxGgmlProcessSecurity::isValidExecutablePath(
+		REQUIRE(ofxGgmlProcessSecurity::isValidExecutablePath(
 			"ofxggml-blocked-path-cmd"));
+		const std::string resolved = ofxGgmlProcessSecurity::resolveExecutablePath(
+			"ofxggml-blocked-path-cmd");
+		REQUIRE(std::filesystem::weakly_canonical(std::filesystem::path(resolved).parent_path()) ==
+			std::filesystem::weakly_canonical(allowedDir));
+		REQUIRE(std::filesystem::weakly_canonical(std::filesystem::path(resolved).parent_path()) !=
+			std::filesystem::weakly_canonical(blockedDir));
+#ifdef _WIN32
+		const std::string commandLine =
+			ofxGgmlProcessSecurity::buildWindowsCommandLine({
+				"ofxggml-blocked-path-cmd",
+				"--flag"
+			});
+		REQUIRE(commandLine.find(resolved) != std::string::npos);
+		REQUIRE(commandLine.find(std::filesystem::weakly_canonical(blockedCmdPath).string()) ==
+			std::string::npos);
+#endif
 
 		ofxGgmlProcessSecurity::setExecutableAllowlistRoots({blockedDir.string()});
 		REQUIRE(ofxGgmlProcessSecurity::isValidExecutablePath(

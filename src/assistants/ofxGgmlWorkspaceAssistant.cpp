@@ -1004,6 +1004,29 @@ std::vector<std::string> collectUnifiedDiffChangedFiles(
 	return changedFiles;
 }
 
+std::vector<ofxGgmlCodeAssistantCommandSuggestion>
+normalizeVerificationCommandWorkingDirectories(
+	const std::vector<ofxGgmlCodeAssistantCommandSuggestion> & commands,
+	const std::string & executionWorkspaceRoot) {
+	if (trimCopy(executionWorkspaceRoot).empty()) {
+		return commands;
+	}
+	std::vector<ofxGgmlCodeAssistantCommandSuggestion> normalized = commands;
+	const std::filesystem::path root(executionWorkspaceRoot);
+	for (auto & command : normalized) {
+		const std::string workingDirectory = trimCopy(command.workingDirectory);
+		if (workingDirectory.empty()) {
+			command.workingDirectory = root.lexically_normal().string();
+			continue;
+		}
+		const std::filesystem::path workDir(workingDirectory);
+		if (workDir.is_relative()) {
+			command.workingDirectory = (root / workDir).lexically_normal().string();
+		}
+	}
+	return normalized;
+}
+
 ofxGgmlWorkspaceCommandResult runDefaultCommand(
 	const ofxGgmlCodeAssistantCommandSuggestion & command) {
 	ofxGgmlWorkspaceCommandResult result;
@@ -2085,6 +2108,9 @@ ofxGgmlWorkspaceResult ofxGgmlWorkspaceAssistant::runTask(
 				result.executionWorkspaceRoot,
 				workspaceInfo);
 		}
+		verificationCommands = normalizeVerificationCommandWorkingDirectories(
+			verificationCommands,
+			result.executionWorkspaceRoot);
 
 		if (!workspaceSettings.runVerification ||
 			verificationCommands.empty()) {

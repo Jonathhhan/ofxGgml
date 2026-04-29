@@ -690,12 +690,14 @@ TEST_CASE("Workspace assistant can verify in a shadow workspace before syncing c
 	settings.keepShadowWorkspace = false;
 	settings.maxVerificationAttempts = 1;
 
-	auto runner = [](const ofxGgmlCodeAssistantCommandSuggestion & command) {
+	std::string observedWorkingDirectory;
+	auto runner = [&observedWorkingDirectory](const ofxGgmlCodeAssistantCommandSuggestion & command) {
+		observedWorkingDirectory = command.workingDirectory;
 		ofxGgmlWorkspaceCommandResult result;
 		result.command = command;
-		result.success = true;
-		result.exitCode = 0;
-		result.output = "verified";
+		result.success = readFile(std::filesystem::path(command.workingDirectory) / "src" / "app.txt") == "after";
+		result.exitCode = result.success ? 0 : 1;
+		result.output = result.success ? "verified" : "wrong working directory";
 		return result;
 	};
 
@@ -711,6 +713,15 @@ TEST_CASE("Workspace assistant can verify in a shadow workspace before syncing c
 	REQUIRE(result.usedShadowWorkspace);
 	REQUIRE(result.success);
 	REQUIRE_FALSE(result.shadowWorkspaceRoot.empty());
+	auto normalizePathString = [](const std::string & value) {
+		std::string normalized = std::filesystem::weakly_canonical(std::filesystem::path(value)).string();
+		while (normalized.size() > 3 &&
+			(normalized.back() == '/' || normalized.back() == '\\')) {
+			normalized.pop_back();
+		}
+		return normalized;
+	};
+	REQUIRE(normalizePathString(observedWorkingDirectory) == normalizePathString(result.shadowWorkspaceRoot));
 	REQUIRE(readFile(root / "src" / "app.txt") == "after");
 	REQUIRE_FALSE(result.synchronizedFiles.empty());
 	REQUIRE_FALSE(std::filesystem::exists(result.shadowWorkspaceRoot));
