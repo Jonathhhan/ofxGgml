@@ -932,8 +932,9 @@ ofxGgmlComputeResult ofxGgml::synchronize() {
 ofxGgmlComputeResult ofxGgml::compute(ofxGgmlGraph & graph) {
 	ofxGgmlComputeResult result;
 
-	if (!allocGraph(graph)) {
-		result.error = "ofxGgml: graph allocation failed";
+	Result<void> alloc = allocGraph(graph);
+	if (!alloc.isOk()) {
+		result.error = std::string("ofxGgml: graph allocation failed: ") + alloc.error().message;
 		return result;
 	}
 
