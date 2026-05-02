@@ -586,6 +586,63 @@ TEST_CASE("Code assistant parser and run path expose structured task results", "
 	}
 }
 
+TEST_CASE("Code assistant tool policy profiles tighten runtime proposals", "[code_assistant]") {
+	ofxGgmlCodeAssistant assistant;
+	assistant.setCompletionExecutable(createAssistantExecutable({
+		"GOAL: Update helper safely",
+		"APPROACH: Touch one file and verify it",
+		"FILE: src/main.txt | update greeting | main",
+		"PATCH: replace | src/main.txt | update greeting",
+		"SEARCH: hello",
+		"REPLACE: ready",
+		"DIFF: --- a/src/main.txt\\n+++ b/src/main.txt\\n@@ -1,1 +1,1 @@\\n-hello\\n+ready",
+		"COMMAND: verify | . | fake-runner | --check",
+		"EXPECT: output contains ready"
+	}));
+
+	ofxGgmlCodeAssistantRequest request;
+	request.action = ofxGgmlCodeAssistantAction::Edit;
+	request.language = ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+	request.userInput = "Update the greeting safely.";
+	request.requestStructuredResult = true;
+	request.requestUnifiedDiff = true;
+	request.webUrls = {"https://example.com/docs"};
+	request.toolPolicyProfile =
+		ofxGgmlCodeAssistantToolPolicyProfile::WorkspaceSafe;
+
+	const auto prepared = assistant.preparePrompt(request, {});
+	REQUIRE(prepared.prompt.find("Tool policy profile: workspace-safe") != std::string::npos);
+	REQUIRE(prepared.prompt.find("disabled by the active tool policy") != std::string::npos);
+
+	const auto result = assistant.run(
+		createAssistantDummyModel(),
+		request);
+	REQUIRE(result.inference.success);
+
+	const auto hasPatchTool = std::find_if(
+		result.proposedToolCalls.begin(),
+		result.proposedToolCalls.end(),
+		[](const ofxGgmlCodeAssistantToolCall & toolCall) {
+			return toolCall.toolName == "apply_patch" && toolCall.requiresApproval;
+		});
+	REQUIRE(hasPatchTool != result.proposedToolCalls.end());
+
+	const auto hasVerificationTool = std::find_if(
+		result.proposedToolCalls.begin(),
+		result.proposedToolCalls.end(),
+		[](const ofxGgmlCodeAssistantToolCall & toolCall) {
+			return toolCall.toolName == "run_verification" && toolCall.requiresApproval;
+		});
+	REQUIRE(hasVerificationTool != result.proposedToolCalls.end());
+
+	REQUIRE(std::find_if(
+		result.proposedToolCalls.begin(),
+		result.proposedToolCalls.end(),
+		[](const ofxGgmlCodeAssistantToolCall & toolCall) {
+			return toolCall.toolName == "fetch_grounding_sources";
+		}) == result.proposedToolCalls.end());
+}
+
 TEST_CASE("Code assistant sessions stream events and gate risky tool proposals", "[code_assistant]") {
 	const auto sourceDir = makeAssistantTestDir("session_flow");
 	{

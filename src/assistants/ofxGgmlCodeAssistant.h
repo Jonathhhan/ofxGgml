@@ -44,6 +44,13 @@ enum class ofxGgmlCodeAssistantToolCategory {
 	Analysis
 };
 
+enum class ofxGgmlCodeAssistantToolPolicyProfile {
+	Balanced = 0,
+	ReadOnly,
+	WorkspaceSafe,
+	Strict
+};
+
 enum class ofxGgmlCodeAssistantEventKind {
 	SessionStarted = 0,
 	PromptPrepared,
@@ -306,6 +313,8 @@ struct ofxGgmlCodeAssistantRequest {
 	bool requestUnifiedDiff = false;
 	bool preferGroundedEdits = true;
 	bool runSelfCheck = true;
+	ofxGgmlCodeAssistantToolPolicyProfile toolPolicyProfile =
+		ofxGgmlCodeAssistantToolPolicyProfile::Balanced;
 	ofxGgmlCodeAssistantSymbolQuery symbolQuery;
 };
 
@@ -474,6 +483,8 @@ public:
 		const ofxGgmlCodeAssistantRequest & request,
 		const ofxGgmlCodeAssistantContext & context,
 		const ofxGgmlCodeAssistantResult & result);
+	static std::string describeToolPolicyProfile(
+		ofxGgmlCodeAssistantToolPolicyProfile profile);
 
 private:
 	ofxGgmlInference m_inference;

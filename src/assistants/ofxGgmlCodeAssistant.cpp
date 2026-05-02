@@ -133,6 +133,42 @@ std::string joinStrings(
 	return stream.str();
 }
 
+bool toolPolicyAllowsGrounding(ofxGgmlCodeAssistantToolPolicyProfile profile) {
+	return profile == ofxGgmlCodeAssistantToolPolicyProfile::Balanced ||
+		profile == ofxGgmlCodeAssistantToolPolicyProfile::ReadOnly;
+}
+
+bool toolPolicyAllowsPatchApplication(
+	ofxGgmlCodeAssistantToolPolicyProfile profile) {
+	return profile == ofxGgmlCodeAssistantToolPolicyProfile::Balanced ||
+		profile == ofxGgmlCodeAssistantToolPolicyProfile::WorkspaceSafe;
+}
+
+bool toolPolicyAllowsVerification(
+	ofxGgmlCodeAssistantToolPolicyProfile profile) {
+	return profile == ofxGgmlCodeAssistantToolPolicyProfile::Balanced ||
+		profile == ofxGgmlCodeAssistantToolPolicyProfile::WorkspaceSafe;
+}
+
+std::vector<ofxGgmlCodeAssistantToolDefinition> applyToolPolicyProfile(
+	std::vector<ofxGgmlCodeAssistantToolDefinition> registry,
+	ofxGgmlCodeAssistantToolPolicyProfile profile) {
+	for (auto & tool : registry) {
+		if (tool.name == "fetch_grounding_sources") {
+			tool.enabledByDefault = toolPolicyAllowsGrounding(profile);
+		}
+		if (tool.name == "apply_patch") {
+			tool.enabledByDefault = toolPolicyAllowsPatchApplication(profile);
+			tool.requiresApproval = tool.enabledByDefault;
+		}
+		if (tool.name == "run_verification") {
+			tool.enabledByDefault = toolPolicyAllowsVerification(profile);
+			tool.requiresApproval = tool.enabledByDefault;
+		}
+	}
+	return registry;
+}
+
 std::string normalizePathForMatch(const std::string & value) {
 	std::string normalized = std::filesystem::path(value).generic_string();
 	std::replace(normalized.begin(), normalized.end(), '\\', '/');
@@ -1548,6 +1584,28 @@ void appendRequestConstraints(
 	std::ostringstream & prompt,
 	const ofxGgmlCodeAssistantRequest & request) {
 	appendAllowedFiles(prompt, request.allowedFiles);
+	prompt << "Tool policy profile: "
+		<< ofxGgmlCodeAssistant::describeToolPolicyProfile(
+			request.toolPolicyProfile)
+		<< "\n";
+	switch (request.toolPolicyProfile) {
+	case ofxGgmlCodeAssistantToolPolicyProfile::ReadOnly:
+		prompt << "- Stay read-only. Do not assume workspace patch application or verification execution.\n";
+		break;
+	case ofxGgmlCodeAssistantToolPolicyProfile::WorkspaceSafe:
+		prompt << "- Keep tool usage workspace-local and approval-friendly.\n";
+		prompt << "- Avoid relying on external web fetching in this mode.\n";
+		break;
+	case ofxGgmlCodeAssistantToolPolicyProfile::Strict:
+		prompt << "- Stay read-only and offline.\n";
+		prompt << "- Do not rely on patch application, verification commands, or external web fetching.\n";
+		break;
+	case ofxGgmlCodeAssistantToolPolicyProfile::Balanced:
+	default:
+		prompt << "- Use the normal balanced tool policy.\n";
+		break;
+	}
+	prompt << "\n";
 
 	if (request.specToCodeMode) {
 		prompt << "Treat this request as a feature specification to implement professionally.\n";
@@ -3034,6 +3092,21 @@ std::vector<ofxGgmlCodeAssistantBuildError> ofxGgmlCodeAssistant::parseBuildErro
 	return errors;
 }
 
+std::string ofxGgmlCodeAssistant::describeToolPolicyProfile(
+	ofxGgmlCodeAssistantToolPolicyProfile profile) {
+	switch (profile) {
+	case ofxGgmlCodeAssistantToolPolicyProfile::ReadOnly:
+		return "read-only";
+	case ofxGgmlCodeAssistantToolPolicyProfile::WorkspaceSafe:
+		return "workspace-safe";
+	case ofxGgmlCodeAssistantToolPolicyProfile::Strict:
+		return "strict";
+	case ofxGgmlCodeAssistantToolPolicyProfile::Balanced:
+	default:
+		return "balanced";
+	}
+}
+
 void ofxGgmlCodeAssistant::seedContextFromSession(
 	ofxGgmlCodeAssistantContext * context,
 	const ofxGgmlCodeAssistantSession & session) {
@@ -3574,12 +3647,15 @@ ofxGgmlCodeAssistantPreparedPrompt ofxGgmlCodeAssistant::preparePrompt(
 		prompt << "\n";
 	}
 
-	if (!request.webUrls.empty()) {
+	if (!request.webUrls.empty() &&
+		toolPolicyAllowsGrounding(request.toolPolicyProfile)) {
 		prompt << "Grounded web/doc sources requested:\n";
 		for (const auto & url : request.webUrls) {
 			prompt << "- " << url << "\n";
 		}
 		prompt << "\n";
+	} else if (!request.webUrls.empty()) {
+		prompt << "Grounded web/doc sources were requested but are disabled by the active tool policy.\n\n";
 	}
 
 	if (request.requestStructuredResult) {
@@ -3796,7 +3872,8 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runWithSession(
 			sourceSettings);
 		sources.insert(sources.end(), docs.begin(), docs.end());
 	}
-	if (!request.webUrls.empty()) {
+	if (!request.webUrls.empty() &&
+		toolPolicyAllowsGrounding(request.toolPolicyProfile)) {
 		const auto webSources = ofxGgmlInference::fetchUrlSources(
 			request.webUrls,
 			sourceSettings);
@@ -3887,7 +3964,7 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runWithSession(
 		result.prepared,
 		request,
 		result.structured,
-		getToolRegistry());
+		applyToolPolicyProfile(getToolRegistry(), request.toolPolicyProfile));
 
 	ofxGgmlCodeAssistantEvent structuredEvent = makeEvent(
 		ofxGgmlCodeAssistantEventKind::StructuredResultReady,
@@ -3978,6 +4055,8 @@ ofxGgmlCodeAssistantResult ofxGgmlCodeAssistant::runSpecToCode(
 	codeRequest.includeCodeMap = true;
 	codeRequest.requestStructuredResult = true;
 	codeRequest.requestUnifiedDiff = request.requestUnifiedDiff;
+	codeRequest.toolPolicyProfile =
+		ofxGgmlCodeAssistantToolPolicyProfile::WorkspaceSafe;
 	return run(
 		modelPath,
 		codeRequest,

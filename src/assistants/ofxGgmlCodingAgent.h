@@ -27,6 +27,9 @@ struct ofxGgmlCodingAgentSettings {
 	bool autoSuggestVerificationCommands = true;
 	bool requireStructuredResult = true;
 	bool preferUnifiedDiff = true;
+	ofxGgmlCodeAssistantToolPolicyProfile toolPolicyProfile =
+		ofxGgmlCodeAssistantToolPolicyProfile::WorkspaceSafe;
+	bool autoSelectToolPolicyForMode = true;
 };
 
 struct ofxGgmlCodingAgentResult {

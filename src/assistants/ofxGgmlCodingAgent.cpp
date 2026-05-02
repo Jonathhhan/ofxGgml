@@ -69,6 +69,27 @@ bool containsApprovalDenialText(const std::string & text) {
 		text.find("Approval denied") != std::string::npos;
 }
 
+bool toolPolicyAllowsPatchApplication(
+	ofxGgmlCodeAssistantToolPolicyProfile profile) {
+	return profile == ofxGgmlCodeAssistantToolPolicyProfile::Balanced ||
+		profile == ofxGgmlCodeAssistantToolPolicyProfile::WorkspaceSafe;
+}
+
+bool toolPolicyAllowsVerification(
+	ofxGgmlCodeAssistantToolPolicyProfile profile) {
+	return profile == ofxGgmlCodeAssistantToolPolicyProfile::Balanced ||
+		profile == ofxGgmlCodeAssistantToolPolicyProfile::WorkspaceSafe;
+}
+
+ofxGgmlCodeAssistantToolPolicyProfile resolveToolPolicyProfile(
+	const ofxGgmlCodingAgentSettings & settings,
+	bool readOnly) {
+	if (settings.autoSelectToolPolicyForMode && readOnly) {
+		return ofxGgmlCodeAssistantToolPolicyProfile::ReadOnly;
+	}
+	return settings.toolPolicyProfile;
+}
+
 const ofxGgmlScriptSourceWorkspaceInfo * getWorkspaceInfoIfLocal(
 	const ofxGgmlCodeAssistantContext & context,
 	ofxGgmlScriptSourceWorkspaceInfo * snapshot) {
@@ -192,11 +213,14 @@ ofxGgmlCodingAgentResult ofxGgmlCodingAgent::run(
 	std::function<bool(const std::string &)> onChunk) {
 	ofxGgmlCodingAgentResult result;
 	result.readOnly = (settings.mode == ofxGgmlCodingAgentMode::Plan);
+	const auto effectiveToolPolicy =
+		resolveToolPolicyProfile(settings, result.readOnly);
 
 	ofxGgmlCodeAssistantRequest effectiveRequest = request.assistantRequest;
 	if (trimCopy(effectiveRequest.labelOverride).empty()) {
 		effectiveRequest.labelOverride = trimCopy(request.taskLabel);
 	}
+	effectiveRequest.toolPolicyProfile = effectiveToolPolicy;
 	if (settings.requireStructuredResult) {
 		effectiveRequest.requestStructuredResult = true;
 	}
@@ -229,10 +253,27 @@ ofxGgmlCodingAgentResult ofxGgmlCodingAgent::run(
 		return result;
 	}
 
-	if (result.readOnly || !settings.autoApply) {
+	const bool autoApplyAllowed = settings.autoApply &&
+		toolPolicyAllowsPatchApplication(effectiveToolPolicy);
+	const bool autoVerifyAllowed = settings.autoVerify &&
+		toolPolicyAllowsVerification(effectiveToolPolicy);
+	if (result.readOnly || !autoApplyAllowed) {
 		result.changedFiles = collectChangedFiles(
 			result.assistantResult.structured,
 			nullptr);
+		result.applyResult.success = true;
+		if (!result.readOnly &&
+			structuredHasProposedChanges(result.assistantResult.structured) &&
+			!toolPolicyAllowsPatchApplication(effectiveToolPolicy)) {
+			result.applyResult.messages.push_back(
+				"Patch application blocked by tool policy profile.");
+		}
+		result.verificationResult.success = true;
+		if (!toolPolicyAllowsVerification(effectiveToolPolicy) &&
+			!result.assistantResult.structured.verificationCommands.empty()) {
+			result.verificationResult.summary =
+				"Verification blocked by tool policy profile.";
+		}
 		result.success = true;
 		result.summary = summarizeResult(result);
 		return result;
@@ -295,7 +336,7 @@ ofxGgmlCodingAgentResult ofxGgmlCodingAgent::run(
 	}
 
 	auto verificationCommands = result.assistantResult.structured.verificationCommands;
-	if (settings.autoVerify &&
+	if (autoVerifyAllowed &&
 		verificationCommands.empty() &&
 		settings.autoSuggestVerificationCommands &&
 		!result.changedFiles.empty() &&
@@ -316,7 +357,7 @@ ofxGgmlCodingAgentResult ofxGgmlCodingAgent::run(
 		"run_verification");
 	const bool verificationBlockedByPatchDenial =
 		patchApplicationDenied && !verificationCommands.empty();
-	if (settings.autoVerify && !verificationCommands.empty()) {
+	if (autoVerifyAllowed && !verificationCommands.empty()) {
 		if (!verificationToolApproved) {
 			result.verificationResult.success = true;
 			result.verificationResult.summary =
@@ -346,9 +387,11 @@ ofxGgmlCodingAgentResult ofxGgmlCodingAgent::run(
 		}
 	} else {
 		result.verificationResult.success = true;
-		result.verificationResult.summary = verificationCommands.empty()
-			? "No verification commands were provided."
-			: "Verification skipped by settings.";
+		result.verificationResult.summary = !toolPolicyAllowsVerification(effectiveToolPolicy)
+			? "Verification blocked by tool policy profile."
+			: (verificationCommands.empty()
+				? "No verification commands were provided."
+				: "Verification skipped by settings.");
 	}
 
 	result.success = result.assistantResult.inference.success &&

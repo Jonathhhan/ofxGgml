@@ -1,0 +1,7 @@
+{
+  "profile": "gpu-linux",
+  "perf_profile": "gpu",
+  "backend": "",
+  "allowed_regression_percent": 35.0,
+  "metrics": {}
+}

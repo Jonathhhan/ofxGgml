@@ -213,7 +213,9 @@ if(OFXGGML_WITH_OPENFRAMEWORKS)
 endif()
 
 if(OFXGGML_ENABLE_BENCHMARK_TESTS)
-    list(APPEND TEST_SOURCES test_benchmark.cpp)
+    list(APPEND TEST_SOURCES
+        test_benchmark.cpp
+        test_performance_profile.cpp)
 endif()
 
 # ---------------------------------------------------------------------------

@@ -827,6 +827,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\benchmark-addon.ps1
 
 These wrappers configure the test suite with `OFXGGML_ENABLE_BENCHMARK_TESTS=ON`, build `ofxGgml-tests`, and run the stable benchmark set (`[benchmark]~[manual]`) by default.
 
+For deterministic CI regression checks, use the dedicated performance profiles:
+
+```bash
+python3 scripts/dev/run-performance-profile.py --profile cpu-linux --binary build/tests-perf/ofxGgml-tests
+python3 scripts/dev/run-performance-profile.py --profile gpu-linux --binary build/tests-perf/ofxGgml-tests
+```
+
+The profile definitions live in `scripts/dev/performance-profiles.json`, and the checked-in baselines live under `.ci/performance-baselines/`.
+
 **For detailed performance tuning, optimization strategies, and expected performance numbers, see `docs/PERFORMANCE.md`.**
 
 ## Source-grounded generation
@@ -1086,6 +1095,8 @@ Use it when an app wants local chat behavior without duplicating prompt assembly
 
 `ofxGgmlCodeAssistant` provides Copilot-style local coding assistance with semantic search, inline completions, and intelligent code generation. It builds coding prompts with language presets, project memory, repo/file context, focused-file snippets, semantic symbol retrieval, and reusable actions.
 
+Tool proposals can now be constrained with policy profiles (`balanced`, `read-only`, `workspace-safe`, `strict`) so hosted flows can keep planning, editing, verification, and web-grounding behavior aligned with the active mode.
+
 ### Quick Start
 
 ```cpp
@@ -1292,6 +1303,8 @@ For complete examples and API details, see [docs/features/ASSISTANTS.md](docs/fe
 ## Workspace Assistant Helpers
 
 `ofxGgmlWorkspaceAssistant` extends the Code Assistant with safe workspace execution. It validates patches, applies unified diffs, manages transactions with rollback, runs verification commands, and implements a full "plan → edit → verify → retry" loop.
+
+When paired with `ofxGgmlCodingAgent`, the default build-mode policy is now `workspace-safe`, while plan-mode auto-downgrades to a read-only tool policy so risky execution paths stay blocked unless explicitly re-enabled.
 
 ### Quick Start
 

@@ -177,6 +177,12 @@ Benchmark results are printed with timing statistics and throughput metrics.
 
 Benchmarks tagged `[manual]` are intentionally excluded by the wrapper scripts because they exercise heavier teardown/reinit paths or require manual interpretation.
 
+Deterministic regression profiles for CI live behind the `[performance_profile]` tag and are evaluated with:
+
+```bash
+python3 scripts/dev/run-performance-profile.py --profile cpu-linux --binary build/tests-perf/ofxGgml-tests
+```
+
 ### Writing New Tests
 
 Create a new test file in `tests/`:

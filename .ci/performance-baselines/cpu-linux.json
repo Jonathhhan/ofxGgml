@@ -1,0 +1,11 @@
+{
+  "profile": "cpu-linux",
+  "perf_profile": "cpu",
+  "backend": "CPU",
+  "allowed_regression_percent": 35.0,
+  "metrics": {
+    "graph_alloc_p50_ms": 0.01341,
+    "graph_compute_p50_ms": 0.113601,
+    "graph_async_p50_ms": 0.005989
+  }
+}

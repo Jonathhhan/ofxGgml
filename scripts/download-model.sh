@@ -42,6 +42,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADDON_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MODEL_CATALOG_PATH="$ADDON_ROOT/scripts/model-catalog.json"
+MODEL_CATALOG_MANIFEST_PATH="$ADDON_ROOT/scripts/model-catalog.manifest.json"
+MODEL_CATALOG_SIGNATURE_PATH="$ADDON_ROOT/scripts/model-catalog.manifest.sig"
+MODEL_CATALOG_PUBLIC_KEY_PATH="$ADDON_ROOT/scripts/keys/model-catalog-signing.pub.pem"
 
 # ---------------------------------------------------------------------------
 # Model presets (loaded from model-catalog.json, with fallback defaults)
@@ -53,8 +56,17 @@ PRESET_SIZES=()
 PRESET_BESTFOR=()
 PRESET_FILENAMES=()
 PRESET_SHA256=()
+PRESET_PUBLISHERS=()
+PRESET_SOURCE_TYPES=()
+PRESET_UPDATED_AT=()
 
 if command -v python3 >/dev/null 2>&1 && [[ -f "$MODEL_CATALOG_PATH" ]]; then
+	python3 "$ADDON_ROOT/scripts/dev/validate-model-catalog.py" \
+		--manifest "$MODEL_CATALOG_MANIFEST_PATH" \
+		--signature "$MODEL_CATALOG_SIGNATURE_PATH" \
+		--public-key "$MODEL_CATALOG_PUBLIC_KEY_PATH" \
+		--require-signature \
+		"$MODEL_CATALOG_PATH" >/dev/null
 	MODEL_CATALOG_ROWS="$(python3 - "$MODEL_CATALOG_PATH" <<'PY'
 import json, sys
 from pathlib import Path
@@ -62,6 +74,7 @@ from pathlib import Path
 path = Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8"))
 for model in data.get("models", []):
+    provenance = model.get("provenance", {})
     print("\t".join([
         str(model.get("name", "")),
         str(model.get("url", "")),
@@ -69,10 +82,13 @@ for model in data.get("models", []):
         str(model.get("best_for", "")),
         str(model.get("filename", "")),
         str(model.get("sha256", "")),
+        str(provenance.get("publisher", "")),
+        str(provenance.get("source_type", "")),
+        str(provenance.get("catalog_updated_at", "")),
     ]))
 PY
 )"
-	while IFS=$'\t' read -r name url size bestfor filename sha256; do
+	while IFS=$'\t' read -r name url size bestfor filename sha256 publisher source_type updated_at; do
 		[[ -z "$name" ]] && continue
 		PRESET_NAMES+=("$name")
 		PRESET_URLS+=("$url")
@@ -80,6 +96,9 @@ PY
 		PRESET_BESTFOR+=("$bestfor")
 		PRESET_FILENAMES+=("$filename")
 		PRESET_SHA256+=("$sha256")
+		PRESET_PUBLISHERS+=("$publisher")
+		PRESET_SOURCE_TYPES+=("$source_type")
+		PRESET_UPDATED_AT+=("$updated_at")
 	done <<< "$MODEL_CATALOG_ROWS"
 fi
 
@@ -105,6 +124,9 @@ if [[ ${#PRESET_NAMES[@]} -eq 0 ]]; then
 		"qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
 	)
 	PRESET_SHA256=("" "")
+	PRESET_PUBLISHERS=("Qwen" "Qwen")
+	PRESET_SOURCE_TYPES=("official" "official")
+	PRESET_UPDATED_AT=("" "")
 fi
 
 # Zero-based indices of presets downloaded by default / --both.
@@ -169,8 +191,14 @@ list_models() {
 		local n=$((i + 1))
 		printf "  %d. %-40s %s\n" "$n" "${PRESET_NAMES[$i]}" "${PRESET_SIZES[$i]}"
 		printf "     Best for: %s\n" "${PRESET_BESTFOR[$i]}"
+		if [[ -n "${PRESET_PUBLISHERS[$i]:-}" ]]; then
+			printf "     Source: %s (%s)\n" "${PRESET_PUBLISHERS[$i]}" "${PRESET_SOURCE_TYPES[$i]:-unknown}"
+		fi
 		if [[ -n "${PRESET_SHA256[$i]:-}" ]]; then
 			printf "     SHA256: %s\n" "${PRESET_SHA256[$i]}"
+		fi
+		if [[ -n "${PRESET_UPDATED_AT[$i]:-}" ]]; then
+			printf "     Catalog updated: %s\n" "${PRESET_UPDATED_AT[$i]}"
 		fi
 		printf "     %s\n\n" "${PRESET_URLS[$i]}"
 	done

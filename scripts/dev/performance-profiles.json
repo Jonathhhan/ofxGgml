@@ -1,0 +1,15 @@
+{
+  "profiles": {
+    "cpu-linux": {
+      "perf_profile": "cpu",
+      "catch_filter": "[performance_profile]",
+      "baseline": ".ci/performance-baselines/cpu-linux.json"
+    },
+    "gpu-linux": {
+      "perf_profile": "gpu",
+      "catch_filter": "[performance_profile]",
+      "baseline": ".ci/performance-baselines/gpu-linux.json",
+      "allow_skip": true
+    }
+  }
+}

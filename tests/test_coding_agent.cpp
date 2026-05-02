@@ -338,3 +338,73 @@ TEST_CASE("Coding agent plan mode stays read-only", "[coding_agent]") {
 	REQUIRE(result.changedFiles.size() == 1);
 	REQUIRE(result.changedFiles.front() == "src.cpp");
 }
+
+TEST_CASE("Coding agent tool policy can block execution in build mode", "[coding_agent]") {
+	const auto root = makeCodingAgentTestDir("strict_workspace");
+	const auto sourcePath = root / "src.cpp";
+	{
+		std::ofstream out(sourcePath);
+		out << "int answer() { return 60; }\n";
+	}
+
+	ofxGgmlScriptSource scriptSource;
+	REQUIRE(scriptSource.setLocalFolder(root.string()));
+
+	ofxGgmlCodingAgent agent;
+	agent.setCompletionExecutable(createCodingAgentExecutable({
+		"GOAL: Make answer return 61",
+		"APPROACH: Update the helper and verify it",
+		"FILE: src.cpp | update implementation | answer",
+		"PATCH: replace | src.cpp | update return value",
+		"SEARCH: return 60;",
+		"REPLACE: return 61;",
+		"DIFF: --- a/src.cpp\\n+++ b/src.cpp\\n@@ -1,1 +1,1 @@\\n-int answer() { return 60; }\\n+int answer() { return 61; }",
+		"COMMAND: verify | . | fake-runner | --check",
+		"EXPECT: helper verification passes"
+	}));
+
+	ofxGgmlCodingAgentRequest request;
+	request.taskLabel = "Strict helper change";
+	request.assistantRequest.action = ofxGgmlCodeAssistantAction::Edit;
+	request.assistantRequest.language =
+		ofxGgmlCodeAssistant::defaultLanguagePresets().front();
+	request.assistantRequest.userInput =
+		"Update answer() so it returns 61, but stay in strict review-only mode.";
+
+	ofxGgmlCodeAssistantContext context;
+	context.scriptSource = &scriptSource;
+
+	ofxGgmlCodingAgentSettings settings;
+	settings.toolPolicyProfile =
+		ofxGgmlCodeAssistantToolPolicyProfile::Strict;
+	settings.autoSelectToolPolicyForMode = false;
+	bool commandRunnerInvoked = false;
+	settings.commandRunner =
+		[&commandRunnerInvoked](const ofxGgmlCodeAssistantCommandSuggestion & command) {
+			commandRunnerInvoked = true;
+			ofxGgmlWorkspaceCommandResult result;
+			result.command = command;
+			result.success = true;
+			result.exitCode = 0;
+			return result;
+		};
+
+	const auto result = agent.run(
+		createCodingAgentDummyModel(),
+		request,
+		context,
+		settings);
+
+	REQUIRE(result.success);
+	REQUIRE_FALSE(result.appliedChanges);
+	REQUIRE_FALSE(result.verificationAttempted);
+	REQUIRE_FALSE(commandRunnerInvoked);
+	REQUIRE(readFileText(sourcePath).find("return 60;") != std::string::npos);
+	REQUIRE(std::find_if(
+		result.applyResult.messages.begin(),
+		result.applyResult.messages.end(),
+		[](const std::string & message) {
+			return message.find("tool policy profile") != std::string::npos;
+		}) != result.applyResult.messages.end());
+	REQUIRE(result.verificationResult.summary.find("tool policy profile") != std::string::npos);
+}
