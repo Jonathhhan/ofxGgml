@@ -69,16 +69,14 @@ msys2:
 vs:
 	ADDON_INCLUDES += src
 	ADDON_INCLUDES += libs/ggml/include
+	# Keep the checked-in Visual Studio defaults CPU-safe.
+	# Re-run scripts\build-ggml.bat on the target machine after enabling
+	# optional backends so the generated project can pick up the exact local
+	# ggml library set before you regenerate with the Project Generator.
 	# @DIFFUSION_LIBS_START vs
 	ADDON_LIBS += libs/ggml/lib/ggml.lib
 	ADDON_LIBS += libs/ggml/lib/ggml-base.lib
 	ADDON_LIBS += libs/ggml/lib/ggml-cpu.lib
-	ADDON_LIBS += libs/ggml/lib/ggml-cuda.lib
-	ADDON_LIBS += libs/ggml/lib/ggml-vulkan.lib
-	ADDON_LIBS += "$(CUDA_PATH)\lib\x64\cublas.lib"
-	ADDON_LIBS += "$(CUDA_PATH)\lib\x64\cudart.lib"
-	ADDON_LIBS += "$(CUDA_PATH)\lib\x64\cuda.lib"
-	ADDON_LIBS += "$(VULKAN_SDK)\Lib\vulkan-1.lib"
 	# @DIFFUSION_LIBS_END vs
 android/armeabi:
 android/armeabi-v7a:

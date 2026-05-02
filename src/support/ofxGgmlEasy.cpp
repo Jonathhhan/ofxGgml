@@ -4,6 +4,17 @@
 
 namespace {
 
+template <typename T, typename Configure>
+T & ensureOwned(
+	std::unique_ptr<T> & ptr,
+	Configure && configure) {
+	if (!ptr) {
+		ptr = std::make_unique<T>();
+		configure(*ptr);
+	}
+	return *ptr;
+}
+
 ofxGgmlInferenceResult makeTextConfigError(const std::string & message) {
 	ofxGgmlInferenceResult result;
 	result.error = message;
@@ -44,13 +55,33 @@ void applyInferenceExecutables(
 	inference.setEmbeddingExecutable(config.embeddingExecutable);
 }
 
+void applyCrawlerBackend(
+	ofxGgmlWebCrawler & crawler,
+	const ofxGgmlEasyCrawlerConfig & config) {
+	crawler.setBackend(
+		std::make_shared<ofxGgmlMojoWebCrawlerBackend>(config.executablePath));
+}
+
+void applySpeechBackend(
+	ofxGgmlSpeechInference & speechInference,
+	const ofxGgmlEasySpeechConfig & config) {
+	if (config.preferServer && !config.serverUrl.empty()) {
+		speechInference.setBackend(
+			ofxGgmlSpeechInference::createWhisperServerBackend(
+				config.serverUrl,
+				config.serverModel));
+		return;
+	}
+	speechInference.setBackend(
+		ofxGgmlSpeechInference::createWhisperCliBackend(
+			config.cliExecutable.empty()
+				? "whisper-cli"
+				: config.cliExecutable));
+}
+
 } // namespace
 
-ofxGgmlEasy::ofxGgmlEasy() {
-	syncTextBackends();
-	syncCrawlerBackend();
-	syncSpeechBackend();
-}
+ofxGgmlEasy::ofxGgmlEasy() = default;
 
 void ofxGgmlEasy::configureText(const ofxGgmlEasyTextConfig & config) {
 	m_textConfig = config;
@@ -58,25 +89,49 @@ void ofxGgmlEasy::configureText(const ofxGgmlEasyTextConfig & config) {
 }
 
 void ofxGgmlEasy::syncTextBackends() {
-	applyInferenceExecutables(m_inference, m_textConfig);
-	applyInferenceExecutables(m_citationSearch.getInference(), m_textConfig);
-	applyInferenceExecutables(m_ragPipeline.getInference(), m_textConfig);
-	m_chatAssistant.setCompletionExecutable(m_textConfig.completionExecutable);
-	m_textAssistant.setCompletionExecutable(m_textConfig.completionExecutable);
-	m_codingAgent.setCompletionExecutable(m_textConfig.completionExecutable);
-	m_codingAgent.setEmbeddingExecutable(m_textConfig.embeddingExecutable);
-	m_mediaPromptGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
-	m_musicGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
-	m_milkDropGenerator.setCompletionExecutable(m_textConfig.completionExecutable);
-	m_videoEssayWorkflow.getTextAssistant().setCompletionExecutable(
-		m_textConfig.completionExecutable);
-	m_longVideoPlanner.getTextAssistant().setCompletionExecutable(
-		m_textConfig.completionExecutable);
-	m_conversationManager.getInference().setCompletionExecutable(
-		m_textConfig.completionExecutable);
-	applyInferenceExecutables(
-		m_videoEssayWorkflow.getCitationSearch().getInference(),
-		m_textConfig);
+	if (m_inference) {
+		applyInferenceExecutables(*m_inference, m_textConfig);
+	}
+	if (m_citationSearch) {
+		applyInferenceExecutables(m_citationSearch->getInference(), m_textConfig);
+	}
+	if (m_ragPipeline) {
+		applyInferenceExecutables(m_ragPipeline->getInference(), m_textConfig);
+	}
+	if (m_chatAssistant) {
+		m_chatAssistant->setCompletionExecutable(m_textConfig.completionExecutable);
+	}
+	if (m_textAssistant) {
+		m_textAssistant->setCompletionExecutable(m_textConfig.completionExecutable);
+	}
+	if (m_codingAgent) {
+		m_codingAgent->setCompletionExecutable(m_textConfig.completionExecutable);
+		m_codingAgent->setEmbeddingExecutable(m_textConfig.embeddingExecutable);
+	}
+	if (m_mediaPromptGenerator) {
+		m_mediaPromptGenerator->setCompletionExecutable(m_textConfig.completionExecutable);
+	}
+	if (m_musicGenerator) {
+		m_musicGenerator->setCompletionExecutable(m_textConfig.completionExecutable);
+	}
+	if (m_milkDropGenerator) {
+		m_milkDropGenerator->setCompletionExecutable(m_textConfig.completionExecutable);
+	}
+	if (m_videoEssayWorkflow) {
+		m_videoEssayWorkflow->getTextAssistant().setCompletionExecutable(
+			m_textConfig.completionExecutable);
+		applyInferenceExecutables(
+			m_videoEssayWorkflow->getCitationSearch().getInference(),
+			m_textConfig);
+	}
+	if (m_longVideoPlanner) {
+		m_longVideoPlanner->getTextAssistant().setCompletionExecutable(
+			m_textConfig.completionExecutable);
+	}
+	if (m_conversationManager) {
+		m_conversationManager->getInference().setCompletionExecutable(
+			m_textConfig.completionExecutable);
+	}
 }
 
 void ofxGgmlEasy::configureVision(const ofxGgmlEasyVisionConfig & config) {
@@ -110,139 +165,139 @@ const ofxGgmlEasyCrawlerConfig & ofxGgmlEasy::getWebCrawlerConfig() const {
 }
 
 ofxGgmlInference & ofxGgmlEasy::getInference() {
-	return m_inference;
+	return ensureInference();
 }
 
 const ofxGgmlInference & ofxGgmlEasy::getInference() const {
-	return m_inference;
+	return ensureInference();
 }
 
 ofxGgmlChatAssistant & ofxGgmlEasy::getChatAssistant() {
-	return m_chatAssistant;
+	return ensureChatAssistant();
 }
 
 const ofxGgmlChatAssistant & ofxGgmlEasy::getChatAssistant() const {
-	return m_chatAssistant;
+	return ensureChatAssistant();
 }
 
 ofxGgmlTextAssistant & ofxGgmlEasy::getTextAssistant() {
-	return m_textAssistant;
+	return ensureTextAssistant();
 }
 
 const ofxGgmlTextAssistant & ofxGgmlEasy::getTextAssistant() const {
-	return m_textAssistant;
+	return ensureTextAssistant();
 }
 
 ofxGgmlVisionInference & ofxGgmlEasy::getVisionInference() {
-	return m_visionInference;
+	return ensureVisionInference();
 }
 
 const ofxGgmlVisionInference & ofxGgmlEasy::getVisionInference() const {
-	return m_visionInference;
+	return ensureVisionInference();
 }
 
 ofxGgmlSpeechInference & ofxGgmlEasy::getSpeechInference() {
-	return m_speechInference;
+	return ensureSpeechInference();
 }
 
 const ofxGgmlSpeechInference & ofxGgmlEasy::getSpeechInference() const {
-	return m_speechInference;
+	return ensureSpeechInference();
 }
 
 ofxGgmlWebCrawler & ofxGgmlEasy::getWebCrawler() {
-	return m_citationSearch.getWebCrawler();
+	return ensureCitationSearch().getWebCrawler();
 }
 
 const ofxGgmlWebCrawler & ofxGgmlEasy::getWebCrawler() const {
-	return m_citationSearch.getWebCrawler();
+	return ensureCitationSearch().getWebCrawler();
 }
 
 ofxGgmlCitationSearch & ofxGgmlEasy::getCitationSearch() {
-	return m_citationSearch;
+	return ensureCitationSearch();
 }
 
 const ofxGgmlCitationSearch & ofxGgmlEasy::getCitationSearch() const {
-	return m_citationSearch;
+	return ensureCitationSearch();
 }
 
 ofxGgmlVideoPlanner & ofxGgmlEasy::getVideoPlanner() {
-	return m_videoPlanner;
+	return ensureVideoPlanner();
 }
 
 const ofxGgmlVideoPlanner & ofxGgmlEasy::getVideoPlanner() const {
-	return m_videoPlanner;
+	return ensureVideoPlanner();
 }
 
 ofxGgmlMediaPromptGenerator & ofxGgmlEasy::getMediaPromptGenerator() {
-	return m_mediaPromptGenerator;
+	return ensureMediaPromptGenerator();
 }
 
 const ofxGgmlMediaPromptGenerator & ofxGgmlEasy::getMediaPromptGenerator() const {
-	return m_mediaPromptGenerator;
+	return ensureMediaPromptGenerator();
 }
 
 ofxGgmlMusicGenerator & ofxGgmlEasy::getMusicGenerator() {
-	return m_musicGenerator;
+	return ensureMusicGenerator();
 }
 
 const ofxGgmlMusicGenerator & ofxGgmlEasy::getMusicGenerator() const {
-	return m_musicGenerator;
+	return ensureMusicGenerator();
 }
 
 ofxGgmlAceStepBridge & ofxGgmlEasy::getAceStepBridge() {
-	return m_aceStepBridge;
+	return ensureAceStepBridge();
 }
 
 const ofxGgmlAceStepBridge & ofxGgmlEasy::getAceStepBridge() const {
-	return m_aceStepBridge;
+	return ensureAceStepBridge();
 }
 
 ofxGgmlMilkDropGenerator & ofxGgmlEasy::getMilkDropGenerator() {
-	return m_milkDropGenerator;
+	return ensureMilkDropGenerator();
 }
 
 const ofxGgmlMilkDropGenerator & ofxGgmlEasy::getMilkDropGenerator() const {
-	return m_milkDropGenerator;
+	return ensureMilkDropGenerator();
 }
 
 ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::getVideoEssayWorkflow() {
-	return m_videoEssayWorkflow;
+	return ensureVideoEssayWorkflow();
 }
 
 const ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::getVideoEssayWorkflow() const {
-	return m_videoEssayWorkflow;
+	return ensureVideoEssayWorkflow();
 }
 
 ofxGgmlLongVideoPlanner & ofxGgmlEasy::getLongVideoPlanner() {
-	return m_longVideoPlanner;
+	return ensureLongVideoPlanner();
 }
 
 const ofxGgmlLongVideoPlanner & ofxGgmlEasy::getLongVideoPlanner() const {
-	return m_longVideoPlanner;
+	return ensureLongVideoPlanner();
 }
 
 ofxGgmlCodingAgent & ofxGgmlEasy::getCodingAgent() {
-	return m_codingAgent;
+	return ensureCodingAgent();
 }
 
 const ofxGgmlCodingAgent & ofxGgmlEasy::getCodingAgent() const {
-	return m_codingAgent;
+	return ensureCodingAgent();
 }
 
 ofxGgmlRAGPipeline & ofxGgmlEasy::getRAGPipeline() {
-	return m_ragPipeline;
+	return ensureRAGPipeline();
 }
 
 const ofxGgmlRAGPipeline & ofxGgmlEasy::getRAGPipeline() const {
-	return m_ragPipeline;
+	return ensureRAGPipeline();
 }
 
 ofxGgmlConversationManager & ofxGgmlEasy::getConversationManager() {
-	return m_conversationManager;
+	return ensureConversationManager();
 }
 
 const ofxGgmlConversationManager & ofxGgmlEasy::getConversationManager() const {
-	return m_conversationManager;
+	return ensureConversationManager();
 }
 
 ofxGgmlInferenceSettings ofxGgmlEasy::makeTextSettings() const {
@@ -285,23 +340,15 @@ ofxGgmlWebCrawlerRequest ofxGgmlEasy::makeCrawlerRequest(
 }
 
 void ofxGgmlEasy::syncCrawlerBackend() {
-	m_citationSearch.getWebCrawler().setBackend(
-		std::make_shared<ofxGgmlMojoWebCrawlerBackend>(m_crawlerConfig.executablePath));
+	if (m_citationSearch) {
+		applyCrawlerBackend(m_citationSearch->getWebCrawler(), m_crawlerConfig);
+	}
 }
 
 void ofxGgmlEasy::syncSpeechBackend() {
-	if (m_speechConfig.preferServer && !m_speechConfig.serverUrl.empty()) {
-		m_speechInference.setBackend(
-			ofxGgmlSpeechInference::createWhisperServerBackend(
-				m_speechConfig.serverUrl,
-				m_speechConfig.serverModel));
-		return;
+	if (m_speechInference) {
+		applySpeechBackend(*m_speechInference, m_speechConfig);
 	}
-	m_speechInference.setBackend(
-		ofxGgmlSpeechInference::createWhisperCliBackend(
-			m_speechConfig.cliExecutable.empty()
-				? "whisper-cli"
-				: m_speechConfig.cliExecutable));
 }
 
 ofxGgmlInferenceResult ofxGgmlEasy::complete(const std::string & prompt) const {
@@ -309,7 +356,7 @@ ofxGgmlInferenceResult ofxGgmlEasy::complete(const std::string & prompt) const {
 		return makeTextConfigError(
 			"Easy API text model is not configured. Call configureText(...) first.");
 	}
-	return m_inference.generate(
+	return ensureInference().generate(
 		m_textConfig.modelPath,
 		prompt,
 		makeTextSettings());
@@ -327,7 +374,7 @@ ofxGgmlChatAssistantResult ofxGgmlEasy::chat(
 	request.userText = userText;
 	request.systemPrompt = systemPrompt;
 	request.responseLanguage = responseLanguage;
-	return m_chatAssistant.run(
+	return ensureChatAssistant().run(
 		m_textConfig.modelPath,
 		request,
 		makeTextSettings());
@@ -342,7 +389,7 @@ ofxGgmlTextAssistantResult ofxGgmlEasy::summarize(const std::string & text) cons
 	ofxGgmlTextAssistantRequest request;
 	request.task = ofxGgmlTextTask::Summarize;
 	request.inputText = text;
-	return m_textAssistant.run(
+	return ensureTextAssistant().run(
 		m_textConfig.modelPath,
 		request,
 		makeTextSettings());
@@ -357,7 +404,7 @@ ofxGgmlTextAssistantResult ofxGgmlEasy::rewrite(const std::string & text) const 
 	ofxGgmlTextAssistantRequest request;
 	request.task = ofxGgmlTextTask::Rewrite;
 	request.inputText = text;
-	return m_textAssistant.run(
+	return ensureTextAssistant().run(
 		m_textConfig.modelPath,
 		request,
 		makeTextSettings());
@@ -377,7 +424,7 @@ ofxGgmlTextAssistantResult ofxGgmlEasy::translate(
 	request.inputText = text;
 	request.sourceLanguage = sourceLanguage;
 	request.targetLanguage = targetLanguage;
-	return m_textAssistant.run(
+	return ensureTextAssistant().run(
 		m_textConfig.modelPath,
 		request,
 		makeTextSettings());
@@ -404,7 +451,7 @@ ofxGgmlVisionResult ofxGgmlEasy::describeImage(
 		"image",
 		ofxGgmlVisionInference::detectMimeType(imagePath)
 	});
-	return m_visionInference.runServerRequest(makeVisionProfile(), request);
+	return ensureVisionInference().runServerRequest(makeVisionProfile(), request);
 }
 
 ofxGgmlVisionResult ofxGgmlEasy::askImage(
@@ -426,7 +473,7 @@ ofxGgmlVisionResult ofxGgmlEasy::askImage(
 		"image",
 		ofxGgmlVisionInference::detectMimeType(imagePath)
 	});
-	return m_visionInference.runServerRequest(makeVisionProfile(), request);
+	return ensureVisionInference().runServerRequest(makeVisionProfile(), request);
 }
 
 ofxGgmlSpeechResult ofxGgmlEasy::transcribeAudio(const std::string & audioPath) const {
@@ -443,7 +490,7 @@ ofxGgmlSpeechResult ofxGgmlEasy::transcribeAudio(const std::string & audioPath) 
 	request.serverModel = m_speechConfig.serverModel;
 	request.languageHint = m_speechConfig.languageHint;
 	request.returnTimestamps = m_speechConfig.returnTimestamps;
-	return m_speechInference.transcribe(request);
+	return ensureSpeechInference().transcribe(request);
 }
 
 ofxGgmlSpeechResult ofxGgmlEasy::translateAudio(const std::string & audioPath) const {
@@ -460,7 +507,7 @@ ofxGgmlSpeechResult ofxGgmlEasy::translateAudio(const std::string & audioPath) c
 	request.serverModel = m_speechConfig.serverModel;
 	request.languageHint = m_speechConfig.languageHint;
 	request.returnTimestamps = m_speechConfig.returnTimestamps;
-	return m_speechInference.transcribe(request);
+	return ensureSpeechInference().transcribe(request);
 }
 
 ofxGgmlMusicPromptResult ofxGgmlEasy::generateMusicPrompt(
@@ -482,7 +529,7 @@ ofxGgmlMusicPromptResult ofxGgmlEasy::generateMusicPrompt(
 	request.instrumentation = instrumentation;
 	request.targetDurationSeconds = targetDurationSeconds;
 	request.instrumentalOnly = instrumentalOnly;
-	return m_musicGenerator.generateMusicPrompt(
+	return ensureMusicGenerator().generateMusicPrompt(
 		m_textConfig.modelPath,
 		request,
 		makeTextSettings());
@@ -507,7 +554,7 @@ ofxGgmlMusicNotationResult ofxGgmlEasy::generateMusicNotation(
 	request.style = style;
 	request.bars = bars;
 	request.key = key;
-	return m_musicGenerator.generateAbcNotation(
+	return ensureMusicGenerator().generateAbcNotation(
 		m_textConfig.modelPath,
 		request,
 		makeTextSettings());
@@ -532,7 +579,7 @@ ofxGgmlImageToMusicResult ofxGgmlEasy::generateImageToMusicPrompt(
 	request.instrumentation = instrumentation;
 	request.targetDurationSeconds = targetDurationSeconds;
 	request.instrumentalOnly = instrumentalOnly;
-	return m_mediaPromptGenerator.generateImageToMusicPrompt(
+	return ensureMediaPromptGenerator().generateImageToMusicPrompt(
 		m_textConfig.modelPath,
 		request,
 		makeTextSettings());
@@ -541,19 +588,19 @@ ofxGgmlImageToMusicResult ofxGgmlEasy::generateImageToMusicPrompt(
 std::string ofxGgmlEasy::saveMusicNotation(
 	const std::string & abcNotation,
 	const std::string & outputPath) const {
-	return m_musicGenerator.saveAbcNotation(abcNotation, outputPath);
+	return ensureMusicGenerator().saveAbcNotation(abcNotation, outputPath);
 }
 
 ofxGgmlAceStepGenerateResult ofxGgmlEasy::generateAceStepMusic(
 	const ofxGgmlAceStepRequest & request,
 	const std::string & serverUrl) const {
-	return m_aceStepBridge.generate(request, serverUrl);
+	return ensureAceStepBridge().generate(request, serverUrl);
 }
 
 ofxGgmlAceStepUnderstandResult ofxGgmlEasy::understandAceStepAudio(
 	const ofxGgmlAceStepUnderstandRequest & request,
 	const std::string & serverUrl) const {
-	return m_aceStepBridge.understandAudio(request, serverUrl);
+	return ensureAceStepBridge().understandAudio(request, serverUrl);
 }
 
 ofxGgmlWebCrawlerResult ofxGgmlEasy::crawlWebsite(
@@ -564,7 +611,7 @@ ofxGgmlWebCrawlerResult ofxGgmlEasy::crawlWebsite(
 		result.error = "Easy API crawler start URL is empty.";
 		return result;
 	}
-	return m_citationSearch.getWebCrawler().crawl(makeCrawlerRequest(startUrl, maxDepth));
+	return ensureCitationSearch().getWebCrawler().crawl(makeCrawlerRequest(startUrl, maxDepth));
 }
 
 ofxGgmlCitationSearchResult ofxGgmlEasy::findCitations(
@@ -582,7 +629,7 @@ ofxGgmlCitationSearchResult ofxGgmlEasy::findCitations(
 		request.useCrawler = true;
 		request.crawlerRequest = makeCrawlerRequest(crawlerUrl);
 	}
-	return m_citationSearch.search(request);
+	return ensureCitationSearch().search(request);
 }
 
 ofxGgmlCitationSearchResult ofxGgmlEasy::findCitationsFromInput(
@@ -600,7 +647,7 @@ ofxGgmlCitationSearchResult ofxGgmlEasy::findCitationsFromInput(
 		request.useCrawler = true;
 		request.crawlerRequest = makeCrawlerRequest(crawlerUrl);
 	}
-	return m_citationSearch.searchFromInput(userInput, request, inputSettings);
+	return ensureCitationSearch().searchFromInput(userInput, request, inputSettings);
 }
 
 ofxGgmlVideoEssayResult ofxGgmlEasy::planVideoEssay(
@@ -633,7 +680,7 @@ ofxGgmlVideoEssayResult ofxGgmlEasy::planVideoEssay(
 		effectiveRequest.sourceSettings.maxTotalChars = 14000;
 		effectiveRequest.sourceSettings.requestCitations = true;
 	}
-	return m_videoEssayWorkflow.run(effectiveRequest);
+	return ensureVideoEssayWorkflow().run(effectiveRequest);
 }
 
 ofxGgmlLongVideoPlanResult ofxGgmlEasy::planLongVideo(
@@ -646,7 +693,7 @@ ofxGgmlLongVideoPlanResult ofxGgmlEasy::planLongVideo(
 	if (effectiveRequest.inferenceSettings.maxTokens <= 0) {
 		effectiveRequest.inferenceSettings = makeTextSettings();
 	}
-	return m_longVideoPlanner.run(effectiveRequest);
+	return ensureLongVideoPlanner().run(effectiveRequest);
 }
 
 std::string ofxGgmlEasy::buildLongVideoManifestJson(
@@ -714,7 +761,7 @@ ofxGgmlCodingAgentResult ofxGgmlEasy::runCodingAgent(
 	if (effectiveSettings.inferenceSettings.serverModel.empty()) {
 		effectiveSettings.inferenceSettings.serverModel = baseSettings.serverModel;
 	}
-	return m_codingAgent.run(
+	return ensureCodingAgent().run(
 		m_textConfig.modelPath,
 		request,
 		context,
@@ -782,11 +829,11 @@ ofxGgmlEasyVideoEditResult ofxGgmlEasy::planVideoEdit(
 	request.targetDurationSeconds = targetDurationSeconds;
 	request.clipCount = clipCount;
 	request.preserveChronology = preserveChronology;
-	result.planning = m_videoPlanner.planEdits(
+	result.planning = ensureVideoPlanner().planEdits(
 		m_textConfig.modelPath,
 		request,
 		makeTextSettings(),
-		m_inference);
+		ensureInference());
 	if (!result.planning.success) {
 		result.error = result.planning.error;
 		return result;
@@ -815,7 +862,7 @@ ofxGgmlMilkDropResult ofxGgmlEasy::generateMilkDropPreset(
 	request.prompt = prompt;
 	request.category = category;
 	request.randomness = randomness;
-	return m_milkDropGenerator.generatePreset(
+	return ensureMilkDropGenerator().generatePreset(
 		m_textConfig.modelPath,
 		request,
 		makeTextSettings());
@@ -837,7 +884,7 @@ ofxGgmlMilkDropVariantResult ofxGgmlEasy::generateMilkDropVariants(
 	request.prompt = prompt;
 	request.category = category;
 	request.randomness = randomness;
-	return m_milkDropGenerator.generateVariants(
+	return ensureMilkDropGenerator().generateVariants(
 		m_textConfig.modelPath,
 		request,
 		variantCount,
@@ -856,7 +903,7 @@ ofxGgmlMilkDropResult ofxGgmlEasy::editMilkDropPreset(
 		return result;
 	}
 
-	return m_milkDropGenerator.editPreset(
+	return ensureMilkDropGenerator().editPreset(
 		m_textConfig.modelPath,
 		existingPresetText,
 		editInstruction,
@@ -877,7 +924,7 @@ ofxGgmlMilkDropResult ofxGgmlEasy::repairMilkDropPreset(
 		return result;
 	}
 
-	return m_milkDropGenerator.repairPreset(
+	return ensureMilkDropGenerator().repairPreset(
 		m_textConfig.modelPath,
 		presetText,
 		category,
@@ -888,13 +935,13 @@ ofxGgmlMilkDropResult ofxGgmlEasy::repairMilkDropPreset(
 
 ofxGgmlMilkDropValidation ofxGgmlEasy::validateMilkDropPreset(
 	const std::string & presetText) const {
-	return m_milkDropGenerator.validatePreset(presetText);
+	return ensureMilkDropGenerator().validatePreset(presetText);
 }
 
 std::string ofxGgmlEasy::saveMilkDropPreset(
 	const std::string & presetText,
 	const std::string & outputPath) const {
-	return m_milkDropGenerator.savePreset(presetText, outputPath);
+	return ensureMilkDropGenerator().savePreset(presetText, outputPath);
 }
 
 // Workflow Presets Implementation
@@ -1045,5 +1092,111 @@ ofxGgmlRAGResult ofxGgmlEasy::ragQuery(
 	request.modelPath = m_textConfig.modelPath;
 	request.promptPrefix = promptPrefix;
 	request.inferenceSettings = makeTextSettings();
-	return m_ragPipeline.generate(request);
+	return ensureRAGPipeline().generate(request);
+}
+
+ofxGgmlInference & ofxGgmlEasy::ensureInference() const {
+	return ensureOwned(m_inference, [this](ofxGgmlInference & inference) {
+		applyInferenceExecutables(inference, m_textConfig);
+	});
+}
+
+ofxGgmlChatAssistant & ofxGgmlEasy::ensureChatAssistant() const {
+	return ensureOwned(m_chatAssistant, [this](ofxGgmlChatAssistant & assistant) {
+		assistant.setCompletionExecutable(m_textConfig.completionExecutable);
+	});
+}
+
+ofxGgmlTextAssistant & ofxGgmlEasy::ensureTextAssistant() const {
+	return ensureOwned(m_textAssistant, [this](ofxGgmlTextAssistant & assistant) {
+		assistant.setCompletionExecutable(m_textConfig.completionExecutable);
+	});
+}
+
+ofxGgmlVisionInference & ofxGgmlEasy::ensureVisionInference() const {
+	return ensureOwned(m_visionInference, [](ofxGgmlVisionInference &) {});
+}
+
+ofxGgmlSpeechInference & ofxGgmlEasy::ensureSpeechInference() const {
+	return ensureOwned(m_speechInference, [this](ofxGgmlSpeechInference & inference) {
+		applySpeechBackend(inference, m_speechConfig);
+	});
+}
+
+ofxGgmlCitationSearch & ofxGgmlEasy::ensureCitationSearch() const {
+	return ensureOwned(m_citationSearch, [this](ofxGgmlCitationSearch & citationSearch) {
+		applyInferenceExecutables(citationSearch.getInference(), m_textConfig);
+		applyCrawlerBackend(citationSearch.getWebCrawler(), m_crawlerConfig);
+	});
+}
+
+ofxGgmlVideoPlanner & ofxGgmlEasy::ensureVideoPlanner() const {
+	return ensureOwned(m_videoPlanner, [](ofxGgmlVideoPlanner &) {});
+}
+
+ofxGgmlMediaPromptGenerator & ofxGgmlEasy::ensureMediaPromptGenerator() const {
+	return ensureOwned(
+		m_mediaPromptGenerator,
+		[this](ofxGgmlMediaPromptGenerator & generator) {
+			generator.setCompletionExecutable(m_textConfig.completionExecutable);
+		});
+}
+
+ofxGgmlMusicGenerator & ofxGgmlEasy::ensureMusicGenerator() const {
+	return ensureOwned(m_musicGenerator, [this](ofxGgmlMusicGenerator & generator) {
+		generator.setCompletionExecutable(m_textConfig.completionExecutable);
+	});
+}
+
+ofxGgmlAceStepBridge & ofxGgmlEasy::ensureAceStepBridge() const {
+	return ensureOwned(m_aceStepBridge, [](ofxGgmlAceStepBridge &) {});
+}
+
+ofxGgmlMilkDropGenerator & ofxGgmlEasy::ensureMilkDropGenerator() const {
+	return ensureOwned(
+		m_milkDropGenerator,
+		[this](ofxGgmlMilkDropGenerator & generator) {
+			generator.setCompletionExecutable(m_textConfig.completionExecutable);
+		});
+}
+
+ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::ensureVideoEssayWorkflow() const {
+	return ensureOwned(
+		m_videoEssayWorkflow,
+		[this](ofxGgmlVideoEssayWorkflow & workflow) {
+			workflow.getTextAssistant().setCompletionExecutable(
+				m_textConfig.completionExecutable);
+			applyInferenceExecutables(
+				workflow.getCitationSearch().getInference(),
+				m_textConfig);
+		});
+}
+
+ofxGgmlLongVideoPlanner & ofxGgmlEasy::ensureLongVideoPlanner() const {
+	return ensureOwned(m_longVideoPlanner, [this](ofxGgmlLongVideoPlanner & planner) {
+		planner.getTextAssistant().setCompletionExecutable(
+			m_textConfig.completionExecutable);
+	});
+}
+
+ofxGgmlCodingAgent & ofxGgmlEasy::ensureCodingAgent() const {
+	return ensureOwned(m_codingAgent, [this](ofxGgmlCodingAgent & agent) {
+		agent.setCompletionExecutable(m_textConfig.completionExecutable);
+		agent.setEmbeddingExecutable(m_textConfig.embeddingExecutable);
+	});
+}
+
+ofxGgmlRAGPipeline & ofxGgmlEasy::ensureRAGPipeline() const {
+	return ensureOwned(m_ragPipeline, [this](ofxGgmlRAGPipeline & pipeline) {
+		applyInferenceExecutables(pipeline.getInference(), m_textConfig);
+	});
+}
+
+ofxGgmlConversationManager & ofxGgmlEasy::ensureConversationManager() const {
+	return ensureOwned(
+		m_conversationManager,
+		[this](ofxGgmlConversationManager & manager) {
+			manager.getInference().setCompletionExecutable(
+				m_textConfig.completionExecutable);
+		});
 }

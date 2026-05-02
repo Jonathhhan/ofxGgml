@@ -189,6 +189,14 @@ cd ofxGgml
 scripts\setup_windows.bat
 ```
 
+> [!WARNING]
+> **First run is not optional:** the examples will usually fail to build or launch until you run the platform setup script, build the bundled ggml libraries, and regenerate the example project with the openFrameworks Project Generator.
+>
+> Minimum first-run flow:
+> - run `./scripts/setup_linux_macos.sh` or `scripts\setup_windows.bat`
+> - run `./scripts/build-ggml.sh` or `scripts\build-ggml.bat`
+> - regenerate the example project before building it
+
 After setup, add `ofxGgml` to your project's `addons.make`, regenerate with the openFrameworks Project Generator when needed, and build normally.
 
 By default, helper scripts now prefer a shared addon-level model folder:
@@ -678,7 +686,11 @@ The `.bat` wrapper forwards all flags to `scripts/build-ggml.sh`, so make sure `
 
 After building ggml, regenerate your project with the openFrameworks Project Generator so generated Visual Studio projects pick up the latest addon library list.
 
-`scripts/build-ggml.sh` (and the Windows wrapper) also refreshes `addon_config.mk` for the `vs` section so Visual Studio links the exact ggml libraries you just built. When CUDA is enabled, it injects the CUDA Toolkit dependencies using `$(CUDA_PATH)`. Vulkan linking uses `$(VULKAN_SDK)`.
+`scripts/build-ggml.sh` (and the Windows wrapper) also refreshes `addon_config.mk` for the `vs` section so Visual Studio can track the ggml libraries present in your local build. The checked-in `addon_config.mk` stays CPU-safe by default, so rerun the helper on the machine that built ggml before regenerating your Visual Studio project if you enabled optional backends.
+
+### Streaming limitation
+
+`OFXGGML_HAS_SERVER_STREAMING` is currently enabled only for Windows builds that use WinHTTP. On Linux and macOS the addon still supports server requests, but it falls back to non-streaming request/response handling instead of live SSE token streaming for `llama-server` style responses.
 
 ### llama-server on Windows
 

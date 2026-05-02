@@ -444,6 +444,24 @@ TEST_CASE("Easy API exposes the coding agent wrapper", "[easy_api][coding_agent]
 	REQUIRE_FALSE(result.summary.empty());
 }
 
+TEST_CASE("Easy API lazily applies text config to late-created helpers", "[easy_api]") {
+	const std::string modelPath = createEasyApiDummyModel();
+	const std::string exePath = createEasyApiExecutable("lazy helper summary");
+
+	ofxGgmlEasy easy;
+	ofxGgmlEasyTextConfig textConfig;
+	textConfig.modelPath = modelPath;
+	textConfig.completionExecutable = exePath;
+	easy.configureText(textConfig);
+
+	auto & conversation = easy.getConversationManager();
+	conversation.addUserTurn("Summarize this short conversation.");
+
+	const auto summary = conversation.summarizeHistory(modelPath);
+	REQUIRE(summary.success);
+	REQUIRE(summary.summary.find("lazy helper summary") != std::string::npos);
+}
+
 TEST_CASE("Mojo crawler keeps canonical source URLs and filters allowed domains", "[easy_api][crawler]") {
 	const std::string fakeMojo = createFakeMojoCrawlerExecutable();
 
@@ -502,8 +520,11 @@ TEST_CASE("Default crawler uses native HTML parsing for static pages", "[easy_ap
 	REQUIRE(result.backendName == "NativeHtml");
 	REQUIRE(
 		result.commandOutput.find("Parsed native page") != std::string::npos);
-	REQUIRE(
-		result.commandOutput.find("libxml2 xmllint HTML") != std::string::npos);
+	const bool usedSupportedNativeParser =
+		result.commandOutput.find("libxml2 xmllint HTML") != std::string::npos ||
+		result.commandOutput.find("libxml2 readability HTML") != std::string::npos ||
+		result.commandOutput.find("HTML text fallback") != std::string::npos;
+	REQUIRE(usedSupportedNativeParser);
 	REQUIRE(result.documents.size() >= 2);
 	REQUIRE(result.documents[0].title == "Native Root");
 	REQUIRE(

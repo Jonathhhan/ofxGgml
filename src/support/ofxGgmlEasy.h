@@ -19,6 +19,7 @@
 #include "inference/ofxGgmlWebCrawler.h"
 #include "support/ofxGgmlConversationManager.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -317,26 +318,42 @@ private:
 	void syncTextBackends();
 	void syncCrawlerBackend();
 	void syncSpeechBackend();
+	ofxGgmlInference & ensureInference() const;
+	ofxGgmlChatAssistant & ensureChatAssistant() const;
+	ofxGgmlTextAssistant & ensureTextAssistant() const;
+	ofxGgmlVisionInference & ensureVisionInference() const;
+	ofxGgmlSpeechInference & ensureSpeechInference() const;
+	ofxGgmlCitationSearch & ensureCitationSearch() const;
+	ofxGgmlVideoPlanner & ensureVideoPlanner() const;
+	ofxGgmlMediaPromptGenerator & ensureMediaPromptGenerator() const;
+	ofxGgmlMusicGenerator & ensureMusicGenerator() const;
+	ofxGgmlAceStepBridge & ensureAceStepBridge() const;
+	ofxGgmlMilkDropGenerator & ensureMilkDropGenerator() const;
+	ofxGgmlVideoEssayWorkflow & ensureVideoEssayWorkflow() const;
+	ofxGgmlLongVideoPlanner & ensureLongVideoPlanner() const;
+	ofxGgmlCodingAgent & ensureCodingAgent() const;
+	ofxGgmlRAGPipeline & ensureRAGPipeline() const;
+	ofxGgmlConversationManager & ensureConversationManager() const;
 
 	ofxGgmlEasyTextConfig m_textConfig;
 	ofxGgmlEasyVisionConfig m_visionConfig;
 	ofxGgmlEasySpeechConfig m_speechConfig;
 	ofxGgmlEasyCrawlerConfig m_crawlerConfig;
 
-	ofxGgmlInference m_inference;
-	ofxGgmlChatAssistant m_chatAssistant;
-	ofxGgmlTextAssistant m_textAssistant;
-	ofxGgmlVisionInference m_visionInference;
-	ofxGgmlSpeechInference m_speechInference;
-	ofxGgmlCitationSearch m_citationSearch;
-	ofxGgmlVideoPlanner m_videoPlanner;
-	ofxGgmlMediaPromptGenerator m_mediaPromptGenerator;
-	ofxGgmlMusicGenerator m_musicGenerator;
-	ofxGgmlAceStepBridge m_aceStepBridge;
-	ofxGgmlMilkDropGenerator m_milkDropGenerator;
-	ofxGgmlVideoEssayWorkflow m_videoEssayWorkflow;
-	ofxGgmlLongVideoPlanner m_longVideoPlanner;
-	ofxGgmlCodingAgent m_codingAgent;
-	ofxGgmlRAGPipeline m_ragPipeline;
-	ofxGgmlConversationManager m_conversationManager;
+	mutable std::unique_ptr<ofxGgmlInference> m_inference;
+	mutable std::unique_ptr<ofxGgmlChatAssistant> m_chatAssistant;
+	mutable std::unique_ptr<ofxGgmlTextAssistant> m_textAssistant;
+	mutable std::unique_ptr<ofxGgmlVisionInference> m_visionInference;
+	mutable std::unique_ptr<ofxGgmlSpeechInference> m_speechInference;
+	mutable std::unique_ptr<ofxGgmlCitationSearch> m_citationSearch;
+	mutable std::unique_ptr<ofxGgmlVideoPlanner> m_videoPlanner;
+	mutable std::unique_ptr<ofxGgmlMediaPromptGenerator> m_mediaPromptGenerator;
+	mutable std::unique_ptr<ofxGgmlMusicGenerator> m_musicGenerator;
+	mutable std::unique_ptr<ofxGgmlAceStepBridge> m_aceStepBridge;
+	mutable std::unique_ptr<ofxGgmlMilkDropGenerator> m_milkDropGenerator;
+	mutable std::unique_ptr<ofxGgmlVideoEssayWorkflow> m_videoEssayWorkflow;
+	mutable std::unique_ptr<ofxGgmlLongVideoPlanner> m_longVideoPlanner;
+	mutable std::unique_ptr<ofxGgmlCodingAgent> m_codingAgent;
+	mutable std::unique_ptr<ofxGgmlRAGPipeline> m_ragPipeline;
+	mutable std::unique_ptr<ofxGgmlConversationManager> m_conversationManager;
 };
