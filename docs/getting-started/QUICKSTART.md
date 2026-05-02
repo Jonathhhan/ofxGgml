@@ -37,7 +37,7 @@ This will:
 The easiest way to get started is to open an existing example:
 
 1. Use the openFrameworks Project Generator
-2. Import `ofxGgmlBasicExample` or `ofxGgmlChatExample`
+2. Import `ofxGgmlBasicExample`, `ofxGgmlChatExample`, or `ofxGgmlWebScrapingExample`
 3. Build and run
 
 ### Option 2: Create a New Project
@@ -123,6 +123,6 @@ Try CPU-only mode:
 
 ## Getting Help
 
-- **Examples**: Check the `ofxGgmlBasicExample`, `ofxGgmlChatExample`, `ofxGgmlVisionExample`
+- **Examples**: Check the `ofxGgmlBasicExample`, `ofxGgmlChatExample`, `ofxGgmlWebScrapingExample`, `ofxGgmlGuiExample`
 - **Documentation**: See `docs/` folder
 - **Issues**: https://github.com/Jonathhhan/ofxGgml/issues

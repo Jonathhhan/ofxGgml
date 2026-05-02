@@ -320,9 +320,10 @@ std::string buildCitationPrompt(
 		<< "You are a citation extraction assistant.\n"
 		<< "Using only the provided source material, extract up to "
 		<< std::max<size_t>(1, maxCitations)
-		<< " short, relevant citations about the topic below.\n"
+		<< " relevant exact citations about the topic below.\n"
 		<< "CRITICAL REQUIREMENTS:\n"
 		<< "- Each quote MUST be an exact verbatim span copied word-for-word from one provided source\n"
+		<< "- Quotes may be short or longer multi-sentence spans when that better preserves the exact evidence\n"
 		<< "- Each citation MUST include a valid sourceIndex (1-based) matching a [Source N] label\n"
 		<< "- Do NOT paraphrase, summarize, or rewrite source text inside the quote field\n"
 		<< "- Do NOT invent sources, URLs, or quotes\n"
@@ -334,6 +335,31 @@ std::string buildCitationPrompt(
 		<< "Use 1-based sourceIndex values that match the provided [Source N] labels.\n\n"
 		<< "Topic: " << topic << "\n";
 	return prompt.str();
+}
+
+int parseCitationSourceIndex(const ofJson & value) {
+	try {
+		if (value.is_number()) {
+			return value.get<int>();
+		}
+		if (value.is_string()) {
+			const std::string text = trimCopy(value.get<std::string>());
+			if (text.empty()) {
+				return -1;
+			}
+			for (unsigned char ch : text) {
+				if (!std::isdigit(ch)) {
+					return -1;
+				}
+			}
+			const unsigned long parsed = std::stoul(text);
+			return parsed <= static_cast<unsigned long>(std::numeric_limits<int>::max())
+				? static_cast<int>(parsed)
+				: -1;
+		}
+	} catch (...) {
+	}
+	return -1;
 }
 
 ofJson parseLooseJson(const std::string & rawText) {
@@ -439,6 +465,66 @@ std::vector<std::string> buildHeuristicAlternateQueries(
 		queries.resize(maxAlternateQueries);
 	}
 	return dedupeStrings(queries);
+}
+
+struct ValidationResult {
+	bool valid = true;
+	std::string error;
+};
+
+ValidationResult validateCitationSearchRequest(const ofxGgmlCitationSearchRequest & request) {
+	ValidationResult result;
+	result.valid = true;
+
+	const std::string topic = trimCopy(request.topic);
+	if (topic.empty()) {
+		result.valid = false;
+		result.error = "Citation topic cannot be empty. Please provide a search topic.";
+		return result;
+	}
+
+	if (topic.size() < 3) {
+		result.valid = false;
+		result.error = "Citation topic is too short (minimum 3 characters). Current: \"" + topic + "\"";
+		return result;
+	}
+
+	const std::string modelPath = trimCopy(request.modelPath);
+	if (modelPath.empty()) {
+		result.valid = false;
+		result.error = "Model path is required for citation search. Please specify a valid model path.";
+		return result;
+	}
+
+	if (request.maxCitations == 0) {
+		result.valid = false;
+		result.error = "maxCitations must be at least 1.";
+		return result;
+	}
+
+	if (request.maxCitations > 1000) {
+		result.valid = false;
+		result.error = "maxCitations is too large (maximum 1000). Current: " + std::to_string(request.maxCitations);
+		return result;
+	}
+
+	if (request.minimumConfidenceThreshold < 0.0f || request.minimumConfidenceThreshold > 1.0f) {
+		result.valid = false;
+		result.error = "minimumConfidenceThreshold must be between 0.0 and 1.0. Current: " +
+			std::to_string(request.minimumConfidenceThreshold);
+		return result;
+	}
+
+	if (request.useCrawler) {
+		const std::string crawlerUrl = trimCopy(request.crawlerRequest.startUrl);
+		if (crawlerUrl.empty()) {
+			result.valid = false;
+			result.error = "Crawler URL is required when useCrawler is true. Please specify crawlerRequest.startUrl.";
+			return result;
+		}
+	}
+
+	return result;
 }
 
 std::vector<std::string> extractHeuristicDomainHints(
@@ -790,7 +876,37 @@ std::vector<ofxGgmlCitationItem> dedupeCitationItems(
 	std::vector<ofxGgmlCitationItem> deduped;
 	deduped.reserve(items.size());
 	std::unordered_set<std::string> seen;
+	std::unordered_map<std::string, size_t> perSourceCounts;
+	constexpr size_t kMaxCitationsPerSource = 4;
 	for (auto & item : items) {
+		const std::string sourceKey = !trimCopy(item.sourceUri).empty()
+			? trimCopy(item.sourceUri)
+			: ("source:" + std::to_string(item.sourceIndex));
+		if (perSourceCounts[sourceKey] >= kMaxCitationsPerSource) {
+			continue;
+		}
+		const std::string normalizedQuote = normalizeForExactQuoteMatch(item.quote);
+		bool overlapsExisting = false;
+		for (const auto & existing : deduped) {
+			const std::string existingSourceKey = !trimCopy(existing.sourceUri).empty()
+				? trimCopy(existing.sourceUri)
+				: ("source:" + std::to_string(existing.sourceIndex));
+			if (existingSourceKey != sourceKey) {
+				continue;
+			}
+			const std::string existingQuote =
+				normalizeForExactQuoteMatch(existing.quote);
+			if (!normalizedQuote.empty() &&
+				!existingQuote.empty() &&
+				(normalizedQuote.find(existingQuote) != std::string::npos ||
+				 existingQuote.find(normalizedQuote) != std::string::npos)) {
+				overlapsExisting = true;
+				break;
+			}
+		}
+		if (overlapsExisting) {
+			continue;
+		}
 		const std::string key = trimCopy(item.quote) + "\n---\n" + item.sourceUri;
 		if (key == "\n---\n") {
 			continue;
@@ -798,6 +914,7 @@ std::vector<ofxGgmlCitationItem> dedupeCitationItems(
 		if (!seen.insert(key).second) {
 			continue;
 		}
+		++perSourceCounts[sourceKey];
 		deduped.push_back(std::move(item));
 	}
 	return deduped;
@@ -833,7 +950,7 @@ std::vector<std::string> splitIntoExactQuoteCandidates(const std::string & conte
 
 	auto appendCandidate = [&candidates](std::string candidate) {
 		candidate = trimCopy(candidate);
-		if (candidate.size() < 24 || candidate.size() > 520) {
+		if (candidate.size() < 24 || candidate.size() > 1100) {
 			return;
 		}
 		candidates.push_back(std::move(candidate));
@@ -874,7 +991,7 @@ std::vector<std::string> splitIntoExactQuoteCandidates(const std::string & conte
 		}
 		std::string candidate = trimCopy(content.substr(start, endExclusive - start));
 		start = endExclusive;
-		if (candidate.size() < 24 || candidate.size() > 420) {
+		if (candidate.size() < 24 || candidate.size() > 900) {
 			return;
 		}
 		sentenceCandidates.push_back(std::move(candidate));
@@ -894,6 +1011,12 @@ std::vector<std::string> splitIntoExactQuoteCandidates(const std::string & conte
 	}
 	for (size_t i = 0; i + 1 < sentenceCandidates.size(); ++i) {
 		appendCandidate(sentenceCandidates[i] + " " + sentenceCandidates[i + 1]);
+	}
+	for (size_t i = 0; i + 2 < sentenceCandidates.size(); ++i) {
+		appendCandidate(
+			sentenceCandidates[i] + " " +
+			sentenceCandidates[i + 1] + " " +
+			sentenceCandidates[i + 2]);
 	}
 
 	std::unordered_set<std::string> seen;
@@ -954,7 +1077,7 @@ float scoreExactQuoteCandidate(
 		}
 	}
 
-	if (normalizedCandidate.size() >= 40 && normalizedCandidate.size() <= 220) {
+	if (normalizedCandidate.size() >= 40 && normalizedCandidate.size() <= 420) {
 		score += 0.5f;
 	}
 	if (candidate.find('\n') != std::string::npos) {
@@ -966,10 +1089,113 @@ float scoreExactQuoteCandidate(
 	return score;
 }
 
+float calculateSourceCredibility(const std::string & sourceUri) {
+	const std::string lowerUri = toLowerCopy(sourceUri);
+	float credibility = 0.5f;
+
+	if (lowerUri.find(".edu") != std::string::npos) {
+		credibility += 0.3f;
+	}
+	if (lowerUri.find(".gov") != std::string::npos) {
+		credibility += 0.3f;
+	}
+	if (lowerUri.find(".org") != std::string::npos) {
+		credibility += 0.15f;
+	}
+	if (lowerUri.find("wikipedia.org") != std::string::npos) {
+		credibility += 0.2f;
+	}
+	if (lowerUri.find("github.com") != std::string::npos) {
+		credibility += 0.15f;
+	}
+	if (lowerUri.find("arxiv.org") != std::string::npos) {
+		credibility += 0.25f;
+	}
+	if (lowerUri.find("scholar.google") != std::string::npos) {
+		credibility += 0.2f;
+	}
+	if (lowerUri.find("ieee.org") != std::string::npos ||
+		lowerUri.find("acm.org") != std::string::npos) {
+		credibility += 0.25f;
+	}
+
+	return std::min(credibility, 1.0f);
+}
+
+float calculateConfidenceScore(
+	const ofxGgmlCitationItem & item,
+	bool isExactMatch,
+	float relevanceScore,
+	float sourceCredibility) {
+	float confidence = 0.0f;
+
+	if (isExactMatch) {
+		confidence += 0.4f;
+	} else {
+		confidence += 0.15f;
+	}
+
+	confidence += relevanceScore * 0.35f;
+	confidence += sourceCredibility * 0.25f;
+
+	const size_t quoteLength = item.quote.size();
+	if (quoteLength >= 30 && quoteLength <= 500) {
+		confidence += 0.05f;
+	}
+	if (quoteLength > 500 && quoteLength <= 800) {
+		confidence += 0.03f;
+	}
+
+	if (!item.note.empty()) {
+		confidence += 0.02f;
+	}
+
+	return std::min(confidence, 1.0f);
+}
+
+float calculateSourceDiversityScore(const std::vector<ofxGgmlCitationItem> & citations) {
+	if (citations.empty()) {
+		return 0.0f;
+	}
+
+	std::unordered_map<int, size_t> sourceIndexCounts;
+	for (const auto & citation : citations) {
+		if (citation.sourceIndex > 0) {
+			++sourceIndexCounts[citation.sourceIndex];
+		}
+	}
+
+	if (sourceIndexCounts.empty()) {
+		return 0.0f;
+	}
+
+	const size_t uniqueSources = sourceIndexCounts.size();
+	const size_t totalCitations = citations.size();
+
+	float diversityScore = static_cast<float>(uniqueSources) /
+		static_cast<float>(std::max<size_t>(totalCitations, 1));
+
+	float evenness = 0.0f;
+	if (uniqueSources > 1) {
+		const float idealCount = static_cast<float>(totalCitations) /
+			static_cast<float>(uniqueSources);
+		float sumDeviation = 0.0f;
+		for (const auto & pair : sourceIndexCounts) {
+			const float deviation = std::abs(static_cast<float>(pair.second) - idealCount);
+			sumDeviation += deviation;
+		}
+		const float maxDeviation = static_cast<float>(totalCitations);
+		evenness = 1.0f - (sumDeviation / (maxDeviation * static_cast<float>(uniqueSources)));
+	}
+
+	return (diversityScore * 0.6f) + (evenness * 0.4f);
+}
+
 std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 	const std::string & topic,
 	const std::vector<ofxGgmlPromptSource> & sources,
-	size_t maxCitations) {
+	size_t maxCitations,
+	float minimumConfidence = 0.0f) {
 	struct RankedCandidate {
 		float score = 0.0f;
 		ofxGgmlCitationItem item;
@@ -1000,6 +1226,14 @@ std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 			rankedCandidate.item.sourceLabel =
 				buildExactSourceLabel(source.label, source.uri, rankedCandidate.item.sourceIndex);
 			rankedCandidate.item.sourceUri = source.uri;
+			rankedCandidate.item.isExactMatch = true;
+			rankedCandidate.item.relevanceScore = std::min(score / 10.0f, 1.0f);
+			rankedCandidate.item.sourceCredibility = calculateSourceCredibility(source.uri);
+			rankedCandidate.item.confidenceScore = calculateConfidenceScore(
+				rankedCandidate.item,
+				true,
+				rankedCandidate.item.relevanceScore,
+				rankedCandidate.item.sourceCredibility);
 			ranked.push_back(std::move(rankedCandidate));
 		}
 	}
@@ -1008,6 +1242,9 @@ std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 		ranked.begin(),
 		ranked.end(),
 		[](const RankedCandidate & a, const RankedCandidate & b) {
+			if (a.item.confidenceScore != b.item.confidenceScore) {
+				return a.item.confidenceScore > b.item.confidenceScore;
+			}
 			if (a.score != b.score) {
 				return a.score > b.score;
 			}
@@ -1017,12 +1254,49 @@ std::vector<ofxGgmlCitationItem> fallbackExtractExactCitations(
 	std::vector<ofxGgmlCitationItem> citations;
 	citations.reserve(std::min(maxCitations, ranked.size()));
 	std::unordered_set<std::string> seen;
+	std::unordered_map<std::string, size_t> perSourceCounts;
+	const size_t maxPerSource = sources.size() <= 1
+		? maxCitations
+		: (sources.size() <= 3 ? 4 : 3);
 	for (const auto & candidate : ranked) {
+		if (candidate.item.confidenceScore < minimumConfidence) {
+			continue;
+		}
+		const std::string sourceKey = !trimCopy(candidate.item.sourceUri).empty()
+			? trimCopy(candidate.item.sourceUri)
+			: ("source:" + std::to_string(candidate.item.sourceIndex));
+		if (perSourceCounts[sourceKey] >= maxPerSource) {
+			continue;
+		}
+		const std::string normalizedQuote =
+			normalizeForExactQuoteMatch(candidate.item.quote);
+		bool overlapsExisting = false;
+		for (const auto & existing : citations) {
+			const std::string existingSourceKey = !trimCopy(existing.sourceUri).empty()
+				? trimCopy(existing.sourceUri)
+				: ("source:" + std::to_string(existing.sourceIndex));
+			if (existingSourceKey != sourceKey) {
+				continue;
+			}
+			const std::string existingQuote =
+				normalizeForExactQuoteMatch(existing.quote);
+			if (!normalizedQuote.empty() &&
+				!existingQuote.empty() &&
+				(normalizedQuote.find(existingQuote) != std::string::npos ||
+				 existingQuote.find(normalizedQuote) != std::string::npos)) {
+				overlapsExisting = true;
+				break;
+			}
+		}
+		if (overlapsExisting) {
+			continue;
+		}
 		const std::string key =
 			normalizeForExactQuoteMatch(candidate.item.quote) + "\n---\n" + candidate.item.sourceUri;
 		if (!seen.insert(key).second) {
 			continue;
 		}
+		++perSourceCounts[sourceKey];
 		citations.push_back(candidate.item);
 		if (citations.size() >= maxCitations) {
 			break;
@@ -1277,6 +1551,12 @@ ofxGgmlRealtimeInfoSettings makeRealtimeCitationSettings(
 
 } // namespace
 
+std::vector<std::string>
+ofxGgmlCitationSearchInternal::extractExactQuoteCandidatesForTesting(
+	const std::string & content) {
+	return splitIntoExactQuoteCandidates(content);
+}
+
 ofxGgmlCitationSearch::ofxGgmlCitationSearch() = default;
 
 ofxGgmlInference & ofxGgmlCitationSearch::getInference() {
@@ -1356,17 +1636,14 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 	result.backendName = request.useCrawler ? "Mojo+Inference" : "Inference";
 	result.requestedTopic = trimCopy(request.topic);
 
+	const auto validation = validateCitationSearchRequest(request);
+	if (!validation.valid) {
+		result.error = validation.error;
+		result.elapsedMs = elapsedMsSince(start);
+		return result;
+	}
+
 	const std::string topic = trimCopy(request.topic);
-	if (topic.empty()) {
-		result.error = "Citation topic is empty.";
-		result.elapsedMs = elapsedMsSince(start);
-		return result;
-	}
-	if (trimCopy(request.modelPath).empty()) {
-		result.error = "Citation search requires a model path.";
-		result.elapsedMs = elapsedMsSince(start);
-		return result;
-	}
 
 	result.queryRewrite = rewriteTopicForSearch(
 		m_inference,
@@ -1422,14 +1699,39 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 	} else {
 		const auto normalizedUrls = normalizeSourceUrls(request.sourceUrls);
 		if (normalizedUrls.empty()) {
-			auto realtimeSettings = makeRealtimeCitationSettings(request.sourceSettings);
+			std::vector<ofxGgmlPromptSource> sources;
+			if (request.useWebSearch) {
+				ofxGgmlWebSearchRequest webSearchRequest = request.webSearchRequest;
+				webSearchRequest.query = result.requestedTopic;
+				if (webSearchRequest.maxResults == 0) {
+					webSearchRequest.maxResults = request.sourceSettings.maxSources;
+				}
+				if (webSearchRequest.maxResults == 0) {
+					webSearchRequest.maxResults = 8;
+				}
+				webSearchRequest.maxReadablePages = std::min<size_t>(
+					std::max<size_t>(1, request.sourceSettings.maxSources),
+					std::max<size_t>(1, webSearchRequest.maxReadablePages));
+				result.webSearchResult = m_webSearch.search(webSearchRequest);
+				if (result.webSearchResult.success) {
+					sources = ofxGgmlWebSearch::toPromptSources(
+						result.webSearchResult,
+						request.sourceSettings);
+				}
+			}
+
 			auto queries = result.queryRewrite.queriesUsed;
 			if (queries.empty()) {
 				queries.push_back(result.requestedTopic);
 			}
-			auto sources = fetchRealtimeSourcesForQueries(queries, realtimeSettings);
 			if (sources.empty()) {
-				result.error = "No usable web sources were found for the citation topic.";
+				auto realtimeSettings = makeRealtimeCitationSettings(request.sourceSettings);
+				sources = fetchRealtimeSourcesForQueries(queries, realtimeSettings);
+			}
+			if (sources.empty()) {
+				result.error = result.webSearchResult.error.empty()
+					? std::string("No usable web sources were found for the citation topic.")
+					: result.webSearchResult.error;
 				result.elapsedMs = elapsedMsSince(start);
 				return result;
 			}
@@ -1450,7 +1752,9 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 				sources,
 				request.inferenceSettings,
 				request.sourceSettings);
-			result.backendName = "Realtime+Inference";
+			result.backendName = result.webSearchResult.success
+				? "WebSearch+Inference"
+				: "Realtime+Inference";
 		} else {
 			auto sources = ofxGgmlInferenceSourceInternals::fetchUrlSources(
 				normalizedUrls,
@@ -1486,8 +1790,15 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		result.citations = fallbackExtractExactCitations(
 			result.requestedTopic,
 			result.sourcesUsed,
-			std::max<size_t>(1, request.maxCitations));
+			std::max<size_t>(1, request.maxCitations),
+			request.minimumConfidenceThreshold);
 		if (!result.citations.empty()) {
+			result.sourceDiversityScore = calculateSourceDiversityScore(result.citations);
+			float totalConfidence = 0.0f;
+			for (const auto & citation : result.citations) {
+				totalConfidence += citation.confidenceScore;
+			}
+			result.averageConfidence = totalConfidence / static_cast<float>(result.citations.size());
 			result.success = true;
 			result.error.clear();
 			result.elapsedMs = elapsedMsSince(start);
@@ -1505,11 +1816,19 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		result.citations = fallbackExtractExactCitations(
 			result.requestedTopic,
 			result.sourcesUsed,
-			std::max<size_t>(1, request.maxCitations));
+			std::max<size_t>(1, request.maxCitations),
+			request.minimumConfidenceThreshold);
 		result.success = !result.citations.empty();
 		if (!result.success) {
 			result.error =
 				"Citation extraction returned non-JSON output. Raw response is available.";
+		} else {
+			result.sourceDiversityScore = calculateSourceDiversityScore(result.citations);
+			float totalConfidence = 0.0f;
+			for (const auto & citation : result.citations) {
+				totalConfidence += citation.confidenceScore;
+			}
+			result.averageConfidence = totalConfidence / static_cast<float>(result.citations.size());
 		}
 		result.elapsedMs = elapsedMsSince(start);
 		return result;
@@ -1525,12 +1844,32 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 			ofxGgmlCitationItem item;
 			item.quote = trimCopy(entry.value("quote", std::string()));
 			item.note = trimCopy(entry.value("note", std::string()));
-			item.sourceIndex = entry.value("sourceIndex", -1);
+			item.sourceIndex =
+				entry.contains("sourceIndex")
+					? parseCitationSourceIndex(entry["sourceIndex"])
+					: -1;
 			item.sourceLabel = resolveSourceLabel(result.sourcesUsed, item.sourceIndex);
 			item.sourceUri = resolveSourceUri(result.sourcesUsed, item.sourceIndex);
 			const auto exactQuote = findExactQuoteInSource(result.sourcesUsed, item);
-			if (!item.quote.empty() && exactQuote.has_value()) {
+			const bool foundExact = exactQuote.has_value();
+			if (!item.quote.empty() && foundExact) {
 				item.quote = *exactQuote;
+				item.isExactMatch = true;
+				const std::string normalizedTopic = normalizeForExactQuoteMatch(result.requestedTopic);
+				const auto topicTerms = tokenizeTopicTerms(result.requestedTopic);
+				const float relevance = scoreExactQuoteCandidate(
+					item.quote,
+					item.sourceLabel,
+					item.sourceUri,
+					normalizedTopic,
+					topicTerms);
+				item.relevanceScore = std::min(relevance / 10.0f, 1.0f);
+				item.sourceCredibility = calculateSourceCredibility(item.sourceUri);
+				item.confidenceScore = calculateConfidenceScore(
+					item,
+					true,
+					item.relevanceScore,
+					item.sourceCredibility);
 				parsedItems.push_back(std::move(item));
 			}
 		}
@@ -1540,11 +1879,22 @@ ofxGgmlCitationSearchResult ofxGgmlCitationSearch::search(
 		result.citations = fallbackExtractExactCitations(
 			result.requestedTopic,
 			result.sourcesUsed,
-			std::max<size_t>(1, request.maxCitations));
+			std::max<size_t>(1, request.maxCitations),
+			request.minimumConfidenceThreshold);
 		if (result.citations.empty()) {
 			result.summary.clear();
 		}
 	}
+
+	result.sourceDiversityScore = calculateSourceDiversityScore(result.citations);
+
+	float totalConfidence = 0.0f;
+	for (const auto & citation : result.citations) {
+		totalConfidence += citation.confidenceScore;
+	}
+	result.averageConfidence = result.citations.empty()
+		? 0.0f
+		: totalConfidence / static_cast<float>(result.citations.size());
 
 	result.success = true;
 	result.elapsedMs = elapsedMsSince(start);

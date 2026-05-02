@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <random>
 #include <sstream>
+#include <unordered_set>
 
 #ifndef OFXGGML_HEADLESS_STUBS
 #include "ofImage.h"
@@ -135,6 +136,158 @@ NormalizedVideoRequest normalizeVideoRequest(const ofxGgmlVideoRequest & request
 	return normalized;
 }
 
+bool isCompactClassificationTask(ofxGgmlVideoTask task) {
+	return task == ofxGgmlVideoTask::Action ||
+		task == ofxGgmlVideoTask::Emotion;
+}
+
+std::string lowerCopy(std::string text) {
+	std::transform(text.begin(), text.end(), text.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return text;
+}
+
+std::string collapseRepeatedSentences(const std::string & text) {
+	std::string result;
+	std::unordered_set<std::string> seen;
+	std::string sentence;
+	auto flushSentence = [&]() {
+		std::string trimmed = trimCopy(sentence);
+		sentence.clear();
+		if (trimmed.empty()) {
+			return;
+		}
+		std::string key = trimmed;
+		std::transform(key.begin(), key.end(), key.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		if (!seen.insert(key).second) {
+			return;
+		}
+		if (!result.empty()) {
+			result.push_back(' ');
+		}
+		result += trimmed;
+	};
+
+	for (char ch : text) {
+		sentence.push_back(ch);
+		if (ch == '.' || ch == '!' || ch == '?' || ch == '\n') {
+			flushSentence();
+		}
+	}
+	flushSentence();
+	return result.empty() ? trimCopy(text) : result;
+}
+
+std::vector<std::string> splitSentences(const std::string & text) {
+	std::vector<std::string> sentences;
+	std::string sentence;
+	for (char ch : text) {
+		sentence.push_back(ch);
+		if (ch == '.' || ch == '!' || ch == '?' || ch == '\n') {
+			const std::string trimmed = trimCopy(sentence);
+			if (!trimmed.empty()) {
+				sentences.push_back(trimmed);
+			}
+			sentence.clear();
+		}
+	}
+	const std::string trimmed = trimCopy(sentence);
+	if (!trimmed.empty()) {
+		sentences.push_back(trimmed);
+	}
+	return sentences;
+}
+
+std::string joinSentences(const std::vector<std::string> & sentences) {
+	std::string result;
+	for (const auto & sentence : sentences) {
+		if (trimCopy(sentence).empty()) {
+			continue;
+		}
+		if (!result.empty()) {
+			result.push_back(' ');
+		}
+		result += trimCopy(sentence);
+	}
+	return result;
+}
+
+int maxVideoResponseSentences(ofxGgmlVideoTask task) {
+	switch (task) {
+	case ofxGgmlVideoTask::Summarize: return 5;
+	case ofxGgmlVideoTask::Ask: return 4;
+	case ofxGgmlVideoTask::Action:
+	case ofxGgmlVideoTask::Emotion: return 4;
+	case ofxGgmlVideoTask::Ocr: return 0;
+	}
+	return 5;
+}
+
+int effectiveVideoMaxTokens(ofxGgmlVideoTask task, int requestedMaxTokens) {
+	switch (task) {
+	case ofxGgmlVideoTask::Action:
+	case ofxGgmlVideoTask::Emotion:
+		return std::min(std::max(32, requestedMaxTokens), 96);
+	case ofxGgmlVideoTask::Summarize:
+		return std::min(std::max(80, requestedMaxTokens), 192);
+	case ofxGgmlVideoTask::Ask:
+		return std::min(std::max(64, requestedMaxTokens), 192);
+	case ofxGgmlVideoTask::Ocr:
+		return requestedMaxTokens;
+	}
+	return requestedMaxTokens;
+}
+
+float effectiveVideoTemperature(ofxGgmlVideoTask task, float requestedTemperature) {
+	if (task == ofxGgmlVideoTask::Summarize ||
+		task == ofxGgmlVideoTask::Ask ||
+		isCompactClassificationTask(task)) {
+		return std::min(requestedTemperature, 0.15f);
+	}
+	return requestedTemperature;
+}
+
+std::string cleanupVideoResponseText(const std::string & text, ofxGgmlVideoTask task) {
+	if (task == ofxGgmlVideoTask::Ocr) {
+		return trimCopy(text);
+	}
+
+	std::vector<std::string> sentences = splitSentences(collapseRepeatedSentences(text));
+	if (sentences.empty()) {
+		return trimCopy(text);
+	}
+
+	std::vector<std::string> kept;
+	const int maxSentences = maxVideoResponseSentences(task);
+	int negativeInventoryCount = 0;
+	for (const auto & sentence : sentences) {
+		const std::string lower = lowerCopy(sentence);
+		const bool isNegativeInventory =
+			lower.find("does not contain") != std::string::npos ||
+			lower.find("no other objects") != std::string::npos ||
+			lower.find("no other scenes") != std::string::npos;
+		const bool isOtherInventory =
+			lower.find("does not contain any other") != std::string::npos ||
+			lower.find("besides the") != std::string::npos;
+
+		if (isNegativeInventory) {
+			++negativeInventoryCount;
+		}
+		if (!kept.empty() && (negativeInventoryCount > 1 || isOtherInventory)) {
+			break;
+		}
+
+		kept.push_back(sentence);
+		if (maxSentences > 0 && static_cast<int>(kept.size()) >= maxSentences) {
+			break;
+		}
+	}
+
+	const std::string cleaned = joinSentences(kept);
+	return cleaned.empty() ? trimCopy(text) : cleaned;
+}
+
 } // namespace
 
 ofxGgmlVideoInference::ofxGgmlVideoInference()
@@ -161,9 +314,9 @@ std::string ofxGgmlVideoInference::defaultPromptForTask(ofxGgmlVideoTask task) {
 	case ofxGgmlVideoTask::Ask:
 		return "Answer the user's question about the sampled video frames. Use temporal order when it matters and mention if the answer may depend on unsampled gaps.";
 	case ofxGgmlVideoTask::Action:
-		return "Identify the primary action in this video clip. Return the action label, short evidence, secondary actions if any, and a confidence estimate grounded in the observed motion.";
+		return "Identify the primary action in this video clip. Return one compact answer with primary action, evidence, confidence, and uncertainty.";
 	case ofxGgmlVideoTask::Emotion:
-		return "Analyze the dominant emotional state expressed in this clip. Return the primary emotion, evidence from face/body/context, any secondary emotions, and a confidence estimate.";
+		return "Identify the dominant emotion in this video clip. Return one compact answer with primary emotion, evidence, confidence, and uncertainty.";
 	}
 	return {};
 }
@@ -276,19 +429,36 @@ std::string ofxGgmlVideoInference::buildFrameAwarePrompt(
 	}
 	switch (request.task) {
 	case ofxGgmlVideoTask::Summarize:
-		prompt << "\nUse the frame order and timestamps to explain what changes over time. Prefer a professional summary with a brief timeline or bullet sequence when useful.";
+		prompt << "\nUse the frame order and timestamps to explain what changes over time."
+			<< " Return at most five concise sentences."
+			<< " Mention absent text only once if it matters."
+			<< " Do not list objects, sounds, scenes, or actions that are not visible."
+			<< " Stop after the complete summary.";
 		break;
 	case ofxGgmlVideoTask::Ocr:
 		prompt << "\nGroup extracted text by frame and timestamp. Ignore unreadable regions instead of inventing missing words.";
 		break;
 	case ofxGgmlVideoTask::Ask:
-		prompt << "\nAnswer from the sampled evidence only. If the question depends on unseen moments between frames, say so explicitly.";
+		prompt << "\nAnswer from the sampled evidence only in at most four concise sentences."
+			<< " If the question depends on unseen moments between frames, say so once."
+			<< " Do not list absent objects or scenes."
+			<< " Stop after the complete answer.";
 		break;
 	case ofxGgmlVideoTask::Action:
-		prompt << "\nReturn a professional action analysis with: primary action, secondary actions if present, confidence, evidence frames, and a brief timeline.";
+		prompt << "\nReturn exactly four short lines:\n"
+			<< "Primary action: <one phrase>\n"
+			<< "Evidence: <visible cue from the sampled frames>\n"
+			<< "Confidence: <low|medium|high>\n"
+			<< "Uncertainty: <what the sampled frames cannot prove>\n"
+			<< "Stop after these four lines. Do not repeat any sentence.";
 		break;
 	case ofxGgmlVideoTask::Emotion:
-		prompt << "\nReturn a professional emotion analysis with: dominant emotion, secondary emotions if present, confidence, visible evidence, and valence/arousal if appropriate.";
+		prompt << "\nReturn exactly four short lines:\n"
+			<< "Primary emotion: <one emotion or uncertain>\n"
+			<< "Evidence: <face, posture, gesture, or context cue>\n"
+			<< "Confidence: <low|medium|high>\n"
+			<< "Uncertainty: <what the sampled frames cannot prove>\n"
+			<< "Stop after these four lines. Do not repeat any sentence.";
 		break;
 	}
 	return prompt.str();
@@ -521,8 +691,8 @@ ofxGgmlVideoResult ofxGgmlVideoInference::runServerRequest(
 	visionRequest.prompt = buildFrameAwarePrompt(request, result.sampledFrames);
 	visionRequest.systemPrompt = normalized.systemPrompt;
 	visionRequest.responseLanguage = normalized.responseLanguage;
-	visionRequest.maxTokens = request.maxTokens;
-	visionRequest.temperature = request.temperature;
+	visionRequest.maxTokens = effectiveVideoMaxTokens(request.task, request.maxTokens);
+	visionRequest.temperature = effectiveVideoTemperature(request.task, request.temperature);
 	visionRequest.images.reserve(result.sampledFrames.size());
 	for (const auto & frame : result.sampledFrames) {
 		visionRequest.images.push_back({
@@ -542,7 +712,7 @@ ofxGgmlVideoResult ofxGgmlVideoInference::runServerRequest(
 	}
 
 	result.success = true;
-	result.text = result.visionResult.text;
+	result.text = cleanupVideoResponseText(result.visionResult.text, request.task);
 	return result;
 }
 

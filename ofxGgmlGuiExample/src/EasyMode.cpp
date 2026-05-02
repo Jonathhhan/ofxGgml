@@ -352,7 +352,7 @@ void ofApp::drawEasyPanel() {
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(140);
 		if (ImGui::InputInt("Citation count", &easyCitationCount)) {
-			easyCitationCount = std::clamp(easyCitationCount, 1, 12);
+			easyCitationCount = std::clamp(easyCitationCount, 1, 100);
 			autoSaveSession();
 		}
 	}

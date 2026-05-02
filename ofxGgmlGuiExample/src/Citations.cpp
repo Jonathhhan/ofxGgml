@@ -3,7 +3,9 @@
 #include "utils/ImGuiHelpers.h"
 #include "utils/PathHelpers.h"
 
+#include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <unordered_set>
 
 namespace {
@@ -20,6 +22,33 @@ std::string trimCopyLocal(const std::string & text) {
 		--end;
 	}
 	return text.substr(start, end - start);
+}
+
+std::string lowerAsciiLocal(std::string value) {
+	std::transform(value.begin(), value.end(), value.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return value;
+}
+
+bool isJanV1ModelPathLocal(const std::string & modelPath) {
+	const std::string filename =
+		lowerAsciiLocal(std::filesystem::path(modelPath).filename().string());
+	return filename.find("jan-v1") != std::string::npos ||
+		filename.find("jan_v1") != std::string::npos;
+}
+
+void applyJanV1ResearchDefaults(
+	const std::string & modelPath,
+	ofxGgmlInferenceSettings & settings) {
+	if (!isJanV1ModelPathLocal(modelPath)) {
+		return;
+	}
+	settings.maxTokens = std::max(settings.maxTokens, 2048);
+	settings.temperature = 0.6f;
+	settings.topP = 0.95f;
+	settings.topK = 20;
+	settings.minP = 0.0f;
+	settings.contextSize = std::max(settings.contextSize, 8192);
 }
 
 std::string parseUrlHostLocal(const std::string & rawUrl) {
@@ -80,6 +109,10 @@ void ofApp::drawCitationSearchSection(
 	ImGui::Text("Citation Research");
 	ImGui::TextDisabled(
 		"Extract source-backed quotes about a topic from loaded URLs, a crawler URL, or topic-only web search.");
+	if (isJanV1ModelPathLocal(getSelectedModelPath())) {
+		ImGui::TextDisabled(
+			"Jan v1 research preset active: using temp 0.6, top_p 0.95, top_k 20, min_p 0.0 for citation runs.");
+	}
 
 	if (hasDeferredCitationTopic) {
 		copyStringToBuffer(
@@ -112,7 +145,7 @@ void ofApp::drawCitationSearchSection(
 	}
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(120);
-	if (ImGui::SliderInt("Max quotes", &citationMaxResults, 1, 12)) {
+	if (ImGui::SliderInt("Max quotes", &citationMaxResults, 1, 100)) {
 		autoSaveSession();
 	}
 
@@ -263,6 +296,77 @@ void ofApp::runCitationSearch() {
 	}
 
 	const AiMode requestMode = activeMode;
+	const std::string modelPath = getSelectedModelPath();
+	const bool preferredServerBackend =
+		(textInferenceBackend == TextInferenceBackend::LlamaServer);
+	bool useServerBackend = preferredServerBackend;
+	std::string backendError;
+	auto prepareCliBackend = [&](std::string * cliError = nullptr) -> bool {
+		std::string localError;
+		if (modelPath.empty()) {
+			localError = "No model preset selected.";
+		} else if (!std::filesystem::exists(modelPath)) {
+			localError = "Model file not found: " + modelPath;
+		}
+		if (!localError.empty()) {
+			if (cliError != nullptr) {
+				*cliError = localError;
+			}
+			return false;
+		}
+		if (!isLlamaCliReady()) {
+			probeLlamaCli();
+			if (!isLlamaCliReady()) {
+				localError =
+					"Optional CLI fallback is not installed. Build it with scripts/build-llama-cli.sh if you want a local non-server fallback.";
+				if (cliError != nullptr) {
+					*cliError = localError;
+				}
+				return false;
+			}
+		}
+		llmInference.setCompletionExecutable(getLlamaCliCommand());
+		llmInference.probeCompletionCapabilities(true);
+		if (cliError != nullptr) {
+			cliError->clear();
+		}
+		return true;
+	};
+	if (useServerBackend && !ensureTextServerReady(false, true)) {
+		const std::string serverError = !textServerStatusMessage.empty()
+			? textServerStatusMessage
+			: "Server-backed inference is not ready.";
+		std::string cliError;
+		if (prepareCliBackend(&cliError)) {
+			useServerBackend = false;
+			if (shouldLog(OF_LOG_NOTICE)) {
+				logWithLevel(
+					OF_LOG_NOTICE,
+					"Server-backed citation search is unavailable; falling back to local llama-completion for this request.");
+			}
+		} else {
+			backendError = serverError;
+			if (!cliError.empty()) {
+				backendError += " CLI fallback unavailable: " + cliError;
+			}
+		}
+	} else if (!useServerBackend) {
+		std::string cliError;
+		if (!prepareCliBackend(&cliError)) {
+			backendError = cliError;
+		}
+	}
+	if (!backendError.empty()) {
+		citationBackendName = "CitationSearch";
+		citationElapsedMs = 0.0f;
+		citationResults.clear();
+		citationOutput = "[Error] " + backendError;
+		{
+			std::lock_guard<std::mutex> lock(streamMutex);
+			streamingOutput.clear();
+		}
+		return;
+	}
 
 	generating.store(true);
 	cancelRequested.store(false);
@@ -287,11 +391,36 @@ void ofApp::runCitationSearch() {
 		workerThread.join();
 	}
 
-	const std::string modelPath = getSelectedModelPath();
-	const int maxCitations = std::clamp(citationMaxResults, 1, 12);
-	const auto inferenceSettings = buildCurrentTextInferenceSettings(requestMode);
-	workerThread = std::thread([this, topic, useCrawler, crawlUrl, loadedUrls, modelPath, maxCitations, inferenceSettings]() {
+	const int maxCitations = std::clamp(citationMaxResults, 1, 100);
+	auto inferenceSettings = buildCurrentTextInferenceSettings(requestMode);
+	applyJanV1ResearchDefaults(modelPath, inferenceSettings);
+	if (!useServerBackend) {
+		inferenceSettings.useServerBackend = false;
+		inferenceSettings.serverUrl.clear();
+		inferenceSettings.serverModel.clear();
+	}
+	const std::string completionExecutable = llmInference.getCompletionExecutable();
+	const std::string embeddingExecutable = llmInference.getEmbeddingExecutable();
+	workerThread = std::thread([this,
+		topic,
+		useCrawler,
+		crawlUrl,
+		loadedUrls,
+		modelPath,
+		maxCitations,
+		inferenceSettings,
+		completionExecutable,
+		embeddingExecutable]() {
 		try {
+			ofxGgmlCitationSearch localCitationSearch;
+			if (!completionExecutable.empty()) {
+				localCitationSearch.getInference().setCompletionExecutable(
+					completionExecutable);
+			}
+			if (!embeddingExecutable.empty()) {
+				localCitationSearch.getInference().setEmbeddingExecutable(
+					embeddingExecutable);
+			}
 			ofxGgmlCitationSearchRequest request;
 			request.modelPath = modelPath;
 			request.topic = topic;
@@ -307,10 +436,11 @@ void ofApp::runCitationSearch() {
 				request.crawlerRequest.startUrl = crawlUrl;
 				request.crawlerRequest.maxDepth = 1;
 				request.crawlerRequest.renderJavaScript = false;
-				request.crawlerRequest.keepOutputFiles = true;
+				request.crawlerRequest.keepOutputFiles = false;
 			}
 
-			const ofxGgmlCitationSearchResult result = citationSearch.search(request);
+			const ofxGgmlCitationSearchResult result =
+				localCitationSearch.search(request);
 
 			std::ostringstream text;
 			if (result.success) {

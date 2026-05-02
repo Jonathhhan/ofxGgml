@@ -8,6 +8,7 @@
 #include <functional>
 #include <mutex>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -33,12 +34,33 @@ std::mutex g_execConfigMutex;
 bool g_allowPathLookup = false;
 std::vector<std::string> g_allowedRoots;
 
-bool isUnderAllowedRoot(const std::filesystem::path & candidate) {
-	if (g_allowedRoots.empty()) return true;
+struct ExecutableConfig {
+	bool allowPathLookup = false;
+	std::vector<std::string> allowedRoots;
+};
+
+ExecutableConfig getExecutableConfigSnapshot() {
+	ExecutableConfig config;
+	{
+		std::lock_guard<std::mutex> lock(g_execConfigMutex);
+		config.allowPathLookup = g_allowPathLookup;
+		config.allowedRoots = g_allowedRoots;
+	}
+	if (!config.allowPathLookup) {
+		const std::string envAllow = getEnvVarString("OFXGGML_ALLOW_PATH_EXEC");
+		config.allowPathLookup = !envAllow.empty() && envAllow != "0";
+	}
+	return config;
+}
+
+bool isUnderAllowedRoot(
+	const std::filesystem::path & candidate,
+	const std::vector<std::string> & allowedRoots) {
+	if (allowedRoots.empty()) return true;
 	std::error_code ec;
 	const auto canon = std::filesystem::weakly_canonical(candidate, ec);
 	if (ec) return false;
-	for (const auto & root : g_allowedRoots) {
+	for (const auto & root : allowedRoots) {
 		std::filesystem::path rootPath(root);
 		const auto canonRoot = std::filesystem::weakly_canonical(rootPath, ec);
 		if (ec) continue;
@@ -51,6 +73,71 @@ bool isUnderAllowedRoot(const std::filesystem::path & candidate) {
 		}
 	}
 	return false;
+}
+
+bool isRegularExecutableFile(const std::filesystem::path & candidate) {
+	std::error_code ec;
+	if (!std::filesystem::exists(candidate, ec) || ec) return false;
+	if (!std::filesystem::is_regular_file(candidate, ec) || ec) return false;
+#ifndef _WIN32
+	return access(candidate.c_str(), X_OK) == 0;
+#else
+	return true;
+#endif
+}
+
+std::string resolveRegularExecutable(
+	const std::filesystem::path & candidate,
+	const std::vector<std::string> & allowedRoots) {
+	std::error_code ec;
+	const std::filesystem::path canonical =
+		std::filesystem::weakly_canonical(candidate, ec);
+	if (!ec && isRegularExecutableFile(canonical) &&
+		isUnderAllowedRoot(canonical, allowedRoots)) {
+		return canonical.string();
+	}
+	if (isRegularExecutableFile(candidate) &&
+		isUnderAllowedRoot(candidate, allowedRoots)) {
+		return candidate.lexically_normal().string();
+	}
+	return {};
+}
+
+bool containsPathSeparator(const std::string & value) {
+	return value.find('/') != std::string::npos ||
+		value.find('\\') != std::string::npos;
+}
+
+bool isLikelyPath(const std::string & value) {
+	std::filesystem::path fsPath(value);
+	return fsPath.is_absolute() || fsPath.has_parent_path() ||
+		containsPathSeparator(value);
+}
+
+bool isSafePathCommandName(const std::string & path) {
+	for (char c : path) {
+		const unsigned char uc = static_cast<unsigned char>(c);
+		if (std::iscntrl(uc) || std::isspace(uc)) return false;
+	}
+	return true;
+}
+
+std::vector<std::string> windowsExecutableExtensions() {
+	std::vector<std::string> executableExtensions;
+#ifdef _WIN32
+	const std::string envPathext = getEnvVarString("PATHEXT");
+	if (!envPathext.empty()) {
+		std::istringstream extStream(envPathext);
+		std::string ext;
+		while (std::getline(extStream, ext, ';')) {
+			if (!ext.empty()) executableExtensions.push_back(ext);
+		}
+	}
+	if (executableExtensions.empty()) {
+		executableExtensions = {".exe", ".bat", ".cmd", ".com"};
+	}
+#endif
+	return executableExtensions;
 }
 } // namespace
 
@@ -76,78 +163,35 @@ std::string getEnvVarString(const char * name) {
 bool isValidExecutablePath(
 	const std::string & path,
 	const std::string & workingDirectory) {
-	if (path.empty()) return false;
-	if (path.find('\0') != std::string::npos) return false;
+	return !resolveExecutablePath(path, workingDirectory).empty();
+}
 
-	// Allow PATH lookup only when explicitly enabled for controlled environments.
-	bool allowPathLookup = false;
-	{
-		std::lock_guard<std::mutex> lock(g_execConfigMutex);
-		allowPathLookup = g_allowPathLookup;
-	}
-	if (!allowPathLookup) {
-		const std::string envAllow = getEnvVarString("OFXGGML_ALLOW_PATH_EXEC");
-		if (!envAllow.empty() && envAllow != "0") {
-			allowPathLookup = true;
-		}
-	}
+std::string resolveExecutablePath(
+	const std::string & path,
+	const std::string & workingDirectory) {
+	if (path.empty()) return {};
+	if (path.find('\0') != std::string::npos) return {};
 
-	auto containsPathSeparator = [](const std::string & value) {
-		return value.find('/') != std::string::npos ||
-			value.find('\\') != std::string::npos;
-	};
-	auto isLikelyPath = [&](const std::string & value) {
-		std::filesystem::path fsPath(value);
-		return fsPath.is_absolute() || fsPath.has_parent_path() ||
-			containsPathSeparator(value);
-	};
-	auto isRegularExecutableFile = [](
-		const std::filesystem::path & candidate) {
-		std::error_code ec;
-		if (!std::filesystem::exists(candidate, ec) || ec) return false;
-		if (!std::filesystem::is_regular_file(candidate, ec) || ec) return false;
-#ifndef _WIN32
-		return access(candidate.c_str(), X_OK) == 0;
-#else
-		return true;
-#endif
-	};
+	const ExecutableConfig config = getExecutableConfigSnapshot();
 
 	if (isLikelyPath(path)) {
-		std::error_code ec;
 		std::filesystem::path fsPath(path);
 		if (!workingDirectory.empty() && fsPath.is_relative()) {
 			fsPath = std::filesystem::path(workingDirectory) / fsPath;
 		}
-		const std::filesystem::path canonical =
-			std::filesystem::weakly_canonical(fsPath, ec);
-		if (!ec && isRegularExecutableFile(canonical) && isUnderAllowedRoot(canonical)) return true;
-		return isRegularExecutableFile(fsPath) && isUnderAllowedRoot(fsPath);
+		return resolveRegularExecutable(fsPath, config.allowedRoots);
 	}
 
-	if (!allowPathLookup) return false;
+	if (!config.allowPathLookup) return {};
 
-	for (char c : path) {
-		const unsigned char uc = static_cast<unsigned char>(c);
-		if (std::iscntrl(uc) || std::isspace(uc)) return false;
-	}
+	if (!isSafePathCommandName(path)) return {};
 	const std::string envPath = getEnvVarString("PATH");
-	if (envPath.empty()) return false;
+	if (envPath.empty()) return {};
 
 #ifdef _WIN32
 	const char pathSep = ';';
-	std::vector<std::string> executableExtensions;
-	const std::string envPathext = getEnvVarString("PATHEXT");
-	if (!envPathext.empty()) {
-		std::istringstream extStream(envPathext);
-		std::string ext;
-		while (std::getline(extStream, ext, ';')) {
-			if (!ext.empty()) executableExtensions.push_back(ext);
-		}
-	}
-	if (executableExtensions.empty()) {
-		executableExtensions = {".exe", ".bat", ".cmd", ".com"};
-	}
+	const std::vector<std::string> executableExtensions =
+		windowsExecutableExtensions();
 #else
 	const char pathSep = ':';
 #endif
@@ -160,16 +204,22 @@ bool isValidExecutablePath(
 		if (!std::filesystem::is_directory(base)) continue;
 #ifdef _WIN32
 		std::filesystem::path candidate = base / path;
-		if (isRegularExecutableFile(candidate)) return true;
+		std::string resolved =
+			resolveRegularExecutable(candidate, config.allowedRoots);
+		if (!resolved.empty()) return resolved;
 		for (const auto & ext : executableExtensions) {
 			candidate = base / (path + ext);
-			if (isRegularExecutableFile(candidate)) return true;
+			resolved = resolveRegularExecutable(candidate, config.allowedRoots);
+			if (!resolved.empty()) return resolved;
 		}
 #else
-		if (isRegularExecutableFile(base / path)) return true;
+		const std::filesystem::path candidate = base / path;
+		const std::string resolved =
+			resolveRegularExecutable(candidate, config.allowedRoots);
+		if (!resolved.empty()) return resolved;
 #endif
 	}
-	return false;
+	return {};
 }
 
 void setAllowPathLookupForExecutables(bool allow) {
@@ -242,6 +292,10 @@ std::string resolveWindowsLaunchPath(const std::string & executable) {
 	if (executable.empty()) {
 		return {};
 	}
+	const std::string validatedExecutable = resolveExecutablePath(executable);
+	if (!validatedExecutable.empty()) {
+		return validatedExecutable;
+	}
 
 	auto hasPathSeparator = [](const std::string & value) {
 		return value.find('\\') != std::string::npos ||
@@ -252,6 +306,10 @@ std::string resolveWindowsLaunchPath(const std::string & executable) {
 	if (inputPath.is_absolute() || inputPath.has_parent_path() ||
 		hasPathSeparator(executable)) {
 		return executable;
+	}
+	const ExecutableConfig config = getExecutableConfigSnapshot();
+	if (config.allowPathLookup || !config.allowedRoots.empty()) {
+		return {};
 	}
 
 	std::vector<std::string> exts;
@@ -303,6 +361,9 @@ std::string buildWindowsCommandLine(const std::vector<std::string> & args) {
 		return {};
 	}
 	const std::string resolvedExecutable = resolveWindowsLaunchPath(args.front());
+	if (resolvedExecutable.empty()) {
+		return {};
+	}
 	const bool useCmdWrapper = isWindowsBatchScript(resolvedExecutable);
 	const std::string comspec = [&]() {
 		const std::string envComspec = getEnvVarString("COMSPEC");
@@ -345,9 +406,32 @@ bool runCommandCapture(
 	int & exitCode,
 	bool mergeStderr,
 	std::function<bool(const std::string &)> onChunk) {
+	return runCommandCapture(
+		args,
+		{},
+		output,
+		exitCode,
+		mergeStderr,
+		std::move(onChunk));
+}
+
+bool runCommandCapture(
+	const std::vector<std::string> & args,
+	const std::string & workingDirectory,
+	std::string & output,
+	int & exitCode,
+	bool mergeStderr,
+	std::function<bool(const std::string &)> onChunk) {
 	output.clear();
 	exitCode = -1;
 	if (args.empty() || args.front().empty()) return false;
+	const std::string resolvedExecutable =
+		resolveExecutablePath(args.front(), workingDirectory);
+	if (resolvedExecutable.empty()) {
+		return false;
+	}
+	std::vector<std::string> launchArgs = args;
+	launchArgs.front() = resolvedExecutable;
 
 	std::string pendingChunk;
 	auto dispatchChunk = [&](const std::string & chunk) -> bool {
@@ -407,7 +491,7 @@ bool runCommandCapture(
 	}
 
 	PROCESS_INFORMATION pi {};
-	const std::string cmdLine = buildWindowsCommandLine(args);
+	const std::string cmdLine = buildWindowsCommandLine(launchArgs);
 	if (cmdLine.empty()) {
 		CloseHandle(readPipe);
 		CloseHandle(writePipe);
@@ -422,6 +506,9 @@ bool runCommandCapture(
 	std::wstring wideCmdLine = ofxGgmlWideFromUtf8(cmdLine);
 	std::vector<wchar_t> mutableCmd(wideCmdLine.begin(), wideCmdLine.end());
 	mutableCmd.push_back(L'\0');
+	const std::wstring wideWorkingDirectory = ofxGgmlWideFromUtf8(workingDirectory);
+	const wchar_t * workDirPtr =
+		workingDirectory.empty() ? nullptr : wideWorkingDirectory.c_str();
 
 	BOOL ok = CreateProcessW(
 		nullptr,
@@ -431,7 +518,7 @@ bool runCommandCapture(
 		TRUE,
 		CREATE_NO_WINDOW,
 		nullptr,
-		nullptr,
+		workDirPtr,
 		&si,
 		&pi);
 	CloseHandle(writePipe);
@@ -492,15 +579,22 @@ bool runCommandCapture(
 		}
 		close(pipeFds[0]);
 		close(pipeFds[1]);
+		if (!workingDirectory.empty() &&
+			chdir(workingDirectory.c_str()) != 0) {
+			const std::string message =
+				"Failed to change working directory: " + workingDirectory + "\n";
+			(void)write(STDERR_FILENO, message.c_str(), message.size());
+			_exit(127);
+		}
 
 		std::vector<char *> argv;
-		argv.reserve(args.size() + 1);
-		for (const auto & arg : args) {
+		argv.reserve(launchArgs.size() + 1);
+		for (const auto & arg : launchArgs) {
 			argv.push_back(const_cast<char *>(arg.c_str()));
 		}
 		argv.push_back(nullptr);
 
-		execvp(argv[0], argv.data());
+		execv(argv[0], argv.data());
 		_exit(127);
 	}
 

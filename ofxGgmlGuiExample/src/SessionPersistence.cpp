@@ -55,6 +55,7 @@ bool ofApp::saveSession(const std::string & path) {
 		{"liveContextAllowPromptUrls", liveContextAllowPromptUrls},
 		{"liveContextAllowDomainProviders", liveContextAllowDomainProviders},
 		{"liveContextAllowGenericSearch", liveContextAllowGenericSearch},
+		{"scriptSimpleUi", scriptSimpleUi},
 		{"scriptIncludeRepoContext", scriptIncludeRepoContext},
 		{"selectedVisionProfileIndex", selectedVisionProfileIndex},
 		{"selectedSpeechProfileIndex", selectedSpeechProfileIndex},
@@ -525,6 +526,7 @@ bool ofApp::loadSession(const std::string & path) {
 	liveContextAllowPromptUrls = getBool(settings, "liveContextAllowPromptUrls", liveContextAllowPromptUrls);
 	liveContextAllowDomainProviders = getBool(settings, "liveContextAllowDomainProviders", liveContextAllowDomainProviders);
 	liveContextAllowGenericSearch = getBool(settings, "liveContextAllowGenericSearch", liveContextAllowGenericSearch);
+	scriptSimpleUi = getBool(settings, "scriptSimpleUi", scriptSimpleUi);
 	scriptIncludeRepoContext = getBool(settings, "scriptIncludeRepoContext", scriptIncludeRepoContext);
 	selectedVisionProfileIndex = std::max(0, getInt(settings, "selectedVisionProfileIndex", selectedVisionProfileIndex));
 	selectedSpeechProfileIndex = std::max(0, getInt(settings, "selectedSpeechProfileIndex", selectedSpeechProfileIndex));
@@ -533,7 +535,7 @@ bool ofApp::loadSession(const std::string & path) {
 	videoEssayCitationCount = std::clamp(
 		getInt(settings, "videoEssayCitationCount", videoEssayCitationCount),
 		2,
-		12);
+		100);
 	videoEssayToneIndex = std::clamp(
 		getInt(settings, "videoEssayToneIndex", videoEssayToneIndex),
 		0,
@@ -752,7 +754,7 @@ bool ofApp::loadSession(const std::string & path) {
 	videoTaskIndex = std::clamp(getInt(indices, "videoTaskIndex", videoTaskIndex), 0, 4);
 	visionVideoMaxFrames = std::clamp(getInt(indices, "visionVideoMaxFrames", visionVideoMaxFrames), 1, 12);
 	easyActionIndex = std::clamp(getInt(indices, "easyActionIndex", easyActionIndex), 0, 5);
-	easyCitationCount = std::clamp(getInt(indices, "easyCitationCount", easyCitationCount), 1, 12);
+	easyCitationCount = std::clamp(getInt(indices, "easyCitationCount", easyCitationCount), 1, 100);
 	videoPlanBeatCount = std::clamp(getInt(indices, "videoPlanBeatCount", videoPlanBeatCount), 1, 12);
 	videoPlanSceneCount = std::clamp(getInt(indices, "videoPlanSceneCount", videoPlanSceneCount), 1, 8);
 	videoPlanGenerationMode = std::clamp(getInt(indices, "videoPlanGenerationMode", videoPlanGenerationMode), 0, 1);
@@ -806,7 +808,7 @@ bool ofApp::loadSession(const std::string & path) {
 		getInt(indices, "milkdropVariantCount", milkdropVariantCount),
 		1,
 		6);
-	citationMaxResults = std::clamp(getInt(settings, "citationMaxResults", citationMaxResults), 1, 12);
+	citationMaxResults = std::clamp(getInt(settings, "citationMaxResults", citationMaxResults), 1, 100);
 
 	videoPlanDurationSeconds = std::clamp(getFloat(floats, "videoPlanDurationSeconds", videoPlanDurationSeconds), 1.0f, 30.0f);
 	musicVideoCutIntensity = std::clamp(

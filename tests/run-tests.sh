@@ -32,6 +32,10 @@ cmake --build "$TEST_BUILD_DIR" --config Release
 
 # Run tests
 write_step "Running tests"
-"$TEST_BUILD_DIR/ofxGgml-tests" "$@"
+if [[ $# -gt 0 ]]; then
+	"$TEST_BUILD_DIR/ofxGgml-tests" "$@"
+else
+	ctest --test-dir "$TEST_BUILD_DIR" --output-on-failure
+fi
 
 write_step "Tests completed successfully"

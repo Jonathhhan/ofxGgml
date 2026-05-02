@@ -47,8 +47,8 @@ jobs:
           cmake -B build/runtime-tests -S tests -DOFXGGML_ENABLE_RUNTIME_SOURCES=ON
           cmake --build build/runtime-tests --config Release
 
-      - name: Run inference-focused tests
-        run: ./build/runtime-tests/ofxGgml-tests "[inference]"
+      - name: Run headless CMake test target
+        run: ctest --test-dir build/runtime-tests --output-on-failure
 
   static-analysis:
     runs-on: ubuntu-latest

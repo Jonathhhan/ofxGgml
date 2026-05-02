@@ -1,5 +1,7 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
+#include "../src/support/ofxGgmlProcessSecurity.h"
+#include <chrono>
 #include <cstdlib>
 #include <cctype>
 #include <filesystem>
@@ -110,7 +112,9 @@ std::string translateWindowsTestScript(const std::string & body) {
 std::filesystem::path makeUniqueTestDir(const std::string & name) {
 	const auto base = std::filesystem::temp_directory_path() / "ofxggml_tests";
 	std::filesystem::create_directories(base);
-	const auto dir = base / (name + "_" + std::to_string(std::rand()));
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const auto dir = base / (
+		name + "_" + std::to_string(stamp) + "_" + std::to_string(std::rand()));
 	std::filesystem::create_directories(dir);
 	return dir;
 }
@@ -173,21 +177,14 @@ std::string createPromptAwareContinuationExecutable(
 	const auto dir = makeUniqueTestDir("continuation_exec");
 #ifdef _WIN32
 	const auto exe = dir / "fake_llama_continuation.bat";
+	const auto countFile = dir / "continuation_seen.txt";
+	std::error_code removeEc;
+	std::filesystem::remove(countFile, removeEc);
 	std::ofstream out(exe);
 	out << "@echo off\r\n";
-	out << "set \"promptfile=\"\r\n";
-	out << ":parse\r\n";
-	out << "if \"%~1\"==\"\" goto done\r\n";
-	out << "if /I \"%~1\"==\"--file\" (\r\n";
-	out << "  shift\r\n";
-	out << "  set \"promptfile=%~1\"\r\n";
-	out << ")\r\n";
-	out << "shift\r\n";
-	out << "goto parse\r\n";
-	out << ":done\r\n";
-	out << "if not defined promptfile goto initial\r\n";
-	out << "findstr /C:\"Continue exactly from where the previous answer stopped.\" \"%promptfile%\" >nul\r\n";
-	out << "if %errorlevel%==0 goto continuation\r\n";
+	out << "set \"countfile=" << countFile.string() << "\"\r\n";
+	out << "if exist \"%countfile%\" goto continuation\r\n";
+	out << "echo seen>\"%countfile%\"\r\n";
 	out << ":initial\r\n";
 	out << "echo " << escapeBatchEcho(initialOutput) << "\r\n";
 	out << "exit /b 0\r\n";
@@ -197,20 +194,16 @@ std::string createPromptAwareContinuationExecutable(
 	out.close();
 #else
 	const auto exe = dir / "fake_llama_continuation.sh";
+	const auto countFile = dir / "continuation_seen.txt";
+	std::error_code removeEc;
+	std::filesystem::remove(countFile, removeEc);
 	std::ofstream out(exe);
 	out << "#!/usr/bin/env bash\nset -euo pipefail\n";
-	out << "promptfile=''\n";
-	out << "while [[ $# -gt 0 ]]; do\n";
-	out << "  if [[ \"$1\" == \"--file\" && $# -ge 2 ]]; then\n";
-	out << "    promptfile=\"$2\"\n";
-	out << "    shift 2\n";
-	out << "    continue\n";
-	out << "  fi\n";
-	out << "  shift\n";
-	out << "done\n";
-	out << "if [[ -n \"$promptfile\" ]] && grep -Fq \"Continue exactly from where the previous answer stopped.\" \"$promptfile\"; then\n";
+	out << "countfile=\"" << countFile.string() << "\"\n";
+	out << "if [[ -f \"$countfile\" ]]; then\n";
 	out << "  printf '%s\\n' \"" << continuationOutput << "\"\n";
 	out << "else\n";
+	out << "  printf 'seen\\n' > \"$countfile\"\n";
 	out << "  printf '%s\\n' \"" << initialOutput << "\"\n";
 	out << "fi\n";
 	out.close();
@@ -256,6 +249,23 @@ struct ScopedEnvVar {
 		} else {
 			unsetEnvVar(key);
 		}
+	}
+};
+
+struct ScopedExecutableSecurityConfig {
+	bool originalAllowPathLookup = false;
+	std::vector<std::string> originalAllowlistRoots;
+
+	ScopedExecutableSecurityConfig() {
+		originalAllowPathLookup =
+			ofxGgmlProcessSecurity::getAllowPathLookupForExecutables();
+		originalAllowlistRoots =
+			ofxGgmlProcessSecurity::getExecutableAllowlistRoots();
+	}
+
+	~ScopedExecutableSecurityConfig() {
+		ofxGgmlProcessSecurity::setAllowPathLookupForExecutables(originalAllowPathLookup);
+		ofxGgmlProcessSecurity::setExecutableAllowlistRoots(originalAllowlistRoots);
 	}
 };
 
@@ -357,6 +367,100 @@ TEST_CASE("Executable resolution accepts absolute path and PATH command", "[infe
 		auto gen = inf.generate(modelPath, "hello");
 		REQUIRE(gen.success);
 		REQUIRE(gen.text.find("path-ok") != std::string::npos);
+	}
+
+	SECTION("PATH lookup still honors executable allowlist roots") {
+		ScopedExecutableSecurityConfig scopedSecurityConfig;
+		const auto allowedDir = makeUniqueTestDir("allowed_exec_root");
+		const auto blockedDir = makeUniqueTestDir("blocked_exec_root");
+#ifdef _WIN32
+		const auto blockedCmdPath = blockedDir / "ofxggml-blocked-path-cmd.bat";
+		std::ofstream blockedOut(blockedCmdPath);
+		blockedOut << "@echo off\r\necho should-not-run\r\n";
+		blockedOut.close();
+		const auto allowedCmdPath = allowedDir / "ofxggml-blocked-path-cmd.bat";
+		std::ofstream allowedOut(allowedCmdPath);
+		allowedOut << "@echo off\r\necho allowed-run\r\n";
+		allowedOut.close();
+		const std::string pathSep = ";";
+#else
+		const auto blockedCmdPath = blockedDir / "ofxggml-blocked-path-cmd";
+		std::ofstream blockedOut(blockedCmdPath);
+		blockedOut << "#!/usr/bin/env bash\nset -euo pipefail\necho should-not-run\n";
+		blockedOut.close();
+		chmod(blockedCmdPath.c_str(), 0755);
+		const auto allowedCmdPath = allowedDir / "ofxggml-blocked-path-cmd";
+		std::ofstream allowedOut(allowedCmdPath);
+		allowedOut << "#!/usr/bin/env bash\nset -euo pipefail\necho allowed-run\n";
+		allowedOut.close();
+		chmod(allowedCmdPath.c_str(), 0755);
+		const std::string pathSep = ":";
+#endif
+		std::string pathValue = blockedDir.string();
+		pathValue += pathSep;
+		pathValue += allowedDir.string();
+		if (const char * existingPath = std::getenv("PATH")) {
+			pathValue += pathSep;
+			pathValue += existingPath;
+		}
+		ScopedEnvVar scopedPath("PATH", pathValue);
+		ScopedEnvVar scopedAllow("OFXGGML_ALLOW_PATH_EXEC", "1");
+		ofxGgmlProcessSecurity::setAllowPathLookupForExecutables(true);
+		ofxGgmlProcessSecurity::setExecutableAllowlistRoots({allowedDir.string()});
+
+		REQUIRE(ofxGgmlProcessSecurity::isValidExecutablePath(
+			"ofxggml-blocked-path-cmd"));
+		const std::string resolved = ofxGgmlProcessSecurity::resolveExecutablePath(
+			"ofxggml-blocked-path-cmd");
+		REQUIRE(std::filesystem::weakly_canonical(std::filesystem::path(resolved).parent_path()) ==
+			std::filesystem::weakly_canonical(allowedDir));
+		REQUIRE(std::filesystem::weakly_canonical(std::filesystem::path(resolved).parent_path()) !=
+			std::filesystem::weakly_canonical(blockedDir));
+#ifdef _WIN32
+		const std::string commandLine =
+			ofxGgmlProcessSecurity::buildWindowsCommandLine({
+				"ofxggml-blocked-path-cmd",
+				"--flag"
+			});
+		REQUIRE(commandLine.find(resolved) != std::string::npos);
+		REQUIRE(commandLine.find(std::filesystem::weakly_canonical(blockedCmdPath).string()) ==
+			std::string::npos);
+#endif
+		std::string output;
+		int exitCode = -1;
+		REQUIRE(ofxGgmlProcessSecurity::runCommandCapture(
+			{"ofxggml-blocked-path-cmd"},
+			output,
+			exitCode,
+			true));
+		REQUIRE(exitCode == 0);
+		REQUIRE(output.find("allowed-run") != std::string::npos);
+		REQUIRE(output.find("should-not-run") == std::string::npos);
+
+		const auto missingWorkDir = allowedDir / "missing-working-dir";
+		output.clear();
+		exitCode = -1;
+#ifdef _WIN32
+		REQUIRE_FALSE(ofxGgmlProcessSecurity::runCommandCapture(
+			{allowedCmdPath.string()},
+			missingWorkDir.string(),
+			output,
+			exitCode,
+			true));
+#else
+		REQUIRE(ofxGgmlProcessSecurity::runCommandCapture(
+			{allowedCmdPath.string()},
+			missingWorkDir.string(),
+			output,
+			exitCode,
+			true));
+		REQUIRE(exitCode != 0);
+		REQUIRE(output.find("Failed to change working directory") != std::string::npos);
+#endif
+
+		ofxGgmlProcessSecurity::setExecutableAllowlistRoots({blockedDir.string()});
+		REQUIRE(ofxGgmlProcessSecurity::isValidExecutablePath(
+			"ofxggml-blocked-path-cmd"));
 	}
 
 	SECTION("missing command and non-file path are rejected") {
@@ -936,6 +1040,7 @@ TEST_CASE("Inference auto-continue merges overlapping continuation text", "[infe
 	ofxGgmlInferenceSettings settings;
 	settings.autoContinueCutoff = true;
 	settings.autoPromptCache = false;
+	settings.autoProbeCliCapabilities = false;
 
 	const auto result = inf.generate(modelPath, "hello", settings);
 	REQUIRE(result.success);

@@ -1,0 +1,12 @@
+prefix=/home/runner/work/apothecary/apothecary/out/libxml2
+exec_prefix=/home/runner/work/apothecary/apothecary/out/libxml2
+libdir=/home/runner/work/apothecary/apothecary/out/libxml2/lib/emscripten/WASM/
+includedir=/home/runner/work/apothecary/apothecary/out/libxml2/include
+modules=0
+
+Name: libXML
+Version: 2.13.5
+Description: libXML library version2.
+Requires: 
+Libs: -L${libdir} -lxml2    -lm   
+Cflags: -I${includedir}/libxml2 -DLIBXML_STATIC

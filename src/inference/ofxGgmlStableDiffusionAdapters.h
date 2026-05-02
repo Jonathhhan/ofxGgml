@@ -189,17 +189,19 @@ inline ofxStableDiffusionImageMode mapImageMode(
 	ofxGgmlImageGenerationTask task) {
 	switch (task) {
 	case ofxGgmlImageGenerationTask::InstructImage:
-		return ofxStableDiffusionImageMode::InstructImage;
 	case ofxGgmlImageGenerationTask::Variation:
-		return ofxStableDiffusionImageMode::Variation;
 	case ofxGgmlImageGenerationTask::Restyle:
-		return ofxStableDiffusionImageMode::Restyle;
 	case ofxGgmlImageGenerationTask::ImageToImage:
 		return ofxStableDiffusionImageMode::ImageToImage;
 	case ofxGgmlImageGenerationTask::TextToImage:
 	default:
 		return ofxStableDiffusionImageMode::TextToImage;
 	}
+}
+
+inline std::string promptForStableDiffusion(
+	const ofxGgmlImageGenerationRequest & request) {
+	return !request.prompt.empty() ? request.prompt : request.instruction;
 }
 
 inline ofxStableDiffusionImageSelectionMode mapSelectionMode(
@@ -436,10 +438,7 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 				result.errorType = ofxGgmlImageGenerationErrorType::ConfigurationError;
 				return result;
 			}
-			const bool isInstructionTask =
-				request.task == ofxGgmlImageGenerationTask::InstructImage;
-			if (request.prompt.empty() &&
-				request.instruction.empty() &&
+			if (promptForStableDiffusion(request).empty() &&
 				request.task != ofxGgmlImageGenerationTask::Upscale) {
 				result.error = "prompt is empty";
 				result.errorType = ofxGgmlImageGenerationErrorType::ValidationError;
@@ -607,10 +606,7 @@ inline std::shared_ptr<ofxGgmlImageGenerationBackend> createImageBackend(
 			ofxStableDiffusionImageRequest sdRequest;
 			sdRequest.mode = mapImageMode(request.task);
 			sdRequest.selectionMode = mapSelectionMode(request.selectionMode);
-			sdRequest.prompt = request.prompt;
-			sdRequest.instruction = isInstructionTask
-				? (!request.instruction.empty() ? request.instruction : request.prompt)
-				: request.instruction;
+			sdRequest.prompt = promptForStableDiffusion(request);
 			sdRequest.negativePrompt = request.negativePrompt;
 			sdRequest.clipSkip = options.clipSkip;
 			sdRequest.cfgScale = request.cfgScale;

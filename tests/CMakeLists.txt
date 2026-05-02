@@ -74,6 +74,9 @@ endif()
 include_directories(${GGML_INCLUDE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../src)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../libs/libxml2/include/libxml/parser.h")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../libs/libxml2/include")
+endif()
 
 if(OFXGGML_WITH_OPENFRAMEWORKS)
     include_directories(${OF_ROOT}/libs/openFrameworks)
@@ -138,6 +141,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/inference/ofxGgmlVisionInference.cpp
         ../src/inference/ofxGgmlVideoInference.cpp
         ../src/inference/ofxGgmlWebCrawler.cpp
+        ../src/inference/ofxGgmlWebSearch.cpp
         ../src/inference/ofxGgmlTtsInference.cpp
         ../src/inference/ofxGgmlClipInference.cpp
         ../src/inference/ofxGgmlValidationLoop.cpp

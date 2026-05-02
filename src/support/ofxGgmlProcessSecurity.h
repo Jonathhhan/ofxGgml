@@ -10,6 +10,9 @@ std::string getEnvVarString(const char * name);
 bool isValidExecutablePath(
 	const std::string & path,
 	const std::string & workingDirectory = {});
+std::string resolveExecutablePath(
+	const std::string & path,
+	const std::string & workingDirectory = {});
 
 /// Control whether PATH lookup is allowed when validating executables.
 /// Default is false for stricter security; set to true only when you
@@ -33,6 +36,14 @@ std::vector<std::string> getExecutableAllowlistRoots();
 /// @return true if the command was executed, false on failure
 bool runCommandCapture(
 	const std::vector<std::string> & args,
+	std::string & output,
+	int & exitCode,
+	bool mergeStderr = true,
+	std::function<bool(const std::string &)> onChunk = nullptr);
+
+bool runCommandCapture(
+	const std::vector<std::string> & args,
+	const std::string & workingDirectory,
 	std::string & output,
 	int & exitCode,
 	bool mergeStderr = true,

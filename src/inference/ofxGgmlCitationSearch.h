@@ -3,6 +3,7 @@
 #include "inference/ofxGgmlInference.h"
 #include "inference/ofxGgmlRAGPipeline.h"
 #include "inference/ofxGgmlWebCrawler.h"
+#include "inference/ofxGgmlWebSearch.h"
 
 #include <string>
 #include <vector>
@@ -13,14 +14,20 @@ struct ofxGgmlCitationItem {
 	std::string sourceLabel;
 	std::string sourceUri;
 	int sourceIndex = -1;
+	float confidenceScore = 0.0f;
+	bool isExactMatch = false;
+	float relevanceScore = 0.0f;
+	float sourceCredibility = 0.0f;
 };
 
 struct ofxGgmlCitationSearchRequest {
 	std::string modelPath;
 	std::string topic;
-	size_t maxCitations = 5;
+	size_t maxCitations = 100;
 	bool useCrawler = false;
+	bool useWebSearch = true;
 	ofxGgmlWebCrawlerRequest crawlerRequest;
+	ofxGgmlWebSearchRequest webSearchRequest;
 	std::vector<std::string> sourceUrls;
 	ofxGgmlInferenceSettings inferenceSettings;
 	ofxGgmlPromptSourceSettings sourceSettings;
@@ -31,6 +38,7 @@ struct ofxGgmlCitationSearchRequest {
 		bool allowDomainHints = true;
 		size_t maxAlternateQueries = 2;
 	} queryRewriteSettings;
+	float minimumConfidenceThreshold = 0.0f;
 };
 
 struct ofxGgmlCitationSearchInputSettings {
@@ -80,13 +88,18 @@ struct ofxGgmlCitationSearchResult {
 	} queryRewrite;
 	std::vector<ofxGgmlCitationItem> citations;
 	std::vector<ofxGgmlPromptSource> sourcesUsed;
+	ofxGgmlWebSearchResult webSearchResult;
 	ofxGgmlWebCrawlerResult crawlerResult;
 	ofxGgmlRAGRetrievalResult retrieval;
+	float sourceDiversityScore = 0.0f;
+	float averageConfidence = 0.0f;
 };
 
 namespace ofxGgmlCitationSearchInternal {
 
 std::string cleanCrawlerMarkdownForCitations(const std::string & rawMarkdown);
+std::vector<std::string> extractExactQuoteCandidatesForTesting(
+	const std::string & content);
 
 } // namespace ofxGgmlCitationSearchInternal
 
@@ -113,4 +126,5 @@ public:
 private:
 	ofxGgmlInference m_inference;
 	ofxGgmlWebCrawler m_webCrawler;
+	ofxGgmlWebSearch m_webSearch;
 };

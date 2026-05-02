@@ -114,13 +114,14 @@ std::vector<int> collectSourceIndices(const std::string & text) {
 			std::isdigit(static_cast<unsigned char>(text[end]))) {
 			++end;
 		}
-		if (end > pos) {
+		const bool hasClosingBracket = end < text.size() && text[end] == ']';
+		if (end > pos && hasClosingBracket) {
 			try {
 				uniqueIndices.insert(std::stoi(text.substr(pos, end - pos)));
 			} catch (...) {
 			}
 		}
-		pos = end;
+		pos = hasClosingBracket ? (end + 1) : end;
 	}
 	return std::vector<int>(uniqueIndices.begin(), uniqueIndices.end());
 }

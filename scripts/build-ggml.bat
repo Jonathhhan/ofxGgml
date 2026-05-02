@@ -8,12 +8,23 @@ set "SCRIPT_DIR=%~dp0"
 set "SCRIPT_SH=%SCRIPT_DIR%build-ggml.sh"
 set "BASH_CMD="
 
-REM Prefer Git Bash/WSL bash if available
-for %%B in (bash.exe bash) do (
-    where %%B >nul 2>&1
-    if not errorlevel 1 (
-        set "BASH_CMD=%%B"
+REM Prefer Bash distributions that understand Windows drive paths.
+for %%B in ("%ProgramFiles%\Git\bin\bash.exe" "%ProgramFiles%\Git\usr\bin\bash.exe" "C:\msys64\usr\bin\bash.exe" "C:\msys64\mingw64\bin\bash.exe") do (
+    if exist "%%~B" (
+        set "BASH_CMD=%%~B"
         goto :have_bash
+    )
+)
+
+REM Fall back to PATH, but avoid the WindowsApps WSL launcher because it
+REM cannot execute the C:/... path passed below.
+for %%B in (bash.exe bash) do (
+    for /f "delims=" %%P in ('where %%B 2^>nul') do (
+        echo %%P | findstr /I "\\WindowsApps\\bash.exe" >nul
+        if errorlevel 1 (
+            set "BASH_CMD=%%P"
+            goto :have_bash
+        )
     )
 )
 
@@ -33,7 +44,7 @@ REM Convert the script path for bash
 set "SCRIPT_SH=%SCRIPT_SH:\=/%"
 
 echo [ofxGgml] build-ggml.bat forwarding to build-ggml.sh via %BASH_CMD%...
-"%BASH_CMD%" "%SCRIPT_SH%" %*
+"%BASH_CMD%" -lc "'%SCRIPT_SH%' %*"
 set "RC=%ERRORLEVEL%"
 
 if "%RC%"=="0" (

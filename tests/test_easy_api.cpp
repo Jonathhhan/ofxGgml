@@ -4,7 +4,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <memory>
+#include <sstream>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -110,6 +112,29 @@ std::string createFakeMojoCrawlerExecutable() {
 	chmod(exe.c_str(), 0755);
 #endif
 	return exe.string();
+}
+
+std::string encodeFileUrlComponent(const std::string & text) {
+	std::ostringstream encoded;
+	for (const unsigned char ch : text) {
+		if (std::isalnum(ch) || ch == '/' || ch == '-' || ch == '_' || ch == '.' || ch == '~' || ch == ':') {
+			encoded << static_cast<char>(ch);
+		} else {
+			encoded << '%' << std::uppercase << std::hex
+				<< std::setw(2) << std::setfill('0') << static_cast<int>(ch)
+				<< std::nouppercase << std::dec;
+		}
+	}
+	return encoded.str();
+}
+
+std::string makeFileUrl(const std::filesystem::path & path) {
+	const std::string generic = path.lexically_normal().generic_string();
+#ifdef _WIN32
+	return "file:///" + encodeFileUrlComponent(generic);
+#else
+	return "file://" + encodeFileUrlComponent(generic);
+#endif
 }
 
 class FakeEasySpeechBackend final : public ofxGgmlSpeechBackend {
@@ -444,4 +469,56 @@ TEST_CASE("Mojo crawler keeps canonical source URLs and filters allowed domains"
 		blockedResult.error.find("allowedDomains") != std::string::npos ||
 		blockedResult.error.find("allowed domains") != std::string::npos;
 	REQUIRE(hasAllowedDomainError);
+}
+
+TEST_CASE("Default crawler uses native HTML parsing for static pages", "[easy_api][crawler]") {
+	const auto dir = makeEasyApiTestDir("native_html");
+	const auto indexPath = dir / "index.html";
+	const auto secondPath = dir / "page2.html";
+	{
+		std::ofstream out(indexPath);
+		out
+			<< "<html><head><title>Native Root</title></head><body>"
+			<< "<main><h1>Native Root</h1>"
+			<< "<p>Berlin weather research starts on the first page.</p>"
+			<< "<a href=\"page2.html\">Next</a></main></body></html>";
+	}
+	{
+		std::ofstream out(secondPath);
+		out
+			<< "<html><head><title>Native Follow Up</title></head><body>"
+			<< "<article><p>Second page adds a supporting exact sentence.</p></article>"
+			<< "</body></html>";
+	}
+
+	ofxGgmlWebCrawler crawler;
+	ofxGgmlWebCrawlerRequest request;
+	request.startUrl = makeFileUrl(indexPath);
+	request.maxDepth = 1;
+	request.keepOutputFiles = false;
+
+	const auto result = crawler.crawl(request);
+	REQUIRE(result.success);
+	REQUIRE(result.backendName == "NativeHtml");
+	REQUIRE(
+		result.commandOutput.find("Parsed native page") != std::string::npos);
+	REQUIRE(
+		result.commandOutput.find("libxml2 xmllint HTML") != std::string::npos);
+	REQUIRE(result.documents.size() >= 2);
+	REQUIRE(result.documents[0].title == "Native Root");
+	REQUIRE(
+		result.documents[0].markdown.find(
+			"Berlin weather research starts on the first page.") != std::string::npos);
+
+	bool foundSecondPage = false;
+	for (const auto & document : result.documents) {
+		if (document.title == "Native Follow Up") {
+			foundSecondPage = true;
+			REQUIRE(
+				document.markdown.find(
+					"Second page adds a supporting exact sentence.") != std::string::npos);
+			break;
+		}
+	}
+	REQUIRE(foundSecondPage);
 }
