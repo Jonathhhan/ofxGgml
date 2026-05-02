@@ -773,7 +773,11 @@ ofxGgmlVideoResult ofxGgmlVideoInference::runTemporalSidecarRequest(
 			return result;
 		}
 
-		const ofJson parsed = ofJson::parse(result.responseJson);
+		const ofJson parsed = ofJson::parse(result.responseJson, nullptr, false);
+		if (parsed.is_discarded()) {
+			result.error = "temporal sidecar returned invalid JSON";
+			return result;
+		}
 		const ofJson payload = parsed.contains("result") ? parsed["result"] : parsed;
 		result.structured.analysisType = trimCopy(payload.value("analysis_type", std::string()));
 		result.structured.primaryLabel = trimCopy(payload.value("primary_label", std::string()));
