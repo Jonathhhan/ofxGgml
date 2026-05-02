@@ -201,6 +201,7 @@ def main() -> int:
         source_url = str(provenance.get("source_url", "")).strip()
         checksum_verified_at = str(provenance.get("checksum_verified_at", "")).strip()
         entry_updated_at = str(provenance.get("catalog_updated_at", "")).strip()
+        verification_status = str(provenance.get("verification_status", "")).strip().lower()
         official = source_type == "official"
 
         if not publisher:
@@ -221,6 +222,10 @@ def main() -> int:
             errors.append(
                 f"preset {preset} ({name}): provenance.checksum_verified_at must use UTC ISO-8601 format"
             )
+        if verification_status not in {"verified-sha256", "checksum-pending"}:
+            errors.append(
+                f"preset {preset} ({name}): provenance.verification_status must be verified-sha256 or checksum-pending"
+            )
 
         if sha256 and not SHA256_RE.fullmatch(sha256):
             errors.append(f"preset {preset} ({name}): sha256 must be 64 lowercase hex characters")
@@ -228,10 +233,18 @@ def main() -> int:
 
         if not sha256:
             msg = f"preset {preset} ({name}): sha256 missing"
+            if verification_status != "checksum-pending":
+                errors.append(
+                    f"preset {preset} ({name}): provenance.verification_status must be checksum-pending when sha256 is missing"
+                )
             if args.require_official_checksums and official:
                 errors.append(msg)
             else:
                 warnings.append(msg)
+        elif verification_status != "verified-sha256":
+            errors.append(
+                f"preset {preset} ({name}): provenance.verification_status must be verified-sha256 when sha256 is populated"
+            )
         elif not checksum_verified_at:
             warnings.append(
                 f"preset {preset} ({name}): provenance.checksum_verified_at missing for populated sha256"

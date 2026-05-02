@@ -1,8 +1,8 @@
 {
   "manifest_version": 1,
   "catalog_path": "scripts/model-catalog.json",
-  "catalog_sha256": "e0f65e66f997146f5b2fe4714e3858eaae89705e5007ddaf257a30b70d7ced20",
-  "generated_at": "2026-05-02T22:15:49Z",
+  "catalog_sha256": "87496c475c7857396e3f6479ee24b6ea0fce475b56535ef5bdae10960aa22d0e",
+  "generated_at": "2026-05-02T22:29:52Z",
   "signing_key_id": "ofxggml-model-catalog-rsa-2026-05",
   "entry_count": 7,
   "official_entry_count": 4
