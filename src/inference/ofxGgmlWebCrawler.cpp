@@ -766,8 +766,10 @@ const LibXml2Api & getLibXml2Api() {
 			reinterpret_cast<decltype(loaded.xmlNodeGetContentFn)>(resolve("xmlNodeGetContent"));
 		loaded.xmlGetPropFn =
 			reinterpret_cast<decltype(loaded.xmlGetPropFn)>(resolve("xmlGetProp"));
-		loaded.xmlFreeFn =
-			reinterpret_cast<decltype(loaded.xmlFreeFn)>(resolve("xmlFree"));
+		void * xmlFreeSymbol = resolve("xmlFree");
+		if (xmlFreeSymbol) {
+			loaded.xmlFreeFn = *reinterpret_cast<xmlFreeFunc *>(xmlFreeSymbol);
+		}
 		loaded.xmlXPathNewContextFn =
 			reinterpret_cast<decltype(loaded.xmlXPathNewContextFn)>(resolve("xmlXPathNewContext"));
 		loaded.xmlXPathEvalExpressionFn =

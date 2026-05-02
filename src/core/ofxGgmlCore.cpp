@@ -12,12 +12,14 @@
 #endif
 
 #include <chrono>
+#include <atomic>
 #include <csetjmp>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
 #include <mutex>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
