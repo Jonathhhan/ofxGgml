@@ -17,6 +17,9 @@ A focused openFrameworks example for website crawling and Markdown extraction wi
 
 ## Setup
 
+> [!WARNING]
+> **First run required:** before this example will build or run reliably, run the addon setup script, build bundled ggml, and regenerate the example project.
+
 ### 1. Install the Addon
 
 ```bash

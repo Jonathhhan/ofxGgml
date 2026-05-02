@@ -2,6 +2,8 @@
 #include "ofApp.h"
 
 int main() {
+	ofLogWarning("ofxGgml")
+		<< "First run setup required: run the ofxGgml setup script, build bundled ggml, then regenerate this example before building.";
 	ofGLFWWindowSettings settings;
 	settings.setGLVersion(3, 3);
 	settings.setSize(1280, 800);

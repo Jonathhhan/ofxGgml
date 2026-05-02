@@ -43,6 +43,9 @@
 	#include <unistd.h>
 #endif
 
+// Live server-side token streaming currently uses the WinHTTP path below.
+// Non-Windows builds still support server requests, but they fall back to
+// non-streaming request/response handling until a portable SSE/HTTP path lands.
 #if defined(_WIN32) && !defined(OFXGGML_HEADLESS_STUBS)
 	#define OFXGGML_HAS_SERVER_STREAMING 1
 #else
