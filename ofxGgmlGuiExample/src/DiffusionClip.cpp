@@ -665,7 +665,7 @@ void ofApp::drawClipPanel() {
 	if (!clipCppAvailable) {
 		ImGui::TextColored(
 			ImVec4(0.95f, 0.65f, 0.25f, 1.0f),
-			"This build does not currently see clip.cpp headers. Add clip.cpp to the workspace include path to enable live ranking.");
+			"CLIP support is bundled but requires building ggml first. Run ./scripts/build-ggml.sh to enable CLIP functionality.");
 	}
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);
