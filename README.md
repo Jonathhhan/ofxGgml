@@ -720,9 +720,10 @@ scripts\build-ggml.bat
 scripts\build-ggml.bat --cuda
 scripts\build-ggml.bat --vulkan
 scripts\build-ggml.bat --cpu-only
+scripts\build-ggml.bat --with-debug
 ```
 
-The `.bat` wrapper forwards all flags to `scripts/build-ggml.sh`, so make sure `bash` is on `PATH` (Git Bash or WSL). The helper builds the Release ggml libraries; use a manual CMake invocation if you also need Debug artifacts.
+The `.bat` wrapper forwards all flags to `scripts/build-ggml.sh`, so make sure `bash` is on `PATH` (Git Bash or WSL). The helper builds Release ggml libraries by default; add `--with-debug` when you also want Debug artifacts for Visual Studio multi-config builds.
 
 After building ggml, regenerate your project with the openFrameworks Project Generator so generated Visual Studio projects pick up the latest addon library list.
 

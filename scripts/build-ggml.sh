@@ -94,13 +94,66 @@ resolve_windows_cmake() {
 	return 1
 }
 
+resolve_vswhere() {
+	local candidates=(
+		"/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+		"/c/Program Files/Microsoft Visual Studio/Installer/vswhere.exe"
+	)
+	local candidate
+
+	for candidate in "${candidates[@]}"; do
+		if [[ -x "$candidate" ]]; then
+			printf '%s\n' "$candidate"
+			return 0
+		fi
+	done
+
+	if command -v vswhere.exe >/dev/null 2>&1; then
+		command -v vswhere.exe
+		return 0
+	fi
+	if command -v vswhere >/dev/null 2>&1; then
+		command -v vswhere
+		return 0
+	fi
+
+	return 1
+}
+
+generator_for_visual_studio_version() {
+	local version="$1"
+
+	case "$version" in
+		18.*) printf '%s\n' "Visual Studio 18 2026" ;;
+		17.*) printf '%s\n' "Visual Studio 17 2022" ;;
+		16.*) printf '%s\n' "Visual Studio 16 2019" ;;
+		*) return 1 ;;
+	esac
+}
+
 detect_windows_cmake_generator() {
 	local generators=(
 		"Visual Studio 18 2026"
 		"Visual Studio 17 2022"
 		"Visual Studio 16 2019"
 	)
+	local vswhere
+	local version
 	local generator
+
+	if vswhere="$(resolve_vswhere)"; then
+		while IFS= read -r version; do
+			[[ -n "$version" ]] || continue
+			generator="$(generator_for_visual_studio_version "$version" || true)"
+			[[ -n "$generator" ]] || continue
+			if cmake_supports_generator "$generator"; then
+				printf '%s\n' "$generator"
+				return 0
+			fi
+		done < <("$vswhere" -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion 2>/dev/null | sort -Vr)
+
+		return 1
+	fi
 
 	for generator in "${generators[@]}"; do
 		if cmake_supports_generator "$generator"; then
@@ -404,23 +457,26 @@ touch "$INCLUDE_DIR/.gitkeep"
 # Static libraries (recursively for ggml 0.10.x backend layout)
 declare -A LIB_MAP=()
 declare -A LIB_PRIO=()
+declare -A DEBUG_LIB_MAP=()
 
 while IFS= read -r -d '' lib; do
 	base_name="$(basename "$lib")"
 
-	# Prefer non-config/Makefile outputs, then Release/RelWithDebInfo, then Debug.
-	priority=1
-	if [[ "$lib" == *"/Release/"* || "$lib" == *"/RelWithDebInfo/"* || "$lib" == *"/MinSizeRel/"* ]]; then
-		priority=1
-	elif [[ "$lib" == *"/Debug/"* ]]; then
-		priority=0
+	if [[ "$lib" == *"/Debug/"* ]]; then
+		DEBUG_LIB_MAP[$base_name]="$lib"
 	else
-		priority=2
-	fi
+		# Prefer non-config/Makefile outputs, then Release/RelWithDebInfo/MinSizeRel.
+		priority=1
+		if [[ "$lib" == *"/Release/"* || "$lib" == *"/RelWithDebInfo/"* || "$lib" == *"/MinSizeRel/"* ]]; then
+			priority=1
+		else
+			priority=2
+		fi
 
-	if [[ -z "${LIB_MAP[$base_name]:-}" || "${LIB_PRIO[$base_name]:-0}" -lt "$priority" ]]; then
-		LIB_MAP[$base_name]="$lib"
-		LIB_PRIO[$base_name]="$priority"
+		if [[ -z "${LIB_MAP[$base_name]:-}" || "${LIB_PRIO[$base_name]:-0}" -lt "$priority" ]]; then
+			LIB_MAP[$base_name]="$lib"
+			LIB_PRIO[$base_name]="$priority"
+		fi
 	fi
 done < <(find "$BUILD_DIR" -type f \( -name "libggml*.a" -o -name "ggml*.lib" \) -print0)
 
@@ -431,6 +487,16 @@ fi
 for base_name in $(printf '%s\n' "${!LIB_MAP[@]}" | sort); do
 	cp "${LIB_MAP[$base_name]}" "$LIB_DIR/$base_name"
 done
+
+if [[ "$WITH_DEBUG" -eq 1 && ${#DEBUG_LIB_MAP[@]} -gt 0 ]]; then
+	mkdir -p "$LIB_DIR/Release" "$LIB_DIR/Debug"
+	for base_name in $(printf '%s\n' "${!LIB_MAP[@]}" | sort); do
+		cp "${LIB_MAP[$base_name]}" "$LIB_DIR/Release/$base_name"
+	done
+	for base_name in $(printf '%s\n' "${!DEBUG_LIB_MAP[@]}" | sort); do
+		cp "${DEBUG_LIB_MAP[$base_name]}" "$LIB_DIR/Debug/$base_name"
+	done
+fi
 touch "$LIB_DIR/.gitkeep"
 
 # ---------------------------------------------------------------------------
@@ -493,17 +559,36 @@ update_addon_config() {
 	local -A selected=()
 	local base_name
 	local rel_path
+	local use_vs_config_dirs=0
 
-	shopt -s nullglob
-	for lib in "$LIB_DIR"/*"$ext"; do
-		base_name="$(basename "$lib")"
-		selected["$base_name"]="$lib"
-	done
-	shopt -u nullglob
+	if [[ "$section" == "vs" && -d "$LIB_DIR/Release" && -d "$LIB_DIR/Debug" ]]; then
+		use_vs_config_dirs=1
+		shopt -s nullglob
+		for lib in "$LIB_DIR/Release"/*"$ext"; do
+			base_name="$(basename "$lib")"
+			if [[ -f "$LIB_DIR/Debug/$base_name" ]]; then
+				selected["$base_name"]="libs/ggml/lib/\$(Configuration)/$base_name"
+			else
+				write_step "Warning: Debug library missing for $base_name; skipping config-specific Visual Studio entry."
+			fi
+		done
+		shopt -u nullglob
+	else
+		shopt -s nullglob
+		for lib in "$LIB_DIR"/*"$ext"; do
+			base_name="$(basename "$lib")"
+			selected["$base_name"]="$lib"
+		done
+		shopt -u nullglob
+	fi
 
 	for base_name in "${ordered_names[@]}"; do
 		if [[ -n "${selected[$base_name]:-}" ]]; then
-			rel_path="${selected[$base_name]#"$ADDON_ROOT"/}"
+			if [[ "$use_vs_config_dirs" -eq 1 ]]; then
+				rel_path="${selected[$base_name]}"
+			else
+				rel_path="${selected[$base_name]#"$ADDON_ROOT"/}"
+			fi
 			libs+=("$rel_path")
 			unset "selected[$base_name]"
 		fi
@@ -511,7 +596,11 @@ update_addon_config() {
 
 	if [[ ${#selected[@]} -gt 0 ]]; then
 		for base_name in $(printf '%s\n' "${!selected[@]}" | sort); do
-			rel_path="${selected[$base_name]#"$ADDON_ROOT"/}"
+			if [[ "$use_vs_config_dirs" -eq 1 ]]; then
+				rel_path="${selected[$base_name]}"
+			else
+				rel_path="${selected[$base_name]#"$ADDON_ROOT"/}"
+			fi
 			libs+=("$rel_path")
 		done
 	fi
