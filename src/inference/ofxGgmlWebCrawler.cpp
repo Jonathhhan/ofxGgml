@@ -1635,6 +1635,11 @@ struct NativeFetchResult {
 	long httpStatus = 0;
 };
 
+bool isSupportedRemoteUrlScheme(const std::string & url) {
+	const std::string lowered = toLowerCopy(trimCopy(url));
+	return lowered.rfind("http://", 0) == 0 || lowered.rfind("https://", 0) == 0;
+}
+
 bool isTransientNetworkError(const NativeFetchResult & result) {
 	if (result.success) {
 		return false;
@@ -1652,6 +1657,11 @@ bool isTransientNetworkError(const NativeFetchResult & result) {
 
 NativeFetchResult fetchUrlWithCurl(const std::string & url, int timeoutSeconds = 300) {
 	NativeFetchResult result;
+	if (!isFileUrl(url) && !isSupportedRemoteUrlScheme(url)) {
+		result.error = "Unsupported URL scheme for native web crawling.";
+		return result;
+	}
+
 	const std::string curlExe = resolveCurlExecutable();
 	if (curlExe.empty()) {
 		result.error = "curl executable was not found for native web crawling. Please ensure curl is installed and in your PATH, or specify the executable path in the request.";
@@ -1671,6 +1681,12 @@ NativeFetchResult fetchUrlWithCurl(const std::string & url, int timeoutSeconds =
 	const std::string metadataMarker = "__OFXGGML_CURL_METADATA__:";
 	std::vector<std::string> args = {
 		curlExe,
+		"--proto",
+		"=http,https,file",
+		"--proto-redir",
+		"=http,https,file",
+		"--max-redirs",
+		"8",
 		"--location",
 		"--silent",
 		"--show-error",

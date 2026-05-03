@@ -215,6 +215,8 @@ bool performStringRequest(
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteToString);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
 		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 8L);
+		curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 		curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds);
 		if (headers) {
 			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -282,6 +284,8 @@ bool performBinaryRequest(
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteToVector);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBytes);
 		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 8L);
+		curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 		curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds);
 		if (headers) {
 			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
