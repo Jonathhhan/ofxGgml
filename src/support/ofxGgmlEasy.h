@@ -5,20 +5,27 @@
 #include "assistants/ofxGgmlTextAssistant.h"
 #include "core/ofxGgmlTypes.h"
 #include "inference/ofxGgmlCitationSearch.h"
-#include "inference/ofxGgmlAceStepBridge.h"
 #include "inference/ofxGgmlMediaPromptGenerator.h"
-#include "inference/ofxGgmlMilkDropGenerator.h"
 #include "inference/ofxGgmlMontagePreviewBridge.h"
 #include "inference/ofxGgmlMontagePlanner.h"
 #include "inference/ofxGgmlLongVideoPlanner.h"
-#include "inference/ofxGgmlMusicGenerator.h"
 #include "inference/ofxGgmlRAGPipeline.h"
 #include "inference/ofxGgmlSpeechInference.h"
-#include "inference/ofxGgmlVideoEssayWorkflow.h"
 #include "inference/ofxGgmlVideoPlanner.h"
 #include "inference/ofxGgmlVisionInference.h"
 #include "inference/ofxGgmlWebCrawler.h"
 #include "support/ofxGgmlConversationManager.h"
+
+#ifndef OFXGGML_ENABLE_COMPANION_WORKFLOWS
+#define OFXGGML_ENABLE_COMPANION_WORKFLOWS 0
+#endif
+
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
+#include "inference/ofxGgmlAceStepBridge.h"
+#include "inference/ofxGgmlMilkDropGenerator.h"
+#include "inference/ofxGgmlMusicGenerator.h"
+#include "inference/ofxGgmlVideoEssayWorkflow.h"
+#endif
 
 #include <memory>
 #include <optional>
@@ -216,6 +223,7 @@ public:
 	const ofxGgmlVideoPlanner & getVideoPlanner() const;
 	ofxGgmlMediaPromptGenerator & getMediaPromptGenerator();
 	const ofxGgmlMediaPromptGenerator & getMediaPromptGenerator() const;
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 	ofxGgmlMusicGenerator & getMusicGenerator();
 	const ofxGgmlMusicGenerator & getMusicGenerator() const;
 	ofxGgmlAceStepBridge & getAceStepBridge();
@@ -224,6 +232,7 @@ public:
 	const ofxGgmlMilkDropGenerator & getMilkDropGenerator() const;
 	ofxGgmlVideoEssayWorkflow & getVideoEssayWorkflow();
 	const ofxGgmlVideoEssayWorkflow & getVideoEssayWorkflow() const;
+#endif
 	ofxGgmlLongVideoPlanner & getLongVideoPlanner();
 	const ofxGgmlLongVideoPlanner & getLongVideoPlanner() const;
 	ofxGgmlCodingAgent & getCodingAgent();
@@ -267,6 +276,7 @@ public:
 		const std::string & question) const;
 	ofxGgmlSpeechResult transcribeAudio(const std::string & audioPath) const;
 	ofxGgmlSpeechResult translateAudio(const std::string & audioPath) const;
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 	ofxGgmlMusicPromptResult generateMusicPrompt(
 		const std::string & sourceConcept,
 		const std::string & style = "cinematic instrumental soundtrack, expressive, high fidelity",
@@ -294,6 +304,7 @@ public:
 	ofxGgmlAceStepUnderstandResult understandAceStepAudio(
 		const ofxGgmlAceStepUnderstandRequest & request,
 		const std::string & serverUrl = "") const;
+#endif
 	ofxGgmlWebCrawlerResult crawlWebsite(
 		const std::string & startUrl,
 		int maxDepth = -1) const;
@@ -308,8 +319,10 @@ public:
 		const std::string & crawlerUrl = "",
 		size_t maxCitations = 100,
 		const ofxGgmlCitationSearchInputSettings & inputSettings = {}) const;
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 	ofxGgmlVideoEssayResult planVideoEssay(
 		const ofxGgmlVideoEssayRequest & request) const;
+#endif
 	ofxGgmlLongVideoPlanResult planLongVideo(
 		const ofxGgmlLongVideoPlanRequest & request) const;
 	std::string buildLongVideoManifestJson(
@@ -335,6 +348,7 @@ public:
 		int clipCount = 5,
 		bool preserveChronology = true,
 		const ofxGgmlVideoEditWorkflowContext & workflowContext = {}) const;
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 	ofxGgmlMilkDropResult generateMilkDropPreset(
 		const std::string & prompt,
 		const std::string & category = "General",
@@ -359,6 +373,7 @@ public:
 	std::string saveMilkDropPreset(
 		const std::string & presetText,
 		const std::string & outputPath) const;
+#endif
 
 	/// Workflow Presets - Common multi-step AI workflows
 
@@ -416,10 +431,12 @@ private:
 	ofxGgmlCitationSearch & ensureCitationSearch() const;
 	ofxGgmlVideoPlanner & ensureVideoPlanner() const;
 	ofxGgmlMediaPromptGenerator & ensureMediaPromptGenerator() const;
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 	ofxGgmlMusicGenerator & ensureMusicGenerator() const;
 	ofxGgmlAceStepBridge & ensureAceStepBridge() const;
 	ofxGgmlMilkDropGenerator & ensureMilkDropGenerator() const;
 	ofxGgmlVideoEssayWorkflow & ensureVideoEssayWorkflow() const;
+#endif
 	ofxGgmlLongVideoPlanner & ensureLongVideoPlanner() const;
 	ofxGgmlCodingAgent & ensureCodingAgent() const;
 	ofxGgmlRAGPipeline & ensureRAGPipeline() const;
@@ -438,10 +455,12 @@ private:
 	mutable std::unique_ptr<ofxGgmlCitationSearch> m_citationSearch;
 	mutable std::unique_ptr<ofxGgmlVideoPlanner> m_videoPlanner;
 	mutable std::unique_ptr<ofxGgmlMediaPromptGenerator> m_mediaPromptGenerator;
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 	mutable std::unique_ptr<ofxGgmlMusicGenerator> m_musicGenerator;
 	mutable std::unique_ptr<ofxGgmlAceStepBridge> m_aceStepBridge;
 	mutable std::unique_ptr<ofxGgmlMilkDropGenerator> m_milkDropGenerator;
 	mutable std::unique_ptr<ofxGgmlVideoEssayWorkflow> m_videoEssayWorkflow;
+#endif
 	mutable std::unique_ptr<ofxGgmlLongVideoPlanner> m_longVideoPlanner;
 	mutable std::unique_ptr<ofxGgmlCodingAgent> m_codingAgent;
 	mutable std::unique_ptr<ofxGgmlRAGPipeline> m_ragPipeline;

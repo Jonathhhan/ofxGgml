@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgml.h"
+#include "../src/inference/ofxGgmlMusicGenerator.h"
 
 TEST_CASE("Music generator prepares a backend-friendly music prompt", "[music_generator]") {
 	ofxGgmlMusicGenerator generator;

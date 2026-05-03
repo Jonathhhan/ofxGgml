@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgml.h"
+#include "../src/inference/ofxGgmlAceStepBridge.h"
 
 TEST_CASE("AceStep bridge builds instrument-aware request JSON", "[acestep_bridge]") {
 	ofxGgmlAceStepRequest request;

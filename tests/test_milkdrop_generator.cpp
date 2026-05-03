@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgml.h"
+#include "../src/inference/ofxGgmlMilkDropGenerator.h"
 
 TEST_CASE("MilkDrop generator prepares a constrained preset prompt", "[milkdrop]") {
 	ofxGgmlMilkDropGenerator generator;

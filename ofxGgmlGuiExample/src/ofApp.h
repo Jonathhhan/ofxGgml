@@ -1,12 +1,16 @@
 #pragma once
 
+#ifndef OFXGGML_ENABLE_COMPANION_WORKFLOWS
+#define OFXGGML_ENABLE_COMPANION_WORKFLOWS 1
+#endif
+
 #include "ofMain.h"
 #include "ofxGgmlCore.h"
 #include "ofxGgmlBasic.h"
 #include "ofxGgmlModalities.h"
 #include "ofxGgmlWorkflows.h"
+#include "ofxGgmlCompanionWorkflows.h"
 #include "ofxGgmlAssistants.h"
-#include "bridges/ofxGgmlHoloscanBridge.h"
 #include "ofxImGui.h"
 #include "config/ModelPresets.h"
 #include "panels/DeviceInfoPanel.h"

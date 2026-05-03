@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgml.h"
+#include "../src/inference/ofxGgmlVideoEssayWorkflow.h"
 
 TEST_CASE("Video essay workflow parses markdown sections", "[video_essay]") {
 	const std::string script =

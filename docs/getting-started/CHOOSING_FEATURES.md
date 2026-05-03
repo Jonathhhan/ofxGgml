@@ -6,7 +6,7 @@ ofxGgml uses a **layered architecture** - you include only the features you need
 
 **Most users should start with `#include "ofxGgmlBasic.h"`** - it provides text inference which covers 80% of use cases.
 
-## The Five Layers
+## The Core Layers
 
 ### Layer 1: Core
 **Header:** `#include "ofxGgmlCore.h"`
@@ -56,12 +56,9 @@ What you get (includes Modalities plus):
 - Video planning and editing
 - Montage planning with EDL export
 - Citation search
-- Video essay pipeline
-- Music generation
-- MilkDrop presets
 - Web crawling for RAG
 
-**Use when:** You need domain-specific creative or research tools.
+**Use when:** You need optional planning, montage, citation, crawler, or RAG helpers without adopting companion media-application prototypes.
 
 ### Layer 5: Assistants
 **Header:** `#include "ofxGgmlAssistants.h"`
@@ -75,6 +72,10 @@ What you get (includes Basic plus):
 - Code review
 
 **Use when:** You need AI coding or review tools.
+
+## Companion / Example-Tier Workflows
+
+Video essay orchestration, music generation, AceStep bridging, MilkDrop preset generation, and Holoscan bridge code are no longer default addon-tier APIs. For existing examples or experiments that intentionally use them, define `OFXGGML_ENABLE_COMPANION_WORKFLOWS=1` before including `ofxGgmlEasy.h`, or include `ofxGgmlCompanionWorkflows.h`. Treat those surfaces as candidates for standalone companion addons or example-level code.
 
 ## Need Multiple Layers?
 
@@ -94,6 +95,8 @@ Or for a comprehensive application (like the GUI example), include all layers:
 #include "ofxGgmlModalities.h"
 #include "ofxGgmlWorkflows.h"
 #include "ofxGgmlAssistants.h"
+// Optional companion/example tier:
+#include "ofxGgmlCompanionWorkflows.h"
 ```
 
 ## Project Examples
@@ -127,24 +130,24 @@ Or for a comprehensive application (like the GUI example), include all layers:
 
 **You skip:**
 - Video workflows
-- Music generation
+- Companion-tier media prototypes
 - Code assistants
 
-### Example 3: Video Essay Creator
+### Example 3: Citation-Grounded Research Tool
 
-**Goal:** Research → script → narration → video
+**Goal:** Crawl sources, find citations, and produce grounded summaries
 
 **Include:** `ofxGgmlWorkflows.h`
 
 **You get:**
 - Everything up to workflows
 - Citation search
-- Video essay pipeline
+- Web crawling / RAG helpers
 - Text, speech, vision
 
 **You skip:**
 - Code assistants
-- MilkDrop generation
+- Companion-tier video essay, music, MilkDrop, AceStep, and Holoscan prototypes
 
 ### Example 4: AI Code Helper
 
@@ -160,11 +163,11 @@ Or for a comprehensive application (like the GUI example), include all layers:
 **You skip:**
 - Speech, vision
 - Video workflows
-- Music generation
+- Companion-tier media prototypes
 
 ### Example 5: Comprehensive Application
 
-**Goal:** Build full-featured AI toolkit (like GUI example)
+**Goal:** Build an application-style example with companion prototypes (like GUI example)
 
 **Include:** All layers
 ```cpp
@@ -173,11 +176,13 @@ Or for a comprehensive application (like the GUI example), include all layers:
 #include "ofxGgmlModalities.h"
 #include "ofxGgmlWorkflows.h"
 #include "ofxGgmlAssistants.h"
+// Optional companion/example tier:
+#include "ofxGgmlCompanionWorkflows.h"
 ```
 
-**You get:** Everything
+**You get:** Core addon layers plus companion/example-tier prototypes
 
-**Use when:** Building comprehensive applications with many AI features
+**Use when:** Building comprehensive examples that intentionally opt into companion media workflows
 
 ## External Dependencies
 
@@ -187,9 +192,9 @@ Some features require companion addons:
 |---------|----------|-----------|
 | Image generation | `ofxStableDiffusion` | Yes |
 | CLIP embeddings | Built-in (bundled) | No - included |
-| AceStep music | `acestep.cpp` server | Yes |
+| AceStep music (companion tier) | `acestep.cpp` server + `ofxGgmlCompanionWorkflows.h` | Yes |
 | VLC preview | `ofxVlc4` | Yes |
-| Holoscan bridge | Holoscan runtime | Yes |
+| Holoscan bridge (companion tier) | Holoscan runtime + `ofxGgmlCompanionWorkflows.h` | Yes |
 
 **Note**: CLIP support is now bundled directly in `libs/clip/` and automatically available after building ggml.
 

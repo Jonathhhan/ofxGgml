@@ -370,6 +370,7 @@ TEST_CASE("Easy API wraps common text workflows", "[easy_api]") {
 	REQUIRE(chat.inference.success);
 	REQUIRE(chat.prepared.prompt.find("How are you?") != std::string::npos);
 
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 	const std::string musicPromptExePath = createEasyApiExecutable(
 		"Music prompt: cinematic synthwave soundtrack, neon pulses, reflective pacing, instrumental");
 	textConfig.completionExecutable = musicPromptExePath;
@@ -434,6 +435,7 @@ TEST_CASE("Easy API wraps common text workflows", "[easy_api]") {
 		(saveDir / "preset").string());
 	REQUIRE_FALSE(savedPath.empty());
 	REQUIRE(std::filesystem::exists(savedPath));
+#endif
 }
 
 TEST_CASE("Easy API can reuse a custom speech backend", "[easy_api]") {

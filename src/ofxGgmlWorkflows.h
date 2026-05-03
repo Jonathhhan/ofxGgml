@@ -6,15 +6,15 @@
 /// - Video planning and editing (beat planning, multi-scene scripts)
 /// - Montage planning (subtitle-driven clip selection, EDL export)
 /// - Citation search (source-grounded research)
-/// - Video essay workflow (topic → script → narration → planning)
-/// - Music generation (prompt generation, ABC notation, AceStep integration)
-/// - MilkDrop preset generation (visualization presets)
 /// - Web crawling and RAG pipelines
-/// - Media prompt translation (music → image, image → music)
+/// - Media prompt translation
 /// - Image search (reference gathering)
 ///
-/// These workflows combine multiple modalities and assistants
-/// into domain-specific pipelines.
+/// Video essay, music generation, MilkDrop, AceStep, and Holoscan bridge
+/// surfaces are companion/example-tier features. Include
+/// ofxGgmlCompanionWorkflows.h, or define
+/// OFXGGML_ENABLE_COMPANION_WORKFLOWS=1 before including ofxGgmlEasy.h, when
+/// you intentionally opt into those boundaries.
 ///
 /// Example usage:
 ///   #include "ofxGgmlWorkflows.h"
@@ -36,7 +36,6 @@
 #include "inference/ofxGgmlLongVideoPlanner.h"
 #include "inference/ofxGgmlMontagePlanner.h"
 #include "inference/ofxGgmlMontagePreviewBridge.h"
-#include "inference/ofxGgmlVideoEssayWorkflow.h"
 
 // Research and content workflows
 #include "inference/ofxGgmlCitationSearch.h"
@@ -46,6 +45,3 @@
 
 // Music and creative workflows
 #include "inference/ofxGgmlMediaPromptGenerator.h"
-#include "inference/ofxGgmlMusicGenerator.h"
-#include "inference/ofxGgmlMilkDropGenerator.h"
-#include "inference/ofxGgmlAceStepBridge.h"

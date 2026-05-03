@@ -250,6 +250,7 @@ void ofxGgmlEasy::syncTextBackends() {
 	if (m_mediaPromptGenerator) {
 		m_mediaPromptGenerator->setCompletionExecutable(m_textConfig.completionExecutable);
 	}
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 	if (m_musicGenerator) {
 		m_musicGenerator->setCompletionExecutable(m_textConfig.completionExecutable);
 	}
@@ -263,6 +264,7 @@ void ofxGgmlEasy::syncTextBackends() {
 			m_videoEssayWorkflow->getCitationSearch().getInference(),
 			m_textConfig);
 	}
+#endif
 	if (m_longVideoPlanner) {
 		m_longVideoPlanner->getTextAssistant().setCompletionExecutable(
 			m_textConfig.completionExecutable);
@@ -375,6 +377,7 @@ const ofxGgmlMediaPromptGenerator & ofxGgmlEasy::getMediaPromptGenerator() const
 	return ensureMediaPromptGenerator();
 }
 
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 ofxGgmlMusicGenerator & ofxGgmlEasy::getMusicGenerator() {
 	return ensureMusicGenerator();
 }
@@ -406,6 +409,7 @@ ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::getVideoEssayWorkflow() {
 const ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::getVideoEssayWorkflow() const {
 	return ensureVideoEssayWorkflow();
 }
+#endif
 
 ofxGgmlLongVideoPlanner & ofxGgmlEasy::getLongVideoPlanner() {
 	return ensureLongVideoPlanner();
@@ -891,6 +895,7 @@ ofxGgmlSpeechResult ofxGgmlEasy::translateAudio(const std::string & audioPath) c
 	return ensureSpeechInference().transcribe(request);
 }
 
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 ofxGgmlMusicPromptResult ofxGgmlEasy::generateMusicPrompt(
 	const std::string & sourceConcept,
 	const std::string & style,
@@ -983,6 +988,7 @@ ofxGgmlAceStepUnderstandResult ofxGgmlEasy::understandAceStepAudio(
 	const std::string & serverUrl) const {
 	return ensureAceStepBridge().understandAudio(request, serverUrl);
 }
+#endif
 
 ofxGgmlWebCrawlerResult ofxGgmlEasy::crawlWebsite(
 	const std::string & startUrl,
@@ -1031,6 +1037,7 @@ ofxGgmlCitationSearchResult ofxGgmlEasy::findCitationsFromInput(
 	return ensureCitationSearch().searchFromInput(userInput, request, inputSettings);
 }
 
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 ofxGgmlVideoEssayResult ofxGgmlEasy::planVideoEssay(
 	const ofxGgmlVideoEssayRequest & request) const {
 	ofxGgmlVideoEssayRequest effectiveRequest = request;
@@ -1063,6 +1070,7 @@ ofxGgmlVideoEssayResult ofxGgmlEasy::planVideoEssay(
 	}
 	return ensureVideoEssayWorkflow().run(effectiveRequest);
 }
+#endif
 
 ofxGgmlLongVideoPlanResult ofxGgmlEasy::planLongVideo(
 	const ofxGgmlLongVideoPlanRequest & request) const {
@@ -1228,6 +1236,7 @@ ofxGgmlEasyVideoEditResult ofxGgmlEasy::planVideoEdit(
 	return result;
 }
 
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 ofxGgmlMilkDropResult ofxGgmlEasy::generateMilkDropPreset(
 	const std::string & prompt,
 	const std::string & category,
@@ -1324,6 +1333,7 @@ std::string ofxGgmlEasy::saveMilkDropPreset(
 	const std::string & outputPath) const {
 	return ensureMilkDropGenerator().savePreset(presetText, outputPath);
 }
+#endif
 
 // Workflow Presets Implementation
 
@@ -1523,6 +1533,7 @@ ofxGgmlMediaPromptGenerator & ofxGgmlEasy::ensureMediaPromptGenerator() const {
 		});
 }
 
+#if OFXGGML_ENABLE_COMPANION_WORKFLOWS
 ofxGgmlMusicGenerator & ofxGgmlEasy::ensureMusicGenerator() const {
 	return ensureOwned(m_musicGenerator, [this](ofxGgmlMusicGenerator & generator) {
 		generator.setCompletionExecutable(m_textConfig.completionExecutable);
@@ -1552,6 +1563,7 @@ ofxGgmlVideoEssayWorkflow & ofxGgmlEasy::ensureVideoEssayWorkflow() const {
 				m_textConfig);
 		});
 }
+#endif
 
 ofxGgmlLongVideoPlanner & ofxGgmlEasy::ensureLongVideoPlanner() const {
 	return ensureOwned(m_longVideoPlanner, [this](ofxGgmlLongVideoPlanner & planner) {
