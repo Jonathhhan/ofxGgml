@@ -1059,7 +1059,7 @@ private:
 	void runCitationSearch();
 	void runVideoEssayWorkflow();
 	void runLongVideoPlanning();
-	void runLongVideoRenderGeneration();
+	void runLongVideoRenderGeneration(bool renderFullSequence = false);
 	void runClipInference();
 	void runMilkDropGeneration(
 		bool editExisting = false,
