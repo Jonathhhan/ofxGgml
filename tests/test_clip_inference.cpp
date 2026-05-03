@@ -343,8 +343,11 @@ TEST_CASE("CLIP image ranking result structure", "[clip_inference]") {
 	}
 }
 
-TEST_CASE("Bundled clip.cpp adapter is compiled into tests", "[clip_inference][clip_cpp]") {
+TEST_CASE("Bundled clip.cpp adapter symbols are linked into tests", "[clip_inference][clip_cpp]") {
 	REQUIRE(OFXGGML_HAS_CLIPCPP == 1);
+	auto * image = clip_image_u8_make();
+	REQUIRE(image != nullptr);
+	clip_image_u8_free(image);
 }
 
 TEST_CASE("Bundled clip.cpp adapter reports load errors cleanly", "[clip_inference][clip_cpp]") {
@@ -372,7 +375,7 @@ TEST_CASE("Bundled clip.cpp adapter reports load errors cleanly", "[clip_inferen
 TEST_CASE("Bundled clip.cpp adapter can run an end-to-end smoke test", "[clip_inference][clip_cpp][integration]") {
 	const std::string modelPath = getEnvOrEmpty("OFXGGML_TEST_CLIP_MODEL");
 	if (modelPath.empty()) {
-		SUCCEED("Set OFXGGML_TEST_CLIP_MODEL to run the real clip.cpp smoke test.");
+		SUCCEED("Skipping optional real clip.cpp smoke test. Set OFXGGML_TEST_CLIP_MODEL to enable.");
 		return;
 	}
 
