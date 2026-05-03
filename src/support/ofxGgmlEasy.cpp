@@ -103,9 +103,9 @@ std::optional<std::pair<ofJson, std::filesystem::path>> loadModelCatalogJson(
 		if (!in) {
 			continue;
 		}
-		const std::string text(
+		const std::string text{
 			std::istreambuf_iterator<char>(in),
-			std::istreambuf_iterator<char>());
+			std::istreambuf_iterator<char>()};
 		const ofJson parsed = ofJson::parse(text, nullptr, false);
 		if (!parsed.is_discarded()) {
 			return std::make_pair(parsed, std::filesystem::weakly_canonical(candidate));
