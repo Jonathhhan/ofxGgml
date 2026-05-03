@@ -93,9 +93,9 @@ Upgrade retrieval workflows with hybrid keyword + embedding ranking and optional
 **Priority**: MEDIUM  
 **Status**: 📋 Planned
 
-Continue extracting feature logic out of the giant GUI example and into addon APIs or focused helper modules.
+Reduce the giant GUI example to a showcase for API layers and UI patterns. Complex workflows should move into focused examples, tutorial projects, or companion addons instead of using the GUI example as a test harness.
 
-**Outcome**: the example becomes easier to maintain and better demonstrates stable surfaces.
+**Outcome**: the example becomes easier to maintain, demonstrates stable surfaces clearly, and stops carrying validation responsibility for unrelated workflows.
 
 ---
 
@@ -151,15 +151,15 @@ Extend memory beyond code assistance into long-lived project context for:
 **Priority**: MEDIUM  
 **Status**: 💡 Proposed
 
-Ship more narrowly scoped examples for:
+Ship more narrowly scoped examples or tutorial projects for:
 
 - research and citation workflows
-- video essay generation
+- companion-tier video essay generation
 - speech + subtitle tooling
 - coding assistant integration
 - CLIP/image search and visual planning
 
-**Outcome**: easier onboarding and less pressure on a single all-in-one example.
+**Outcome**: easier onboarding and less pressure on a single all-in-one showcase.
 
 ---
 

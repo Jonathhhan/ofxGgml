@@ -1,16 +1,22 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
 #include "../src/support/ofxGgmlProcessSecurity.h"
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 #ifndef _WIN32
+	#include <arpa/inet.h>
+	#include <netinet/in.h>
+	#include <sys/socket.h>
 	#include <sys/stat.h>
+	#include <unistd.h>
 #endif
 
 // Inference tests are mostly API tests since they depend on external llama.cpp executables
@@ -269,6 +275,19 @@ struct ScopedExecutableSecurityConfig {
 	}
 };
 
+#if defined(OFXGGML_HEADLESS_STUBS) && !defined(_WIN32)
+void sendAllToSocket(int fd, const std::string & data) {
+	size_t sent = 0;
+	while (sent < data.size()) {
+		const ssize_t n = send(fd, data.data() + sent, data.size() - sent, 0);
+		if (n <= 0) {
+			return;
+		}
+		sent += static_cast<size_t>(n);
+	}
+}
+#endif
+
 } // namespace
 
 TEST_CASE("Inference initialization", "[inference]") {
@@ -287,6 +306,82 @@ TEST_CASE("Inference initialization", "[inference]") {
 		REQUIRE(embedding.size() >= 0);
 	}
 }
+
+#if defined(OFXGGML_HEADLESS_STUBS) && !defined(_WIN32)
+TEST_CASE("Server streaming uses portable HTTP in headless tests", "[inference][server][streaming]") {
+	const int listenFd = socket(AF_INET, SOCK_STREAM, 0);
+	REQUIRE(listenFd >= 0);
+	int reuse = 1;
+	setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+	sockaddr_in addr{};
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	addr.sin_port = 0;
+	REQUIRE(bind(listenFd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0);
+	REQUIRE(listen(listenFd, 1) == 0);
+
+	sockaddr_in bound{};
+	socklen_t boundLen = sizeof(bound);
+	REQUIRE(getsockname(listenFd, reinterpret_cast<sockaddr *>(&bound), &boundLen) == 0);
+	const int port = ntohs(bound.sin_port);
+
+	std::thread server([listenFd]() {
+		const int client = accept(listenFd, nullptr, nullptr);
+		if (client < 0) {
+			close(listenFd);
+			return;
+		}
+		std::string request;
+		std::array<char, 512> buffer{};
+		while (request.find("\r\n\r\n") == std::string::npos) {
+			const ssize_t n = recv(client, buffer.data(), buffer.size(), 0);
+			if (n <= 0) {
+				break;
+			}
+			request.append(buffer.data(), static_cast<size_t>(n));
+		}
+		const std::string headers =
+			"HTTP/1.1 200 OK\r\n"
+			"Content-Type: text/event-stream\r\n"
+			"Transfer-Encoding: chunked\r\n"
+			"Connection: close\r\n\r\n";
+		sendAllToSocket(client, headers);
+		auto sendChunk = [client](const std::string & body) {
+			std::ostringstream chunk;
+			chunk << std::hex << body.size() << "\r\n" << body << "\r\n";
+			sendAllToSocket(client, chunk.str());
+		};
+		sendChunk("data: portable \n\n");
+		sendChunk("data: streaming\n\n");
+		sendChunk("data: [DONE]\n\n");
+		sendAllToSocket(client, "0\r\n\r\n");
+		close(client);
+		close(listenFd);
+	});
+
+	ofxGgmlInference inference;
+	ofxGgmlInferenceSettings settings;
+	settings.useServerBackend = true;
+	settings.serverUrl = "http://127.0.0.1:" + std::to_string(port);
+	settings.maxTokens = 8;
+
+	std::string streamed;
+	const auto result = inference.generate(
+		"server-model.gguf",
+		"Say hello",
+		settings,
+		[&](const std::string & chunk) {
+			streamed += chunk;
+			return true;
+		});
+
+	server.join();
+	REQUIRE(result.success);
+	REQUIRE(result.text == "portable streaming");
+	REQUIRE(streamed == "portable streaming");
+}
+#endif
 
 TEST_CASE("Inference executable configuration", "[inference]") {
 	ofxGgmlInference inf;

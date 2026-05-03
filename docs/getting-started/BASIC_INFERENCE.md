@@ -91,11 +91,11 @@ For real-time token-by-token output:
 
 | Platform | `OFXGGML_HAS_SERVER_STREAMING` | Server request behavior |
 | --- | --- | --- |
-| Windows | Enabled in non-headless builds | Live token streaming via WinHTTP |
-| Linux | Enabled in non-headless builds when `curl` is available | Live token streaming via system `curl` |
-| macOS | Enabled in non-headless builds when `curl` is available | Live token streaming via system `curl` |
+| Windows | Enabled | Live token streaming via WinHTTP |
+| Linux | Enabled | Live token streaming via built-in portable HTTP (`http://`) |
+| macOS | Enabled | Live token streaming via built-in portable HTTP (`http://`) |
 
-The callback API is available on every platform; Linux/macOS live server-side SSE streaming requires a usable `curl` executable.
+The callback API is available on every platform. Linux/macOS live server-side SSE streaming no longer shells out to `curl` for local `http://` servers, which keeps the core server path covered by headless CI.
 
 
 ```cpp

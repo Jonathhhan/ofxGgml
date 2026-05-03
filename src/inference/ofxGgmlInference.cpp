@@ -5,6 +5,7 @@
 #include "core/ofxGgmlHelpers.h"
 #include "core/ofxGgmlWindowsUtf8.h"
 #include "core/ofxGgmlMetrics.h"
+#include "core/ofxGgmlVersion.h"
 #include "support/ofxGgmlProcessSecurity.h"
 #include "support/ofxGgmlScriptSource.h"
 
@@ -38,19 +39,19 @@
 	#include <winhttp.h>
 	#pragma comment(lib, "winhttp.lib")
 #else
+	#include <arpa/inet.h>
 	#include <fcntl.h>
+	#include <netdb.h>
+	#include <sys/socket.h>
+	#include <sys/types.h>
 	#include <sys/wait.h>
 	#include <unistd.h>
 #endif
 
-// Live server-side token streaming is available on non-headless builds.
-// Windows uses WinHTTP below; Linux/macOS use the system curl executable to
-// consume OpenAI-compatible SSE responses without adding a libcurl dependency.
-#if !defined(OFXGGML_HEADLESS_STUBS)
-	#define OFXGGML_HAS_SERVER_STREAMING 1
-#else
-	#define OFXGGML_HAS_SERVER_STREAMING 0
-#endif
+// Live server-side token streaming uses built-in HTTP transports instead of
+// shelling out to curl, which keeps the core inference path portable and
+// testable in headless CI.
+#define OFXGGML_HAS_SERVER_STREAMING 1
 
 namespace {
 
@@ -308,28 +309,6 @@ static uint32_t makeRandomSeed() {
 	}
 }
 
-static std::string findCurlExecutable() {
-	static const std::array<std::string, 2> kCandidates = {
-		"/usr/bin/curl",
-		"/usr/local/bin/curl"
-	};
-	const std::string envCurl = ofxGgmlProcessSecurity::getEnvVarString("OFXGGML_CURL");
-	if (!envCurl.empty() && ofxGgmlProcessSecurity::isValidExecutablePath(envCurl)) {
-		return envCurl;
-	}
-	for (const auto & candidate : kCandidates) {
-		if (ofxGgmlProcessSecurity::isValidExecutablePath(candidate)) {
-			return candidate;
-		}
-	}
-	// As a last resort, allow PATH resolution only if explicitly permitted.
-	if (ofxGgmlProcessSecurity::getAllowPathLookupForExecutables() ||
-		!ofxGgmlProcessSecurity::getEnvVarString("OFXGGML_ALLOW_PATH_EXEC").empty()) {
-		return "curl";
-	}
-	return {};
-}
-
 static void recordStreamingMetrics(
 	const std::string & modelPath,
 	const std::string & transport,
@@ -352,6 +331,289 @@ static void recordStreamingMetrics(
 		}
 	}
 }
+
+struct ofxGgmlHttpUrlParts {
+	std::string scheme;
+	std::string host;
+	std::string port;
+	std::string path = "/";
+	std::string error;
+};
+
+static ofxGgmlHttpUrlParts parseHttpUrlParts(const std::string & url) {
+	ofxGgmlHttpUrlParts parts;
+	const size_t schemeEnd = url.find("://");
+	if (schemeEnd == std::string::npos) {
+		parts.error = "missing URL scheme";
+		return parts;
+	}
+	parts.scheme = url.substr(0, schemeEnd);
+	const size_t authorityStart = schemeEnd + 3;
+	const size_t pathStart = url.find('/', authorityStart);
+	const std::string authority = pathStart == std::string::npos
+		? url.substr(authorityStart)
+		: url.substr(authorityStart, pathStart - authorityStart);
+	parts.path = pathStart == std::string::npos ? "/" : url.substr(pathStart);
+	if (authority.empty()) {
+		parts.error = "missing URL host";
+		return parts;
+	}
+	const size_t portSep = authority.rfind(':');
+	if (portSep != std::string::npos && portSep + 1 < authority.size()) {
+		parts.host = authority.substr(0, portSep);
+		parts.port = authority.substr(portSep + 1);
+	} else {
+		parts.host = authority;
+		parts.port = parts.scheme == "https" ? "443" : "80";
+	}
+	if (parts.host.empty()) {
+		parts.error = "missing URL host";
+	}
+	return parts;
+}
+
+struct ofxGgmlHttpChunkDecoder {
+	bool chunked = false;
+	bool done = false;
+	size_t remaining = 0;
+	std::string buffer;
+
+	std::string decode(const std::string & input) {
+		if (!chunked) {
+			return input;
+		}
+		buffer += input;
+		std::string out;
+		while (!done) {
+			if (remaining == 0) {
+				const size_t lineEnd = buffer.find("\r\n");
+				if (lineEnd == std::string::npos) {
+					break;
+				}
+				std::string sizeText = buffer.substr(0, lineEnd);
+				const size_t extension = sizeText.find(';');
+				if (extension != std::string::npos) {
+					sizeText = sizeText.substr(0, extension);
+				}
+				try {
+					remaining = static_cast<size_t>(std::stoull(sizeText, nullptr, 16));
+				} catch (...) {
+					done = true;
+					break;
+				}
+				buffer.erase(0, lineEnd + 2);
+				if (remaining == 0) {
+					done = true;
+					break;
+				}
+			}
+			if (buffer.size() < remaining + 2) {
+				break;
+			}
+			out += buffer.substr(0, remaining);
+			buffer.erase(0, remaining);
+			if (buffer.rfind("\r\n", 0) == 0) {
+				buffer.erase(0, 2);
+			}
+			remaining = 0;
+		}
+		return out;
+	}
+};
+
+static bool consumeOpenAiSseBytes(
+	const std::string & bytes,
+	std::string & pending,
+	std::string & accumulated,
+	const std::function<bool(const std::string &)> & onChunk,
+	size_t & chunkCount,
+	size_t & byteCount,
+	bool & cancelled,
+	bool & done) {
+	pending += bytes;
+	size_t newlinePos = std::string::npos;
+	while ((newlinePos = pending.find('\n')) != std::string::npos) {
+		std::string line = pending.substr(0, newlinePos);
+		pending.erase(0, newlinePos + 1);
+		if (!line.empty() && line.back() == '\r') {
+			line.pop_back();
+		}
+		const std::string trimmedLine = trim(line);
+		if (trimmedLine.empty() || trimmedLine.rfind(":", 0) == 0) {
+			continue;
+		}
+		if (trimmedLine.rfind("data:", 0) != 0) {
+			continue;
+		}
+		std::string eventPayload = line.substr(5);
+		if (!eventPayload.empty() && eventPayload.front() == ' ') {
+			eventPayload.erase(0, 1);
+		}
+		if (eventPayload.empty()) {
+			continue;
+		}
+		if (trim(eventPayload) == "[DONE]") {
+			pending.clear();
+			done = true;
+			return false;
+		}
+		const std::string delta =
+			ofxGgmlInferenceServerInternals::extractDeltaTextFromOpenAiStreamEvent(
+				eventPayload);
+		if (delta.empty()) {
+			continue;
+		}
+		++chunkCount;
+		byteCount += delta.size();
+		accumulated += delta;
+		if (onChunk && !onChunk(delta)) {
+			cancelled = true;
+			return false;
+		}
+	}
+	return true;
+}
+
+#if !defined(_WIN32)
+struct ofxGgmlPortableStreamResult {
+	bool started = false;
+	long statusCode = 0;
+	std::string body;
+	std::string error;
+};
+
+static ofxGgmlPortableStreamResult postHttpSsePortable(
+	const std::string & url,
+	const std::string & requestBody,
+	const std::function<bool(const std::string &)> & onBodyBytes) {
+	ofxGgmlPortableStreamResult result;
+	const ofxGgmlHttpUrlParts parts = parseHttpUrlParts(url);
+	if (!parts.error.empty()) {
+		result.error = parts.error;
+		return result;
+	}
+	if (parts.scheme != "http") {
+		result.error = "portable streaming currently supports http:// server URLs";
+		return result;
+	}
+
+	addrinfo hints{};
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	addrinfo * addresses = nullptr;
+	const int gai = getaddrinfo(parts.host.c_str(), parts.port.c_str(), &hints, &addresses);
+	if (gai != 0 || !addresses) {
+		result.error = "unable to resolve server host";
+		return result;
+	}
+
+	int fd = -1;
+	for (addrinfo * ai = addresses; ai != nullptr; ai = ai->ai_next) {
+		fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+		if (fd < 0) {
+			continue;
+		}
+		if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) {
+			break;
+		}
+		close(fd);
+		fd = -1;
+	}
+	freeaddrinfo(addresses);
+	if (fd < 0) {
+		result.error = "unable to connect to server";
+		return result;
+	}
+
+	auto closeSocket = [&]() {
+		if (fd >= 0) {
+			close(fd);
+			fd = -1;
+		}
+	};
+
+	std::ostringstream request;
+	request << "POST " << parts.path << " HTTP/1.1\r\n"
+		<< "Host: " << parts.host << "\r\n"
+		<< "User-Agent: ofxGgml/" << OFX_GGML_VERSION_STRING << "\r\n"
+		<< "Content-Type: application/json\r\n"
+		<< "Accept: text/event-stream\r\n"
+		<< "Connection: close\r\n"
+		<< "Content-Length: " << requestBody.size() << "\r\n\r\n"
+		<< requestBody;
+	const std::string wireRequest = request.str();
+	size_t sent = 0;
+	while (sent < wireRequest.size()) {
+		const ssize_t n = send(fd, wireRequest.data() + sent, wireRequest.size() - sent, 0);
+		if (n <= 0) {
+			closeSocket();
+			result.error = "request transmission failed";
+			return result;
+		}
+		sent += static_cast<size_t>(n);
+	}
+	result.started = true;
+
+	std::string headerBuffer;
+	bool headersParsed = false;
+	ofxGgmlHttpChunkDecoder decoder;
+	std::array<char, 4096> readBuffer{};
+	for (;;) {
+		const ssize_t n = recv(fd, readBuffer.data(), readBuffer.size(), 0);
+		if (n < 0) {
+			closeSocket();
+			result.error = "response read failed";
+			return result;
+		}
+		if (n == 0) {
+			break;
+		}
+		std::string bytes(readBuffer.data(), static_cast<size_t>(n));
+		if (!headersParsed) {
+			headerBuffer += bytes;
+			const size_t headerEnd = headerBuffer.find("\r\n\r\n");
+			if (headerEnd == std::string::npos) {
+				continue;
+			}
+			const std::string headers = headerBuffer.substr(0, headerEnd);
+			std::istringstream headerStream(headers);
+			std::string statusLine;
+			std::getline(headerStream, statusLine);
+			{
+				std::istringstream status(statusLine);
+				std::string httpVersion;
+				status >> httpVersion >> result.statusCode;
+			}
+			std::string lowerHeaders = headers;
+			std::transform(
+				lowerHeaders.begin(),
+				lowerHeaders.end(),
+				lowerHeaders.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			decoder.chunked =
+				lowerHeaders.find("transfer-encoding: chunked") != std::string::npos;
+			bytes = headerBuffer.substr(headerEnd + 4);
+			headerBuffer.clear();
+			headersParsed = true;
+		}
+		const std::string bodyBytes = decoder.decode(bytes);
+		if (bodyBytes.empty()) {
+			continue;
+		}
+		result.body += bodyBytes;
+		if (result.statusCode >= 200 && result.statusCode < 300 && onBodyBytes) {
+			if (!onBodyBytes(bodyBytes)) {
+				break;
+			}
+		}
+	}
+	closeSocket();
+	if (!headersParsed) {
+		result.error = "response headers were incomplete";
+	}
+	return result;
+}
+#endif
 
 static bool writeTextFile(const std::string & path, const std::string & text) {
 	std::ofstream out(path, std::ios::binary);
@@ -907,21 +1169,23 @@ std::function<bool(const std::string&)> onChunk) const {
 
 	if (settings.useServerBackend || !trim(settings.serverUrl).empty()) {
 #ifdef OFXGGML_HEADLESS_STUBS
-		result.error = "server-backed inference requires openFrameworks HTTP runtime";
-		return result;
-#else
+		if (!onChunk) {
+			result.error =
+				"non-streaming server-backed inference requires openFrameworks HTTP runtime";
+			return result;
+		}
+#endif
 		const auto t0 = std::chrono::steady_clock::now();
 	const std::string requestUrl =
 		ofxGgmlInferenceServerInternals::normalizeServerUrl(settings.serverUrl);
 		try {
 			ofJson payload;
 			const bool requestStreaming = (onChunk != nullptr);
-			payload["messages"] = ofJson::array({
-				{
-					{"role", "user"},
-					{"content", sanitizedPrompt}
-				}
-			});
+			ofJson message;
+			message["role"] = "user";
+			message["content"] = sanitizedPrompt;
+			payload["messages"] = ofJson::array();
+			payload["messages"].push_back(message);
 			payload["max_tokens"] = std::max(1, settings.maxTokens);
 			payload["temperature"] = std::clamp(settings.temperature, 0.0f, 2.0f);
 			payload["top_p"] = std::clamp(settings.topP, 0.0f, 1.0f);
@@ -959,6 +1223,12 @@ std::function<bool(const std::string&)> onChunk) const {
 
 			auto performNonStreamingRequest = [&](const ofJson & requestPayload) -> ofxGgmlInferenceResult {
 				ofxGgmlInferenceResult serverResult;
+#ifdef OFXGGML_HEADLESS_STUBS
+				(void)requestPayload;
+				serverResult.error =
+					"non-streaming server-backed inference requires openFrameworks HTTP runtime";
+				return serverResult;
+#else
 				ofHttpRequest request(requestUrl, "text-inference");
 				request.method = ofHttpRequest::POST;
 				request.body = requestPayload.dump();
@@ -994,6 +1264,7 @@ std::function<bool(const std::string&)> onChunk) const {
 					serverResult.error = "server-backed inference returned empty output";
 				}
 				return serverResult;
+#endif
 			};
 
 			if (!requestStreaming) {
@@ -1006,81 +1277,29 @@ std::function<bool(const std::string&)> onChunk) const {
 #if !defined(_WIN32)
 			else {
 				payload["stream"] = true;
-				const std::string curlExe = findCurlExecutable();
-				if (curlExe.empty()) {
-					result.error = "server-backed inference failed: curl executable not found (set OFXGGML_CURL or enable PATH lookup)";
-					return result;
-				}
 				const std::string requestBody = payload.dump();
-				std::vector<std::string> args;
-				args.reserve(12);
-				args.push_back(curlExe);
-				args.push_back("--no-buffer");
-				args.push_back("-sS");
-				args.push_back("-X");
-				args.push_back("POST");
-				args.push_back("-H");
-				args.push_back("Content-Type: application/json");
-				args.push_back("-H");
-				args.push_back("Accept: text/event-stream");
-				args.push_back("--data-binary");
-				args.push_back(requestBody);
-				args.push_back(requestUrl);
-
-				std::string output;
-				int exitCode = -1;
 				std::string pending;
 				std::string accumulated;
 				bool cancelled = false;
+				bool streamDone = false;
 				size_t chunkCount = 0;
 				size_t byteCount = 0;
-				const bool started = runCommandCapture(
-					args,
-					output,
-					exitCode,
-					true,
+				const auto streamResponse = postHttpSsePortable(
+					requestUrl,
+					requestBody,
 					[&](const std::string & chunk) -> bool {
-						pending += chunk;
-						size_t newlinePos = std::string::npos;
-						while ((newlinePos = pending.find('\n')) != std::string::npos) {
-							std::string line = pending.substr(0, newlinePos);
-							pending.erase(0, newlinePos + 1);
-							if (!line.empty() && line.back() == '\r') {
-								line.pop_back();
-							}
-							const std::string trimmedLine = trim(line);
-							if (trimmedLine.empty() || trimmedLine.rfind(":", 0) == 0) {
-								continue;
-							}
-							if (trimmedLine.rfind("data:", 0) != 0) {
-								continue;
-							}
-							const std::string eventPayload = trim(trimmedLine.substr(5));
-							if (eventPayload.empty()) {
-								continue;
-							}
-							if (eventPayload == "[DONE]") {
-								pending.clear();
-								return false;
-							}
-							const std::string delta =
-								ofxGgmlInferenceServerInternals::extractDeltaTextFromOpenAiStreamEvent(
-									eventPayload);
-							if (delta.empty()) {
-								continue;
-							}
-							++chunkCount;
-							byteCount += delta.size();
-							accumulated += delta;
-							if (onChunk && !onChunk(delta)) {
-								cancelled = true;
-								return false;
-							}
-						}
-						return true;
+						return consumeOpenAiSseBytes(
+							chunk,
+							pending,
+							accumulated,
+							onChunk,
+							chunkCount,
+							byteCount,
+							cancelled,
+							streamDone);
 					});
-				if (!started) {
-					result.error = "server-backed inference failed: curl invocation failed to start";
+				if (!streamResponse.started) {
+					result.error = "server-backed inference failed: " + streamResponse.error;
 					return result;
 				}
 				if (cancelled) {
@@ -1091,28 +1310,42 @@ std::function<bool(const std::string&)> onChunk) const {
 						settings);
 					return result;
 				}
-				if (exitCode != 0 && accumulated.empty()) {
-					result.error = "server-backed inference failed via curl (exit " +
-						ofToString(exitCode) + "): " + trim(output);
+				if (streamResponse.statusCode < 200 || streamResponse.statusCode >= 300) {
+					std::string detail = trim(
+						ofxGgmlInferenceServerInternals::extractTextFromOpenAiResponse(
+							streamResponse.body));
+					if (detail.empty()) {
+						detail = trim(streamResponse.body);
+					}
+					if (detail.empty()) {
+						detail = trim(streamResponse.error);
+					}
+					result.error = "server-backed inference failed with HTTP " +
+						ofToString(static_cast<int>(streamResponse.statusCode)) + ": " + detail;
 					return result;
 				}
 				result.text = finalizeGeneratedResponseText(
-					accumulated.empty() ? output : accumulated,
+					accumulated.empty() ? streamResponse.body : accumulated,
 					sanitizedPrompt,
 					settings);
 				recordStreamingMetrics(
 					serverModel,
-					"server.curl",
+					"server.http",
 					chunkCount,
 					byteCount,
 					cancelled);
 				if (result.text.empty()) {
+#ifdef OFXGGML_HEADLESS_STUBS
+					result.error = "server-backed inference returned empty streamed output";
+					return result;
+#else
 					ofJson retryPayload = payload;
 					retryPayload["stream"] = false;
 					result = performNonStreamingRequest(retryPayload);
 					if (onChunk && !result.text.empty()) {
 						onChunk(result.text);
 					}
+#endif
 				}
 			}
 #else
@@ -1384,7 +1617,6 @@ std::function<bool(const std::string&)> onChunk) const {
 			result.error = std::string("server-backed inference failed: ") + e.what();
 			return result;
 		}
-#endif
 	}
 
 	if (modelPath.empty()) {

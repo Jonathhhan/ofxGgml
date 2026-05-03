@@ -26,7 +26,7 @@ What you get:
 
 What you get (includes Core plus):
 - LLM text inference (llama-server and CLI backends)
-- Streaming with backpressure control (live server-side token streaming is cross-platform in non-headless builds; Linux/macOS require `curl` on `PATH` or `OFXGGML_CURL`)
+- Streaming with backpressure control (live server-side token streaming uses built-in HTTP transports; Linux/macOS `http://` streaming is covered in headless CI)
 - Batch processing
 - `ofxGgmlEasy` facade
 - Chat and text assistants

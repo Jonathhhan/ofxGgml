@@ -45,6 +45,8 @@ This addon is released under the [MIT License](LICENSE).
 ## Release
 
 - addon release version: `1.0.4`
+- public version guards: `OFXGGML_VERSION_MAJOR`, `OFXGGML_VERSION_MINOR`, `OFXGGML_VERSION_PATCH`
+- API stability policy: `docs/API_STABILITY.md`
 - changelog: `CHANGELOG.md`
 
 ## Highlights
@@ -683,13 +685,13 @@ After building ggml, regenerate your project with the openFrameworks Project Gen
 
 ### Streaming support
 
-`OFXGGML_HAS_SERVER_STREAMING` is enabled for non-headless builds. Windows uses WinHTTP; Linux and macOS use the system `curl` executable (or `OFXGGML_CURL`) to consume live SSE token streams from `llama-server` style responses.
+`OFXGGML_HAS_SERVER_STREAMING` is enabled for server-backed text inference. Linux/macOS use the built-in portable HTTP streaming transport for `http://` local servers, which is covered by headless CI with a mock SSE server. Windows continues to use the native WinHTTP transport for the same OpenAI-compatible stream format.
 
 | Platform | `OFXGGML_HAS_SERVER_STREAMING` | Server request behavior |
 | --- | --- | --- |
-| Windows | Enabled in non-headless builds | Live token streaming via WinHTTP |
-| Linux | Enabled in non-headless builds when `curl` is available | Live token streaming via system `curl` |
-| macOS | Enabled in non-headless builds when `curl` is available | Live token streaming via system `curl` |
+| Windows | Enabled | Live token streaming via WinHTTP |
+| Linux | Enabled | Live token streaming via built-in portable HTTP (`http://`) |
+| macOS | Enabled | Live token streaming via built-in portable HTTP (`http://`) |
 
 ### llama-server on Windows
 
@@ -772,9 +774,9 @@ See [docs/getting-started/CHOOSING_FEATURES.md](docs/getting-started/CHOOSING_FE
 - `ofxGgmlNeuralExample`: Reusable inference graph with live class bars and latency view
 - `ofxGgmlWebScrapingExample`: Keyboard-driven website crawl viewer for `ofxGgmlWebCrawler`
 
-### Comprehensive Example
+### Showcase Example
 
-- `ofxGgmlGuiExample`: All features in one GUI demo - local chat, review, script, speech, multimodal, and `Live context` workflow UI backed by addon helpers
+- `ofxGgmlGuiExample`: Showcase for API layers and UI patterns, not a test harness. Keep complex workflows in focused examples, tutorial projects, or companion addons instead of growing this example further; see `ofxGgmlGuiExample/README.md`.
 
 The lightweight examples are keyboard-driven so you can rerun compute and benchmark paths without restarting the app.
 
