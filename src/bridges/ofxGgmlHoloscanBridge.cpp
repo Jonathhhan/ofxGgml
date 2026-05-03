@@ -10,7 +10,7 @@
 #include <mutex>
 #include <thread>
 
-#if !defined(_WIN32) && defined(__has_include)
+#if defined(OFXGGML_ENABLE_HOLOSCAN) && OFXGGML_ENABLE_HOLOSCAN && !defined(_WIN32) && defined(__has_include)
 #  if __has_include(<holoscan/holoscan.hpp>)
 #    include <holoscan/holoscan.hpp>
 #    define OFXGGML_HAS_HOLOSCAN 1

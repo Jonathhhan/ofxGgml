@@ -87,6 +87,17 @@ auto result = inference.generate(
 
 For real-time token-by-token output:
 
+### Platform support
+
+| Platform | `OFXGGML_HAS_SERVER_STREAMING` | Server request behavior |
+| --- | --- | --- |
+| Windows | Enabled in non-headless builds | Live token streaming via WinHTTP |
+| Linux | Enabled in non-headless builds when `curl` is available | Live token streaming via system `curl` |
+| macOS | Enabled in non-headless builds when `curl` is available | Live token streaming via system `curl` |
+
+The callback API is available on every platform; Linux/macOS live server-side SSE streaming requires a usable `curl` executable.
+
+
 ```cpp
 auto ctx = std::make_shared<ofxGgmlStreamingContext>();
 

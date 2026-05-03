@@ -458,6 +458,6 @@ Follow the compatibility matrix in `docs/COMPATIBILITY.md`:
 ## See Also
 
 - `docs/COMPATIBILITY.md` - Addon versioning and compatibility
-- `docs/API_BACKEND_BOUNDARIES.md` - Backend integration principles
-- `docs/FEATURE_SYNERGIES.md` - Cross-feature integration patterns
+- `docs/ARCHITECTURE.md` - Backend integration principles
+- `docs/ROADMAP.md` - Cross-feature integration patterns
 - `tests/test_diffusion_inference.cpp` - Test examples

@@ -189,30 +189,19 @@ if "%CUDA_PRESENT%"=="1" (
     )
 
     if not defined CUDA_LIB_DIR (
-        echo Error: CUDA backend detected but could not locate CUDA lib directory with required libraries
-        if defined CUDA_PATH (
-            echo   CUDA_PATH environment variable is set
-            echo   Value: %CUDA_PATH%
+        echo ==^> Warning: CUDA backend detected, but CUDA Toolkit libraries were not found.
+        echo ==^>          Skipping CUDA SDK link entries so addon_config.mk remains usable on CPU-only machines.
+        echo ==^>          Set CUDA_PATH and rerun this script on CUDA machines before regenerating projects.
+        set "CUDA_PRESENT=0"
+    ) else (
+        for %%P in ("!CUDA_LIB_DIR!") do set "CUDA_LIB_DIR=%%~fP"
+        echo ==^> Located CUDA libraries at: !CUDA_LIB_DIR!
+        set "CUDA_CUBLAS=!CUDA_LIB_DIR!\cublas.lib"
+        set "CUDA_CUDART=!CUDA_LIB_DIR!\cudart.lib"
+        set "CUDA_DRIVER=!CUDA_LIB_DIR!\cuda.lib"
+        if defined CUDA_PATH_CLEAN (
+            set "USE_CUDA_PATH_MACRO=1"
         )
-        if defined CUDAToolkit_ROOT (
-            echo   CUDA root environment variable is set
-            echo   Value: %CUDAToolkit_ROOT%
-        )
-        echo   Expected path format example:
-        echo   C:\Program Files\NVIDIA GPU Computing\CUDA\v13.2\lib\x64
-        echo.
-        echo   Solution: Set CUDA_PATH environment variable and rerun this script.
-        echo   If you meant to build CPU-only, rebuild ggml with --cpu-only to drop the CUDA dependency.
-        exit /b 1
-    )
-
-    for %%P in ("!CUDA_LIB_DIR!") do set "CUDA_LIB_DIR=%%~fP"
-    echo ==^> Located CUDA libraries at: !CUDA_LIB_DIR!
-    set "CUDA_CUBLAS=!CUDA_LIB_DIR!\cublas.lib"
-    set "CUDA_CUDART=!CUDA_LIB_DIR!\cudart.lib"
-    set "CUDA_DRIVER=!CUDA_LIB_DIR!\cuda.lib"
-    if defined CUDA_PATH_CLEAN (
-        set "USE_CUDA_PATH_MACRO=1"
     )
 )
 

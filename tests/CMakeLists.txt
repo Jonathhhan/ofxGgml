@@ -68,6 +68,7 @@ set(GGML_LIB_DIR "${GGML_DIR}/lib")
 set(CLIP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../libs/clip")
 set(CLIP_INCLUDE_DIR "${CLIP_DIR}/include")
 set(CLIP_SOURCE "${CLIP_DIR}/src/clip.cpp")
+find_package(LibXml2 QUIET)
 
 if(NOT EXISTS "${GGML_INCLUDE_DIR}/ggml.h")
     message(FATAL_ERROR "ggml headers not found in ${GGML_INCLUDE_DIR}. Run ./scripts/build-ggml.sh first.")
@@ -80,7 +81,9 @@ if(EXISTS "${CLIP_INCLUDE_DIR}/clip.h")
 endif()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../src)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../libs/libxml2/include/libxml/parser.h")
+if(LIBXML2_FOUND)
+    include_directories(${LIBXML2_INCLUDE_DIR})
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../libs/libxml2/include/libxml/parser.h")
     include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../libs/libxml2/include")
 endif()
 
@@ -155,6 +158,9 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/support/ofxGgmlScriptSource.cpp
         ../src/support/ofxGgmlProcessSecurity.cpp
         ../src/assistants/ofxGgmlCodeAssistant.cpp
+        ../src/assistants/ofxGgmlCodeAssistantPrompt.cpp
+        ../src/assistants/ofxGgmlCodeAssistantSession.cpp
+        ../src/assistants/ofxGgmlCodeAssistantTools.cpp
         ../src/assistants/ofxGgmlCodingAgent.cpp
         ../src/assistants/ofxGgmlWorkspaceAssistant.cpp
         ../src/assistants/ofxGgmlTextAssistant.cpp

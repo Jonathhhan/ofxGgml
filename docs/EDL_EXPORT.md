@@ -296,5 +296,5 @@ void exportMontageEdl() {
 
 - `ofxGgmlMontagePlanner.h` - Core montage planning API
 - `ofxGgmlEasy::planMontageFromSrt()` - High-level facade
-- `docs/FEATURE_SYNERGIES.md` - Workflow integration examples
+- `docs/ROADMAP.md` - Workflow integration examples
 - CMX 3600 EDL specification (industry standard)

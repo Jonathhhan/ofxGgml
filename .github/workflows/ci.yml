@@ -54,6 +54,35 @@ jobs:
       - name: Run headless CMake test target
         run: ctest --test-dir build/runtime-tests --output-on-failure
 
+  real-model-inference:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build llama.cpp CLI tools (CPU-only)
+        run: ./scripts/build-llama-cli.sh --jobs 2 --clean
+
+      - name: Download tiny GGUF model
+        env:
+          MODEL_URL: https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf
+          MODEL_PATH: models/ci/SmolLM2-135M-Instruct-Q4_K_M.gguf
+        run: |
+          mkdir -p "$(dirname "$MODEL_PATH")"
+          curl -L --fail --retry 3 --retry-delay 5 -o "$MODEL_PATH" "$MODEL_URL"
+          test -s "$MODEL_PATH"
+
+      - name: Run one real-model inference
+        run: |
+          ./scripts/dev/benchmark-llama-cli.sh \
+            --cli ./libs/llama/bin/llama-cli \
+            --model models/ci/SmolLM2-135M-Instruct-Q4_K_M.gguf \
+            --prompt "Reply with OK." \
+            --runs 1 \
+            --tokens 8 \
+            --context 256
+
+
   static-analysis:
     runs-on: ubuntu-latest
     steps:

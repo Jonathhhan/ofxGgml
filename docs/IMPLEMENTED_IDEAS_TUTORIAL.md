@@ -315,7 +315,7 @@ This is why "improve existing backends" is often a better direction than "add mo
 If you want to inspect the implemented ideas in the source, read in this order:
 
 1. `README.md` for the addon's high-level structure
-2. `docs/IMPROVEMENTS_IMPLEMENTED.md` for the summary list
+2. `docs/CHANGELOG.md` for the summary list
 3. `src/core/ofxGgmlHelpers.h` for shared helper direction
 4. `src/support/ofxGgmlProcessSecurity.h` and related implementation for centralized process execution
 5. `src/inference/ofxGgmlTtsAdapterCommon.h` for shared backend scaffolding

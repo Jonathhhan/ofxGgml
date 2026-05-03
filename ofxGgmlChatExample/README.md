@@ -26,6 +26,9 @@ A minimal example demonstrating local AI chat using ofxGgml.
 
 ## Setup
 
+> [!WARNING]
+> **First run required:** `libs/ggml/` is intentionally empty after cloning `ofxGgml`. Run the addon setup script, build bundled ggml, and regenerate this example project before building or launching it.
+
 ### 1. Install the Addon
 
 ```bash

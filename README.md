@@ -73,7 +73,7 @@ This addon is released under the [MIT License](LICENSE).
   - the planner remains generation-agnostic so apps can pair those plans with `ofxStableDiffusion`, `ofxVlc4`, or external renderers while keeping one shared planning/export manifest
 - `ofxGgmlMontagePlanner` for subtitle-driven montage planning, ranked clip selection, editor briefs, and CMX-style EDL export
 - `ofxGgmlMontagePreviewBridge` as a playback-facing bridge surface that exposes source-timed and montage-timed subtitle tracks, cue lookup, and playlist-oriented preview data for companions such as `ofxVlc4`
-- `ofxGgmlHoloscanBridge` as an optional live `frame -> vision -> preview/result` bridge for Holoscan-style media pipelines, with a native Holoscan runtime path on Linux and the addon fallback lane kept for other platforms for now
+- `ofxGgmlHoloscanBridge` as an optional live `frame -> vision -> preview/result` bridge for Holoscan-style media pipelines, with an opt-in native Holoscan runtime path on Linux (`OFXGGML_ENABLE_HOLOSCAN=1`) and the addon fallback lane kept for other platforms for now
 - `ofxGgmlImageSearch` for internet reference-image lookup through pluggable providers, with a working Wikimedia Commons backend
 - `ofxGgmlWebCrawler` as an optional website-ingestion bridge layer, with a `Mojo` CLI adapter for local website-to-Markdown crawling workflows
 - `ofxGgmlCitationSearch` for topic-oriented source-grounded quote extraction, with structured citation items built from loaded URLs or crawler-ingested website content
@@ -110,7 +110,7 @@ This addon is released under the [MIT License](LICENSE).
   - GUI example `Easy` mode now demonstrates the high-level `ofxGgmlEasy` facade directly, including one-click chat, summarize, translate, citation search, `Video Essay`, and coding-agent `Plan` flows using the currently selected backend/model
     - GUI example sidebar loading is now more centralized: `Video` now separates its text planner model from a dedicated video-render model preset/override lane, text modes can override the selected preset with any local GGUF path, and `Image` mode now keeps diffusion model / VAE / init / mask loading together in one shared sidebar section
   - GUI example Vision mode now also includes a small `Holoscan Bridge` section for live frame submission and inline preview.
-    - The native Holoscan runtime path is Linux-only for now; Windows and other platforms stay on the addon fallback lane until that runtime is validated there.
+    - The native Holoscan runtime path is opt-in with `OFXGGML_ENABLE_HOLOSCAN=1` and Linux-only for now; Windows and other platforms stay on the addon fallback lane until that runtime is validated there.
   - GUI example Translate mode with auto-detect source language, natural vs. literal translation shortcuts, detect-and-translate flow, and more reliable prompt/input handoff buttons
   - GUI example Chat and Translate modes now each keep a dedicated lightweight TTS preview lane, so spoken replies and translated voice output can be played, restarted, and stopped inline without bouncing through the main TTS panel
   - GUI example `Video Essay` mode now also supports optional `ofxVlc4` preview/render handoff, so a source video plus the generated essay SRT can be previewed live and texture-recorded into a muxed narration render without leaving the example
@@ -203,7 +203,7 @@ scripts\setup_windows.bat
 ```
 
 > [!WARNING]
-> **First run is not optional:** the examples will usually fail to build or launch until you run the platform setup script, build the bundled ggml libraries, and regenerate the example project with the openFrameworks Project Generator.
+> **First run is not optional:** `libs/ggml/` is intentionally empty when you clone the addon. The examples will usually fail to build or launch until you run the platform setup script, build the bundled ggml libraries, and regenerate the example project with the openFrameworks Project Generator.
 >
 > Minimum first-run flow:
 > - run `./scripts/setup_linux_macos.sh` or `scripts\setup_windows.bat`
@@ -437,7 +437,7 @@ Workflow results include:
 
 ## Quick Wins: Developer Experience Features
 
-ofxGgml includes high-impact features for improved developer experience. See `docs/QUICK_WINS.md` for detailed documentation.
+ofxGgml includes high-impact features for improved developer experience. See `docs/ROADMAP.md` for detailed quick-win and roadmap documentation.
 
 ### Batched Inference API
 
@@ -729,9 +729,15 @@ After building ggml, regenerate your project with the openFrameworks Project Gen
 
 `scripts/build-ggml.sh` (and the Windows wrapper) also refreshes `addon_config.mk` for the `vs` section so Visual Studio can track the ggml libraries present in your local build. The checked-in `addon_config.mk` stays CPU-safe by default, so rerun the helper on the machine that built ggml before regenerating your Visual Studio project if you enabled optional backends.
 
-### Streaming limitation
+### Streaming support
 
-`OFXGGML_HAS_SERVER_STREAMING` is currently enabled only for Windows builds that use WinHTTP. On Linux and macOS the addon still supports server requests, but it falls back to non-streaming request/response handling instead of live SSE token streaming for `llama-server` style responses.
+`OFXGGML_HAS_SERVER_STREAMING` is enabled for non-headless builds. Windows uses WinHTTP; Linux and macOS use the system `curl` executable (or `OFXGGML_CURL`) to consume live SSE token streams from `llama-server` style responses.
+
+| Platform | `OFXGGML_HAS_SERVER_STREAMING` | Server request behavior |
+| --- | --- | --- |
+| Windows | Enabled in non-headless builds | Live token streaming via WinHTTP |
+| Linux | Enabled in non-headless builds when `curl` is available | Live token streaming via system `curl` |
+| macOS | Enabled in non-headless builds when `curl` is available | Live token streaming via system `curl` |
 
 ### llama-server on Windows
 
