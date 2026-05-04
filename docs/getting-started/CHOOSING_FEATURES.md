@@ -28,13 +28,12 @@ What you get (includes Core plus):
 - LLM text inference (llama-server and CLI backends)
 - Streaming with backpressure control (live server-side token streaming uses built-in HTTP transports; Linux/macOS `http://` streaming is covered in headless CI)
 - Batch processing
-- `ofxGgmlEasy` facade
 - Chat and text assistants
 - Prompt templates
 
 **Use when:** You need chat, summarization, translation, or any text AI.
 
-### Layer 3: Modalities
+### Layer 3: Modalities (Optional Adapter Layer)
 **Header:** `#include "ofxGgmlModalities.h"`
 **Size:** Basic + ~12,000 LOC
 
@@ -46,18 +45,18 @@ What you get (includes Basic plus):
 - Image generation (Stable Diffusion integration)
 - CLIP embeddings
 
-**Use when:** You need audio or visual AI capabilities.
+**Use when:** You explicitly need audio or visual AI capabilities. These APIs are split from the default `ofxGgml.h` boundary so text-only projects do not inherit speech/TTS/vision/diffusion surfaces.
 
 ### Layer 4: Workflows
 **Header:** `#include "ofxGgmlWorkflows.h"`
-**Size:** Modalities + ~10,000 LOC
+**Size:** Basic + ~10,000 LOC
 
-What you get (includes Modalities plus):
-- Video planning and editing
+What you get (includes Basic plus):
+- Text/metadata video planning and editing manifests
 - Citation search
 - Web crawling for RAG
 
-**Use when:** You need optional video planning, citation, crawler, or RAG helpers without adopting companion media-application prototypes.
+**Use when:** You need optional video planning, citation, crawler, or RAG helpers without adopting multimodal adapters or companion media-application prototypes.
 
 ### Layer 5: Assistants
 **Header:** `#include "ofxGgmlAssistants.h"`
@@ -91,8 +90,8 @@ Or for a comprehensive application (like the GUI example), include all layers:
 ```cpp
 #include "ofxGgmlCore.h"
 #include "ofxGgmlBasic.h"
-#include "ofxGgmlModalities.h"
-#include "ofxGgmlWorkflows.h"
+#include "ofxGgmlModalities.h"  // Optional speech/vision/TTS/diffusion adapters
+#include "ofxGgmlWorkflows.h"   // Optional planning/research helpers
 #include "ofxGgmlAssistants.h"
 // Optional companion/example tier:
 #include "ofxGgmlCompanionWorkflows.h"
@@ -108,7 +107,7 @@ Or for a comprehensive application (like the GUI example), include all layers:
 
 **You get:**
 - Text inference
-- `ofxGgmlEasy::chat()`
+- Low-level text generation helpers; add `support/ofxGgmlEasy.h` for `ofxGgmlEasy::chat()`
 - Conversation memory
 
 **You skip:**

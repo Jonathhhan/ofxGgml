@@ -49,6 +49,7 @@ The easiest way to get started is to open an existing example:
 ```cpp
 // main.cpp or ofApp.cpp
 #include "ofxGgmlBasic.h"
+#include "support/ofxGgmlEasy.h"
 
 class ofApp : public ofBaseApp {
 public:
@@ -80,8 +81,9 @@ ofxGgml provides layered headers for incremental adoption:
 | Header | What You Get | Use When |
 |--------|--------------|----------|
 | `ofxGgmlBasic.h` | Core + text inference | **You only need text/chat AI (recommended start)** |
-| `ofxGgmlModalities.h` | Basic + speech/vision/TTS/images | You need multimodal AI |
-| `ofxGgmlWorkflows.h` | Modalities + specialized pipelines | You need video/montage/research workflows |
+| `ofxGgml.h` | Basic + chat/text/code assistants | You want the default supported addon tier |
+| `ofxGgmlModalities.h` | Basic + speech/vision/TTS/images | You explicitly need multimodal adapters |
+| `ofxGgmlWorkflows.h` | Basic + source-grounded planning/research helpers | You need optional planning/research workflows |
 | `ofxGgmlAssistants.h` | Basic + code/chat/review assistants | You need AI coding assistance |
 | `ofxGgmlCore.h` | Runtime, tensors, models | You need low-level tensor operations |
 
@@ -90,7 +92,7 @@ ofxGgml provides layered headers for incremental adoption:
 **Need multiple features?** Include multiple headers:
 ```cpp
 #include "ofxGgmlBasic.h"
-#include "ofxGgmlModalities.h"  // Also get speech/vision
+#include "ofxGgmlModalities.h"  // Optional speech/vision/TTS/diffusion adapters
 ```
 
 ## Next Steps

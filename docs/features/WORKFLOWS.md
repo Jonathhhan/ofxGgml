@@ -1,18 +1,18 @@
 # Workflows Guide
 
-Learn how to use ofxGgml's specialized creative and research workflows for video, montage, music, and citation-based research.
+Learn how to use ofxGgml's optional source-grounded planning and research helpers.
 
 ## Overview
 
 Include `ofxGgmlWorkflows.h` to get:
-- All modalities (speech, vision, TTS, diffusion, CLIP)
-- Video planning and beat generation
-- Montage editing from subtitles
+- Text/metadata video planning and beat generation
 - Citation search and source-grounded research
-- Video essay pipeline (topic → script → narration)
-- Music generation and ABC notation
-- MilkDrop visualization presets
 - Web crawling for RAG pipelines
+
+Speech, TTS, vision, diffusion, and other multimodal adapters are split behind
+`ofxGgmlModalities.h`. Montage, video essay, music/AceStep, MilkDrop, and
+Holoscan surfaces are companion/example-tier APIs behind
+`ofxGgmlCompanionWorkflows.h`.
 
 ## Video Planning
 

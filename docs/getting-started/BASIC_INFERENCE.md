@@ -15,12 +15,13 @@ Learn how to use ofxGgml for text-only AI workflows without the complexity of mu
 
 ```cpp
 #include "ofxGgmlBasic.h"
+#include "support/ofxGgmlEasy.h"
 ```
 
 This gives you:
 - Core runtime and model loading
 - Text inference (llama-server + CLI fallback)
-- `ofxGgmlEasy` facade for common tasks
+- Prompt/source utilities; add `support/ofxGgmlEasy.h` when you want the facade for common tasks
 - Chat and text assistants
 - Streaming support
 

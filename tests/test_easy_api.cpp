@@ -1,4 +1,5 @@
 #include "catch2.hpp"
+#include "../src/support/ofxGgmlEasy.h"
 #include "../src/ofxGgml.h"
 #include "../src/core/ofxGgmlMetrics.h"
 

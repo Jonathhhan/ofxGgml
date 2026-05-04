@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgml.h"
+#include "../src/ofxGgmlModalities.h"
 #include "../src/support/ofxGgmlProcessSecurity.h"
 #include <array>
 #include <chrono>

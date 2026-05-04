@@ -17,7 +17,7 @@ Key subtitle capabilities:
 ### Parsing SRT Files
 
 ```cpp
-#include "ofxGgml.h"
+#include "ofxGgmlCompanionWorkflows.h"
 
 // Parse SRT file
 std::vector<ofxGgmlSimpleSrtCue> cues;

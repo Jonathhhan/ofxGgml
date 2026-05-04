@@ -1,5 +1,6 @@
 #include "catch2.hpp"
-#include "../src/ofxGgml.h"
+#include "../src/support/ofxGgmlEasy.h"
+#include "../src/ofxGgmlWorkflows.h"
 
 TEST_CASE("Long video planner validates requests", "[long_video]") {
 	ofxGgmlLongVideoPlanRequest request;

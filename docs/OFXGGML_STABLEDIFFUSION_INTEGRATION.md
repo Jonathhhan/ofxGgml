@@ -286,7 +286,7 @@ if (result.success) {
 ### Basic Integration
 
 ```cpp
-#include "ofxGgml.h"
+#include "ofxGgmlModalities.h"
 
 #if OFXGGML_HAS_OFXSTABLEDIFFUSION
 #include "ofxGgmlStableDiffusionAdapters.h"

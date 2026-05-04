@@ -1,5 +1,6 @@
 #include "catch2.hpp"
-#include "../src/ofxGgml.h"
+#include "../src/support/ofxGgmlEasy.h"
+#include "../src/ofxGgmlWorkflows.h"
 
 #include <cstdlib>
 #include <filesystem>

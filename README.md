@@ -11,8 +11,9 @@ ofxGgml uses **layered headers** - include only what you need:
 | Header | What You Get | Use When |
 |--------|--------------|----------|
 | **`ofxGgmlBasic.h`** | **Core + text inference** | **Text/chat AI (start here!)** |
-| `ofxGgmlModalities.h` | Basic + speech/vision/TTS/images | Multimodal AI workflows |
-| `ofxGgmlWorkflows.h` | Modalities + planning/research helpers | Optional helper layer |
+| `ofxGgml.h` | Basic + chat/text/code assistants | Default supported addon tier |
+| `ofxGgmlModalities.h` | Basic + speech/vision/TTS/images/CLIP adapters | Optional multimodal adapter layer |
+| `ofxGgmlWorkflows.h` | Basic + source-grounded planning/research helpers | Optional helper layer |
 | `ofxGgmlCompanionWorkflows.h` | Montage/video essay/music/MilkDrop/AceStep/Holoscan prototypes | Companion/example-tier opt-in |
 | `ofxGgmlAssistants.h` | Basic + code/chat assistants | AI coding assistance |
 | `ofxGgmlCore.h` | Runtime, tensors, models | Low-level tensor ops only |
@@ -81,7 +82,7 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlVideoEssayWorkflow` is kept as companion/example-tier orchestration for `topic -> cited outline -> narrated script -> voice cues -> SRT -> visual concept -> scene/edit planning`, not as a default addon surface
 - `ofxGgmlMediaPromptGenerator` for local-first cross-media prompt translation, starting with `Music -> Image` prompt generation that can reuse transcripts, lyrics, and existing text backends before handing the result to diffusion workflows
 - `ofxGgmlMusicGenerator`, `ofxGgmlAceStepBridge`, and `ofxGgmlMilkDropGenerator` are companion/example-tier prototypes for music and visualization workflows
-- `ofxGgmlEasy` as a small high-level facade for common text, chat, translation, vision, and speech tasks without wiring the lower-level assistants by hand
+- `ofxGgmlEasy` as a small high-level facade for common text, chat, translation, and explicitly included optional modality/workflow tasks without wiring the lower-level assistants by hand
 - `ofxGgmlEasy` covers crawler-backed citation research and AI-assisted video-edit planning by default; montage and other companion workflow helpers are available only when `OFXGGML_ENABLE_COMPANION_WORKFLOWS=1` is defined before including the Easy header
 - `ofxGgmlEasy` now keeps text inference, crawling, and citation search on one persistent helper path, so `configureText()`, `configureWebCrawler()`, `getWebCrawler()`, `getCitationSearch()`, and `findCitations()` operate on the same configured pipeline
 - `ofxGgmlEasy` now also exposes lightweight onboarding helpers for text-model preset discovery, per-task recommendations, and setup diagnostics backed by `scripts/model-catalog.json`
@@ -241,7 +242,8 @@ For coding workflows that need more than a single prompt, `ofxGgmlCodingAgent` n
 Minimal text setup:
 
 ```cpp
-#include "ofxGgml.h"
+#include "ofxGgml.h" // default core + text/assistant tier
+#include "support/ofxGgmlEasy.h" // optional high-level facade
 
 ofxGgmlEasy ai;
 
@@ -282,6 +284,8 @@ auto translated = ai.translate("Guten Morgen", "English", "German");
 Vision:
 
 ```cpp
+#include "ofxGgmlModalities.h"
+
 ofxGgmlEasyVisionConfig vision;
 vision.modelPath = "data/models/LFM2.5-VL-1.6B-Q8_0.gguf";
 vision.mmprojPath = "data/models/mmproj-LFM2.5-VL-1.6b-Q8_0.gguf";
@@ -294,6 +298,8 @@ auto imageResult = ai.describeImage("data/images/test.png");
 Speech:
 
 ```cpp
+#include "ofxGgmlModalities.h"
+
 ofxGgmlEasySpeechConfig speech;
 speech.modelPath = "data/models/ggml-base.en.bin";
 speech.cliExecutable = "whisper-cli";
@@ -305,6 +311,8 @@ auto transcript = ai.transcribeAudio("data/audio/test.wav");
 Research and edit workflows:
 
 ```cpp
+#include "ofxGgmlWorkflows.h"
+
 ofxGgmlEasyCrawlerConfig crawler;
 crawler.executablePath = "mojo";
 ai.configureWebCrawler(crawler);

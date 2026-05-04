@@ -34,7 +34,7 @@ CLIP sources are automatically included when you build ofxGgml. The headers are 
 CLIP functionality is available through `ofxGgmlClipCppAdapters.h` which provides automatic detection and integration:
 
 ```cpp
-#include "ofxGgml.h"
+#include "ofxGgmlModalities.h"
 
 // CLIP headers are automatically found
 ofxGgmlClipInference clip;

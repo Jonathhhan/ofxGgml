@@ -17,7 +17,7 @@ EDL files are industry-standard text files that describe edit sequences. They sp
 ### Simple Video-Only EDL
 
 ```cpp
-#include "ofxGgml.h"
+#include "ofxGgmlCompanionWorkflows.h"
 
 // Create a montage plan from subtitle segments
 ofxGgmlMontagePlannerRequest request;
@@ -233,7 +233,7 @@ This ensures visual variety in the montage.
 ## Complete Example
 
 ```cpp
-#include "ofxGgml.h"
+#include "ofxGgmlCompanionWorkflows.h"
 
 void exportMontageEdl() {
     // Load subtitle segments

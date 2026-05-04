@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgml.h"
+#include "../src/ofxGgmlWorkflows.h"
 
 TEST_CASE("Media prompt generator prepares a music-to-image prompt", "[media_prompt]") {
 	ofxGgmlMediaPromptGenerator generator;
