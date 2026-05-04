@@ -60,7 +60,8 @@ Fill this table in when updating either upstream:
 
 | ofxGgml release | ofxGgml ggml revision | ofxStableDiffusion release | stable-diffusion.cpp revision | Status | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 1.0.2+ | `record exact commit/tag` | `record exact addon tag/commit` | `record exact commit/tag` | Pending | Update this row when validating a new pair |
+| 1.0.4 | `ggml v0.10.0` (`1c40d85`) | Not bundled | Not bundled | Tested for ofxGgml CPU headless tier | `scripts/build-ggml.sh --cpu-only` and `./tests/run-tests.sh` validate the addon-local ggml build. |
+| 1.0.4 | `ggml v0.10.0` (`1c40d85`) | `record exact addon tag/commit` | `record exact commit/tag` | Pending | Fill this row when validating a combined ofxGgml + ofxStableDiffusion workspace. |
 
 Recommended status values:
 
@@ -77,6 +78,18 @@ When updating `ggml` or `stable-diffusion.cpp`:
 3. Verify text, speech, vision, and diffusion flows together if both addons are enabled.
 4. Check runtime packaging for stale copied DLLs or duplicate backend libraries.
 5. Record the validated revision pair in the matrix above.
+
+## Release checklist
+
+Before publishing an addon release:
+
+1. Verify version macros in `src/core/ofxGgmlVersion.h`.
+2. Update `README.md`, `CHANGELOG.md`, `docs/API_STABILITY.md`, and this compatibility matrix.
+3. Rebuild bundled ggml with the pinned ref.
+4. Run `./tests/run-tests.sh` after ggml is built.
+5. Run companion/example-tier tests when companion APIs changed.
+6. Validate `scripts/model-catalog.json` with required provenance, checksums, and signature.
+7. Confirm Windows runtime packaging does not include stale `ggml*.dll` files.
 
 ## Rule of thumb
 

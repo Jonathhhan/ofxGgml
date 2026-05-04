@@ -193,6 +193,7 @@ set(TEST_SOURCES
     test_helpers.cpp
     test_resource_guards.cpp
     test_srt_parser.cpp
+    test_public_headers.cpp
 )
 
 if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)

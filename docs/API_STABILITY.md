@@ -22,9 +22,22 @@ Stable APIs are expected to remain source-compatible for the current major versi
 
 - `ofxGgmlCore.h`
 - `ofxGgmlBasic.h`
+- `ofxGgml.h` as the default supported addon-tier umbrella
 - core runtime, tensor, graph, model, and result types
 - `ofxGgmlInference` settings/result structures and non-experimental text inference methods
-- documented model onboarding and health helpers in `ofxGgmlEasy`
+- documented text setup, model onboarding, diagnostics, health, chat/completion, and RAG-basics helpers in `ofxGgmlEasy`
+
+## Optional addon-tier layers
+
+These headers are supported but intentionally opt-in so they do not expand the
+default stable boundary:
+
+- `ofxGgmlModalities.h` for speech, TTS, vision, video, diffusion, and CLIP adapters
+- `ofxGgmlWorkflows.h` for source-grounded research, crawling, RAG, image/reference search, media prompts, and text/video planning helpers
+
+Additions in these layers should preserve source compatibility where practical,
+but APIs that depend on external tools or optional runtimes may report degraded
+diagnostics when those tools are unavailable.
 
 Backward-compatible additions may ship in minor releases. Patch releases should limit changes to fixes, documentation, and behavior-preserving improvements.
 
@@ -37,6 +50,13 @@ Experimental APIs may change in minor releases and should not be treated as comp
 - video essay, montage, music/AceStep, MilkDrop, and Holoscan bridge surfaces
 - GUI-only workflows and prototype panels
 - APIs documented as proposed, draft, experimental, or roadmap-only
+
+## Header compile guards
+
+The headless test suite includes a public-header compile test for the layered
+headers. Companion/example-tier headers are included by that test only when
+`OFXGGML_ENABLE_COMPANION_WORKFLOWS` is enabled through the companion test
+configuration.
 
 When an experimental API becomes stable, it should be documented here and covered by tests before a release.
 

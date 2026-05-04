@@ -266,6 +266,7 @@ Onboarding helpers for the first roadmap step:
 auto presets = ai.listTextModelPresets("scripts/model-catalog.json");
 auto recommendation = ai.recommendTextModelForTask("script", "scripts/model-catalog.json");
 auto setup = ai.inspectTextSetup("script", "scripts/model-catalog.json");
+auto diagnostics = ai.inspectTextDiagnostics("script", "scripts/model-catalog.json");
 auto download = ai.planTextModelDownload("script", 0, "scripts/model-catalog.json", "models");
 
 if (!setup.ready && recommendation) {
@@ -274,7 +275,7 @@ if (!setup.ready && recommendation) {
 }
 ```
 
-`inspectTextSetup()` now also reports GGUF compatibility hints, missing embedding support for hybrid retrieval, and server-model routing warnings. `planTextModelDownload()` turns a recommended preset into a concrete download plan with checksum/provenance metadata and a ready-to-run `download-model.sh` command.
+`inspectTextSetup()` reports GGUF compatibility hints, missing embedding support for hybrid retrieval, and server-model routing warnings. `inspectTextDiagnostics()` combines setup and health into a severity-tagged report with JSON serialization for GUI panels and support dumps. `planTextModelDownload()` turns a recommended preset into a concrete download plan with checksum/provenance metadata and a ready-to-run `download-model.sh --require-checksum` command for verified presets.
 
 Chat and translation:
 
@@ -630,7 +631,7 @@ scripts\setup_windows.bat --with-llama-cli --skip-model
 scripts\setup_windows.bat --skip-ggml --model-preset 2
 ```
 
-`download-model` covers the text GGUF presets used by chat/script/write flows. Speech (`Whisper`) and multimodal `Vision` models are configured separately in the addon and GUI example because they use different runtimes and file layouts. The current Vision defaults favor EU-safe llama-server profiles such as `LFM2.5-VL` for general image understanding and `GLM-OCR` for OCR-heavy work.
+`download-model` covers the text GGUF presets used by chat/script/write flows. Catalog presets are loaded only after the signed manifest is validated, official catalog entries must publish SHA256 checksums, and `--require-checksum` (or `OFXGGML_REQUIRE_MODEL_CHECKSUM=1`) makes custom downloads fail unless a checksum is supplied. Speech (`Whisper`) and multimodal `Vision` models are configured separately in the addon and GUI example because they use different runtimes and file layouts. The current Vision defaults favor EU-safe llama-server profiles such as `LFM2.5-VL` for general image understanding and `GLM-OCR` for OCR-heavy work.
 
 ### AceStep music backend
 

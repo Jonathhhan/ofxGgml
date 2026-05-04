@@ -51,6 +51,19 @@ cmake --build build/tests-companion --config Release
 ctest --test-dir build/tests-companion --output-on-failure
 ```
 
+### Public Header Compile Coverage
+
+The default headless suite includes `test_public_headers.cpp`, which compiles
+the stable layered headers:
+
+- `ofxGgmlBasic.h`
+- `ofxGgml.h`
+- `ofxGgmlModalities.h`
+- `ofxGgmlWorkflows.h`
+
+When companion tests are enabled, the same compile coverage also includes
+`ofxGgmlCompanionWorkflows.h`.
+
 ### Code Coverage
 
 Generate code coverage reports locally:

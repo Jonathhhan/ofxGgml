@@ -1,6 +1,0 @@
-- [ ] Baseline current build/tests (no changes)
-- [ ] Audit curl usage in AceStep bridge (timeouts, TLS, redirects)
-- [ ] Audit web crawling/search networking backends and input validation
-- [ ] Identify actionable network hardening improvements
-- [ ] Implement minimal, targeted fixes
-- [ ] Re-run ./scripts/build-ggml.sh and ./tests/run-tests.sh

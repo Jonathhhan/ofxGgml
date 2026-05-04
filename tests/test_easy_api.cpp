@@ -345,6 +345,40 @@ TEST_CASE("Easy API health snapshot combines latency and cache metrics", "[easy_
 	metrics.reset();
 }
 
+TEST_CASE("Easy API diagnostics report combines setup, health, severities, and JSON", "[easy_api]") {
+	const std::string catalogPath = createEasyApiCatalog();
+
+	ofxGgmlEasy easy;
+	const auto missing = easy.inspectTextDiagnostics("chat", catalogPath);
+	REQUIRE_FALSE(missing.ready);
+	REQUIRE(missing.countIssues(ofxGgmlEasyDiagnosticSeverity::Blocking) >= 1);
+	REQUIRE(missing.countIssues(ofxGgmlEasyDiagnosticSeverity::Info) >= 1);
+	const std::string missingJson = missing.toJsonString();
+	REQUIRE(missingJson.find("\"severity\"") != std::string::npos);
+	REQUIRE(missingJson.find("\"blocking\"") != std::string::npos);
+	REQUIRE(missingJson.find("\"setup\"") != std::string::npos);
+	REQUIRE(missingJson.find("\"health\"") != std::string::npos);
+
+	const std::string modelPath = createEasyApiDummyModel("general.gguf");
+	const std::string exePath = createEasyApiExecutable("easy-api-ok");
+	ofxGgmlEasyTextConfig textConfig;
+	textConfig.modelPath = modelPath;
+	textConfig.completionExecutable = exePath;
+	easy.configureText(textConfig);
+
+	ofxGgml runtime;
+	const auto configured = easy.inspectTextDiagnostics("chat", catalogPath, &runtime);
+	REQUIRE(configured.ready);
+	REQUIRE(configured.setup.catalogAvailable);
+	REQUIRE(configured.setup.configuredPreset.has_value());
+	REQUIRE(configured.setup.configuredPreset->checksumVerified());
+	REQUIRE(configured.countIssues(ofxGgmlEasyDiagnosticSeverity::Blocking) == 0);
+	REQUIRE(configured.countIssues(ofxGgmlEasyDiagnosticSeverity::Degraded) >= 1);
+	const std::string configuredJson = configured.toJsonString();
+	REQUIRE(configuredJson.find("\"localRuntimeAttached\"") != std::string::npos);
+	REQUIRE(configuredJson.find("true") != std::string::npos);
+}
+
 TEST_CASE("Easy API wraps common text workflows", "[easy_api]") {
 	const std::string modelPath = createEasyApiDummyModel();
 	const std::string exePath = createEasyApiExecutable("easy-api-ok");

@@ -159,6 +159,8 @@ struct ofxGgmlEasyModelDownloadPlan {
 	std::string downloadScriptPath;
 	std::string suggestedCommand;
 	bool verifiedCatalogEntry = false;
+	bool checksumRequired = false;
+	std::string catalogTrustSummary;
 	std::vector<std::string> warnings;
 };
 
@@ -177,6 +179,30 @@ struct ofxGgmlEasyHealthSnapshot {
 	ofxGgmlServerProbeResult serverProbe;
 	ofxGgmlServerQueueStatus serverQueue;
 	std::vector<std::string> warnings;
+};
+
+enum class ofxGgmlEasyDiagnosticSeverity {
+	Info,
+	Warning,
+	Degraded,
+	Blocking
+};
+
+struct ofxGgmlEasyDiagnosticIssue {
+	ofxGgmlEasyDiagnosticSeverity severity = ofxGgmlEasyDiagnosticSeverity::Info;
+	std::string component;
+	std::string message;
+};
+
+struct ofxGgmlEasyDiagnosticsReport {
+	bool ready = false;
+	bool degraded = false;
+	ofxGgmlEasyModelSetupReport setup;
+	ofxGgmlEasyHealthSnapshot health;
+	std::vector<ofxGgmlEasyDiagnosticIssue> issues;
+
+	size_t countIssues(ofxGgmlEasyDiagnosticSeverity severity) const;
+	std::string toJsonString() const;
 };
 
 /// High-level convenience facade for common text, vision, and speech workflows.
@@ -257,6 +283,10 @@ public:
 		const std::string & catalogPath = "",
 		const std::string & outputDir = "") const;
 	ofxGgmlEasyHealthSnapshot inspectTextHealth(
+		const ofxGgml * runtime = nullptr) const;
+	ofxGgmlEasyDiagnosticsReport inspectTextDiagnostics(
+		const std::string & task = "",
+		const std::string & catalogPath = "",
 		const ofxGgml * runtime = nullptr) const;
 
 	ofxGgmlInferenceResult complete(const std::string & prompt) const;

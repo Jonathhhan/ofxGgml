@@ -53,7 +53,7 @@ Focus: remove adoption friction and improve day-to-day usability.
 
 ### 1. Model Onboarding and Compatibility
 **Priority**: HIGH  
-**Status**: 📋 Planned
+**Status**: 🚧 In progress
 
 Build a first-class model onboarding flow that combines:
 
@@ -62,11 +62,18 @@ Build a first-class model onboarding flow that combines:
 - compatibility hints for modality/backend requirements
 - preset recommendations by task and hardware profile
 
+Implemented foundation:
+
+- signed model-catalog validation
+- catalog-backed preset listing and task recommendations
+- setup diagnostics and download plans through `ofxGgmlEasy`
+- strict checksum mode in `scripts/download-model.sh`
+
 **Outcome**: new users can go from zero setup to a working local model path with less manual documentation chasing.
 
 ### 2. Health and Runtime Observability
 **Priority**: HIGH  
-**Status**: 📋 Planned
+**Status**: 🚧 In progress
 
 Expand monitoring beyond point APIs into a unified health surface for:
 
@@ -76,21 +83,32 @@ Expand monitoring beyond point APIs into a unified health surface for:
 - latency and throughput trends
 - degraded-mode warnings and fallback hints
 
+Implemented foundation:
+
+- `ofxGgmlEasyHealthSnapshot`
+- severity-tagged `ofxGgmlEasyDiagnosticsReport`
+- server probe and queue-status integration
+- cache hit rates and latency/throughput metrics
+
 **Outcome**: the GUI example and host apps can expose operational status instead of only failure logs.
 
 ### 3. Semantic Cache
 **Priority**: HIGH  
-**Status**: 📋 Planned
+**Status**: 🚧 In progress
 
 Add semantic-result caching so repeated or closely related prompts can reuse prior work across chat, assistants, and workflow stages.
+
+Implemented foundation: retrieval cache support in `ofxGgmlRAGPipeline`.
 
 **Outcome**: faster iteration for creative prompting, review loops, and research-heavy tasks.
 
 ### 4. Hybrid Retrieval
 **Priority**: HIGH  
-**Status**: 📋 Planned
+**Status**: 🚧 In progress
 
 Upgrade retrieval workflows with hybrid keyword + embedding ranking and optional reranking.
+
+Implemented foundation: RAG query settings expose keyword, semantic, quality, and rerank weights with cache-hit reporting.
 
 **Outcome**: better grounding quality for citation search, RAG, and research-driven assistants.
 

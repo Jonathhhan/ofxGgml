@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# download-model.sh â€” Download a GGUF model for use with ofxGgml.
+# download-model.sh — Download a GGUF model for use with ofxGgml.
 #
 # Usage:
 #   ./scripts/download-model.sh [--model URL] [--preset N] [--task NAME] [--both]
 #                               [--output DIR] [--name FILE] [--checksum SHA256]
+#                               [--require-checksum]
 #
 # Options:
 #   --model  URL   Direct URL to a GGUF model file.
@@ -17,20 +18,23 @@
 #   --name   FILE  Output file name (default: derived from URL)
 #   --both         Download both recommended presets (1 and 2)
 #   --checksum HEX SHA256 checksum for --model URL downloads
+#   --require-checksum
+#                  Fail instead of downloading when no SHA256 is configured.
+#                  Can also be enabled with OFXGGML_REQUIRE_MODEL_CHECKSUM=1.
 #   --list         List recommended models with preset numbers and exit
 #   --help         Show this help message
 #
 # Recommended models (small enough for development):
-#   1. Qwen2.5-1.5B Instruct Q4_K_M       (~1.0 GB) â€” chat, general
-#   2. Qwen2.5-Coder-1.5B Instruct Q4_K_M (~1.0 GB) â€” scripting, code generation
+#   1. Qwen2.5-1.5B Instruct Q4_K_M       (~1.0 GB) — chat, general
+#   2. Qwen2.5-Coder-1.5B Instruct Q4_K_M (~1.0 GB) — scripting, code generation
 #
 # Preferred models per example task:
-#   chat       â†’ preset 1  Qwen2.5-1.5B Instruct Q4_K_M
-#   script     â†’ preset 2  Qwen2.5-Coder-1.5B Instruct Q4_K_M
-#   summarize  â†’ preset 1  Qwen2.5-1.5B Instruct Q4_K_M
-#   write      â†’ preset 1  Qwen2.5-1.5B Instruct Q4_K_M
-#   translate  â†’ preset 1  Qwen2.5-1.5B Instruct Q4_K_M
-#   custom     â†’ preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   chat       → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   script     → preset 2  Qwen2.5-Coder-1.5B Instruct Q4_K_M
+#   summarize  → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   write      → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   translate  → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
+#   custom     → preset 1  Qwen2.5-1.5B Instruct Q4_K_M
 #
 # Note:
 #   Speech / Whisper models are configured separately in the addon and GUI
@@ -151,7 +155,7 @@ download_companion_files() {
 }
 
 # ---------------------------------------------------------------------------
-# Task â†’ preferred preset mapping (matches GUI example AiMode enum)
+# Task → preferred preset mapping (matches GUI example AiMode enum)
 # ---------------------------------------------------------------------------
 
 declare -A TASK_PRESET
@@ -169,6 +173,7 @@ MODEL_CHECKSUM=""
 PRESET_INDEX=""
 TASK_NAME=""
 DOWNLOAD_BOTH=false
+REQUIRE_CHECKSUM="${OFXGGML_REQUIRE_MODEL_CHECKSUM:-0}"
 
 write_step() {
 	printf '==> %s\n' "$1"
@@ -207,7 +212,7 @@ list_models() {
 	for task in chat script summarize write translate custom; do
 		local p="${TASK_PRESET[$task]}"
 		local idx=$((p - 1))
-		printf "  %-12s â†’ preset %d  %s\n" "$task" "$p" "${PRESET_NAMES[$idx]}"
+		printf "  %-12s → preset %d  %s\n" "$task" "$p" "${PRESET_NAMES[$idx]}"
 	done
 	echo ""
 	echo "Usage:"
@@ -252,6 +257,10 @@ while [[ $# -gt 0 ]]; do
 		--checksum)
 			MODEL_CHECKSUM="$2"
 			shift 2
+			;;
+		--require-checksum)
+			REQUIRE_CHECKSUM=1
+			shift
 			;;
 		--both)
 			DOWNLOAD_BOTH=true
@@ -309,6 +318,10 @@ download_model() {
 	local expected_sha256="${3:-}"
 	local output_path="$OUTPUT_DIR/$output_name"
 
+	if [[ "$REQUIRE_CHECKSUM" != "0" && -z "$expected_sha256" ]]; then
+		die "Checksum is required for $output_name. Use --checksum SHA256 for custom URLs or choose a verified catalog preset."
+	fi
+
 	compute_sha256() {
 		local path="$1"
 		if command -v sha256sum >/dev/null 2>&1; then
@@ -346,7 +359,7 @@ download_model() {
 	if [[ -n "$expected_sha256" ]]; then
 		write_step "  SHA256: $expected_sha256"
 	else
-		write_step "  SHA256: not configured (download will not be integrity-verified)"
+		write_step "  SHA256: not configured (download will not be integrity verified; use --require-checksum to fail instead)"
 	fi
 	write_step ""
 
@@ -393,6 +406,9 @@ if [[ "$DOWNLOAD_BOTH" == true ]]; then
 			die "Recommended preset index $i is out of range, but only ${#PRESET_URLS[@]} preset entries are configured"
 		fi
 		write_step "Preset $((i + 1)): ${PRESET_NAMES[$i]} (${PRESET_SIZES[$i]})"
+		if [[ "${PRESET_SOURCE_TYPES[$i]:-}" == "official" && -z "${PRESET_SHA256[$i]:-}" ]]; then
+			die "Official preset $((i + 1)) is missing a SHA256 checksum in the catalog."
+		fi
 		local_name="${PRESET_FILENAMES[$i]:-}"
 		if [[ -z "$local_name" ]]; then
 			local_name="$(basename "${PRESET_URLS[$i]}")"
@@ -417,7 +433,7 @@ if [[ -n "$TASK_NAME" ]]; then
 		die "Cannot use both --task and --preset"
 	fi
 	PRESET_INDEX="${TASK_PRESET[$TASK_NAME]}"
-	write_step "Task '$TASK_NAME' â†’ preset $PRESET_INDEX"
+	write_step "Task '$TASK_NAME' → preset $PRESET_INDEX"
 fi
 
 # Resolve preset.
@@ -429,6 +445,9 @@ if [[ -n "$PRESET_INDEX" ]]; then
 	MODEL_URL="${PRESET_URLS[$idx]}"
 	if [[ -z "$MODEL_CHECKSUM" ]]; then
 		MODEL_CHECKSUM="${PRESET_SHA256[$idx]:-}"
+	fi
+	if [[ "${PRESET_SOURCE_TYPES[$idx]:-}" == "official" && -z "$MODEL_CHECKSUM" ]]; then
+		die "Official preset $PRESET_INDEX is missing a SHA256 checksum in the catalog."
 	fi
 	write_step "Preset $PRESET_INDEX selected: ${PRESET_NAMES[$idx]} (${PRESET_SIZES[$idx]})"
 fi

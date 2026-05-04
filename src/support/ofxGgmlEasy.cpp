@@ -218,7 +218,115 @@ std::string configuredModelMetricKey(const ofxGgmlEasyTextConfig & config) {
 	return "default";
 }
 
+std::string diagnosticSeverityLabel(ofxGgmlEasyDiagnosticSeverity severity) {
+	switch (severity) {
+		case ofxGgmlEasyDiagnosticSeverity::Info: return "info";
+		case ofxGgmlEasyDiagnosticSeverity::Warning: return "warning";
+		case ofxGgmlEasyDiagnosticSeverity::Degraded: return "degraded";
+		case ofxGgmlEasyDiagnosticSeverity::Blocking: return "blocking";
+	}
+	return "unknown";
+}
+
+void addDiagnosticIssue(
+	std::vector<ofxGgmlEasyDiagnosticIssue> & issues,
+	ofxGgmlEasyDiagnosticSeverity severity,
+	const std::string & component,
+	const std::string & message) {
+	issues.push_back({severity, component, message});
+}
+
+ofJson stringVectorToJson(const std::vector<std::string> & values) {
+	ofJson array = ofJson::array();
+	for (const auto & value : values) {
+		array.push_back(value);
+	}
+	return array;
+}
+
 } // namespace
+
+size_t ofxGgmlEasyDiagnosticsReport::countIssues(
+	ofxGgmlEasyDiagnosticSeverity severity) const {
+	size_t count = 0;
+	for (const auto & issue : issues) {
+		if (issue.severity == severity) {
+			++count;
+		}
+	}
+	return count;
+}
+
+std::string ofxGgmlEasyDiagnosticsReport::toJsonString() const {
+	ofJson root;
+	root["ready"] = ready;
+	root["degraded"] = degraded;
+
+	root["setup"]["ready"] = setup.ready;
+	root["setup"]["catalogAvailable"] = setup.catalogAvailable;
+	root["setup"]["modelPathExists"] = setup.modelPathExists;
+	root["setup"]["prefersServer"] = setup.prefersServer;
+	root["setup"]["serverConfigured"] = setup.serverConfigured;
+	root["setup"]["resolvedCatalogPath"] = setup.resolvedCatalogPath;
+	if (setup.configuredPreset) {
+		root["setup"]["configuredPreset"] = {
+			{"preset", setup.configuredPreset->preset},
+			{"name", setup.configuredPreset->name},
+			{"filename", setup.configuredPreset->filename},
+			{"verificationStatus", setup.configuredPreset->verificationStatus}
+		};
+	}
+	if (setup.recommendedPreset) {
+		root["setup"]["recommendedPreset"] = {
+			{"preset", setup.recommendedPreset->preset},
+			{"name", setup.recommendedPreset->name},
+			{"filename", setup.recommendedPreset->filename},
+			{"verificationStatus", setup.recommendedPreset->verificationStatus}
+		};
+	}
+	root["setup"]["errors"] = stringVectorToJson(setup.errors);
+	root["setup"]["warnings"] = stringVectorToJson(setup.warnings);
+	root["setup"]["recommendations"] = stringVectorToJson(setup.recommendations);
+
+	root["health"]["textConfigured"] = health.textConfigured;
+	root["health"]["localRuntimeAttached"] = health.localRuntimeAttached;
+	root["health"]["localRuntimeReady"] = health.localRuntimeReady;
+	root["health"]["serverExpected"] = health.serverExpected;
+	root["health"]["averageLatencyMs"] = health.averageLatencyMs;
+	root["health"]["minLatencyMs"] = health.minLatencyMs;
+	root["health"]["maxLatencyMs"] = health.maxLatencyMs;
+	root["health"]["averageTokensPerSecond"] = health.averageTokensPerSecond;
+	root["health"]["retrievalCacheHitRate"] = health.retrievalCacheHitRate;
+	root["health"]["tokenCountCacheHitRate"] = health.tokenCountCacheHitRate;
+	root["health"]["warnings"] = stringVectorToJson(health.warnings);
+	root["health"]["serverProbe"] = {
+		{"reachable", health.serverProbe.reachable},
+		{"healthOk", health.serverProbe.healthOk},
+		{"modelsOk", health.serverProbe.modelsOk},
+		{"baseUrl", health.serverProbe.baseUrl},
+		{"activeModel", health.serverProbe.activeModel},
+		{"error", health.serverProbe.error}
+	};
+	root["health"]["serverQueue"] = {
+		{"available", health.serverQueue.available},
+		{"queueLength", health.serverQueue.queueLength},
+		{"processingCount", health.serverQueue.processingCount},
+		{"completedCount", health.serverQueue.completedCount},
+		{"failedCount", health.serverQueue.failedCount},
+		{"serverUrl", health.serverQueue.serverUrl},
+		{"error", health.serverQueue.error}
+	};
+
+	root["issues"] = ofJson::array();
+	for (const auto & issue : issues) {
+		root["issues"].push_back({
+			{"severity", diagnosticSeverityLabel(issue.severity)},
+			{"component", issue.component},
+			{"message", issue.message}
+		});
+	}
+	return root.dump(2);
+}
 
 ofxGgmlEasy::ofxGgmlEasy() = default;
 
@@ -610,9 +718,17 @@ std::optional<ofxGgmlEasyModelDownloadPlan> ofxGgmlEasy::planTextModelDownload(
 	plan.catalogPath = catalog->second.string();
 	plan.downloadScriptPath = (catalog->second.parent_path() / "download-model.sh").string();
 	plan.verifiedCatalogEntry = selectedPreset->checksumVerified();
+	plan.checksumRequired = selectedPreset->sourceType == "official" ||
+		!selectedPreset->sha256.empty();
+	plan.catalogTrustSummary = plan.verifiedCatalogEntry
+		? "Catalog entry is signed and marked verified-sha256."
+		: "Catalog entry is available but not marked verified-sha256.";
 
 	std::ostringstream command;
 	command << quoteShellArg(plan.downloadScriptPath) << " --preset " << plan.preset;
+	if (plan.checksumRequired) {
+		command << " --require-checksum";
+	}
 	if (!outputDir.empty()) {
 		command << " --output " << quoteShellArg(outputDir);
 	}
@@ -621,6 +737,10 @@ std::optional<ofxGgmlEasyModelDownloadPlan> ofxGgmlEasy::planTextModelDownload(
 	if (!plan.verifiedCatalogEntry) {
 		plan.warnings.push_back(
 			"Selected preset is present in the catalog but is not yet marked verified-sha256.");
+	}
+	if (plan.checksumRequired && plan.sha256.empty()) {
+		plan.warnings.push_back(
+			"Selected preset requires checksum verification, but the catalog entry does not publish a SHA256 checksum.");
 	}
 	if (plan.downloadScriptPath.empty() ||
 		!std::filesystem::exists(std::filesystem::path(plan.downloadScriptPath))) {
@@ -683,6 +803,68 @@ ofxGgmlEasyHealthSnapshot ofxGgmlEasy::inspectTextHealth(
 			"Local runtime pointer was provided, but the runtime is not ready.");
 	}
 	return snapshot;
+}
+
+ofxGgmlEasyDiagnosticsReport ofxGgmlEasy::inspectTextDiagnostics(
+	const std::string & task,
+	const std::string & catalogPath,
+	const ofxGgml * runtime) const {
+	ofxGgmlEasyDiagnosticsReport report;
+	report.setup = inspectTextSetup(task, catalogPath);
+	report.health = inspectTextHealth(runtime);
+
+	for (const auto & error : report.setup.errors) {
+		addDiagnosticIssue(
+			report.issues,
+			ofxGgmlEasyDiagnosticSeverity::Blocking,
+			"setup",
+			error);
+	}
+	for (const auto & warning : report.setup.warnings) {
+		addDiagnosticIssue(
+			report.issues,
+			ofxGgmlEasyDiagnosticSeverity::Warning,
+			"setup",
+			warning);
+	}
+	for (const auto & recommendation : report.setup.recommendations) {
+		addDiagnosticIssue(
+			report.issues,
+			ofxGgmlEasyDiagnosticSeverity::Info,
+			"setup",
+			recommendation);
+	}
+	for (const auto & warning : report.health.warnings) {
+		addDiagnosticIssue(
+			report.issues,
+			ofxGgmlEasyDiagnosticSeverity::Degraded,
+			"health",
+			warning);
+	}
+
+	if (report.setup.configuredPreset &&
+		report.setup.configuredPreset->hasChecksum() &&
+		!report.setup.configuredPreset->checksumVerified()) {
+		addDiagnosticIssue(
+			report.issues,
+			ofxGgmlEasyDiagnosticSeverity::Warning,
+			"model-catalog",
+			"Configured catalog preset is not marked verified-sha256.");
+	}
+	if (report.health.serverExpected && !report.health.serverProbe.reachable) {
+		addDiagnosticIssue(
+			report.issues,
+			ofxGgmlEasyDiagnosticSeverity::Degraded,
+			"server",
+			"Configured text server is expected but not reachable.");
+	}
+
+	report.ready = report.setup.ready &&
+		report.countIssues(ofxGgmlEasyDiagnosticSeverity::Blocking) == 0;
+	report.degraded =
+		report.countIssues(ofxGgmlEasyDiagnosticSeverity::Degraded) > 0 ||
+		report.countIssues(ofxGgmlEasyDiagnosticSeverity::Warning) > 0;
+	return report;
 }
 
 ofxGgmlInferenceSettings ofxGgmlEasy::makeTextSettings() const {
