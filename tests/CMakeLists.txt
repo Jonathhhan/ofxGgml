@@ -220,7 +220,8 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         test_rag_pipeline.cpp
         test_conversation_manager.cpp
         test_feature_synergies.cpp
-        test_validation_loop.cpp)
+        test_validation_loop.cpp
+        test_web_crawler.cpp)
 endif()
 
 if(OFXGGML_ENABLE_COMPANION_TESTS)

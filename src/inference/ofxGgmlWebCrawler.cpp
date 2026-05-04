@@ -1499,12 +1499,18 @@ void appendLibXmlBlockMarkdown(
 		bodyMarkdown << "# " << text << "\n\n";
 	} else if (tag == "h2") {
 		bodyMarkdown << "## " << text << "\n\n";
-	} else if (tag == "h3" || tag == "h4") {
+	} else if (tag == "h3") {
 		bodyMarkdown << "### " << text << "\n\n";
+	} else if (tag == "h4") {
+		bodyMarkdown << "#### " << text << "\n\n";
+	} else if (tag == "h5" || tag == "h6") {
+		bodyMarkdown << "##### " << text << "\n\n";
 	} else if (tag == "li") {
 		bodyMarkdown << "- " << text << "\n";
 	} else if (tag == "blockquote") {
 		bodyMarkdown << "> " << text << "\n\n";
+	} else if (tag == "pre") {
+		bodyMarkdown << "```\n" << text << "\n```\n\n";
 	} else {
 		bodyMarkdown << text << "\n\n";
 	}
@@ -1536,6 +1542,8 @@ void collectLibXmlReadableBlocks(
 			tag == "h2" ||
 			tag == "h3" ||
 			tag == "h4" ||
+			tag == "h5" ||
+			tag == "h6" ||
 			tag == "p" ||
 			tag == "li" ||
 			tag == "blockquote" ||
@@ -2291,16 +2299,20 @@ public:
 
 		std::queue<std::pair<std::string, int>> pending;
 		std::unordered_set<std::string> visited;
+		std::unordered_set<std::string> inQueue;
 		std::string firstError;
-		pending.push({result.startUrl, 0});
+		const std::string normalizedStart = normalizeUrlForDeduplication(result.startUrl);
+		pending.push({normalizedStart, 0});
+		inQueue.insert(normalizedStart);
 		const int maxDepth = std::max(0, request.maxDepth);
 		const size_t maxPages = static_cast<size_t>(std::max(1, request.maxPages));
 
 		while (!pending.empty() && visited.size() < maxPages) {
 			const auto [currentUrlRaw, currentDepth] = pending.front();
 			pending.pop();
+			inQueue.erase(currentUrlRaw);
 
-			const std::string currentUrl = normalizeUrlForDeduplication(currentUrlRaw);
+			const std::string currentUrl = currentUrlRaw;
 			if (currentUrl.empty() ||
 				!isUrlInCrawlerScope(result.startUrl, currentUrl, request) ||
 				!visited.insert(currentUrl).second) {
@@ -2383,12 +2395,15 @@ public:
 			}
 			for (const auto & link : parsed.links) {
 				const std::string normalizedLink = normalizeUrlForDeduplication(link);
-				if (normalizedLink.empty() || visited.find(normalizedLink) != visited.end()) {
+				if (normalizedLink.empty() ||
+					visited.find(normalizedLink) != visited.end() ||
+					inQueue.find(normalizedLink) != inQueue.end()) {
 					continue;
 				}
 				if (!isUrlInCrawlerScope(result.startUrl, normalizedLink, request)) {
 					continue;
 				}
+				inQueue.insert(normalizedLink);
 				pending.push({normalizedLink, currentDepth + 1});
 			}
 		}
