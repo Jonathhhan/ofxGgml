@@ -719,7 +719,7 @@ std::optional<ofxGgmlEasyModelDownloadPlan> ofxGgmlEasy::planTextModelDownload(
 	plan.downloadScriptPath = (catalog->second.parent_path() / "download-model.sh").string();
 	plan.verifiedCatalogEntry = selectedPreset->checksumVerified();
 	plan.checksumRequired = selectedPreset->sourceType == "official" ||
-		selectedPreset->checksumVerified();
+		!selectedPreset->sha256.empty();
 	plan.catalogTrustSummary = plan.verifiedCatalogEntry
 		? "Catalog entry is signed and marked verified-sha256."
 		: "Catalog entry is available but not marked verified-sha256.";
@@ -842,7 +842,9 @@ ofxGgmlEasyDiagnosticsReport ofxGgmlEasy::inspectTextDiagnostics(
 			warning);
 	}
 
-	if (report.setup.configuredPreset && !report.setup.configuredPreset->checksumVerified()) {
+	if (report.setup.configuredPreset &&
+		report.setup.configuredPreset->hasChecksum() &&
+		!report.setup.configuredPreset->checksumVerified()) {
 		addDiagnosticIssue(
 			report.issues,
 			ofxGgmlEasyDiagnosticSeverity::Warning,

@@ -359,7 +359,7 @@ download_model() {
 	if [[ -n "$expected_sha256" ]]; then
 		write_step "  SHA256: $expected_sha256"
 	else
-		write_step "  SHA256: not configured (download will not be integrity-verified; use --require-checksum to fail instead)"
+		write_step "  SHA256: not configured (download will not be integrity verified; use --require-checksum to fail instead)"
 	fi
 	write_step ""
 
