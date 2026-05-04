@@ -94,6 +94,14 @@ struct ofxGgmlRAGResult {
 /// external process is required for retrieval; scoring uses keyword overlap.
 class ofxGgmlRAGPipeline {
 public:
+	ofxGgmlRAGPipeline() = default;
+	~ofxGgmlRAGPipeline() = default;
+
+	// Non-copyable and non-movable: holds a std::mutex member.
+	ofxGgmlRAGPipeline(const ofxGgmlRAGPipeline &) = delete;
+	ofxGgmlRAGPipeline & operator=(const ofxGgmlRAGPipeline &) = delete;
+	ofxGgmlRAGPipeline(ofxGgmlRAGPipeline &&) = delete;
+	ofxGgmlRAGPipeline & operator=(ofxGgmlRAGPipeline &&) = delete;
 	void addDocument(const ofxGgmlRAGDocument & doc);
 	void addTextDocument(
 		const std::string & content,

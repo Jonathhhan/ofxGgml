@@ -297,6 +297,15 @@ std::string resolveWindowsLaunchPath(const std::string & executable) {
 		return validatedExecutable;
 	}
 
+	// Fetch configuration before any fallback so that allowlist restrictions
+	// are applied consistently.  In particular, if allowedRoots is non-empty
+	// the caller has opted into strict root enforcement; never fall back to
+	// returning an unvalidated path in that case.
+	const ExecutableConfig config = getExecutableConfigSnapshot();
+	if (!config.allowedRoots.empty()) {
+		return {};
+	}
+
 	auto hasPathSeparator = [](const std::string & value) {
 		return value.find('\\') != std::string::npos ||
 			value.find('/') != std::string::npos;
@@ -307,8 +316,9 @@ std::string resolveWindowsLaunchPath(const std::string & executable) {
 		hasPathSeparator(executable)) {
 		return executable;
 	}
-	const ExecutableConfig config = getExecutableConfigSnapshot();
-	if (config.allowPathLookup || !config.allowedRoots.empty()) {
+	if (config.allowPathLookup) {
+		// PATH lookup was already attempted by resolveExecutablePath; don't
+		// duplicate the search — the executable was simply not found.
 		return {};
 	}
 

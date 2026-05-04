@@ -104,8 +104,9 @@ public:
 
 		float previousScore = 0.0f;
 		bool foundGoodResult = false;
+		bool shouldStopEarly = false;  // separate flag: quality not reached but no point continuing
 
-		for (int attempt = 1; attempt <= m_config.maxAttempts && !foundGoodResult; ++attempt) {
+		for (int attempt = 1; attempt <= m_config.maxAttempts && !foundGoodResult && !shouldStopEarly; ++attempt) {
 			ofxGgmlValidationAttempt<TGenerated, TAnalysis> attemptResult;
 			attemptResult.attemptNumber = attempt;
 
@@ -145,7 +146,7 @@ public:
 					if (improvement < m_config.improvementThreshold &&
 						attemptResult.score < m_config.qualityThreshold) {
 						attemptResult.feedback = "Insufficient improvement, stopping refinement";
-						foundGoodResult = true; // Stop trying
+						shouldStopEarly = true;
 					}
 				}
 
@@ -178,7 +179,7 @@ public:
 			}
 
 			// Apply refinement for next attempt
-			if (m_config.enableRefinement && m_refine && !foundGoodResult &&
+			if (m_config.enableRefinement && m_refine && !foundGoodResult && !shouldStopEarly &&
 				attempt < m_config.maxAttempts) {
 				try {
 					m_refine(attemptResult.generated, attemptResult.analysis, attemptResult.score);
@@ -188,7 +189,7 @@ public:
 			}
 		}
 
-		result.success = result.bestScore > 0.0f;
+		result.success = foundGoodResult;
 		return result;
 	}
 

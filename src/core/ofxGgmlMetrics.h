@@ -3,6 +3,7 @@
 #include "ofMain.h"
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <string>
@@ -165,9 +166,10 @@ public:
 		std::lock_guard<std::mutex> lock(m_mutex);
 		auto& timings = m_timings[name];
 		timings.push_back(milliseconds);
-		// Keep only last 1000 samples to avoid unbounded growth
+		// Keep only the last 1000 samples to avoid unbounded growth.
+		// std::deque::pop_front() is O(1), avoiding the O(n) shift of erase(begin()).
 		if (timings.size() > 1000) {
-			timings.erase(timings.begin());
+			timings.pop_front();
 		}
 	}
 
@@ -328,5 +330,5 @@ private:
 	std::map<std::string, BatchStats> m_batchStats;
 	std::map<std::string, size_t> m_counters;
 	std::map<std::string, double> m_gauges;
-	std::map<std::string, std::vector<double>> m_timings;
+	std::map<std::string, std::deque<double>> m_timings;
 };

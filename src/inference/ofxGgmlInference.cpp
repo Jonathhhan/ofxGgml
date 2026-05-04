@@ -849,7 +849,7 @@ static int parseVerbosePromptTokenCount(const std::string & raw) {
 } // namespace
 
 ofxGgmlInference::ofxGgmlInference()
-	: m_completionExe("llama-completion")
+	: m_completionExe("llama-cli")
 	, m_embeddingExe("llama-embedding") { }
 
 void ofxGgmlInference::setCompletionExecutable(const std::string & path) {
@@ -1007,10 +1007,13 @@ ofxGgmlServerQueueStatus ofxGgmlInference::getServerQueueStatus(
 		auto extractMetric = [](const std::string& text, const std::string& pattern) -> int {
 			const size_t pos = text.find(pattern);
 			if (pos != std::string::npos) {
-				const size_t numStart = text.find_last_of(' ', pos + pattern.size() + 20);
-				if (numStart != std::string::npos) {
-					const std::string numStr = text.substr(numStart + 1,
-						text.find_first_of(" \r\n", numStart + 1) - numStart - 1);
+				// The value follows the metric label after a single space, e.g.:
+				//   llamacpp:queue_len{type="queued"} 3
+				// Search forward from the end of the matched pattern.
+				const size_t valueStart = text.find(' ', pos + pattern.size());
+				if (valueStart != std::string::npos) {
+					const std::string numStr = text.substr(valueStart + 1,
+						text.find_first_of(" \r\n", valueStart + 1) - valueStart - 1);
 					try {
 						return std::stoi(trim(numStr));
 					} catch (...) {
@@ -1523,11 +1526,16 @@ std::function<bool(const std::string&)> onChunk) const {
 							continue;
 						}
 
-						const std::string eventPayload = trim(trimmedLine.substr(5));
+						// Strip exactly one optional leading space after "data:" per the
+						// SSE spec, matching the behaviour of the portable streaming path.
+						std::string eventPayload = trimmedLine.substr(5);
+						if (!eventPayload.empty() && eventPayload.front() == ' ') {
+							eventPayload.erase(0, 1);
+						}
 						if (eventPayload.empty()) {
 							continue;
 						}
-						if (eventPayload == "[DONE]") {
+						if (trim(eventPayload) == "[DONE]") {
 							pending.clear();
 							break;
 						}
