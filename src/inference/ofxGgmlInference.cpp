@@ -1160,9 +1160,9 @@ std::string ofxGgmlInference::sanitizeStructuredText(
 
 ofxGgmlInferenceResult ofxGgmlInference::generate(
 	const std::string & modelPath,
-const std::string & prompt,
-const ofxGgmlInferenceSettings & settings,
-std::function<bool(const std::string&)> onChunk) const {
+	const std::string & prompt,
+	const ofxGgmlInferenceSettings & settings,
+	std::function<bool(const std::string &)> onChunk) const {
 	ofxGgmlInferenceResult result;
 	bool promptWasTrimmed = false;
 	std::string effectivePrompt = settings.trimPromptToContext
@@ -1186,8 +1186,8 @@ std::function<bool(const std::string&)> onChunk) const {
 		}
 #endif
 		const auto t0 = std::chrono::steady_clock::now();
-	const std::string requestUrl =
-		ofxGgmlInferenceServerInternals::normalizeServerUrl(settings.serverUrl);
+		const std::string requestUrl =
+			ofxGgmlInferenceServerInternals::normalizeServerUrl(settings.serverUrl);
 		try {
 			ofJson payload;
 			const bool requestStreaming = (onChunk != nullptr);
@@ -1223,9 +1223,9 @@ std::function<bool(const std::string&)> onChunk) const {
 			}
 			std::string serverModel = trim(settings.serverModel);
 			if (serverModel.empty()) {
-			serverModel =
-				ofxGgmlInferenceServerInternals::resolveCachedActiveServerModel(
-					settings.serverUrl);
+				serverModel =
+					ofxGgmlInferenceServerInternals::resolveCachedActiveServerModel(
+						settings.serverUrl);
 			}
 			if (!serverModel.empty()) {
 				payload["model"] = serverModel;
@@ -1250,9 +1250,9 @@ std::function<bool(const std::string&)> onChunk) const {
 				const ofHttpResponse response = loader.handleRequest(request);
 				const std::string responseText = response.data.getText();
 				if (response.status < 200 || response.status >= 300) {
-				std::string detail = trim(
-					ofxGgmlInferenceServerInternals::extractTextFromOpenAiResponse(
-						responseText));
+					std::string detail = trim(
+						ofxGgmlInferenceServerInternals::extractTextFromOpenAiResponse(
+							responseText));
 					if (detail.empty()) {
 						detail = trim(responseText);
 					}
@@ -1481,8 +1481,8 @@ std::function<bool(const std::string&)> onChunk) const {
 					closeHandle(request);
 					closeHandle(connect);
 					closeHandle(session);
-			std::string detail = trim(
-				ofxGgmlInferenceServerInternals::extractTextFromOpenAiResponse(body));
+					std::string detail = trim(
+						ofxGgmlInferenceServerInternals::extractTextFromOpenAiResponse(body));
 					if (detail.empty()) {
 						detail = trim(body);
 					}
@@ -2100,9 +2100,9 @@ ofxGgmlEmbeddingResult ofxGgmlInference::embed(
 			return result;
 		}
 
-	const std::string requestUrl =
-		ofxGgmlInferenceServerInternals::normalizeServerEmbeddingsUrl(
-			settings.serverUrl);
+		const std::string requestUrl =
+			ofxGgmlInferenceServerInternals::normalizeServerEmbeddingsUrl(
+				settings.serverUrl);
 		try {
 			ofJson payload;
 			payload["input"] = sanitizedText;
@@ -2115,9 +2115,9 @@ ofxGgmlEmbeddingResult ofxGgmlInference::embed(
 			}
 			std::string serverModel = trim(settings.serverModel);
 			if (serverModel.empty()) {
-			serverModel =
-				ofxGgmlInferenceServerInternals::resolveCachedActiveServerModel(
-					settings.serverUrl);
+				serverModel =
+					ofxGgmlInferenceServerInternals::resolveCachedActiveServerModel(
+						settings.serverUrl);
 			}
 			if (!serverModel.empty()) {
 				payload["model"] = serverModel;
@@ -2138,7 +2138,7 @@ ofxGgmlEmbeddingResult ofxGgmlInference::embed(
 				if (result.error.empty()) {
 					result.error =
 						"server-backed embedding failed with HTTP status " +
-					std::to_string(response.status);
+						std::to_string(response.status);
 				}
 				if (!shouldTryLocalEmbeddingFallback) {
 					return result;
@@ -2290,11 +2290,10 @@ int ofxGgmlInference::countPromptTokens(
 		std::lock_guard<std::mutex> lock(m_tokenCountCacheMutex);
 		auto it = m_tokenCountCache.find(cacheKey);
 		if (it != m_tokenCountCache.end()) {
-			// Move to front of LRU list (most recently used)
-			m_tokenCountCacheLRU.remove(cacheKey);
-			m_tokenCountCacheLRU.push_front(cacheKey);
+			// Promote to front of LRU list in O(1) using the stored iterator
+			m_tokenCountCacheLRU.splice(m_tokenCountCacheLRU.begin(), m_tokenCountCacheLRU, it->second.second);
 			ofxGgmlMetrics::getInstance().recordCacheHit("token-count");
-			return it->second;
+			return it->second.first;
 		}
 	}
 	ofxGgmlMetrics::getInstance().recordCacheMiss("token-count");
@@ -2342,20 +2341,18 @@ int ofxGgmlInference::countPromptTokens(
 	if (tokenCount >= 0) {
 		std::lock_guard<std::mutex> lock(m_tokenCountCacheMutex);
 
-		// Implement LRU eviction
+		// Evict least recently used entry when at capacity
 		if (m_tokenCountCache.size() >= TOKEN_CACHE_MAX_SIZE) {
-			// Remove least recently used entry (back of list)
 			if (!m_tokenCountCacheLRU.empty()) {
-				const std::string & lruKey = m_tokenCountCacheLRU.back();
-				m_tokenCountCache.erase(lruKey);
+				m_tokenCountCache.erase(m_tokenCountCacheLRU.back());
 				m_tokenCountCacheLRU.pop_back();
 				ofxGgmlMetrics::getInstance().recordCacheEviction("token-count");
 			}
 		}
 
-		// Add new entry and mark as most recently used
-		m_tokenCountCache[cacheKey] = tokenCount;
+		// Insert at front (most recently used) and store the iterator for O(1) future promotions
 		m_tokenCountCacheLRU.push_front(cacheKey);
+		m_tokenCountCache.emplace(cacheKey, std::make_pair(tokenCount, m_tokenCountCacheLRU.begin()));
 	}
 	return tokenCount;
 }
@@ -2478,11 +2475,12 @@ int ofxGgmlInference::sampleFromLogits(
 	float topP,
 	uint32_t seed) {
 	if (logits.empty()) return -1;
+	const auto maxIt = std::max_element(logits.begin(), logits.end());
 	if (!std::isfinite(temperature) || temperature <= 0.0f) {
-		return static_cast<int>(std::distance(logits.begin(), std::max_element(logits.begin(), logits.end())));
+		return static_cast<int>(std::distance(logits.begin(), maxIt));
 	}
 
-	const float maxLogit = *std::max_element(logits.begin(), logits.end());
+	const float maxLogit = *maxIt;
 	std::vector<std::pair<float, size_t>> prob_idx;
 	prob_idx.reserve(logits.size());
 	float sum = 0.0f;
@@ -2494,7 +2492,7 @@ int ofxGgmlInference::sampleFromLogits(
 		sum += valid_p;
 	}
 	if (sum <= 0.0f) {
-		return static_cast<int>(std::distance(logits.begin(), std::max_element(logits.begin(), logits.end())));
+		return static_cast<int>(std::distance(logits.begin(), maxIt));
 	}
 	for (auto & pi : prob_idx) {
 		pi.first /= sum;
@@ -2583,7 +2581,7 @@ float ofxGgmlEmbeddingIndex::cosineSimilarity(const std::vector<float> & a, cons
 		nb += db * db;
 	}
 	if (na <= 0.0 || nb <= 0.0) return 0.0f;
-	return static_cast<float>(dot / (std::sqrt(na) * std::sqrt(nb)));
+	return static_cast<float>(dot / std::sqrt(na * nb));
 }
 
 // -----------------------------------------------------------------------------
@@ -2613,22 +2611,19 @@ ofxGgmlBatchResult ofxGgmlInference::generateBatch(
 		normalizedConcurrencyLimit(batchSettings.maxConcurrentRequests) > 1;
 
 	// Check if all requests share compatible settings for server batch mode
+	// requests is non-empty here — guaranteed by the early return above
 	bool allUseServer = true;
 	bool settingsCompatible = true;
-	ofxGgmlInferenceSettings sharedSettings;
-
-	if (!requests.empty()) {
-		sharedSettings = requests[0].settings;
-		for (const auto & req : requests) {
-			if (!req.settings.useServerBackend) {
-				allUseServer = false;
-			}
-			// Check key parameters that affect batching compatibility
-			if (req.settings.maxTokens != sharedSettings.maxTokens ||
-				req.settings.temperature != sharedSettings.temperature ||
-				req.settings.contextSize != sharedSettings.contextSize) {
-				settingsCompatible = false;
-			}
+	ofxGgmlInferenceSettings sharedSettings = requests[0].settings;
+	for (const auto & req : requests) {
+		if (!req.settings.useServerBackend) {
+			allUseServer = false;
+		}
+		// Check key parameters that affect batching compatibility
+		if (req.settings.maxTokens != sharedSettings.maxTokens ||
+			req.settings.temperature != sharedSettings.temperature ||
+			req.settings.contextSize != sharedSettings.contextSize) {
+			settingsCompatible = false;
 		}
 	}
 

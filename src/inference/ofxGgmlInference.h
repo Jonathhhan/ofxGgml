@@ -355,10 +355,11 @@ private:
 	mutable ofxGgmlInferenceCapabilities m_completionCapabilities;
 	mutable std::mutex m_completionCapabilitiesMutex;
 
-	mutable std::unordered_map<std::string, int> m_tokenCountCache;
-	mutable std::list<std::string> m_tokenCountCacheLRU;  // LRU tracking for cache eviction
+	mutable std::list<std::string> m_tokenCountCacheLRU;  // LRU order: front = most recently used
+	// Value stores (token count, iterator into LRU list) for O(1) promotion on hit
+	mutable std::unordered_map<std::string, std::pair<int, std::list<std::string>::iterator>> m_tokenCountCache;
 	mutable std::mutex m_tokenCountCacheMutex;
-	static constexpr size_t TOKEN_CACHE_MAX_SIZE = 1000;  // Reduced from 2000 for better memory management
+	static constexpr size_t TOKEN_CACHE_MAX_SIZE = 1000;
 
 	/// Helper to process batch via server backend
 	ofxGgmlBatchResult processBatchViaServer(
