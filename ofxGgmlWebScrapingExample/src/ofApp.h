@@ -2,6 +2,7 @@
 
 #include "ofMain.h"
 #include "ofxGgmlWorkflows.h"
+#include "support/ofxGgmlEasy.h"
 
 #include <future>
 #include <string>

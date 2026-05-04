@@ -2,6 +2,7 @@
 
 #include "ofMain.h"
 #include "ofxGgmlBasic.h"
+#include "support/ofxGgmlEasy.h"
 
 class ofApp : public ofBaseApp {
 public:

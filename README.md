@@ -312,6 +312,7 @@ Research and edit workflows:
 
 ```cpp
 #include "ofxGgmlWorkflows.h"
+#include "support/ofxGgmlEasy.h"
 
 ofxGgmlEasyCrawlerConfig crawler;
 crawler.executablePath = "mojo";

@@ -11,6 +11,7 @@
 #include "ofxGgmlWorkflows.h"
 #include "ofxGgmlCompanionWorkflows.h"
 #include "ofxGgmlAssistants.h"
+#include "support/ofxGgmlEasy.h"
 #include "ofxImGui.h"
 #include "config/ModelPresets.h"
 #include "panels/DeviceInfoPanel.h"

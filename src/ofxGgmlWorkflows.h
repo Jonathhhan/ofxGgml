@@ -18,6 +18,7 @@
 ///
 /// Example usage:
 ///   #include "ofxGgmlWorkflows.h"
+///   #include "support/ofxGgmlEasy.h"
 ///
 ///   ofxGgmlEasy ai;
 ///   ai.configureText(textConfig);
