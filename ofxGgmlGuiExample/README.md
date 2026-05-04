@@ -2,6 +2,8 @@
 
 This example is a showcase for the addon API layers and UI integration patterns. It is not the project test harness and should not be the first place new feature logic is added.
 
+The default mode picker stays focused on stable addon APIs. Enable **Show advanced workflows** in the sidebar only when you need companion/example-tier demos such as video essay, long-form video, or MilkDrop.
+
 ## Maintenance policy
 
 - Keep the GUI focused on demonstrating stable addon APIs.

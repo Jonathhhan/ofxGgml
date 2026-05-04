@@ -70,6 +70,36 @@ const char * const kDefaultTextServerUrl = "http://127.0.0.1:8080";
 const char * const kDefaultSpeechServerUrl = "http://127.0.0.1:8081";
 
 namespace {
+	constexpr std::array<AiMode, 12> kDefaultGuiModes = {
+		AiMode::Easy,
+		AiMode::Chat,
+		AiMode::Script,
+		AiMode::Summarize,
+		AiMode::Write,
+		AiMode::Translate,
+		AiMode::Custom,
+		AiMode::Vision,
+		AiMode::Speech,
+		AiMode::Tts,
+		AiMode::Diffusion,
+		AiMode::Clip
+	};
+
+	constexpr std::array<AiMode, 3> kAdvancedGuiModes = {
+		AiMode::VideoEssay,
+		AiMode::LongVideo,
+		AiMode::MilkDrop
+	};
+
+	bool isAdvancedGuiMode(AiMode mode) {
+		for (const AiMode advancedMode : kAdvancedGuiModes) {
+			if (mode == advancedMode) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	constexpr std::array<int, 8> kSupportedDiffusionImageSizes = {128, 256, 384, 512, 640, 768, 896, 1024};
 	const char * const kVideoStructureSettingLabels[] = {
 		"Three-act cinematic",
@@ -1027,12 +1057,12 @@ void ofApp::killActiveInferenceProcess() {
 void ofApp::setup() {
 	gConsoleAnsiEnabled = enableConsoleAnsiFormatting();
 	ofDisableArbTex();
-	ofSetWindowTitle("ofxGgml AI Studio");
+	ofSetWindowTitle("ofxGgml GUI Example");
 	ofSetFrameRate(60);
 	ofSetBackgroundColor(ofColor(30, 30, 34));
 
 gui.setup(nullptr, true, ImGuiConfigFlags_None, true);
-ImGui::GetIO().IniFilename = "imgui_ggml_studio.ini";
+ImGui::GetIO().IniFilename = "imgui_ofxggml_gui_example.ini";
 applyLogLevel(logLevel);
 
 // Initialize presets.
@@ -1096,10 +1126,12 @@ if (trim(diffusionOutputDir).empty()) {
 		sizeof(diffusionOutputDir),
 		ofToDataPath("generated", true));
 }
-if (shouldManageLocalSpeechServer(effectiveSpeechServerUrl(speechServerUrl)) &&
+	if (shouldManageLocalSpeechServer(effectiveSpeechServerUrl(speechServerUrl)) &&
 	!findLocalSpeechServerExecutable().empty()) {
 	startLocalSpeechServer();
 }
+
+showAdvancedGuiModes = showAdvancedGuiModes || isAdvancedGuiMode(activeMode);
 
 // Pre-fill example system prompt only if not restored from session.
 if (customSystemPrompt[0] == '\0') {
@@ -1433,7 +1465,7 @@ ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
 
 if (ImGui::Begin("##Sidebar", nullptr, flags)) {
 const float compactSidebarFieldWidth = std::min(260.0f, ImGui::GetContentRegionAvail().x);
-ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "AI Studio");
+ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "ofxGgml");
 ImGui::Separator();
 ImGui::Spacing();
 ImGui::Text("Mode:");
@@ -1443,22 +1475,41 @@ const int activeModeIndex = std::clamp(
 	0,
 	kModeCount - 1);
 if (ImGui::BeginCombo("##ModeSel", modeLabels[activeModeIndex])) {
-	for (int i = 0; i < kModeCount; i++) {
-		const bool isSelected = (activeModeIndex == i);
-		if (ImGui::Selectable(modeLabels[i], isSelected)) {
-			activeMode = static_cast<AiMode>(i);
+	auto drawModeOption = [&](AiMode mode) {
+		const int modeIndex = std::clamp(static_cast<int>(mode), 0, kModeCount - 1);
+		const bool isSelected = (activeModeIndex == modeIndex);
+		if (ImGui::Selectable(modeLabels[modeIndex], isSelected)) {
+			activeMode = mode;
 			if (useModeTokenBudgets) {
-				maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(i)], 32, 4096);
+				maxTokens = std::clamp(modeMaxTokens[static_cast<size_t>(modeIndex)], 32, 4096);
 			}
 			syncTextBackendForActiveMode(false, false);
 		}
 		if (isSelected) {
 			ImGui::SetItemDefaultFocus();
 		}
+	};
+	for (const AiMode mode : kDefaultGuiModes) {
+		drawModeOption(mode);
+	}
+	if (showAdvancedGuiModes) {
+		ImGui::Separator();
+		ImGui::TextDisabled("Advanced workflows");
+		for (const AiMode mode : kAdvancedGuiModes) {
+			drawModeOption(mode);
+		}
+	} else if (isAdvancedGuiMode(activeMode)) {
+		ImGui::Separator();
+		ImGui::TextDisabled("Current advanced workflow");
+		drawModeOption(activeMode);
 	}
 	ImGui::EndCombo();
 }
-ImGui::TextDisabled("Stored backend and token defaults follow the selected mode.");
+ImGui::Checkbox("Show advanced workflows", &showAdvancedGuiModes);
+ImGui::TextDisabled(
+	showAdvancedGuiModes
+		? "Advanced workflow modes are visible."
+		: "Default view keeps the GUI focused on stable addon APIs.");
 
 drawSectionSeparator();
 

@@ -186,7 +186,7 @@ struct TtsPreviewState {
 };
 
 // ---------------------------------------------------------------------------
-// ofApp — ofxGgml AI Studio with ofxImGui
+// ofApp — ofxGgml GUI example with ofxImGui
 // ---------------------------------------------------------------------------
 
 class ofApp : public ofBaseApp {
@@ -812,6 +812,7 @@ private:
 	bool showDeviceInfo = false;
 	bool showLog = false;
 	bool showPerformance = false;
+	bool showAdvancedGuiModes = false;
 	ofLogLevel logLevel = OF_LOG_NOTICE;
 	std::deque<std::string> logMessages;
 	std::mutex logMutex;
