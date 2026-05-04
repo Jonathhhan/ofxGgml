@@ -7,6 +7,21 @@
 
 namespace {
 
+std::string joinLines(const std::vector<std::string> & lines) {
+	std::ostringstream out;
+	for (size_t i = 0; i < lines.size(); ++i) {
+		if (i > 0) {
+			out << "\n";
+		}
+		out << lines[i];
+	}
+	return out.str();
+}
+
+} // namespace
+
+namespace {
+
 const char * const kEasyActionLabels[] = {
 	"Chat",
 	"Summarize",
@@ -314,13 +329,39 @@ void ofApp::drawEasyPanel() {
 		"scripts/model-catalog.json",
 		&ggml);
 	if (!diagnostics.ready) {
+		std::string quickFixText = diagnostics.quickFixSummary;
+		std::string quickFixLabel = "Quick fixes";
+		const std::vector<std::string> * quickFixCommands = &diagnostics.quickFixCommands;
+
+#ifdef _WIN32
+		if (!diagnostics.quickFixCommandsWindowsBat.empty()) {
+			quickFixLabel = "Windows (.bat)";
+			quickFixCommands = &diagnostics.quickFixCommandsWindowsBat;
+			quickFixText = joinLines(*quickFixCommands);
+		} else if (!diagnostics.quickFixCommandsWindowsPowerShell.empty()) {
+			quickFixLabel = "Windows (PowerShell)";
+			quickFixCommands = &diagnostics.quickFixCommandsWindowsPowerShell;
+			quickFixText = joinLines(*quickFixCommands);
+		}
+#else
+		if (!diagnostics.quickFixCommandsMacLinux.empty()) {
+			quickFixLabel = "macOS/Linux";
+			quickFixCommands = &diagnostics.quickFixCommandsMacLinux;
+			quickFixText = joinLines(*quickFixCommands);
+		}
+#endif
+
 		ImGui::Spacing();
 		ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.25f, 1.0f), "Text setup needs attention");
-		if (!diagnostics.quickFixSummary.empty()) {
-			ImGui::TextWrapped("%s", diagnostics.quickFixSummary.c_str());
+		if (!quickFixText.empty()) {
+			ImGui::TextDisabled("%s", quickFixLabel.c_str());
+			ImGui::TextWrapped("%s", quickFixText.c_str());
 		}
-		if (!diagnostics.quickFixCommands.empty() && ImGui::SmallButton("Copy quick fixes")) {
-			copyToClipboard(diagnostics.quickFixSummary);
+		if (quickFixCommands != nullptr && !quickFixCommands->empty()) {
+			std::string buttonLabel = "Copy " + quickFixLabel;
+			if (ImGui::SmallButton(buttonLabel.c_str())) {
+				copyToClipboard(quickFixText);
+			}
 		}
 		ImGui::Separator();
 	}
