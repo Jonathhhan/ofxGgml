@@ -791,6 +791,50 @@ std::string stripUrlFragment(const std::string & url) {
 	return fragmentPos == std::string::npos ? url : url.substr(0, fragmentPos);
 }
 
+std::string parseUrlScheme(const std::string & rawUrl) {
+	const std::string trimmed = trimCopy(rawUrl);
+	const size_t schemePos = trimmed.find("://");
+	if (schemePos == std::string::npos) {
+		return {};
+	}
+	return toLowerCopy(trimmed.substr(0, schemePos));
+}
+
+bool hasSameRemoteOrigin(
+	const std::string & startUrl,
+	const std::string & candidateUrl) {
+
+	const std::string startScheme = parseUrlScheme(startUrl);
+	const std::string candidateScheme = parseUrlScheme(candidateUrl);
+	if (startScheme.empty() || candidateScheme.empty()) {
+		return true;
+	}
+	if (startScheme != candidateScheme) {
+		return false;
+	}
+	const std::string startHost = parseUrlHost(startUrl);
+	const std::string candidateHost = parseUrlHost(candidateUrl);
+	if (startHost.empty() || candidateHost.empty()) {
+		return true;
+	}
+	return startHost == candidateHost;
+}
+
+bool isUrlInCrawlerScope(
+	const std::string & startUrl,
+	const std::string & candidateUrl,
+	const ofxGgmlWebCrawlerRequest & request) {
+
+	if (!request.allowedDomains.empty()) {
+		return isFileUrl(candidateUrl) ||
+			isUrlAllowedForDomains(candidateUrl, request.allowedDomains);
+	}
+	if (!request.stayOnStartDomain || isFileUrl(candidateUrl)) {
+		return true;
+	}
+	return hasSameRemoteOrigin(startUrl, candidateUrl);
+}
+
 std::string sanitizeFileStem(std::string value) {
 	for (char & ch : value) {
 		const unsigned char uch = static_cast<unsigned char>(ch);
@@ -2250,7 +2294,9 @@ public:
 		std::string firstError;
 		pending.push({result.startUrl, 0});
 		const int maxDepth = std::max(0, request.maxDepth);
-		const size_t maxPages = 24;
+		const size_t maxPages = request.maxPages > 0
+			? static_cast<size_t>(request.maxPages)
+			: 24;
 
 		while (!pending.empty() && visited.size() < maxPages) {
 			const auto [currentUrlRaw, currentDepth] = pending.front();
@@ -2260,9 +2306,7 @@ public:
 			if (currentUrl.empty() || !visited.insert(currentUrl).second) {
 				continue;
 			}
-			if (!request.allowedDomains.empty() &&
-				!isFileUrl(currentUrl) &&
-				!isUrlAllowedForDomains(currentUrl, request.allowedDomains)) {
+			if (!isUrlInCrawlerScope(result.startUrl, currentUrl, request)) {
 				continue;
 			}
 
@@ -2345,9 +2389,7 @@ public:
 				if (normalizedLink.empty() || visited.find(normalizedLink) != visited.end()) {
 					continue;
 				}
-				if (!request.allowedDomains.empty() &&
-					!isFileUrl(normalizedLink) &&
-					!isUrlAllowedForDomains(normalizedLink, request.allowedDomains)) {
+				if (!isUrlInCrawlerScope(result.startUrl, normalizedLink, request)) {
 					continue;
 				}
 				pending.push({normalizedLink, currentDepth + 1});

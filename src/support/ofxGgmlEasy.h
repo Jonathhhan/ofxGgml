@@ -68,6 +68,8 @@ struct ofxGgmlEasyCrawlerConfig {
 	int maxDepth = 2;
 	bool renderJavaScript = false;
 	bool keepOutputFiles = true;
+	bool stayOnStartDomain = true;
+	int maxPages = 24;
 	std::vector<std::string> allowedDomains;
 	std::vector<std::string> extraArgs;
 };

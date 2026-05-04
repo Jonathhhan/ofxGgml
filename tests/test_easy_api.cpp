@@ -732,3 +732,68 @@ TEST_CASE("Default crawler uses native HTML parsing for static pages", "[easy_ap
 	}
 	REQUIRE(foundSecondPage);
 }
+
+TEST_CASE("Native crawler limits crawled pages", "[easy_api][crawler]") {
+	const auto dir = makeEasyApiTestDir("native_html_limit");
+	const auto indexPath = dir / "index.html";
+	const auto secondPath = dir / "page2.html";
+	const auto thirdPath = dir / "page3.html";
+	{
+		std::ofstream out(indexPath);
+		out
+			<< "<html><head><title>Limit Root</title></head><body>"
+			<< "<p>First page.</p><a href=\"page2.html\">Second</a>"
+			<< "</body></html>";
+	}
+	{
+		std::ofstream out(secondPath);
+		out
+			<< "<html><head><title>Limit Second</title></head><body>"
+			<< "<p>Second page.</p><a href=\"page3.html\">Third</a>"
+			<< "</body></html>";
+	}
+	{
+		std::ofstream out(thirdPath);
+		out
+			<< "<html><head><title>Limit Third</title></head><body>"
+			<< "<p>Third page.</p></body></html>";
+	}
+
+	ofxGgmlWebCrawler crawler;
+	ofxGgmlWebCrawlerRequest request;
+	request.startUrl = makeFileUrl(indexPath);
+	request.maxDepth = 3;
+	request.maxPages = 2;
+	request.keepOutputFiles = false;
+
+	const auto result = crawler.crawl(request);
+	REQUIRE(result.success);
+	REQUIRE(result.documents.size() == 2);
+	REQUIRE(result.documents[0].title == "Limit Root");
+	REQUIRE(result.documents[1].title == "Limit Second");
+}
+
+TEST_CASE("Native crawler stays on the start domain by default", "[easy_api][crawler]") {
+	const auto dir = makeEasyApiTestDir("native_html_scope");
+	const auto indexPath = dir / "index.html";
+	{
+		std::ofstream out(indexPath);
+		out
+			<< "<html><head><title>Scoped Root</title></head><body>"
+			<< "<p>Local source page.</p>"
+			<< "<a href=\"https://example.com/offsite\">External page</a>"
+			<< "</body></html>";
+	}
+
+	ofxGgmlWebCrawler crawler;
+	ofxGgmlWebCrawlerRequest request;
+	request.startUrl = makeFileUrl(indexPath);
+	request.maxDepth = 1;
+	request.keepOutputFiles = false;
+
+	const auto result = crawler.crawl(request);
+	REQUIRE(result.success);
+	REQUIRE(result.documents.size() == 1);
+	REQUIRE(result.documents.front().title == "Scoped Root");
+	REQUIRE(result.commandOutput.find("https://example.com/offsite") == std::string::npos);
+}

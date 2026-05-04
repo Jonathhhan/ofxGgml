@@ -900,6 +900,8 @@ ofxGgmlWebCrawlerRequest ofxGgmlEasy::makeCrawlerRequest(
 	request.maxDepth = maxDepth >= 0 ? maxDepth : m_crawlerConfig.maxDepth;
 	request.renderJavaScript = m_crawlerConfig.renderJavaScript;
 	request.keepOutputFiles = m_crawlerConfig.keepOutputFiles;
+	request.stayOnStartDomain = m_crawlerConfig.stayOnStartDomain;
+	request.maxPages = m_crawlerConfig.maxPages;
 	request.allowedDomains = m_crawlerConfig.allowedDomains;
 	request.extraArgs = m_crawlerConfig.extraArgs;
 	request.executablePath = m_crawlerConfig.executablePath;
