@@ -2,7 +2,7 @@
 
 This document tracks the Option A direction for ofxGgml: a boring, dependable openFrameworks addon for ggml tensors plus basic local LLM inference. Larger creative-application workflows belong in companion addons or example-level integrations so every user does not pay for every experiment.
 
-**Last Updated**: 2026-05-04  
+**Last Updated**: 2026-05-04
 **Current Version**: 1.0.4
 
 ---
@@ -25,22 +25,22 @@ That means prioritizing:
 
 ## Guiding Product Principles
 
-1. **Boring core, exciting elsewhere**  
+1. **Boring core, exciting elsewhere**
    The default addon should favor stable setup, clear diagnostics, and small APIs. Experimental creative systems should be built as companion addons or focused examples.
 
-2. **Local by default**  
+2. **Local by default**
    Core inference should run with local models, local tools, and local files whenever possible.
 
-3. **Verifiable by design**  
+3. **Verifiable by design**
    Inference, retrieval, and helper features should expose provenance, warnings, confidence, and reproducibility metadata where relevant.
 
-4. **Composable across modalities**  
+4. **Composable across modalities**
    Tensor, model, text, and optional modality helpers should connect through stable contracts without making the addon an application framework.
 
-5. **Useful for artists and developers**  
+5. **Useful for artists and developers**
    APIs should work for creative coding apps without forcing the addon to own their application lifecycle.
 
-6. **Reference examples, not monoliths**  
+6. **Reference examples, not monoliths**
    The GUI example should demonstrate addon APIs. Video essay, montage, music/AceStep, MilkDrop, and Holoscan workflows should move to companion addons or remain example-level integrations.
 
 ---
