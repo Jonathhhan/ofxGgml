@@ -782,6 +782,15 @@ TEST_CASE("Native crawler stays on the start domain by default", "[easy_api][cra
 			<< "<html><head><title>Scoped Root</title></head><body>"
 			<< "<p>Local source page.</p>"
 			<< "<a href=\"https://example.com/offsite\">External page</a>"
+			<< "<a href=\"local.html\">Local page</a>"
+			<< "</body></html>";
+	}
+	const auto localPath = dir / "local.html";
+	{
+		std::ofstream out(localPath);
+		out
+			<< "<html><head><title>Scoped Local</title></head><body>"
+			<< "<p>Local follow-up page.</p>"
 			<< "</body></html>";
 	}
 
@@ -789,11 +798,13 @@ TEST_CASE("Native crawler stays on the start domain by default", "[easy_api][cra
 	ofxGgmlWebCrawlerRequest request;
 	request.startUrl = makeFileUrl(indexPath);
 	request.maxDepth = 1;
+	request.maxPages = 2;
 	request.keepOutputFiles = false;
 
 	const auto result = crawler.crawl(request);
 	REQUIRE(result.success);
-	REQUIRE(result.documents.size() == 1);
+	REQUIRE(result.documents.size() == 2);
 	REQUIRE(result.documents.front().title == "Scoped Root");
+	REQUIRE(result.documents[1].title == "Scoped Local");
 	REQUIRE(result.commandOutput.find("https://example.com/offsite") == std::string::npos);
 }

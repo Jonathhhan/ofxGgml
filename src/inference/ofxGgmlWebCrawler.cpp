@@ -2303,10 +2303,9 @@ public:
 			pending.pop();
 
 			const std::string currentUrl = normalizeUrlForDeduplication(currentUrlRaw);
-			if (currentUrl.empty() || !visited.insert(currentUrl).second) {
-				continue;
-			}
-			if (!isUrlInCrawlerScope(result.startUrl, currentUrl, request)) {
+			if (currentUrl.empty() ||
+				!isUrlInCrawlerScope(result.startUrl, currentUrl, request) ||
+				!visited.insert(currentUrl).second) {
 				continue;
 			}
 
