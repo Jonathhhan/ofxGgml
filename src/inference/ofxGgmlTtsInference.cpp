@@ -1,5 +1,6 @@
 #include "ofxGgmlTtsInference.h"
 
+#include "ofxGgmlNvigiTtsBackend.h"
 #include "support/ofxGgmlProcessSecurity.h"
 
 #include <algorithm>
@@ -239,6 +240,20 @@ std::vector<ofxGgmlTtsModelProfile> ofxGgmlTtsInference::defaultProfiles() {
 			false,
 			false,
 			false
+		},
+		{
+			"nvigi",
+			"NVIGI TTS (optional SDK bridge)",
+			"NVIDIA NVIGI SDK TTS plugin",
+			"NVIDIA NVIGI SDK 1.4+ Basic C++ TTS sample",
+			"",
+			"",
+			"",
+			"",
+			"",
+			false,
+			true,
+			false
 		}
 	};
 }
@@ -282,6 +297,16 @@ ofxGgmlTtsInference::createPiperTtsBridgeBackend(
 	ofxGgmlTtsBridgeBackend::SynthesizeFunction synthesizeFunction,
 	const std::string & displayName) {
 	return createTtsBridgeBackend(std::move(synthesizeFunction), displayName);
+}
+
+std::shared_ptr<ofxGgmlTtsBackend>
+ofxGgmlTtsInference::createNvigiTtsBackend(
+	ofxGgmlTtsBridgeBackend::SynthesizeFunction synthesizeFunction,
+	const std::string & displayName) {
+	return std::make_shared<ofxGgmlNvigiTtsBackend>(
+		std::move(synthesizeFunction),
+		ofxGgmlNvigiTtsBackend::Options{},
+		displayName);
 }
 
 std::shared_ptr<ofxGgmlTtsBackend>

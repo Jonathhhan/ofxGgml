@@ -144,6 +144,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         ../src/inference/ofxGgmlVideoPlanner.cpp
         ../src/inference/ofxGgmlVisionInference.cpp
         ../src/inference/ofxGgmlVideoInference.cpp
+        ../src/inference/ofxGgmlYoloInference.cpp
         ../src/inference/ofxGgmlWebCrawler.cpp
         ../src/inference/ofxGgmlWebSearch.cpp
         ../src/inference/ofxGgmlTtsInference.cpp
@@ -204,6 +205,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         test_speech_inference.cpp
         test_vision_inference.cpp
         test_video_inference.cpp
+        test_yolo_inference.cpp
         test_assistant_eval.cpp
         test_easy_api.cpp
         test_media_prompt_generator.cpp

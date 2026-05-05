@@ -40,7 +40,7 @@ What you get (includes Core plus):
 What you get (includes Basic plus):
 - Speech-to-text (Whisper)
 - Text-to-speech (Piper, OuteTTS)
-- Vision (image understanding)
+- Vision (image understanding and YOLO object detection)
 - Video (frame analysis)
 - Image generation (Stable Diffusion integration)
 - CLIP embeddings

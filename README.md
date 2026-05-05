@@ -14,7 +14,7 @@ ofxGgml uses **layered headers** - include only what you need:
 |--------|--------------|----------|
 | **`ofxGgmlBasic.h`** | **Core + text inference** | **Text/chat AI (start here!)** |
 | `ofxGgml.h` | Basic + chat/text/code assistants | Default supported addon tier |
-| `ofxGgmlModalities.h` | Basic + speech/vision/TTS/images/CLIP adapters | Optional multimodal adapter layer |
+| `ofxGgmlModalities.h` | Basic + speech/vision/TTS/YOLO/images/CLIP adapters | Optional multimodal adapter layer |
 | `ofxGgmlWorkflows.h` | Basic + source-grounded planning/research helpers | Optional helper layer |
 | `ofxGgmlCompanionWorkflows.h` | Montage/video essay/music/MilkDrop/AceStep/Holoscan prototypes | Companion/example-tier opt-in |
 | `ofxGgmlAssistants.h` | Basic + code/chat assistants | AI coding assistance |
@@ -69,10 +69,11 @@ This addon is released under the [MIT License](LICENSE).
 - server-streamed text output now uses delta-based chunk handling so Chat and Script mode no longer duplicate partial text while `llama-server` replies are still arriving
 - addon-level `Live context` support for loaded sources, domain-provider grounding, generic search fallback, and stricter citation-oriented response modes
 - `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
-- `ofxGgmlTtsInference` as a lightweight text-to-speech bridge layer for Piper and optional `chatllm.cpp`-backed OuteTTS workflows
+- `ofxGgmlTtsInference` as a lightweight text-to-speech bridge layer for Piper, optional `chatllm.cpp`-backed OuteTTS workflows, and opt-in NVIDIA NVIGI SDK callbacks behind `OFXGGML_ENABLE_NVIGI`
 - `ofxGgmlClipInference` as a lightweight CLIP-style embedding and ranking bridge layer for text/image similarity workflows, with bundled `clip.cpp` support (no external dependencies required)
 - `ofxGgmlDiffusionInference` as a lightweight image-generation bridge layer that can host an `ofxStableDiffusion` adapter without coupling diffusion internals into the core addon, now with structured image modes, CLIP-friendly rerank selection, and richer per-image metadata
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
+- `ofxGgmlYoloInference` for object-detection requests through the ggml `examples/yolo` `yolov3-tiny` CLI adapter, using GGUF models such as `yolov3-tiny.gguf`
 - `ofxGgmlVideoInference` for backend-driven video understanding, starting with sampled-frame analysis and room for future specialized video backends
 - `ofxGgmlSegmentationInference` as a lightweight image-segmentation bridge layer, with optional adapter helpers for [sam.cpp](https://github.com/YavorGIvanov/sam.cpp); run `scripts/install-sam-cpp.sh` or `scripts\install-sam-cpp.bat` to place the local sam.cpp checkout under `libs/sam.cpp`
 - `ofxGgmlVideoPlanner` for beat planning, multi-scene sequencing, and AI-assisted edit-plan generation that can feed video, diffusion, or writing workflows

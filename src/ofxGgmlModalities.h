@@ -4,8 +4,8 @@
 ///
 /// This header adds multimodal AI capabilities on top of basic inference:
 /// - Speech-to-text (Whisper integration)
-/// - Text-to-speech (Piper, OuteTTS support)
-/// - Vision and video understanding (LLaVA-style models)
+/// - Text-to-speech (Piper, OuteTTS, optional NVIGI support)
+/// - Vision, YOLO object detection, and video understanding (LLaVA-style models)
 /// - Image generation (Stable Diffusion integration)
 /// - CLIP embeddings (text/image similarity)
 /// - Image segmentation adapters (SAM / sam.cpp)
@@ -37,10 +37,14 @@
 #include "inference/ofxGgmlTtsInference.h"
 #include "inference/ofxGgmlPiperTtsAdapters.h"
 #include "inference/ofxGgmlChatLlmTtsAdapters.h"
+#if OFXGGML_ENABLE_NVIGI
+#include "inference/ofxGgmlNvigiTtsBackend.h"
+#endif
 
 // Vision modalities
 #include "inference/ofxGgmlVisionInference.h"
 #include "inference/ofxGgmlVideoInference.h"
+#include "inference/ofxGgmlYoloInference.h"
 
 // Image generation
 #include "inference/ofxGgmlDiffusionInference.h"

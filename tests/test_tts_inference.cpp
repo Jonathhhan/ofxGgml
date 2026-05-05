@@ -1,5 +1,6 @@
 #include "catch2.hpp"
 #include "../src/inference/ofxGgmlChatLlmTtsAdapters.h"
+#include "../src/inference/ofxGgmlNvigiTtsBackend.h"
 #include "../src/inference/ofxGgmlPiperTtsAdapters.h"
 #include "../src/inference/ofxGgmlTtsInference.h"
 
@@ -113,6 +114,26 @@ TEST_CASE("TTS bridge backend creation", "[tts_inference]") {
 		REQUIRE(backend != nullptr);
 		REQUIRE_FALSE(backend->backendName().empty());
 	}
+
+	SECTION("Create optional NVIGI TTS backend") {
+		auto backend = ofxGgmlTtsInference::createNvigiTtsBackend();
+		REQUIRE(backend != nullptr);
+		REQUIRE(backend->backendName() == "NVIGI TTS");
+	}
+}
+
+TEST_CASE("NVIGI TTS backend stays optional by default", "[tts_inference][nvigi]") {
+	auto backend = std::dynamic_pointer_cast<ofxGgmlNvigiTtsBackend>(
+		ofxGgmlTtsInference::createNvigiTtsBackend());
+	REQUIRE(backend != nullptr);
+	REQUIRE_FALSE(ofxGgmlNvigiTtsBackend::isSdkEnabled());
+
+	ofxGgmlTtsRequest request;
+	request.text = "hello";
+	const auto result = backend->synthesize(request);
+	REQUIRE_FALSE(result.success);
+	REQUIRE(result.backendName == "NVIGI TTS");
+	REQUIRE(result.error.find("OFXGGML_ENABLE_NVIGI") != std::string::npos);
 }
 
 TEST_CASE("TTS bridge backend configuration", "[tts_inference]") {
@@ -508,4 +529,3 @@ TEST_CASE("llama-tts CLI backend executable is configurable", "[tts_inference]")
 	backend.setExecutable("llama-tts");
 	REQUIRE(backend.getExecutable() == "llama-tts");
 }
-

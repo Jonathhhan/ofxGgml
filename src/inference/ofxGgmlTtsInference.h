@@ -140,6 +140,10 @@ public:
 			ofxGgmlTtsBridgeBackend::SynthesizeFunction synthesizeFunction = {},
 			const std::string & displayName = "Piper TTS");
 	static std::shared_ptr<ofxGgmlTtsBackend>
+		createNvigiTtsBackend(
+			ofxGgmlTtsBridgeBackend::SynthesizeFunction synthesizeFunction = {},
+			const std::string & displayName = "NVIGI TTS");
+	static std::shared_ptr<ofxGgmlTtsBackend>
 		createLlamaTtsCliBackend(
 			const std::string & executable = "llama-tts");
 
