@@ -12,6 +12,7 @@
 #include <set>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 
 #ifdef _WIN32
@@ -38,6 +39,74 @@ static size_t totalCachedBytes(const std::vector<ofxGgmlScriptSourceFileEntry> &
 		total += f.cachedContent.size();
 	}
 	return total;
+}
+
+int64_t fileTimeTicks(const std::filesystem::file_time_type & time) {
+	return static_cast<int64_t>(time.time_since_epoch().count());
+}
+
+bool readLocalFileStamp(
+	const std::filesystem::path & path,
+	uint64_t * outSize,
+	int64_t * outWriteTimeTicks) {
+	std::error_code ec;
+	const auto size = std::filesystem::file_size(path, ec);
+	if (ec) {
+		return false;
+	}
+	const auto writeTime = std::filesystem::last_write_time(path, ec);
+	if (ec) {
+		return false;
+	}
+	if (outSize) {
+		*outSize = static_cast<uint64_t>(size);
+	}
+	if (outWriteTimeTicks) {
+		*outWriteTimeTicks = fileTimeTicks(writeTime);
+	}
+	return true;
+}
+
+bool entryCacheStampMatches(
+	const ofxGgmlScriptSourceFileEntry & a,
+	const ofxGgmlScriptSourceFileEntry & b) {
+	return a.fullPath == b.fullPath &&
+		a.fileSizeBytes == b.fileSizeBytes &&
+		a.lastWriteTimeTicks == b.lastWriteTimeTicks;
+}
+
+bool cacheEntryContentLocked(
+	std::vector<ofxGgmlScriptSourceFileEntry> & files,
+	const ofxGgmlScriptSourceFileEntry & entry,
+	size_t preferredIndex,
+	const std::string & content) {
+	if (content.size() > kMaxCachedEntryBytes ||
+		totalCachedBytes(files) + content.size() > kMaxCachedContentBytes) {
+		return false;
+	}
+
+	auto applyCache = [&](ofxGgmlScriptSourceFileEntry & target) {
+		target.cachedContent = content;
+		target.isCached = true;
+	};
+
+	if (preferredIndex < files.size() &&
+		entryCacheStampMatches(files[preferredIndex], entry)) {
+		applyCache(files[preferredIndex]);
+		return true;
+	}
+
+	const auto match = std::find_if(
+		files.begin(),
+		files.end(),
+		[&entry](const ofxGgmlScriptSourceFileEntry & candidate) {
+			return entryCacheStampMatches(candidate, entry);
+		});
+	if (match == files.end()) {
+		return false;
+	}
+	applyCache(*match);
+	return true;
 }
 
 std::string normalizeLower(const std::string & s) {
@@ -1104,11 +1173,38 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 	if (entry.isDirectory) return false;
 
 	if (entry.isCached) {
-		outContent = entry.cachedContent;
-		return true;
+		if (type == ofxGgmlScriptSourceType::LocalFolder) {
+			uint64_t currentSize = 0;
+			int64_t currentWriteTime = 0;
+			if (!readLocalFileStamp(entry.fullPath, &currentSize, &currentWriteTime) ||
+				currentSize != entry.fileSizeBytes ||
+				currentWriteTime != entry.lastWriteTimeTicks) {
+				std::lock_guard<std::mutex> lock(m_mutex);
+				if (index >= 0 && index < static_cast<int>(m_files.size()) &&
+					m_files[static_cast<size_t>(index)].fullPath == entry.fullPath) {
+					m_files[static_cast<size_t>(index)].cachedContent.clear();
+					m_files[static_cast<size_t>(index)].isCached = false;
+				}
+			} else {
+				outContent = entry.cachedContent;
+				return true;
+			}
+		} else {
+			outContent = entry.cachedContent;
+			return true;
+		}
 	}
 
 	if (type == ofxGgmlScriptSourceType::LocalFolder) {
+		uint64_t currentSize = 0;
+		int64_t currentWriteTime = 0;
+		if (!readLocalFileStamp(entry.fullPath, &currentSize, &currentWriteTime)) {
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_status = "Failed to inspect: " + entry.name;
+			return false;
+		}
+		entry.fileSizeBytes = currentSize;
+		entry.lastWriteTimeTicks = currentWriteTime;
 		std::ifstream in(entry.fullPath, std::ios::binary);
 		if (!in.is_open()) {
 			std::lock_guard<std::mutex> lock(m_mutex);
@@ -1120,23 +1216,7 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 		in.close();
 		outContent = std::move(content);
 		std::lock_guard<std::mutex> lock(m_mutex);
-		const size_t entryIndex = static_cast<size_t>(index);
-		if (entryIndex < m_files.size() &&
-			m_files[entryIndex].fullPath == entry.fullPath) {
-			m_files[entryIndex].cachedContent = outContent;
-			m_files[entryIndex].isCached = true;
-		} else {
-			const auto match = std::find_if(
-				m_files.begin(),
-				m_files.end(),
-				[&entry](const ofxGgmlScriptSourceFileEntry & candidate) {
-					return candidate.fullPath == entry.fullPath;
-				});
-			if (match != m_files.end()) {
-				match->cachedContent = outContent;
-				match->isCached = true;
-			}
-		}
+		cacheEntryContentLocked(m_files, entry, static_cast<size_t>(index), outContent);
 		m_status = "Loaded: " + entry.name;
 		return true;
 	}
@@ -1156,23 +1236,7 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 		}
 		outContent = response.data.getText();
 		std::lock_guard<std::mutex> lock(m_mutex);
-		const size_t entryIndex = static_cast<size_t>(index);
-		if (entryIndex < m_files.size() &&
-			m_files[entryIndex].fullPath == entry.fullPath) {
-			m_files[entryIndex].cachedContent = outContent;
-			m_files[entryIndex].isCached = true;
-		} else {
-			const auto match = std::find_if(
-				m_files.begin(),
-				m_files.end(),
-				[&entry](const ofxGgmlScriptSourceFileEntry & candidate) {
-					return candidate.fullPath == entry.fullPath;
-				});
-			if (match != m_files.end()) {
-				match->cachedContent = outContent;
-				match->isCached = true;
-			}
-		}
+		cacheEntryContentLocked(m_files, entry, static_cast<size_t>(index), outContent);
 		m_status = "Loaded: " + entry.name;
 		return true;
 	}
@@ -1191,23 +1255,7 @@ bool ofxGgmlScriptSource::loadFileContent(int index, std::string & outContent) {
 		}
 		outContent = response.data.getText();
 		std::lock_guard<std::mutex> lock(m_mutex);
-		const size_t entryIndex = static_cast<size_t>(index);
-		if (entryIndex < m_files.size() &&
-			m_files[entryIndex].fullPath == entry.fullPath) {
-			m_files[entryIndex].cachedContent = outContent;
-			m_files[entryIndex].isCached = true;
-		} else {
-			const auto match = std::find_if(
-				m_files.begin(),
-				m_files.end(),
-				[&entry](const ofxGgmlScriptSourceFileEntry & candidate) {
-					return candidate.fullPath == entry.fullPath;
-				});
-			if (match != m_files.end()) {
-				match->cachedContent = outContent;
-				match->isCached = true;
-			}
-		}
+		cacheEntryContentLocked(m_files, entry, static_cast<size_t>(index), outContent);
 		m_status = "Loaded: " + entry.name;
 		return true;
 	}
@@ -1434,14 +1482,42 @@ void ofxGgmlScriptSource::pushFetchDiagnosticLocked(
 }
 
 bool ofxGgmlScriptSource::scanLocalFolderLocked() {
-	m_files.clear();
 	std::error_code ec;
 	if (!std::filesystem::is_directory(m_localFolderPath, ec) || ec) {
+		m_files.clear();
 		m_status = "Not a directory";
 		clearWorkspaceInfoLocked();
 		return false;
 	}
+	std::vector<ofxGgmlScriptSourceFileEntry> previousFiles = std::move(m_files);
+	std::unordered_map<std::string, size_t> previousByPath;
+	previousByPath.reserve(previousFiles.size());
+	for (size_t i = 0; i < previousFiles.size(); ++i) {
+		if (!previousFiles[i].isDirectory && previousFiles[i].isCached) {
+			previousByPath[previousFiles[i].fullPath] = i;
+		}
+	}
+
 	m_files = scanLocalFolderEntries(m_localFolderPath);
+	size_t restoredCachedBytes = 0;
+	for (auto & file : m_files) {
+		if (file.isDirectory) {
+			continue;
+		}
+		const auto prevIt = previousByPath.find(file.fullPath);
+		if (prevIt == previousByPath.end()) {
+			continue;
+		}
+		const auto & previous = previousFiles[prevIt->second];
+		if (!entryCacheStampMatches(file, previous) ||
+			previous.cachedContent.size() > kMaxCachedEntryBytes ||
+			restoredCachedBytes + previous.cachedContent.size() > kMaxCachedContentBytes) {
+			continue;
+		}
+		file.cachedContent = previous.cachedContent;
+		file.isCached = true;
+		restoredCachedBytes += file.cachedContent.size();
+	}
 	refreshWorkspaceInfoLocked(m_workspaceInfo.activeVisualStudioPath);
 	m_status = ofToString(m_files.size()) + " items";
 	return true;
@@ -1491,6 +1567,12 @@ std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::scanLocalFolderEn
 		if (fe.isDirectory) {
 			files.push_back(std::move(fe));
 			continue;
+		}
+		uint64_t fileSize = 0;
+		int64_t writeTicks = 0;
+		if (readLocalFileStamp(entry.path(), &fileSize, &writeTicks)) {
+			fe.fileSizeBytes = fileSize;
+			fe.lastWriteTimeTicks = writeTicks;
 		}
 
 		const std::string ext = normalizeLower(entry.path().extension().string());

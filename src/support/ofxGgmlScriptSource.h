@@ -21,6 +21,8 @@ struct ofxGgmlScriptSourceFileEntry {
 	std::string name;
 	std::string fullPath;
 	std::string cachedContent;
+	uint64_t fileSizeBytes = 0;
+	int64_t lastWriteTimeTicks = 0;
 	bool isDirectory = false;
 	bool isCached = false;
 };

@@ -1,6 +1,7 @@
 #include "catch2.hpp"
 #include "../src/ofxGgmlAssistants.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -425,6 +426,46 @@ TEST_CASE("Script source parses GitHub URLs and detects Visual Studio workspaces
 	REQUIRE_FALSE(info.visualStudioPlatforms.empty());
 	REQUIRE(info.hasCompilationDatabase);
 	REQUIRE(info.hasOpenFrameworksProject);
+}
+
+TEST_CASE("Script source preserves unchanged local file cache across rescans", "[workspace_assistant]") {
+	const auto root = makeWorkspaceTestDir("script_cache");
+	const auto filePath = root / "main.cpp";
+	{
+		std::ofstream out(filePath);
+		out << "int cached_value() { return 1; }\n";
+	}
+
+	ofxGgmlScriptSource source;
+	REQUIRE(source.setLocalFolder(root.string()));
+	const auto initialFiles = source.getFiles();
+	const auto fileIt = std::find_if(
+		initialFiles.begin(),
+		initialFiles.end(),
+		[](const ofxGgmlScriptSourceFileEntry & entry) {
+			return !entry.isDirectory && entry.name == "main.cpp";
+		});
+	REQUIRE(fileIt != initialFiles.end());
+	const int fileIndex = static_cast<int>(std::distance(initialFiles.begin(), fileIt));
+
+	std::string content;
+	REQUIRE(source.loadFileContent(fileIndex, content));
+	REQUIRE(content.find("cached_value") != std::string::npos);
+	auto filesAfterLoad = source.getFiles();
+	REQUIRE(filesAfterLoad[static_cast<size_t>(fileIndex)].isCached);
+
+	REQUIRE(source.rescan());
+	auto filesAfterRescan = source.getFiles();
+	REQUIRE(filesAfterRescan[static_cast<size_t>(fileIndex)].isCached);
+	REQUIRE(filesAfterRescan[static_cast<size_t>(fileIndex)].cachedContent == content);
+
+	{
+		std::ofstream out(filePath, std::ios::app);
+		out << "int changed_value() { return 2; }\n";
+	}
+	REQUIRE(source.rescan());
+	filesAfterRescan = source.getFiles();
+	REQUIRE_FALSE(filesAfterRescan[static_cast<size_t>(fileIndex)].isCached);
 }
 
 TEST_CASE("Workspace assistant suggests Visual Studio verification commands", "[workspace_assistant]") {
