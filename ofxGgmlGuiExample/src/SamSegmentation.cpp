@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <sstream>
 #include <thread>
 
@@ -76,6 +77,14 @@ void ofApp::drawSamPanel() {
 		"This panel sends a point prompt and local image pixels through the "
 		"ofxGgml segmentation bridge. Add sam.cpp headers/libs to the generated "
 		"project to enable native Segment Anything inference.");
+	ImGui::TextDisabled(
+		"Mirrors ggml/examples/sam: ViT-B ggml model, point prompts, multi-mask "
+		"output, and CPU thread control.");
+	drawHelpMarker(
+		"The upstream ggml SAM example also exposes box prompts and mask/iou/"
+		"stability thresholds. The current ofxGgml GUI lane keeps to the "
+		"portable point-prompt bridge until those controls are available in the "
+		"attached sam.cpp adapter.");
 
 #if OFXGGML_HAS_SAMCPP
 	const bool samCppAvailable = true;
@@ -95,6 +104,32 @@ void ofApp::drawSamPanel() {
 		ImGui::TextColored(
 			ImVec4(0.95f, 0.65f, 0.25f, 1.0f),
 			"Add sam.cpp to the generated project include/lib paths to enable local segmentation.");
+	}
+
+	if (ImGui::Button("Use ggml example defaults##SAM", ImVec2(210, 0))) {
+		copyStringToBuffer(
+			samModelPath,
+			sizeof(samModelPath),
+			"models/sam-vit-b/ggml-model-f16.bin");
+		copyStringToBuffer(
+			samImagePath,
+			sizeof(samImagePath),
+			"examples/sam/example.jpg");
+		samPointNormalized = false;
+		samPointX = 414.375f;
+		samPointY = 162.796875f;
+		samThreads = 8;
+		samReturnMultipleMasks = true;
+		autoSaveSession();
+	}
+	if (ImGui::IsItemHovered()) {
+		showWrappedTooltip(
+			"Matches ggml/examples/sam README defaults: converted ViT-B model, "
+			"example.jpg, point prompt (414.375, 162.796875), and multi-mask output.");
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Open ggml SAM docs##SAM")) {
+		ofLaunchBrowser("https://github.com/ggml-org/ggml/tree/master/examples/sam");
 	}
 
 	ImGui::SetNextItemWidth(compactModeFieldWidth);

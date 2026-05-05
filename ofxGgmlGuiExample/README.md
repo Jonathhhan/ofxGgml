@@ -19,4 +19,8 @@ The default mode picker stays focused on stable addon APIs. Enable **Show advanc
 - Put complex workflows such as video essay, montage, music/AceStep, MilkDrop, or Holoscan into focused examples, tutorial projects, or companion addons.
 - Avoid expanding `ofApp.cpp`; prefer smaller panels/helpers when showcase glue is still needed.
 
+## SAM mode
+
+The SAM panel follows the upstream `ggml/examples/sam` example defaults where practical: converted ViT-B `ggml-model-f16.bin`, point-prompt inference, CPU thread control, and multi-mask output. Box prompts and direct mask/iou/stability threshold controls are intentionally left out of the GUI until the attached sam.cpp adapter exposes those controls through the addon bridge.
+
 Use `../tests/run-tests.sh` for validation coverage instead of relying on manual GUI flows.
