@@ -1,15 +1,10 @@
 #pragma once
 
-#ifndef OFXGGML_ENABLE_COMPANION_WORKFLOWS
-#define OFXGGML_ENABLE_COMPANION_WORKFLOWS 1
-#endif
-
 #include "ofMain.h"
 #include "ofxGgmlCore.h"
 #include "ofxGgmlBasic.h"
 #include "ofxGgmlModalities.h"
 #include "ofxGgmlWorkflows.h"
-#include "ofxGgmlCompanionWorkflows.h"
 #include "ofxGgmlAssistants.h"
 #include "support/ofxGgmlEasy.h"
 #include "ofxImGui.h"
@@ -20,7 +15,6 @@
 #include "panels/StatusBar.h"
 #include "managers/TextServerManager.h"
 #include "managers/SpeechServerManager.h"
-#include "managers/AceStepServerManager.h"
 
 #include <atomic>
 #include <array>
@@ -34,27 +28,6 @@
 #include <unordered_map>
 #include <vector>
 
-#if defined(__has_include)
-#if __has_include("ofxVlc4.h")
-#define OFXGGML_HAS_OFXVLC4 1
-#include "ofxVlc4.h"
-#else
-#define OFXGGML_HAS_OFXVLC4 0
-#endif
-#else
-#define OFXGGML_HAS_OFXVLC4 0
-#endif
-
-#if defined(__has_include)
-#if __has_include("ofxProjectM.h")
-#define OFXGGML_HAS_OFXPROJECTM 1
-#include "ofxProjectM.h"
-#else
-#define OFXGGML_HAS_OFXPROJECTM 0
-#endif
-#else
-#define OFXGGML_HAS_OFXPROJECTM 0
-#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -223,7 +196,6 @@ private:
 	// -- Server Managers --
 	TextServerManager textServerManager;
 	SpeechServerManager speechServerManager;
-	AceStepServerManager aceStepServerManager;
 
 	// -- mode --
 	AiMode activeMode = AiMode::Chat;
