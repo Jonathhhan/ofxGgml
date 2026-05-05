@@ -39,6 +39,7 @@
 #include "inference/ofxGgmlChatLlmTtsAdapters.h"
 #if OFXGGML_ENABLE_NVIGI
 #include "inference/ofxGgmlNvigiTtsBackend.h"
+#include "inference/ofxGgmlNvigiSpeechBackend.h"
 #endif
 
 // Vision modalities

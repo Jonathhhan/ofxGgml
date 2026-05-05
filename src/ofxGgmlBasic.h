@@ -24,6 +24,10 @@
 // Basic inference
 #include "inference/ofxGgmlInference.h"
 #include "inference/ofxGgmlStreamingContext.h"
+#if OFXGGML_ENABLE_NVIGI
+#include "inference/ofxGgmlNvigiGptBackend.h"
+#include "inference/ofxGgmlNvigiReloadController.h"
+#endif
 
 // Text utilities
 #include "support/ofxGgmlPromptTemplates.h"

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -129,6 +130,9 @@ public:
 	static std::shared_ptr<ofxGgmlSpeechBackend> createWhisperServerBackend(
 		const std::string & serverUrl = "http://127.0.0.1:8081",
 		const std::string & serverModel = "");
+	static std::shared_ptr<ofxGgmlSpeechBackend> createNvigiAsrBackend(
+		std::function<ofxGgmlSpeechResult(const ofxGgmlSpeechRequest &)> transcribeFunction = {},
+		const std::string & displayName = "NVIGI ASR");
 
 	void setBackend(std::shared_ptr<ofxGgmlSpeechBackend> backend);
 	std::shared_ptr<ofxGgmlSpeechBackend> getBackend() const;

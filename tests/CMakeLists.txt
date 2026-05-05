@@ -201,6 +201,7 @@ set(TEST_SOURCES
 if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
     list(APPEND TEST_SOURCES
         test_inference.cpp
+        test_nvigi_bridges.cpp
         test_video_planner_workflow.cpp
         test_speech_inference.cpp
         test_vision_inference.cpp

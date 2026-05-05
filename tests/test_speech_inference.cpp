@@ -1,5 +1,6 @@
 #include "catch2.hpp"
 #include "../src/ofxGgmlModalities.h"
+#include "../src/inference/ofxGgmlNvigiSpeechBackend.h"
 
 #include <filesystem>
 #include <memory>
@@ -172,6 +173,27 @@ TEST_CASE("Speech inference can create a whisper server backend", "[speech_infer
 		"whisper-large-v3");
 	REQUIRE(backend != nullptr);
 	REQUIRE(backend->backendName() == "WhisperServer");
+}
+
+TEST_CASE("Speech inference can create optional NVIGI ASR backend", "[speech_inference][nvigi]") {
+	const auto backend = ofxGgmlSpeechInference::createNvigiAsrBackend();
+	REQUIRE(backend != nullptr);
+	REQUIRE(backend->backendName() == "NVIGI ASR");
+}
+
+TEST_CASE("NVIGI ASR backend stays optional by default", "[speech_inference][nvigi]") {
+	auto backend = std::dynamic_pointer_cast<ofxGgmlNvigiAsrSpeechBackend>(
+		ofxGgmlSpeechInference::createNvigiAsrBackend());
+	REQUIRE(backend != nullptr);
+	REQUIRE_FALSE(ofxGgmlNvigiAsrSpeechBackend::isSdkEnabled());
+	REQUIRE_FALSE(backend->isConfigured());
+
+	ofxGgmlSpeechRequest request;
+	request.audioPath = "clip.wav";
+	const auto result = backend->transcribe(request);
+	REQUIRE_FALSE(result.success);
+	REQUIRE(result.backendName == "NVIGI ASR");
+	REQUIRE(result.error.find("OFXGGML_ENABLE_NVIGI") != std::string::npos);
 }
 
 TEST_CASE("Speech inference allows backend replacement", "[speech_inference]") {

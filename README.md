@@ -68,8 +68,9 @@ This addon is released under the [MIT License](LICENSE).
   - `ofxGgmlPromptTemplates` - 30+ reusable templates for common AI tasks
 - server-streamed text output now uses delta-based chunk handling so Chat and Script mode no longer duplicate partial text while `llama-server` replies are still arriving
 - addon-level `Live context` support for loaded sources, domain-provider grounding, generic search fallback, and stricter citation-oriented response modes
-- `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles
+- `ofxGgmlSpeechInference` for local speech-to-text workflows via pluggable speech backends, with ready-to-use Whisper CLI profiles and opt-in NVIDIA NVIGI ASR SDK callbacks behind `OFXGGML_ENABLE_NVIGI`
 - `ofxGgmlTtsInference` as a lightweight text-to-speech bridge layer for Piper, optional `chatllm.cpp`-backed OuteTTS workflows, and opt-in NVIDIA NVIGI SDK callbacks behind `OFXGGML_ENABLE_NVIGI`
+- optional NVIDIA NVIGI bridge helpers cover GPT text generation, ASR, TTS, RAG, and app-owned SDK reload controls without bundling NVIGI headers, libraries, models, or plugin binaries
 - `ofxGgmlClipInference` as a lightweight CLIP-style embedding and ranking bridge layer for text/image similarity workflows, with bundled `clip.cpp` support (no external dependencies required)
 - `ofxGgmlDiffusionInference` as a lightweight image-generation bridge layer that can host an `ofxStableDiffusion` adapter without coupling diffusion internals into the core addon, now with structured image modes, CLIP-friendly rerank selection, and richer per-image metadata
 - `ofxGgmlVisionInference` for multimodal image-to-text requests against `llama-server`-style OpenAI-compatible endpoints
@@ -180,6 +181,7 @@ Developer tooling:
 The full versioning and runtime-packaging guidance lives in:
 
 - `docs/COMPATIBILITY.md`
+- `docs/NVIGI.md` for the optional NVIDIA NVIGI callback bridge surfaces
 
 Short version: prefer a compatibility matrix over "latest everywhere", and only consider one shared `ggml` build when both upstreams are verified against the same revision and you are ready to maintain that coupling.
 

@@ -43,6 +43,9 @@
 #include "inference/ofxGgmlWebCrawler.h"
 #include "inference/ofxGgmlImageSearch.h"
 #include "inference/ofxGgmlRAGPipeline.h"
+#if OFXGGML_ENABLE_NVIGI
+#include "inference/ofxGgmlNvigiRagBackend.h"
+#endif
 
 // Music and creative workflows
 #include "inference/ofxGgmlMediaPromptGenerator.h"

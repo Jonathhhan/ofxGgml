@@ -1,5 +1,6 @@
 #include "ofxGgmlSpeechInference.h"
 #include "core/ofxGgmlWindowsUtf8.h"
+#include "ofxGgmlNvigiSpeechBackend.h"
 #include "support/ofxGgmlProcessSecurity.h"
 #include "support/ofxGgmlSimpleSrtSubtitleParser.h"
 #include "ofMain.h"
@@ -846,6 +847,15 @@ std::vector<ofxGgmlSpeechModelProfile> ofxGgmlSpeechInference::defaultProfiles()
 			false
 		},
 		{
+			"NVIGI ASR (optional SDK bridge)",
+			"NVIDIA NVIGI SDK 1.4+ Basic C++ ASR sample",
+			"",
+			"",
+			"NVIGI ASR",
+			true,
+			true
+		},
+		{
 			"Whisper Large-v3 Turbo",
 			"ggerganov/whisper.cpp",
 			"ggml-large-v3-turbo.bin",
@@ -913,6 +923,15 @@ std::shared_ptr<ofxGgmlSpeechBackend> ofxGgmlSpeechInference::createWhisperServe
 	return std::make_shared<ofxGgmlWhisperServerSpeechBackend>(
 		serverUrl,
 		serverModel);
+}
+
+std::shared_ptr<ofxGgmlSpeechBackend> ofxGgmlSpeechInference::createNvigiAsrBackend(
+	std::function<ofxGgmlSpeechResult(const ofxGgmlSpeechRequest &)> transcribeFunction,
+	const std::string & displayName) {
+	return std::make_shared<ofxGgmlNvigiAsrSpeechBackend>(
+		std::move(transcribeFunction),
+		ofxGgmlNvigiAsrSpeechBackend::Options{},
+		displayName);
 }
 
 void ofxGgmlSpeechInference::setBackend(std::shared_ptr<ofxGgmlSpeechBackend> backend) {
