@@ -194,7 +194,7 @@ Focus: define small, stable contracts that let companion projects compose workfl
 
 ### 1. Workflow Handoff Contracts
 **Priority**: HIGH  
-**Status**: 💡 Proposed
+**Status**: 🔄 In Progress
 
 Standardize lightweight handoff contracts so companion apps can connect stages like:
 
@@ -208,9 +208,15 @@ Target capabilities:
 - inspectable intermediate outputs
 - replay support for deterministic debugging
 
+Implemented foundation:
+
+- `ofxGgmlWorkflowManifest` shared schema primitive for inputs, artifacts, intermediate outputs, warnings, review notes, metadata, and downstream handoff notes
+- JSON serialization for companion/example handoff files without coupling the core addon to a specific creative workflow runtime
+- workflow-layer exposure through `ofxGgmlWorkflows.h`
+
 ### 2. Shared Workflow Manifest
 **Priority**: HIGH  
-**Status**: 💡 Proposed
+**Status**: 🔄 In Progress
 
 Standardize a manifest format that can carry:
 
@@ -220,6 +226,12 @@ Standardize a manifest format that can carry:
 - intermediate artifacts
 - warnings, confidence, and review notes
 - downstream handoff metadata
+
+Implemented foundation:
+
+- schema version `ofxGgml.workflow_manifest.v1`
+- optional `handoff` block with target, mode, contract, notes, and metadata
+- unit coverage for stable JSON keys used by downstream companion tools
 
 **Outcome**: outputs from one workflow become reliable inputs for the next.
 

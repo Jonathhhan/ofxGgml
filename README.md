@@ -82,6 +82,7 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlMontagePlanner` and `ofxGgmlMontagePreviewBridge` are companion/example-tier surfaces for subtitle-driven montage planning, preview tracks, and CMX-style EDL export
 - `ofxGgmlHoloscanBridge` is companion/example-tier bridge code; include `ofxGgmlCompanionWorkflows.h` or move it to a companion addon when building Holoscan-style media pipelines
 - `ofxGgmlImageSearch` for internet reference-image lookup through pluggable providers, with a working Wikimedia Commons backend
+- `ofxGgmlWorkflowManifest` provides a small Phase 2 handoff contract for workflow inputs, artifacts, intermediate outputs, warnings, review notes, metadata, and downstream companion-tool routing
 - `ofxGgmlWebCrawler` as an optional website-ingestion bridge layer, with a `Mojo` CLI adapter for local website-to-Markdown crawling workflows
 - `ofxGgmlCitationSearch` for topic-oriented source-grounded quote extraction, with structured citation items built from loaded URLs or crawler-ingested website content
 - `ofxGgmlVideoEssayWorkflow` is kept as companion/example-tier orchestration for `topic -> cited outline -> narrated script -> voice cues -> SRT -> visual concept -> scene/edit planning`, not as a default addon surface

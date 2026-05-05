@@ -227,6 +227,7 @@ if(OFXGGML_WITH_OPENFRAMEWORKS OR OFXGGML_ENABLE_RUNTIME_SOURCES)
         test_conversation_manager.cpp
         test_feature_synergies.cpp
         test_validation_loop.cpp
+        test_workflow_manifest.cpp
         test_web_crawler.cpp)
 endif()
 
