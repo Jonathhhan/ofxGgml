@@ -748,6 +748,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-llama-server.ps1 -Detac
 
 The helpers default to `http://127.0.0.1:8080`, reuse the recommended local GGUF model when possible, and expose GPU layers / context size flags so the server path matches the GUI example's defaults more closely.
 
+CUDA builds of upstream `llama.cpp` use CUDA Graphs by default when that runtime path supports them, matching NVIDIA's guidance for reducing launch overhead during token generation. Keep this default enabled for stable local server workloads. If you need to compare profiling runs or debug a CUDA Graphs-specific issue, pass `--no-cuda-graphs` on Linux/macOS or `-NoCudaGraphs` on Windows:
+
+```bash
+./scripts/start-llama-server.sh --no-cuda-graphs
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-llama-server.ps1 -NoCudaGraphs
+```
+
 ### Build ggml locally
 
 The repository keeps `libs/ggml` empty (include/lib placeholders only). Use the helper to fetch ggml from upstream and populate `libs/ggml/include` and `libs/ggml/lib`:

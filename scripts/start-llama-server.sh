@@ -12,6 +12,7 @@ GPU_LAYERS="${GPU_LAYERS:-28}"
 CONTEXT_SIZE="${CONTEXT_SIZE:-6144}"
 DETACHED=0
 DRY_RUN=0
+NO_CUDA_GRAPHS=0
 
 usage() {
 	cat <<'EOF'
@@ -24,6 +25,7 @@ Options:
   --port PORT         Bind port (default: 8080)
   --gpu-layers N      GPU layers / -ngl value (default: 28)
   --context N         Context size / -c value (default: 6144)
+  --no-cuda-graphs    Pass through llama.cpp's CUDA Graphs disable flag
   --detached          Launch in background
   --dry-run           Print the command without launching
   --help              Show this message
@@ -66,6 +68,10 @@ while [[ $# -gt 0 ]]; do
 		--context)
 			CONTEXT_SIZE="${2:-}"
 			shift 2
+			;;
+		--no-cuda-graphs)
+			NO_CUDA_GRAPHS=1
+			shift
 			;;
 		--detached)
 			DETACHED=1
@@ -127,6 +133,9 @@ ARGS=(
 	-ngl "$GPU_LAYERS"
 	-c "$CONTEXT_SIZE"
 )
+if [[ "$NO_CUDA_GRAPHS" -eq 1 ]]; then
+	ARGS+=(--no-cuda-graphs)
+fi
 
 echo "Starting llama-server with:"
 echo "  exe:    $SERVER_EXE"
@@ -135,6 +144,7 @@ echo "  host:   $BIND_HOST"
 echo "  port:   $PORT"
 echo "  ngl:    $GPU_LAYERS"
 echo "  ctx:    $CONTEXT_SIZE"
+echo "  cuda graphs: $([[ "$NO_CUDA_GRAPHS" -eq 1 ]] && echo disabled || echo default)"
 echo "  mode:   $([[ "$DETACHED" -eq 1 ]] && echo detached || echo foreground)"
 echo
 printf '"%s"' "$SERVER_EXE"

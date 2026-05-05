@@ -5,6 +5,7 @@ param(
     [int]$Port = 8080,
     [int]$GpuLayers = 28,
     [int]$ContextSize = 6144,
+    [switch]$NoCudaGraphs,
     [switch]$Detached,
     [switch]$DryRun
 )
@@ -69,6 +70,9 @@ $arguments = @(
     '-ngl', ([Math]::Max(0, $GpuLayers)).ToString(),
     '-c', ([Math]::Max(512, $ContextSize)).ToString()
 )
+if ($NoCudaGraphs) {
+    $arguments += '--no-cuda-graphs'
+}
 
 $commandPreview = '"' + $ServerExe + '" ' + (($arguments | ForEach-Object {
     if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
@@ -81,6 +85,7 @@ Write-Host "  host:   $BindHost"
 Write-Host "  port:   $Port"
 Write-Host "  ngl:    $GpuLayers"
 Write-Host "  ctx:    $ContextSize"
+Write-Host "  cuda graphs: $(if ($NoCudaGraphs) { 'disabled' } else { 'default' })"
 $modeLabel = if ($Detached) { 'detached' } else { 'foreground' }
 Write-Host "  mode:   $modeLabel"
 Write-Host ""
