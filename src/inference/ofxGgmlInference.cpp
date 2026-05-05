@@ -332,6 +332,48 @@ static void recordStreamingMetrics(
 	}
 }
 
+static ofJson buildOpenAiChatCompletionPayload(
+	const std::string & prompt,
+	const ofxGgmlInferenceSettings & settings,
+	const std::string & serverModel,
+	bool stream) {
+	ofJson payload;
+	ofJson message;
+	message["role"] = "user";
+	message["content"] = prompt;
+	payload["messages"] = ofJson::array();
+	payload["messages"].push_back(message);
+	payload["max_tokens"] = std::max(1, settings.maxTokens);
+	payload["temperature"] = std::clamp(settings.temperature, 0.0f, 2.0f);
+	payload["top_p"] = std::clamp(settings.topP, 0.0f, 1.0f);
+	payload["stream"] = stream;
+	if (settings.topK > 0) {
+		payload["top_k"] = std::clamp(settings.topK, 1, 100);
+	}
+	if (settings.minP > 0.0f) {
+		payload["min_p"] = std::clamp(settings.minP, 0.0f, 1.0f);
+	}
+	if (settings.presencePenalty != 0.0f) {
+		payload["presence_penalty"] =
+			std::clamp(settings.presencePenalty, -2.0f, 2.0f);
+	}
+	if (settings.frequencyPenalty != 0.0f) {
+		payload["frequency_penalty"] =
+			std::clamp(settings.frequencyPenalty, -2.0f, 2.0f);
+	}
+	if (settings.repeatPenalty > 0.0f) {
+		payload["repeat_penalty"] =
+			std::clamp(settings.repeatPenalty, 1.0f, 3.0f);
+	}
+	if (settings.seed >= 0) {
+		payload["seed"] = settings.seed;
+	}
+	if (!serverModel.empty()) {
+		payload["model"] = serverModel;
+	}
+	return payload;
+}
+
 struct ofxGgmlHttpUrlParts {
 	std::string scheme;
 	std::string host;
@@ -487,7 +529,8 @@ struct ofxGgmlPortableStreamResult {
 static ofxGgmlPortableStreamResult postHttpSsePortable(
 	const std::string & url,
 	const std::string & requestBody,
-	const std::function<bool(const std::string &)> & onBodyBytes) {
+	const std::function<bool(const std::string &)> & onBodyBytes,
+	bool retainSuccessfulBody = false) {
 	ofxGgmlPortableStreamResult result;
 	const ofxGgmlHttpUrlParts parts = parseHttpUrlParts(url);
 	if (!parts.error.empty()) {
@@ -607,8 +650,11 @@ static ofxGgmlPortableStreamResult postHttpSsePortable(
 		if (bodyBytes.empty()) {
 			continue;
 		}
-		result.body += bodyBytes;
-		if (result.statusCode >= 200 && result.statusCode < 300 && onBodyBytes) {
+		const bool successful = result.statusCode >= 200 && result.statusCode < 300;
+		if (!successful || retainSuccessfulBody) {
+			result.body += bodyBytes;
+		}
+		if (successful && onBodyBytes) {
 			if (!onBodyBytes(bodyBytes)) {
 				break;
 			}
@@ -1189,47 +1235,18 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 		const std::string requestUrl =
 			ofxGgmlInferenceServerInternals::normalizeServerUrl(settings.serverUrl);
 		try {
-			ofJson payload;
 			const bool requestStreaming = (onChunk != nullptr);
-			ofJson message;
-			message["role"] = "user";
-			message["content"] = sanitizedPrompt;
-			payload["messages"] = ofJson::array();
-			payload["messages"].push_back(message);
-			payload["max_tokens"] = std::max(1, settings.maxTokens);
-			payload["temperature"] = std::clamp(settings.temperature, 0.0f, 2.0f);
-			payload["top_p"] = std::clamp(settings.topP, 0.0f, 1.0f);
-			payload["stream"] = requestStreaming;
-			if (settings.topK > 0) {
-				payload["top_k"] = std::clamp(settings.topK, 1, 100);
-			}
-			if (settings.minP > 0.0f) {
-				payload["min_p"] = std::clamp(settings.minP, 0.0f, 1.0f);
-			}
-			if (settings.presencePenalty != 0.0f) {
-				payload["presence_penalty"] =
-					std::clamp(settings.presencePenalty, -2.0f, 2.0f);
-			}
-			if (settings.frequencyPenalty != 0.0f) {
-				payload["frequency_penalty"] =
-					std::clamp(settings.frequencyPenalty, -2.0f, 2.0f);
-			}
-			if (settings.repeatPenalty > 0.0f) {
-				payload["repeat_penalty"] =
-					std::clamp(settings.repeatPenalty, 1.0f, 3.0f);
-			}
-			if (settings.seed >= 0) {
-				payload["seed"] = settings.seed;
-			}
 			std::string serverModel = trim(settings.serverModel);
 			if (serverModel.empty()) {
 				serverModel =
 					ofxGgmlInferenceServerInternals::resolveCachedActiveServerModel(
 						settings.serverUrl);
 			}
-			if (!serverModel.empty()) {
-				payload["model"] = serverModel;
-			}
+			ofJson payload = buildOpenAiChatCompletionPayload(
+				sanitizedPrompt,
+				settings,
+				serverModel,
+				requestStreaming);
 
 			auto performNonStreamingRequest = [&](const ofJson & requestPayload) -> ofxGgmlInferenceResult {
 				ofxGgmlInferenceResult serverResult;
@@ -1278,7 +1295,6 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 			};
 
 			if (!requestStreaming) {
-				payload["stream"] = false;
 				result = performNonStreamingRequest(payload);
 				if (onChunk && !result.text.empty()) {
 					onChunk(result.text);
@@ -1286,7 +1302,6 @@ ofxGgmlInferenceResult ofxGgmlInference::generate(
 			}
 #if !defined(_WIN32)
 			else {
-				payload["stream"] = true;
 				const std::string requestBody = payload.dump();
 				std::string pending;
 				std::string accumulated;
