@@ -255,10 +255,10 @@ Keep long-lived creative project memory in companion projects, while ofxGgml pro
 
 Implemented foundation:
 
-- `ofxGgmlCompanionProjectMemory` shared schema primitive for companion-owned creative intent, accepted prompts, curated references, style notes, continuity rules, preferred tool settings, review notes, and metadata
+- `ofxGgmlCompanionProjectMemory` shared schema primitive for companion-owned creative intent, accepted prompts, curated references, style notes, continuity rules, preferred tool settings, workflow manifest links, review notes, and metadata
 - schema version `ofxGgml.companion_project_memory.v1`
 - workflow-layer exposure through `ofxGgmlWorkflows.h`
-- unit coverage for stable JSON keys used by companion project-memory files
+- unit coverage for stable JSON keys used by companion project-memory files, including linked workflow manifests
 
 **Outcome**: long-form creative projects keep context across sessions.
 

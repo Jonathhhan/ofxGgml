@@ -16,6 +16,9 @@ TEST_CASE("Companion project memory serializes creative continuity state", "[com
 	memory.addContinuityRule("The same botanist appears in every generated scene.");
 	memory.addToolSetting("video_planner", "shot_density", "low", "Preserve slow pacing.");
 	memory.preferredToolSettings.front().metadata["scope"] = "scene-planning";
+	memory.addWorkflowManifest("manifest-001", "citation_to_video_plan", "manifests/run-001.json", "source_run");
+	memory.workflowManifests.front().note = "Accepted outline and subtitle handoff.";
+	memory.workflowManifests.front().metadata["run_id"] = "run-001";
 	memory.addReviewNote("Confirm reference licenses before publishing.");
 	memory.metadata["owner"] = "companion-example";
 
@@ -31,6 +34,10 @@ TEST_CASE("Companion project memory serializes creative continuity state", "[com
 	REQUIRE(json.find("\"continuity_rules\"") != std::string::npos);
 	REQUIRE(json.find("\"preferred_tool_settings\"") != std::string::npos);
 	REQUIRE(json.find("shot_density") != std::string::npos);
+	REQUIRE(json.find("\"workflow_manifests\"") != std::string::npos);
+	REQUIRE(json.find("manifests/run-001.json") != std::string::npos);
+	REQUIRE(json.find("source_run") != std::string::npos);
+	REQUIRE(json.find("Accepted outline and subtitle handoff.") != std::string::npos);
 }
 
 TEST_CASE("Companion project memory ignores empty convenience entries", "[companion_project_memory]") {
@@ -46,5 +53,6 @@ TEST_CASE("Companion project memory ignores empty convenience entries", "[compan
 	REQUIRE(json.find("\"accepted_prompts\":[]") != std::string::npos);
 	REQUIRE(json.find("\"style_notes\":[]") != std::string::npos);
 	REQUIRE(json.find("\"continuity_rules\":[]") != std::string::npos);
+	REQUIRE(json.find("\"workflow_manifests\":[]") != std::string::npos);
 	REQUIRE(json.find("\"review_notes\":[]") != std::string::npos);
 }

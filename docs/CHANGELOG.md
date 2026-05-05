@@ -11,6 +11,7 @@ The sections below preserve information from superseded standalone documents tha
 ### Changed
 
 - Extended the Phase 2 workflow manifest contract with execution-step checkpoints and replay metadata for resumable companion workflow debugging.
+- Extended Phase 2 companion project memory with workflow manifest links for cross-session provenance and handoff continuity.
 - Extracted the removed GUI companion workflows into four focused examples: `ofxGgmlVideoEssayExample`, `ofxGgmlVisualizationExample`, `ofxGgmlAdvancedVisionExample`, and `ofxGgmlMontagePlannerExample`.
 - Added `docs/examples/README.md` and `docs/examples/MIGRATION.md` to document example selection and migration from old GUI companion panels.
 - Updated README and feature-selection guidance to point media workflow users to focused companion examples instead of expanding `ofxGgmlGuiExample`.

@@ -52,6 +52,29 @@ struct ofxGgmlCompanionMemoryToolSetting {
 	}
 };
 
+struct ofxGgmlCompanionMemoryManifestLink {
+	std::string id;
+	std::string workflowType;
+	std::string path;
+	std::string relationship;
+	std::string note;
+	std::map<std::string, std::string> metadata;
+
+	ofJson toJson() const {
+		ofJson json;
+		json["id"] = id;
+		json["workflow_type"] = workflowType;
+		json["path"] = path;
+		json["relationship"] = relationship;
+		json["note"] = note;
+		json["metadata"] = ofJson::object();
+		for (const auto & item : metadata) {
+			json["metadata"][item.first] = item.second;
+		}
+		return json;
+	}
+};
+
 struct ofxGgmlCompanionProjectMemory {
 	std::string schemaVersion = "ofxGgml.companion_project_memory.v1";
 	std::string projectId;
@@ -63,6 +86,7 @@ struct ofxGgmlCompanionProjectMemory {
 	std::vector<std::string> styleNotes;
 	std::vector<std::string> continuityRules;
 	std::vector<ofxGgmlCompanionMemoryToolSetting> preferredToolSettings;
+	std::vector<ofxGgmlCompanionMemoryManifestLink> workflowManifests;
 	std::vector<std::string> reviewNotes;
 	std::map<std::string, std::string> metadata;
 
@@ -122,6 +146,19 @@ struct ofxGgmlCompanionProjectMemory {
 		preferredToolSettings.push_back(setting);
 	}
 
+	void addWorkflowManifest(
+		const std::string & id,
+		const std::string & workflowType,
+		const std::string & path,
+		const std::string & relationship = "") {
+		ofxGgmlCompanionMemoryManifestLink manifest;
+		manifest.id = id;
+		manifest.workflowType = workflowType;
+		manifest.path = path;
+		manifest.relationship = relationship;
+		workflowManifests.push_back(manifest);
+	}
+
 	ofJson toJson() const {
 		ofJson json;
 		json["schema_version"] = schemaVersion;
@@ -145,6 +182,13 @@ struct ofxGgmlCompanionProjectMemory {
 			toolSettings.push_back(setting.toJson());
 		}
 		json["preferred_tool_settings"] = std::move(toolSettings);
+
+		ofJson manifests = ofJson::array();
+		for (const auto & manifest : workflowManifests) {
+			manifests.push_back(manifest.toJson());
+		}
+		json["workflow_manifests"] = std::move(manifests);
+
 		json["review_notes"] = toStringArray(reviewNotes);
 
 		json["metadata"] = ofJson::object();
