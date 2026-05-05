@@ -647,7 +647,7 @@ std::vector<ofxGgmlPromptSource> collectScriptSourceDocuments(
 		return sources;
 	}
 
-	const auto entries = scriptSource.getFiles();
+	const auto entries = scriptSource.getFiles(false);
 	if (entries.empty()) {
 		return sources;
 	}

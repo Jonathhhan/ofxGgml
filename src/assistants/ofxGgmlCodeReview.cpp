@@ -375,7 +375,7 @@ std::vector<RepoInstructionSnippet> collectRepoInstructionSnippets(
 	const std::string & targetPath,
 	bool includePathSpecific) {
 	std::vector<RepoInstructionSnippet> snippets;
-	const auto files = scriptSource.getFiles();
+	const auto files = scriptSource.getFiles(false);
 	const std::string normalizedTarget = normalizePathForMatch(targetPath);
 	const auto targetDirectory = normalizedTarget.empty()
 		? std::string()
@@ -1333,7 +1333,7 @@ ofxGgmlCodeReviewResult ofxGgmlCodeReview::reviewScriptSource(
 		return result;
 	}
 
-	const auto entries = scriptSource.getFiles();
+	const auto entries = scriptSource.getFiles(false);
 	for (size_t i = 0; i < entries.size(); ++i) {
 		if (entries[i].isDirectory) continue;
 		std::string content;

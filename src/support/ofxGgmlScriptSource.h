@@ -109,7 +109,8 @@ public:
 	std::string getGitHubOwnerRepo() const noexcept;
 	std::string getGitHubBranch() const noexcept;
 	std::vector<std::string> getInternetUrls() const;
-	std::vector<ofxGgmlScriptSourceFileEntry> getFiles() const;
+	std::vector<ofxGgmlScriptSourceFileEntry> getFiles(
+		bool includeCachedContent = true) const;
 	ofxGgmlScriptSourceWorkspaceInfo getWorkspaceInfo() const;
 	std::string getStatus() const;
 	bool isFetching() const noexcept;

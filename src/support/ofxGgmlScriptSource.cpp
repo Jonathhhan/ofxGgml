@@ -1323,9 +1323,26 @@ std::vector<std::string> ofxGgmlScriptSource::getInternetUrls() const {
 	return m_internetUrls;
 }
 
-std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::getFiles() const {
+std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::getFiles(
+	bool includeCachedContent) const {
 	std::lock_guard<std::mutex> lock(m_mutex);
-	return m_files;
+	if (includeCachedContent) {
+		return m_files;
+	}
+
+	std::vector<ofxGgmlScriptSourceFileEntry> files;
+	files.reserve(m_files.size());
+	for (const auto & file : m_files) {
+		ofxGgmlScriptSourceFileEntry copy;
+		copy.name = file.name;
+		copy.fullPath = file.fullPath;
+		copy.fileSizeBytes = file.fileSizeBytes;
+		copy.lastWriteTimeTicks = file.lastWriteTimeTicks;
+		copy.isDirectory = file.isDirectory;
+		copy.isCached = file.isCached;
+		files.push_back(std::move(copy));
+	}
+	return files;
 }
 
 ofxGgmlScriptSourceWorkspaceInfo ofxGgmlScriptSource::getWorkspaceInfo() const {

@@ -56,6 +56,32 @@ TEST_CASE("Project memory validation and clamping", "[project_memory]") {
 		mem.setMemoryText(std::string(256, 'x'));
 		REQUIRE(mem.getMemoryText().size() == 64);
 	}
+
+	SECTION("Repeated clamps preserve newest complete entries") {
+		mem.setMaxChars(220);
+		for (int i = 0; i < 12; ++i) {
+			REQUIRE(mem.addInteraction(
+				"request-" + std::to_string(i),
+				"response body for request " + std::to_string(i) + " with enough text to force rolling retention"));
+			REQUIRE(mem.getMemoryText().size() <= mem.getMaxChars());
+		}
+		const std::string & text = mem.getMemoryText();
+		REQUIRE(text.find("request-11") != std::string::npos);
+		REQUIRE(text.find("response body for request 11") != std::string::npos);
+		REQUIRE(text.find("request-0") == std::string::npos);
+		REQUIRE(text.rfind("Request:\n", 0) == 0);
+	}
+
+	SECTION("Repeated interaction insertion stays bounded") {
+		mem.setMaxChars(256);
+		for (int i = 0; i < 64; ++i) {
+			REQUIRE(mem.addInteraction(
+				"bounded request " + std::to_string(i),
+				"bounded response " + std::to_string(i) + " with repeated content that should not grow without limit"));
+		}
+		REQUIRE(mem.getMemoryText().size() <= mem.getMaxChars());
+		REQUIRE(mem.getMemoryText().find("bounded request 63") != std::string::npos);
+	}
 }
 
 TEST_CASE("Project memory prompt context behavior", "[project_memory]") {

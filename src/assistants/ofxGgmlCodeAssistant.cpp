@@ -348,7 +348,7 @@ std::vector<RepoInstructionSnippet> collectRepoInstructionSnippets(
 		return snippets;
 	}
 
-	const auto files = scriptSource->getFiles();
+	const auto files = scriptSource->getFiles(false);
 	const std::string normalizedTarget = normalizePathForMatch(targetPath);
 	const auto targetDirectory = normalizedTarget.empty()
 		? std::string()
@@ -1216,7 +1216,7 @@ bool loadFocusedFile(
 		return false;
 	}
 
-	const auto files = context.scriptSource->getFiles();
+	const auto files = context.scriptSource->getFiles(false);
 	if (context.focusedFileIndex >= static_cast<int>(files.size())) {
 		return false;
 	}
@@ -1268,7 +1268,7 @@ std::optional<size_t> findContextFileIndex(
 	if (context.scriptSource == nullptr || trim(requestedPath).empty()) {
 		return std::nullopt;
 	}
-	const auto files = context.scriptSource->getFiles();
+	const auto files = context.scriptSource->getFiles(false);
 	for (size_t i = 0; i < files.size(); ++i) {
 		if (files[i].isDirectory) {
 			continue;
@@ -1325,7 +1325,7 @@ std::vector<PromptFileSnippet> collectLikelyEditTargetSnippets(
 	}
 
 	std::unordered_map<std::string, size_t> seen;
-	const auto files = context.scriptSource->getFiles();
+	const auto files = context.scriptSource->getFiles(false);
 	for (const auto & candidate : candidates) {
 		const auto index = findContextFileIndex(context, candidate.path);
 		if (!index.has_value() || *index >= files.size() || files[*index].isDirectory) {
@@ -1418,7 +1418,7 @@ void appendRepoContext(
 	}
 
 	const auto sourceType = context.scriptSource->getSourceType();
-	const auto files = context.scriptSource->getFiles();
+	const auto files = context.scriptSource->getFiles(false);
 	const auto workspaceInfo = context.scriptSource->getWorkspaceInfo();
 	if (sourceType == ofxGgmlScriptSourceType::None || files.empty()) {
 		return;
@@ -1928,7 +1928,7 @@ std::vector<ofxGgmlCodeAssistantSymbol> ofxGgmlCodeAssistant::retrieveSymbols(
 		float score = 0.0f;
 
 		if (context.focusedFileIndex >= 0) {
-			const auto currentFiles = context.scriptSource->getFiles();
+			const auto currentFiles = context.scriptSource->getFiles(false);
 			if (context.focusedFileIndex < static_cast<int>(currentFiles.size()) &&
 				currentFiles[static_cast<size_t>(context.focusedFileIndex)].name ==
 					symbol.filePath) {
@@ -2121,7 +2121,7 @@ ofxGgmlCodeAssistantSemanticIndex ofxGgmlCodeAssistant::buildSemanticIndex(
 		}
 	}
 
-	const auto files = context.scriptSource->getFiles();
+	const auto files = context.scriptSource->getFiles(false);
 	if (files.empty()) {
 		return index;
 	}
@@ -2307,7 +2307,7 @@ ofxGgmlCodeAssistantCodeMap ofxGgmlCodeAssistant::buildCodeMap(
 		}
 	}
 
-	const auto files = context.scriptSource->getFiles();
+	const auto files = context.scriptSource->getFiles(false);
 	for (const auto & file : files) {
 		if (!file.isDirectory) {
 			++codeMap.totalFiles;
@@ -2374,7 +2374,7 @@ ofxGgmlCodeAssistant::synthesizeTests(
 		addUniqueString(&touchedFiles, file);
 	}
 	if (touchedFiles.empty() && context.scriptSource != nullptr && context.focusedFileIndex >= 0) {
-		const auto files = context.scriptSource->getFiles();
+		const auto files = context.scriptSource->getFiles(false);
 		if (context.focusedFileIndex < static_cast<int>(files.size())) {
 			addUniqueString(&touchedFiles, files[static_cast<size_t>(context.focusedFileIndex)].name);
 		}

@@ -2,10 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
-#include <utility>
-#include <vector>
 
 namespace {
+
+constexpr const char * kMemoryEntrySeparator = "\n\n---\n\n";
 
 std::string trimCopy(const std::string & s) {
 	size_t b = 0;
@@ -151,43 +151,36 @@ void ofxGgmlProjectMemory::clampMemory() {
 		return;
 	}
 	if (m_memoryText.size() > m_maxChars) {
-		const std::string separator = "\n\n---\n\n";
-		std::vector<std::pair<size_t, size_t>> selectedRanges;
-		size_t rebuiltSize = 0;
+		const std::string separator(kMemoryEntrySeparator);
+		const size_t separatorSize = separator.size();
+		size_t keepStart = std::string::npos;
+		size_t keptSize = 0;
 		size_t entryEnd = m_memoryText.size();
 		while (entryEnd > 0) {
 			const size_t separatorPos = m_memoryText.rfind(separator, entryEnd - 1);
 			const bool hasPreviousEntry = separatorPos != std::string::npos;
-			const size_t entryStart = hasPreviousEntry ? separatorPos + separator.size() : 0;
+			const size_t entryStart = hasPreviousEntry ? separatorPos + separatorSize : 0;
 			const size_t entryLen = entryEnd - entryStart;
-			const size_t candidateSize = rebuiltSize +
+			const size_t candidateSize = keptSize +
 				entryLen +
-				(selectedRanges.empty() ? 0 : separator.size());
+				(keepStart == std::string::npos ? 0 : separatorSize);
 			if (candidateSize > m_maxChars) {
 				break;
 			}
-			selectedRanges.emplace_back(entryStart, entryLen);
-			rebuiltSize = candidateSize;
+			keepStart = entryStart;
+			keptSize = candidateSize;
 			if (!hasPreviousEntry) {
 				break;
 			}
 			entryEnd = separatorPos;
 		}
 
-		if (selectedRanges.empty()) {
+		if (keepStart == std::string::npos) {
 			m_memoryText.erase(0, m_memoryText.size() - m_maxChars);
 			return;
 		}
-
-		std::string rebuilt;
-		rebuilt.reserve(rebuiltSize);
-		for (size_t i = selectedRanges.size(); i > 0; --i) {
-			if (!rebuilt.empty()) {
-				rebuilt += separator;
-			}
-			const auto & range = selectedRanges[i - 1];
-			rebuilt.append(m_memoryText, range.first, range.second);
+		if (keepStart > 0) {
+			m_memoryText.erase(0, keepStart);
 		}
-		m_memoryText = std::move(rebuilt);
 	}
 }
