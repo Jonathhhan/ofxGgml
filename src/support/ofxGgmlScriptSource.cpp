@@ -531,6 +531,17 @@ std::string chooseDefaultBuildDirectory(
 
 }
 
+ofxGgmlScriptSourceFileEntry ofxGgmlScriptSourceFileEntry::withoutCachedContent() const {
+	ofxGgmlScriptSourceFileEntry copy;
+	copy.name = name;
+	copy.fullPath = fullPath;
+	copy.fileSizeBytes = fileSizeBytes;
+	copy.lastWriteTimeTicks = lastWriteTimeTicks;
+	copy.isDirectory = isDirectory;
+	copy.isCached = isCached;
+	return copy;
+}
+
 ofxGgmlScriptSource::~ofxGgmlScriptSource() {
 	cancelFetchWorker("Fetch canceled: source destroyed");
 	stopLocalMonitor();
@@ -1333,14 +1344,7 @@ std::vector<ofxGgmlScriptSourceFileEntry> ofxGgmlScriptSource::getFiles(
 	std::vector<ofxGgmlScriptSourceFileEntry> files;
 	files.reserve(m_files.size());
 	for (const auto & file : m_files) {
-		ofxGgmlScriptSourceFileEntry copy;
-		copy.name = file.name;
-		copy.fullPath = file.fullPath;
-		copy.fileSizeBytes = file.fileSizeBytes;
-		copy.lastWriteTimeTicks = file.lastWriteTimeTicks;
-		copy.isDirectory = file.isDirectory;
-		copy.isCached = file.isCached;
-		files.push_back(std::move(copy));
+		files.push_back(file.withoutCachedContent());
 	}
 	return files;
 }

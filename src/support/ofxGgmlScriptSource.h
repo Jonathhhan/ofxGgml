@@ -25,6 +25,8 @@ struct ofxGgmlScriptSourceFileEntry {
 	int64_t lastWriteTimeTicks = 0;
 	bool isDirectory = false;
 	bool isCached = false;
+
+	ofxGgmlScriptSourceFileEntry withoutCachedContent() const;
 };
 
 struct ofxGgmlScriptSourceFetchDiagnostic {
