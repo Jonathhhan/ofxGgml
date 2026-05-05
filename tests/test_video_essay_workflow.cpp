@@ -128,3 +128,55 @@ TEST_CASE("Video essay workflow builds edit source summary from sections", "[vid
 	REQUIRE(summary.find("Quick setup of the problem.") != std::string::npos);
 	REQUIRE(summary.find("2. Payoff") != std::string::npos);
 }
+
+TEST_CASE("Video essay workflow emits shared handoff manifest", "[video_essay][workflow_manifest]") {
+	ofxGgmlVideoEssayRequest request;
+	request.modelPath = "models/mock.gguf";
+	request.topic = "Local-first creative AI";
+	request.sourceUrls.push_back("https://example.com/source");
+	request.targetDurationSeconds = 75.0;
+	request.tone = "clear and grounded";
+	request.audience = "filmmakers";
+	request.inferenceSettings.seed = 1234;
+	request.inferenceSettings.temperature = 0.2f;
+
+	ofxGgmlVideoEssayResult result;
+	result.success = true;
+	result.backendName = "mock-backend";
+	result.citationResult.success = true;
+	result.citationResult.summary = "A grounded citation summary.";
+	result.outline = "## Hook\n- Grounded idea [Source 1].";
+	result.script = "## Hook\nLocal tools can keep creative work inspectable [Source 1].";
+	result.visualConcept = "A compact studio workflow with visible handoffs.";
+	result.sections.push_back({
+		0,
+		"Hook",
+		"Local tools can keep creative work inspectable.",
+		"Local tools can keep creative work inspectable [Source 1].",
+		12.0,
+		{1}
+	});
+	result.voiceCues = ofxGgmlVideoEssayWorkflow::buildVoiceCueSheet(result.sections);
+	result.srtText = ofxGgmlVideoEssayWorkflow::buildSrt(result.voiceCues);
+	result.scenePlanJson = "{\"scenes\":[]}";
+	result.scenePlanSummary = "One scene handoff.";
+	result.editPlanJson = "{\"clips\":[]}";
+	result.editPlanSummary = "One edit handoff.";
+
+	const std::string manifest =
+		ofxGgmlVideoEssayWorkflow::buildWorkflowManifest(request, result);
+
+	REQUIRE(manifest.find("\"schema_version\": \"ofxGgml.workflow_manifest.v1\"") != std::string::npos);
+	REQUIRE(manifest.find("\"workflow_type\": \"video_essay_handoff\"") != std::string::npos);
+	REQUIRE(manifest.find("\"inputs\"") != std::string::npos);
+	REQUIRE(manifest.find("\"intermediate_outputs\"") != std::string::npos);
+	REQUIRE(manifest.find("\"artifacts\"") != std::string::npos);
+	REQUIRE(manifest.find("\"handoff\"") != std::string::npos);
+	REQUIRE(manifest.find("\"contract\": \"crawl->cite->outline->script->tts->subtitles->video_plan\"") != std::string::npos);
+	REQUIRE(manifest.find("\"execution_steps\"") != std::string::npos);
+	REQUIRE(manifest.find("\"resume_token\": \"checkpoint:script\"") != std::string::npos);
+	REQUIRE(manifest.find("\"replay\"") != std::string::npos);
+	REQUIRE(manifest.find("\"random_seed\": \"1234\"") != std::string::npos);
+	REQUIRE(manifest.find("\"workflow_details\"") != std::string::npos);
+	REQUIRE(manifest.find("\"voice_cues\"") != std::string::npos);
+}
