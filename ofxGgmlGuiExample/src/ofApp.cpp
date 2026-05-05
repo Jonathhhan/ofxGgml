@@ -59,6 +59,16 @@
 // ---------------------------------------------------------------------------
 
 const char * ofApp::modeLabels[kModeCount] = {
+	"Chat",
+	"Script",
+	"Summarize",
+	"Write",
+	"Translate",
+	"Custom",
+	"Vision",
+	"Speech",
+	"Tts",
+	"Easy"
 };
 
 const char * const kTextBackendLabels[] = {
@@ -1572,135 +1582,6 @@ if (!modelPresets.empty()) {
 	}
 }
 
-if (activeMode == AiMode::Diffusion) {
-	if (diffusionProfiles.empty()) {
-		diffusionProfiles = ofxGgmlDiffusionInference::defaultProfiles();
-	}
-	selectedDiffusionProfileIndex = std::clamp(
-		selectedDiffusionProfileIndex,
-		0,
-		std::max(0, static_cast<int>(diffusionProfiles.size()) - 1));
-	const ofxGgmlImageGenerationModelProfile activeDiffusionProfile =
-		diffusionProfiles.empty()
-			? ofxGgmlImageGenerationModelProfile{}
-			: diffusionProfiles[static_cast<size_t>(selectedDiffusionProfileIndex)];
-	const auto activeDiffusionTask =
-		static_cast<ofxGgmlImageGenerationTask>(std::clamp(diffusionTaskIndex, 0, 6));
-	const bool diffusionNeedsInitImage =
-		activeDiffusionTask == ofxGgmlImageGenerationTask::ImageToImage ||
-		activeDiffusionTask == ofxGgmlImageGenerationTask::InstructImage ||
-		activeDiffusionTask == ofxGgmlImageGenerationTask::Variation ||
-		activeDiffusionTask == ofxGgmlImageGenerationTask::Restyle ||
-		activeDiffusionTask == ofxGgmlImageGenerationTask::Inpaint ||
-		activeDiffusionTask == ofxGgmlImageGenerationTask::Upscale;
-	const bool diffusionNeedsMaskImage =
-		activeDiffusionTask == ofxGgmlImageGenerationTask::Inpaint;
-	const std::string recommendedDiffusionModelPath =
-		suggestedModelPath(
-			activeDiffusionProfile.modelPath,
-			activeDiffusionProfile.modelFileHint);
-	const std::string recommendedDiffusionDownloadUrl =
-		suggestedModelDownloadUrl(
-			activeDiffusionProfile.modelRepoHint,
-			activeDiffusionProfile.modelFileHint);
-
-	ImGui::Spacing();
-	ImGui::Separator();
-	ImGui::Spacing();
-	ImGui::Text("Image Assets");
-	if (!activeDiffusionProfile.name.empty()) {
-		ImGui::TextDisabled("Profile: %s", activeDiffusionProfile.name.c_str());
-	}
-	if (!recommendedDiffusionModelPath.empty()) {
-		ImGui::TextDisabled(
-			pathExists(recommendedDiffusionModelPath)
-				? "Recommended model is available"
-				: "Recommended model is not downloaded");
-		ImGui::BeginDisabled(trim(diffusionModelPath) == recommendedDiffusionModelPath);
-		if (ImGui::Button("Use recommended image model", ImVec2(-1, 0))) {
-			copyStringToBuffer(
-				diffusionModelPath,
-				sizeof(diffusionModelPath),
-				recommendedDiffusionModelPath);
-			autoSaveSession();
-		}
-		ImGui::EndDisabled();
-		if (ImGui::IsItemHovered()) {
-			showWrappedTooltip(
-				"Use the current diffusion profile's recommended model path under the shared addon models folder.");
-		}
-		ImGui::BeginDisabled(recommendedDiffusionDownloadUrl.empty());
-		if (ImGui::Button("Download recommended image model", ImVec2(-1, 0))) {
-			ofLaunchBrowser(recommendedDiffusionDownloadUrl);
-		}
-		ImGui::EndDisabled();
-		if (ImGui::IsItemHovered()) {
-			showWrappedTooltip("Open the recommended diffusion model download page in your browser.");
-		}
-	}
-
-	ImGui::InputTextWithHint(
-		"##DiffusionModelPathSidebar",
-		"Diffusion model path",
-		diffusionModelPath,
-		sizeof(diffusionModelPath));
-	if (ImGui::Button("Browse diffusion model...", ImVec2(-1, 0))) {
-		ofFileDialogResult result = ofSystemLoadDialog("Select diffusion model", false);
-		if (result.bSuccess) {
-			copyStringToBuffer(diffusionModelPath, sizeof(diffusionModelPath), result.getPath());
-			autoSaveSession();
-		}
-	}
-
-	ImGui::InputTextWithHint(
-		"##DiffusionVaePathSidebar",
-		"VAE path (optional)",
-		diffusionVaePath,
-		sizeof(diffusionVaePath));
-	if (ImGui::Button("Browse VAE...", ImVec2(-1, 0))) {
-		ofFileDialogResult result = ofSystemLoadDialog("Select VAE file", false);
-		if (result.bSuccess) {
-			copyStringToBuffer(diffusionVaePath, sizeof(diffusionVaePath), result.getPath());
-			autoSaveSession();
-		}
-	}
-
-	if (diffusionNeedsInitImage) {
-		ImGui::InputTextWithHint(
-			"##DiffusionInitPathSidebar",
-			"Init image",
-			diffusionInitImagePath,
-			sizeof(diffusionInitImagePath));
-		if (ImGui::Button("Browse init image...", ImVec2(-1, 0))) {
-			ofFileDialogResult result = ofSystemLoadDialog("Select init image", false);
-			if (result.bSuccess) {
-				copyStringToBuffer(
-					diffusionInitImagePath,
-					sizeof(diffusionInitImagePath),
-					result.getPath());
-				autoSaveSession();
-			}
-		}
-	}
-
-	if (diffusionNeedsMaskImage) {
-		ImGui::InputTextWithHint(
-			"##DiffusionMaskPathSidebar",
-			"Mask image",
-			diffusionMaskImagePath,
-			sizeof(diffusionMaskImagePath));
-		if (ImGui::Button("Browse mask image...", ImVec2(-1, 0))) {
-			ofFileDialogResult result = ofSystemLoadDialog("Select mask image", false);
-			if (result.bSuccess) {
-				copyStringToBuffer(
-					diffusionMaskImagePath,
-					sizeof(diffusionMaskImagePath),
-					result.getPath());
-				autoSaveSession();
-			}
-		}
-	}
-}
 
 ImGui::Spacing();
 const bool modeSupportsTextBackend = aiModeSupportsTextBackend(activeMode);
@@ -2188,8 +2069,6 @@ case AiMode::Summarize: drawSummarizePanel(); break;
 	case AiMode::Vision:    drawVisionPanel();    break;
 	case AiMode::Speech:    drawSpeechPanel();    break;
 	case AiMode::Tts:       drawTtsPanel();       break;
-	case AiMode::Diffusion: drawDiffusionPanel(); break;
-	case AiMode::Clip:      drawClipPanel();      break;
 	}
 }
 ImGui::End();
