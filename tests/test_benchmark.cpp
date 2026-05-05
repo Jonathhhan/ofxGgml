@@ -1,5 +1,6 @@
 #include "catch2.hpp"
 #include "../src/ofxGgml.h"
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -70,7 +71,10 @@ namespace {
 std::filesystem::path makeBenchmarkTempDir(const std::string & name) {
 	const auto base = std::filesystem::temp_directory_path() / "ofxggml_benchmark_tests";
 	std::filesystem::create_directories(base);
-	const auto dir = base / (name + "_" + std::to_string(std::rand()));
+	static std::atomic<uint64_t> counter{0};
+	const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+	const auto dir = base / (name + "_" + std::to_string(now) + "_" +
+		std::to_string(counter.fetch_add(1, std::memory_order_relaxed)));
 	std::error_code ec;
 	std::filesystem::remove_all(dir, ec);
 	std::filesystem::create_directories(dir);

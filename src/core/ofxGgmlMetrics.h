@@ -234,9 +234,9 @@ private:
 			if (name.rfind(prefix, 0) != 0) continue;
 			const uint64_t value = entry.second;
 			const std::string rest = name.substr(prefix.size());
-			// Counter names are stream.<transport>.<kind>.  Transport names may
-			// themselves contain dots (for example "server.http"), so split on
-			// the final separator before the metric kind.
+			// Counter names are stream.<transport>.<kind>, where kind is one of
+			// chunks, bytes, or cancelled. Transport names may themselves contain
+			// dots (for example "server.http"), so split on the final separator.
 			const auto dot = rest.rfind('.');
 			const std::string transport = (dot == std::string::npos) ? rest : rest.substr(0, dot);
 			const std::string kind = (dot == std::string::npos) ? "" : rest.substr(dot + 1);
