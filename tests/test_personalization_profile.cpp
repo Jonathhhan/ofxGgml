@@ -59,6 +59,7 @@ TEST_CASE("Personalization profile set serializes stable JSON keys", "[personali
 	profileSet.styleProfiles.front().metadata["tone"] = "plain";
 	profileSet.projectPresets.front().metadata["sharing"] = "local";
 
+	const auto parsed = profileSet.toJson();
 	const auto json = profileSet.toJsonString();
 	REQUIRE(json.find("\"schema_version\"") != std::string::npos);
 	REQUIRE(json.find("ofxGgml.personalization_profile_set.v1") != std::string::npos);
@@ -79,8 +80,8 @@ TEST_CASE("Personalization profile set serializes stable JSON keys", "[personali
 	REQUIRE(json.find("\"default_adapter_refs\"") != std::string::npos);
 	REQUIRE(json.find("\"adaptation_rules\"") != std::string::npos);
 	REQUIRE(json.find("\"review_notes\"") != std::string::npos);
-	REQUIRE(json.find("continuity_asset_ledger") != std::string::npos);
-	REQUIRE(json.find("project_memory") != std::string::npos);
+	REQUIRE(parsed["adapters"][0]["asset_refs"][0].get<std::string>() == "project_memory:accepted_prompts");
+	REQUIRE(parsed["style_profiles"][1]["reference_refs"][0].get<std::string>() == "continuity_asset_ledger:rules");
 	REQUIRE(json.find("plain") != std::string::npos);
 }
 
