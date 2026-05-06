@@ -30,3 +30,6 @@
 // Model loading
 #include "model/ofxGgmlModel.h"
 #include "model/ofxGgmlModelRegistry.h"
+
+// Extensibility metadata
+#include "support/ofxGgmlPluginRegistry.h"

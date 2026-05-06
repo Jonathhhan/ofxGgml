@@ -60,6 +60,7 @@ All notable changes to `ofxGgml` are documented in this file.
   - `ofxGgmlMemoryUsage` struct with detailed memory metrics including model weights, graph allocations, and backend memory stats
   - `ofxGgmlServerQueueStatus` struct with queue length, processing count, and completion statistics
 - `ofxGgmlTrustEvaluationSuite` as a Phase 3 trust/evaluation schema for citation quality, workflow correctness, latency/throughput, multimodal coherence, assistant safety, approval rules, and evidence-backed evaluation cases.
+- `ofxGgmlPluginRegistry` as a Phase 4 plugin metadata schema for plugin descriptors, capabilities, ABI markers, lifecycle notes, safety requirements, and compatibility rules.
 - `ofxGgmlCitationSearch::detectInputIntent(...)` and `searchFromInput(...)` for small intercepted search-style prompts such as `find sources about ...`, plus `ofxGgmlEasy::findCitationsFromInput(...)` for the configured high-level wrapper path.
 
 - New comprehensive documentation: `docs/OFXGGML_STABLEDIFFUSION_INTEGRATION.md` covering:

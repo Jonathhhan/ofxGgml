@@ -390,7 +390,7 @@ Focus: let other developers build companion layers on top of the stable addon fo
 
 ### 1. Plugin System
 **Priority**: HIGH  
-**Status**: 💡 Proposed
+**Status**: 🔄 In Progress
 
 Create a plugin architecture for:
 
@@ -399,6 +399,14 @@ Create a plugin architecture for:
 - modalities and renderers
 - search/retrieval providers
 - tool adapters and assistant capabilities
+
+Implemented foundation:
+
+- `ofxGgmlPluginRegistry` shared schema primitive for plugin descriptors, capability declarations, ABI/schema versions, lifecycle notes, safety requirements, compatibility rules, and metadata
+- default plugin categories for custom inference backends, companion workflow nodes, modality/renderer adapters, search/retrieval providers, and assistant tool adapters
+- schema version `ofxGgml.plugin_registry.v1` and ABI marker `ofxGgml.plugin.v1`
+- core- and workflow-layer exposure through `ofxGgmlCore.h` and `ofxGgmlWorkflows.h`
+- unit coverage for default plugin categories, stable JSON keys, and empty-entry handling
 
 ### 2. Third-Party Integration Surface
 **Priority**: MEDIUM-HIGH  
