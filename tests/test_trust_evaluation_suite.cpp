@@ -1,6 +1,8 @@
 #include "catch2.hpp"
 #include "../src/ofxGgmlWorkflows.h"
 
+#include <set>
+
 TEST_CASE("Trust evaluation suite exposes roadmap trust dimensions", "[trust_evaluation]") {
 	const auto suite = ofxGgmlDefaultTrustEvaluationSuite();
 	REQUIRE(suite.schemaVersion == "ofxGgml.trust_evaluation_suite.v1");
@@ -11,18 +13,10 @@ TEST_CASE("Trust evaluation suite exposes roadmap trust dimensions", "[trust_eva
 	REQUIRE(suite.approvalRules.size() == 2);
 	REQUIRE(suite.reviewNotes.size() == 2);
 
-	bool hasCitationQuality = false;
-	bool hasWorkflowCorrectness = false;
-	bool hasLatencyThroughput = false;
-	bool hasMultimodalCoherence = false;
-	bool hasAssistantSafety = false;
+	std::set<std::string> metricIds;
 
 	for (const auto & metric : suite.metrics) {
-		hasCitationQuality = hasCitationQuality || metric.id == "citation_quality";
-		hasWorkflowCorrectness = hasWorkflowCorrectness || metric.id == "workflow_correctness";
-		hasLatencyThroughput = hasLatencyThroughput || metric.id == "latency_throughput";
-		hasMultimodalCoherence = hasMultimodalCoherence || metric.id == "multimodal_coherence";
-		hasAssistantSafety = hasAssistantSafety || metric.id == "assistant_safety";
+		metricIds.insert(metric.id);
 		REQUIRE_FALSE(metric.category.empty());
 		REQUIRE_FALSE(metric.description.empty());
 		REQUIRE_FALSE(metric.target.empty());
@@ -30,11 +24,11 @@ TEST_CASE("Trust evaluation suite exposes roadmap trust dimensions", "[trust_eva
 		REQUIRE_FALSE(metric.evidenceRefs.empty());
 	}
 
-	REQUIRE(hasCitationQuality);
-	REQUIRE(hasWorkflowCorrectness);
-	REQUIRE(hasLatencyThroughput);
-	REQUIRE(hasMultimodalCoherence);
-	REQUIRE(hasAssistantSafety);
+	REQUIRE(metricIds.count("citation_quality") == 1);
+	REQUIRE(metricIds.count("workflow_correctness") == 1);
+	REQUIRE(metricIds.count("latency_throughput") == 1);
+	REQUIRE(metricIds.count("multimodal_coherence") == 1);
+	REQUIRE(metricIds.count("assistant_safety") == 1);
 
 	for (const auto & evalCase : suite.cases) {
 		REQUIRE_FALSE(evalCase.id.empty());

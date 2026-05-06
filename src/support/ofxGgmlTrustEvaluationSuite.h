@@ -7,6 +7,16 @@
 #include <utility>
 #include <vector>
 
+namespace ofxGgmlTrustEvaluationDetail {
+inline ofJson stringArrayToJson(const std::vector<std::string> & values) {
+	ofJson array = ofJson::array();
+	for (const auto & value : values) {
+		array.push_back(value);
+	}
+	return array;
+}
+} // namespace ofxGgmlTrustEvaluationDetail
+
 struct ofxGgmlTrustEvaluationMetric {
 	std::string id;
 	std::string category;
@@ -31,21 +41,12 @@ struct ofxGgmlTrustEvaluationMetric {
 		json["target"] = target;
 		json["threshold"] = threshold;
 		json["unit"] = unit;
-		json["evidence_refs"] = toStringArray(evidenceRefs);
+		json["evidence_refs"] = ofxGgmlTrustEvaluationDetail::stringArrayToJson(evidenceRefs);
 		json["metadata"] = ofJson::object();
 		for (const auto & item : metadata) {
 			json["metadata"][item.first] = item.second;
 		}
 		return json;
-	}
-
-private:
-	static ofJson toStringArray(const std::vector<std::string> & values) {
-		ofJson array = ofJson::array();
-		for (const auto & value : values) {
-			array.push_back(value);
-		}
-		return array;
 	}
 };
 
@@ -73,21 +74,12 @@ struct ofxGgmlTrustEvaluationCase {
 		json["source_ref"] = sourceRef;
 		json["prompt"] = prompt;
 		json["expected_behavior"] = expectedBehavior;
-		json["required_signals"] = toStringArray(requiredSignals);
+		json["required_signals"] = ofxGgmlTrustEvaluationDetail::stringArrayToJson(requiredSignals);
 		json["metadata"] = ofJson::object();
 		for (const auto & item : metadata) {
 			json["metadata"][item.first] = item.second;
 		}
 		return json;
-	}
-
-private:
-	static ofJson toStringArray(const std::vector<std::string> & values) {
-		ofJson array = ofJson::array();
-		for (const auto & value : values) {
-			array.push_back(value);
-		}
-		return array;
 	}
 };
 
@@ -142,8 +134,8 @@ struct ofxGgmlTrustEvaluationSuite {
 			caseArray.push_back(evalCase.toJson());
 		}
 		json["cases"] = std::move(caseArray);
-		json["approval_rules"] = toStringArray(approvalRules);
-		json["review_notes"] = toStringArray(reviewNotes);
+		json["approval_rules"] = ofxGgmlTrustEvaluationDetail::stringArrayToJson(approvalRules);
+		json["review_notes"] = ofxGgmlTrustEvaluationDetail::stringArrayToJson(reviewNotes);
 
 		json["metadata"] = ofJson::object();
 		for (const auto & item : metadata) {
@@ -156,14 +148,6 @@ struct ofxGgmlTrustEvaluationSuite {
 		return toJson().dump();
 	}
 
-private:
-	static ofJson toStringArray(const std::vector<std::string> & values) {
-		ofJson array = ofJson::array();
-		for (const auto & value : values) {
-			array.push_back(value);
-		}
-		return array;
-	}
 };
 
 inline ofxGgmlTrustEvaluationMetric ofxGgmlMakeTrustEvaluationMetric(
