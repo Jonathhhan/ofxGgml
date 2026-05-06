@@ -13,6 +13,7 @@
 
 #include "ofxGgmlWorkflows.h"
 
+#include "assistants/ofxGgmlAssistantTeam.h"
 #include "inference/ofxGgmlAceStepBridge.h"
 #include "inference/ofxGgmlMilkDropGenerator.h"
 #include "inference/ofxGgmlMontagePlanner.h"
@@ -20,3 +21,12 @@
 #include "inference/ofxGgmlMusicGenerator.h"
 #include "inference/ofxGgmlVideoEssayWorkflow.h"
 #include "bridges/ofxGgmlHoloscanBridge.h"
+#include "support/ofxGgmlCollaborativeWorkflow.h"
+#include "support/ofxGgmlCompanionProjectMemory.h"
+#include "support/ofxGgmlContinuityAssetLedger.h"
+#include "support/ofxGgmlFocusedExampleCatalog.h"
+#include "support/ofxGgmlIntegrationSurface.h"
+#include "support/ofxGgmlPersonalizationProfile.h"
+#include "support/ofxGgmlPluginRegistry.h"
+#include "support/ofxGgmlTimelineCopilotPlan.h"
+#include "support/ofxGgmlTrustEvaluationSuite.h"

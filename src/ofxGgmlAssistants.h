@@ -9,11 +9,11 @@
 /// - Coding agent (orchestration layer with approval callbacks)
 /// - Code review (hierarchical analysis, embedding-based ranking)
 /// - Text assistant (translation, summarization, rewriting)
-/// - Specialist assistant team specs (roles, handoffs, safety rules)
-/// - Trust evaluation suite specs (metrics, cases, approval evidence)
 ///
 /// These assistants provide higher-level task-oriented APIs
 /// on top of the basic inference layer.
+/// Specialist assistant-team and trust/evaluation schemas remain companion-tier
+/// surfaces behind ofxGgmlCompanionWorkflows.h.
 ///
 /// Example usage:
 ///   #include "ofxGgmlAssistants.h"
@@ -35,5 +35,3 @@
 #include "assistants/ofxGgmlWorkspaceAssistant.h"
 #include "assistants/ofxGgmlCodingAgent.h"
 #include "assistants/ofxGgmlCodeReview.h"
-#include "assistants/ofxGgmlAssistantTeam.h"
-#include "support/ofxGgmlTrustEvaluationSuite.h"

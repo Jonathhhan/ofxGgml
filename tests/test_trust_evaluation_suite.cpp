@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgmlWorkflows.h"
+#include "../src/support/ofxGgmlTrustEvaluationSuite.h"
 
 #include <set>
 

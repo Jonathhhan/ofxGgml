@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgmlCore.h"
+#include "../src/support/ofxGgmlPluginRegistry.h"
 
 #include <set>
 

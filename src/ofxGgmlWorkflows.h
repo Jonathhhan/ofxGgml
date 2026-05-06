@@ -11,7 +11,8 @@
 /// - Image/reference search and CLIP-style ranking primitives
 ///
 /// Montage planning, video essay, music generation, MilkDrop, AceStep, and
-/// Holoscan bridge surfaces are companion/example-tier features. Include
+/// Holoscan bridge surfaces, plus companion project-memory/timeline/plugin
+/// schemas, are companion/example-tier features. Include
 /// ofxGgmlCompanionWorkflows.h, or define
 /// OFXGGML_ENABLE_COMPANION_WORKFLOWS=1 before including ofxGgmlEasy.h, when
 /// you intentionally opt into those boundaries.
@@ -43,15 +44,6 @@
 #include "inference/ofxGgmlWebCrawler.h"
 #include "inference/ofxGgmlImageSearch.h"
 #include "inference/ofxGgmlRAGPipeline.h"
-#include "support/ofxGgmlCollaborativeWorkflow.h"
-#include "support/ofxGgmlCompanionProjectMemory.h"
-#include "support/ofxGgmlContinuityAssetLedger.h"
-#include "support/ofxGgmlFocusedExampleCatalog.h"
-#include "support/ofxGgmlIntegrationSurface.h"
-#include "support/ofxGgmlPersonalizationProfile.h"
-#include "support/ofxGgmlPluginRegistry.h"
-#include "support/ofxGgmlTimelineCopilotPlan.h"
-#include "support/ofxGgmlTrustEvaluationSuite.h"
 #include "support/ofxGgmlWorkflowManifest.h"
 #if OFXGGML_ENABLE_NVIGI
 #include "inference/ofxGgmlNvigiRagBackend.h"

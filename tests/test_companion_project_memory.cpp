@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgmlWorkflows.h"
+#include "../src/support/ofxGgmlCompanionProjectMemory.h"
 
 TEST_CASE("Companion project memory serializes creative continuity state", "[companion_project_memory]") {
 	ofxGgmlCompanionProjectMemory memory;

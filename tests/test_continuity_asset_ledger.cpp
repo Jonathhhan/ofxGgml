@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgmlWorkflows.h"
+#include "../src/support/ofxGgmlContinuityAssetLedger.h"
 
 TEST_CASE("Continuity asset ledger exposes roadmap continuity surfaces", "[continuity_asset_ledger]") {
 	const auto ledger = ofxGgmlDefaultContinuityAssetLedger();

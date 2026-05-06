@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgmlWorkflows.h"
+#include "../src/support/ofxGgmlFocusedExampleCatalog.h"
 
 TEST_CASE("Focused example catalog exposes roadmap example tracks", "[focused_examples]") {
 	const auto catalog = ofxGgmlDefaultFocusedExampleCatalog();

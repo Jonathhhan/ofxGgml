@@ -1,5 +1,5 @@
 #include "catch2.hpp"
-#include "../src/ofxGgmlAssistants.h"
+#include "../src/assistants/ofxGgmlAssistantTeam.h"
 
 TEST_CASE("Specialist assistant team exposes Phase 3 roles", "[assistant_team]") {
 	const auto team = ofxGgmlDefaultSpecialistAssistantTeam();

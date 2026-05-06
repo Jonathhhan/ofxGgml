@@ -16,7 +16,7 @@ ofxGgml uses **layered headers** - include only what you need:
 | `ofxGgml.h` | Basic + chat/text/code assistants | Default supported addon tier |
 | `ofxGgmlModalities.h` | Basic + speech/vision/TTS/YOLO/images/CLIP adapters | Optional multimodal adapter layer |
 | `ofxGgmlWorkflows.h` | Basic + source-grounded planning/research helpers | Optional helper layer |
-| `ofxGgmlCompanionWorkflows.h` | Montage/video essay/music/MilkDrop/AceStep/Holoscan prototypes | Companion/example-tier opt-in |
+| `ofxGgmlCompanionWorkflows.h` | Companion schemas + montage/video essay/music/MilkDrop/AceStep/Holoscan prototypes | Companion/example-tier opt-in |
 | `ofxGgmlAssistants.h` | Basic + code/chat assistants | AI coding assistance |
 | `ofxGgmlCore.h` | Runtime, tensors, models | Low-level tensor ops only |
 
@@ -103,12 +103,12 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlCodeAssistant` now also exposes lightweight assistant sessions, a typed tool registry, approval callbacks for risky proposals, and streamed assistant events so apps can build safer IDE-style coding flows without reimplementing orchestration
 - `ofxGgmlAssistantTeamSpec` provides a small Phase 3 schema for specialist assistant roles, approval-first handoffs, workspace rules, and companion-safe delegation plans
 - `ofxGgmlTrustEvaluationSuite` provides a small Phase 3 schema for citation quality, workflow correctness, latency/throughput, multimodal coherence, assistant safety, approval rules, and evidence-backed evaluation cases
-- Phase 3 is complete at the shared-schema foundation level: assistant teams, timeline copilots, continuity assets, and trust/evaluation contracts are available for companion projects without expanding the default addon boundary
+- Phase 3 is complete at the shared-schema foundation level: assistant teams, timeline copilots, continuity assets, and trust/evaluation contracts are available for companion projects through explicit companion/direct headers without expanding the default addon boundary
 - `ofxGgmlPluginRegistry` provides a small Phase 4 schema for plugin descriptors, capabilities, ABI markers, lifecycle notes, safety requirements, and compatibility rules across inference backends, workflow nodes, modalities/renderers, retrieval providers, and assistant tools
 - `ofxGgmlIntegrationSurface` provides a small Phase 4 schema for editor shells, external renderers/media tools, search/research pipelines, and hardware/media runtimes to declare endpoints, host boundaries, setup needs, failure modes, and safety requirements
 - `ofxGgmlPersonalizationProfileSet` provides a small Phase 4 schema for LoRA-style adapters, reusable project presets, text/visual/audio style profiles, adaptation rules, safety requirements, and review notes
 - `ofxGgmlCollaborativeWorkflowSpace` provides a small Phase 4 schema for local-first collaborative sessions, participants, realtime channels, approval checkpoints, sync rules, review notes, and manifest/project-memory handoffs
-- Phase 4 is complete at the shared-schema foundation level: plugin metadata, integration surfaces, personalization profiles, and collaborative realtime workflow contracts are available without expanding the default addon boundary
+- Phase 4 is complete at the shared-schema foundation level: plugin metadata, integration surfaces, personalization profiles, and collaborative realtime workflow contracts are available through explicit companion/direct headers without expanding the default addon boundary
 - `ofxGgmlCodingAgent` as a thin orchestration layer on top of the code and workspace assistants, with persistent session memory, a read-only `Plan` mode, optional patch application, and verification-aware coding runs
 - the GUI example Script mode now surfaces that assistant runtime directly with a default simple ChatPilot-style UI plus optional full `Build` / `Plan` controls, `@` references including read-oriented `@general`, quick slash/intents chips, streamed tool/approval status, and explicit approve/deny handling for risky proposals
 - `ofxGgmlWorkspaceAssistant` for validated patch application, allow-listed edit enforcement, unified-diff transactions with rollback, shadow-workspace safe apply, auto-selected verification commands, and retry-oriented coding loops on top of structured assistant output
