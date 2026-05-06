@@ -41,6 +41,7 @@ CLEAN=0
 WITH_DEBUG=0
 CMAKE_CMD="cmake"
 CMAKE_GENERATOR=""
+CMAKE_GENERATOR_TOOLSET=""
 CMAKE_GENERATOR_ARGS=()
 
 OS_NAME="$(uname -s 2>/dev/null || echo unknown)"
@@ -181,6 +182,54 @@ read_cmake_cache_value() {
 	' "$cache_file"
 }
 
+cuda_msbuild_extensions_present() {
+	local cuda_root="$1"
+	local msbuild_dir="$cuda_root/extras/visual_studio_integration/MSBuildExtensions"
+
+	[[ -d "$msbuild_dir" ]] || return 1
+	find "$msbuild_dir" -maxdepth 1 -name 'CUDA *.targets' -print -quit | grep -q .
+}
+
+resolve_cuda_toolkit_root() {
+	local cuda_root=""
+	local nvcc_path=""
+
+	if [[ -n "${CUDA_PATH:-}" ]]; then
+		cuda_root="$(cygpath -u "$CUDA_PATH" 2>/dev/null || printf '%s\n' "$CUDA_PATH")"
+		if [[ -x "$cuda_root/bin/nvcc.exe" || -x "$cuda_root/bin/nvcc" ]] && cuda_msbuild_extensions_present "$cuda_root"; then
+			cygpath -m "$cuda_root" 2>/dev/null || printf '%s\n' "$cuda_root"
+			return 0
+		fi
+	fi
+
+	if command -v nvcc >/dev/null 2>&1; then
+		nvcc_path="$(command -v nvcc)"
+		cuda_root="$(cd "$(dirname "$nvcc_path")/.." && pwd)"
+		if cuda_msbuild_extensions_present "$cuda_root"; then
+			cygpath -m "$cuda_root" 2>/dev/null || printf '%s\n' "$cuda_root"
+			return 0
+		fi
+	fi
+
+	return 1
+}
+
+configure_windows_cuda_toolset() {
+	local cuda_root
+
+	if [[ "$ENABLE_CUDA" != "ON" || -z "$CMAKE_GENERATOR" ]]; then
+		return 0
+	fi
+
+	if cuda_root="$(resolve_cuda_toolkit_root)"; then
+		CMAKE_GENERATOR_TOOLSET="host=x64,cuda=$cuda_root"
+		CMAKE_GENERATOR_ARGS+=(-T "$CMAKE_GENERATOR_TOOLSET")
+		write_step "Using CUDA toolkit integration: $cuda_root"
+	else
+		die "CUDA was requested, but CUDA Visual Studio integration files were not found. Install CUDA with Visual Studio Integration, or rerun with --cpu-only."
+	fi
+}
+
 reset_cmake_build_dir() {
 	local reason="$1"
 
@@ -192,6 +241,7 @@ reset_cmake_build_dir() {
 prepare_cmake_build_dir() {
 	local cache_file="$BUILD_DIR/CMakeCache.txt"
 	local cached_generator
+	local cached_toolset
 	local cached_option
 	local option_name
 	local desired_option
@@ -204,6 +254,14 @@ prepare_cmake_build_dir() {
 	if [[ -n "$CMAKE_GENERATOR" && -n "$cached_generator" && "$cached_generator" != "$CMAKE_GENERATOR" ]]; then
 		reset_cmake_build_dir "CMake generator changed from '$cached_generator' to '$CMAKE_GENERATOR'; resetting build tree..."
 		return 0
+	fi
+
+	cached_toolset="$(read_cmake_cache_value "$cache_file" "CMAKE_GENERATOR_TOOLSET" || true)"
+	if [[ -n "$cached_toolset" || -n "$CMAKE_GENERATOR_TOOLSET" ]]; then
+		if [[ "$cached_toolset" != "$CMAKE_GENERATOR_TOOLSET" ]]; then
+			reset_cmake_build_dir "CMake generator toolset changed from '${cached_toolset:-default}' to '${CMAKE_GENERATOR_TOOLSET:-default}'; resetting build tree..."
+			return 0
+		fi
 	fi
 
 	for option_name in GGML_CUDA GGML_VULKAN GGML_METAL; do
@@ -376,7 +434,7 @@ write_step "Using ggml commit: $GGML_COMMIT"
 # ---------------------------------------------------------------------------
 
 if [[ "$AUTO_DETECT" -eq 1 ]]; then
-	if [[ -z "$ENABLE_CUDA" ]] && command -v nvcc >/dev/null 2>&1; then
+	if [[ -z "$ENABLE_CUDA" ]] && { command -v nvcc >/dev/null 2>&1 || resolve_cuda_toolkit_root >/dev/null 2>&1; }; then
 		ENABLE_CUDA="ON"
 	fi
 	if [[ -z "$ENABLE_VULKAN" ]] && { command -v glslc >/dev/null 2>&1 || [[ -n "${VULKAN_SDK:-}" ]]; }; then
@@ -397,6 +455,7 @@ if [[ -z "$ENABLE_METAL" ]]; then
 	ENABLE_METAL="OFF"
 fi
 
+configure_windows_cuda_toolset
 prepare_cmake_build_dir
 
 # ---------------------------------------------------------------------------

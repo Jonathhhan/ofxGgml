@@ -88,6 +88,8 @@ vs:
 	ADDON_LIBS += libs/ggml/lib/ggml.lib
 	ADDON_LIBS += libs/ggml/lib/ggml-base.lib
 	ADDON_LIBS += libs/ggml/lib/ggml-cpu.lib
+	ADDON_LIBS += libs/ggml/lib/ggml-cuda.lib
+	ADDON_LIBS += libs/ggml/lib/ggml-vulkan.lib
 	# @DIFFUSION_LIBS_END vs
 android/armeabi:
 android/armeabi-v7a:
