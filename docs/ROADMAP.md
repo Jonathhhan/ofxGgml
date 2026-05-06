@@ -362,7 +362,7 @@ Implemented foundation:
 
 ### 4. Trust and Evaluation Suites
 **Priority**: MEDIUM-HIGH  
-**Status**: 💡 Proposed
+**Status**: 🔄 In Progress
 
 Build repeatable evaluation coverage for:
 
@@ -373,6 +373,15 @@ Build repeatable evaluation coverage for:
 - assistant safety and approval behavior
 
 **Outcome**: “local and verifiable” becomes an enforceable product property, not just positioning.
+
+Implemented foundation:
+
+- `ofxGgmlTrustEvaluationSuite` shared schema primitive for trust criteria, deterministic scenarios, required reports, workspace rules, approval-first safety, and workflow-manifest handoffs
+- default evaluation criteria for citation quality, workflow correctness, latency/throughput, multimodal coherence, and assistant safety/approval behavior
+- default scenarios for source-grounded research, companion media handoffs, and approval-first coding assistant safety
+- schema version `ofxGgml.trust_evaluation_suite.v1`
+- workflow-layer exposure through `ofxGgmlWorkflows.h`
+- unit coverage for default criteria, scenarios, stable JSON keys, and empty-entry handling
 
 ---
 

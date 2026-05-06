@@ -87,6 +87,7 @@ This addon is released under the [MIT License](LICENSE).
 - `ofxGgmlFocusedExampleCatalog` provides a small Phase 2 catalog of focused example tracks, setup notes, handoff contracts, and expected outputs for research/citations, companion video essays, speech/subtitles, coding assistants, and CLIP/image planning
 - `ofxGgmlTimelineCopilotPlan` provides a small Phase 3 companion-copilot schema for timeline lanes, anchors, approval checkpoints, workspace rules, and manifest/project-memory handoffs
 - `ofxGgmlContinuityAssetLedger` provides a small Phase 3 companion schema for scene continuity rules, style constraints, reusable asset references, and provenance-aware review notes
+- `ofxGgmlTrustEvaluationSuite` provides a small Phase 3 reliability schema for trust criteria, deterministic scenarios, required reports, approval-first safety, and workflow-manifest handoffs
 - `ofxGgmlWebCrawler` as an optional website-ingestion bridge layer, with a `Mojo` CLI adapter for local website-to-Markdown crawling workflows
 - `ofxGgmlCitationSearch` for topic-oriented source-grounded quote extraction, with structured citation items built from loaded URLs or crawler-ingested website content
 - `ofxGgmlVideoEssayWorkflow` is kept as companion/example-tier orchestration for `topic -> cited outline -> narrated script -> voice cues -> SRT -> visual concept -> scene/edit planning`, not as a default addon surface

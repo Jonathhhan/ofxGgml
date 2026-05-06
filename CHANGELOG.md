@@ -59,6 +59,7 @@ All notable changes to `ofxGgml` are documented in this file.
   - Server queue status API via `ofxGgmlInference::getServerQueueStatus()` for monitoring llama-server request queues
   - `ofxGgmlMemoryUsage` struct with detailed memory metrics including model weights, graph allocations, and backend memory stats
   - `ofxGgmlServerQueueStatus` struct with queue length, processing count, and completion statistics
+- `ofxGgmlTrustEvaluationSuite` for Phase 3 trust/evaluation criteria, deterministic scenarios, required reports, approval-first safety, and workflow-manifest handoffs.
 - `ofxGgmlCitationSearch::detectInputIntent(...)` and `searchFromInput(...)` for small intercepted search-style prompts such as `find sources about ...`, plus `ofxGgmlEasy::findCitationsFromInput(...)` for the configured high-level wrapper path.
 
 - New comprehensive documentation: `docs/OFXGGML_STABLEDIFFUSION_INTEGRATION.md` covering:
