@@ -50,15 +50,31 @@ from the pinned upstream ggml `v0.11.0` revision.
 
 ```powershell
 .\scripts\setup-ggml.ps1
+.\scripts\setup-ggml.bat
 .\scripts\setup-ggml.ps1 -CpuOnly
 .\scripts\setup-ggml.ps1 -Cuda
 .\scripts\setup-ggml.ps1 -Vulkan
 .\scripts\setup-ggml.ps1 -AllBackends
 ```
 
+On macOS and Linux, use the shell wrapper:
+
+```sh
+./scripts/setup-ggml.sh
+./scripts/setup-ggml.sh -CpuOnly
+./scripts/setup-ggml.sh -Vulkan
+```
+
 Running without backend switches is the default `-Auto` mode. Explicit backend
 switches keep the build narrow, and adding `-Auto` to an explicit backend also
 enables any other locally detected backend.
+
+`-Auto` and `-AllBackends` are intentionally different:
+
+| Option | Behavior |
+| --- | --- |
+| `-Auto` | Detects local SDKs/tools and enables only available backends. |
+| `-AllBackends` | Forces every supported backend option on, even if a local SDK may be missing. |
 
 Backend binaries remain generated local artifacts. `addon_config.mk` is updated
 by the setup script to reference the ggml libraries that were actually built.

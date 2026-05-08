@@ -33,6 +33,17 @@ function Test-Command {
 	$null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Invoke-CheckedNative {
+	param(
+		[string]$Step,
+		[scriptblock]$Command
+	)
+	& $Command
+	if ($LASTEXITCODE -ne 0) {
+		throw "$Step failed with exit code $LASTEXITCODE"
+	}
+}
+
 function Clear-DirectoryContents {
 	param([string]$Path)
 	if (!(Test-Path -LiteralPath $Path)) {
@@ -241,14 +252,17 @@ if ($Clean) {
 
 if (!(Test-Path -LiteralPath $Source)) {
 	Write-Step "Cloning ggml $Revision"
-	git clone --depth 1 --branch $Revision $Repo $Source
+	Invoke-CheckedNative "git clone ggml" { git clone --depth 1 --branch $Revision $Repo $Source }
 } else {
 	Write-Step "Fetching ggml $Revision"
-	git -C $Source fetch --depth 1 origin $Revision
-	git -C $Source checkout --detach FETCH_HEAD
+	Invoke-CheckedNative "git fetch ggml" { git -C $Source fetch --depth 1 origin $Revision }
+	Invoke-CheckedNative "git checkout ggml" { git -C $Source checkout --detach FETCH_HEAD }
 }
 
 $commit = git -C $Source rev-parse --short HEAD
+if ($LASTEXITCODE -ne 0) {
+	throw "git rev-parse ggml failed with exit code $LASTEXITCODE"
+}
 Write-Step "Using ggml commit $commit"
 
 if (Test-Path -LiteralPath $Build) {
@@ -285,14 +299,14 @@ if (!$IsLinux -and !$IsMacOS) {
 }
 
 Write-Step "Configuring ggml backends: CPU=ON CUDA=$(if ($Cuda) { 'ON' } else { 'OFF' }) Vulkan=$(if ($Vulkan) { 'ON' } else { 'OFF' }) Metal=$(if ($Metal) { 'ON' } else { 'OFF' }) OpenCL=$(if ($OpenCL) { 'ON' } else { 'OFF' })"
-cmake @configureArgs
+Invoke-CheckedNative "cmake configure ggml" { cmake @configureArgs }
 
 Write-Step "Building ggml Release with $Jobs jobs"
-cmake --build $Build --config Release -j $Jobs
+Invoke-CheckedNative "cmake build ggml Release" { cmake --build $Build --config Release -j $Jobs }
 
 if ($WithDebug) {
 	Write-Step "Building ggml Debug with $Jobs jobs"
-	cmake --build $Build --config Debug -j $Jobs
+	Invoke-CheckedNative "cmake build ggml Debug" { cmake --build $Build --config Debug -j $Jobs }
 }
 
 Write-Step "Exporting headers and libraries"

@@ -91,6 +91,7 @@ Core dependency setup must be reproducible:
 - support CPU by default
 - keep CUDA, Vulkan, Metal, and OpenCL as explicit setup options
 - use auto-detection by default when no backend switch is supplied
+- provide Windows batch and POSIX shell wrappers for setup
 
 The setup script should be safe to rerun and should not delete files outside the
 addon.
