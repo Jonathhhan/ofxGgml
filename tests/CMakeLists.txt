@@ -190,6 +190,7 @@ set(TEST_SOURCES
     test_graph.cpp
     test_result.cpp
     test_core.cpp
+    test_foundation_api.cpp
     test_model.cpp
     test_project_memory.cpp
     test_collaborative_workflow.cpp

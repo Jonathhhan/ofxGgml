@@ -1,6 +1,9 @@
 #include "catch2.hpp"
 
 #include "../src/ofxGgmlBasic.h"
+#include "../src/ofxGgmlFoundation.h"
+#include "../src/ofxGgmlInference.h"
+#include "../src/ofxGgmlCreative.h"
 #include "../src/ofxGgml.h"
 #include "../src/ofxGgmlModalities.h"
 #include "../src/ofxGgmlWorkflows.h"
