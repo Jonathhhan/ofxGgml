@@ -108,6 +108,8 @@ function Test-GeneratedAddonPath {
 	$normalized = $Path -replace "/", "\"
 	return ($normalized -match '(^|\\)libs\\ggml\\\.source(\\|$)') -or
 		($normalized -match '(^|\\)libs\\ggml\\build[^\\]*(\\|$)') -or
+		($normalized -match '(^|\\)libs\\llama\.cpp\\\.source(\\|$)') -or
+		($normalized -match '(^|\\)libs\\llama\.cpp\\build[^\\]*(\\|$)') -or
 		($normalized -match '(^|\\)libs\\sam3\.cpp\\build[^\\]*(\\|$)') -or
 		($normalized -match '(^|\\)libs\\sam3\.cpp\\(ggml|examples|media|scripts|tests)(\\|$)') -or
 		($normalized -match '(^|\\)libs\\sam3\.cpp\\sam3\.cpp$')

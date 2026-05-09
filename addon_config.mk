@@ -15,6 +15,9 @@ common:
 	ADDON_SOURCES_EXCLUDE += libs/ggml/.source/%
 	ADDON_SOURCES_EXCLUDE += libs/ggml/build/%
 	ADDON_SOURCES_EXCLUDE += libs/ggml/build*/%
+	ADDON_SOURCES_EXCLUDE += libs/llama.cpp/.source/%
+	ADDON_SOURCES_EXCLUDE += libs/llama.cpp/build/%
+	ADDON_SOURCES_EXCLUDE += libs/llama.cpp/build*/%
 	ADDON_SOURCES_EXCLUDE += libs/sam3.cpp/.git/%
 	ADDON_SOURCES_EXCLUDE += libs/sam3.cpp/sam3.cpp
 	ADDON_SOURCES_EXCLUDE += libs/sam3.cpp/build/%
@@ -28,6 +31,9 @@ common:
 	ADDON_INCLUDES_EXCLUDE += libs/ggml/.source/%
 	ADDON_INCLUDES_EXCLUDE += libs/ggml/build/%
 	ADDON_INCLUDES_EXCLUDE += libs/ggml/build*/%
+	ADDON_INCLUDES_EXCLUDE += libs/llama.cpp/.source/%
+	ADDON_INCLUDES_EXCLUDE += libs/llama.cpp/build/%
+	ADDON_INCLUDES_EXCLUDE += libs/llama.cpp/build*/%
 	ADDON_INCLUDES_EXCLUDE += libs/sam3.cpp/.git/%
 	ADDON_INCLUDES_EXCLUDE += libs/sam3.cpp/build/%
 	ADDON_INCLUDES_EXCLUDE += libs/sam3.cpp/build*/%
