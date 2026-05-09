@@ -88,3 +88,15 @@ the CUDA toolset.
 
 Backend binaries remain generated local artifacts. `addon_config.mk` is updated
 by the setup script to reference the ggml libraries that were actually built.
+
+SAM3 support is optional and generated locally:
+
+```powershell
+scripts\install-sam3-cpp.bat
+scripts\build-sam3-cpp.bat -Cuda -SkipExamples
+```
+
+The install script patches `sam3.cpp` with a `SAM3_CUDA` CMake option and a CUDA
+backend initialization path. The build script exports `libs/sam3/lib/sam3.lib`
+and enables `OFXGGML_ENABLE_SAM3_ADAPTER` in the local `addon_config.mk` SAM3
+marker.

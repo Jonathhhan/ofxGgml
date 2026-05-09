@@ -18,6 +18,10 @@ libs/ggml/lib/*
 !libs/ggml/include/.gitkeep
 !libs/ggml/lib/.gitkeep
 
+libs/sam3.cpp/
+libs/sam3/lib/*
+!libs/sam3/lib/.gitkeep
+
 ofxGgmlSimpleExample/bin/
 ofxGgmlSimpleExample/config.make
 ofxGgmlSimpleExample/icon.rc
