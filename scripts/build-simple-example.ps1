@@ -27,6 +27,39 @@ function Invoke-CheckedNative {
 	}
 }
 
+function Get-StableNameFragment {
+	param([string]$Text)
+	$sha1 = [System.Security.Cryptography.SHA1]::Create()
+	try {
+		$bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+		$hash = $sha1.ComputeHash($bytes)
+		return [System.BitConverter]::ToString($hash).Replace("-", "")
+	} finally {
+		$sha1.Dispose()
+	}
+}
+
+function Invoke-WithNamedMutex {
+	param(
+		[string]$Name,
+		[scriptblock]$Command
+	)
+	$mutex = New-Object System.Threading.Mutex($false, $Name)
+	$locked = $false
+	try {
+		$locked = $mutex.WaitOne([TimeSpan]::FromMinutes(30))
+		if (!$locked) {
+			throw "Timed out waiting for build lock: $Name"
+		}
+		& $Command
+	} finally {
+		if ($locked) {
+			$mutex.ReleaseMutex()
+		}
+		$mutex.Dispose()
+	}
+}
+
 function Get-MsBuild {
 	$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
 	if (Test-Path -LiteralPath $vswhere) {
@@ -169,18 +202,22 @@ if (Test-WindowsHost) {
 
 	$target = if ($Clean) { "Rebuild" } else { "Build" }
 	Write-Step "Building $Example $Configuration $Platform with MSBuild"
-	$exitCode = 0
-	for ($attempt = 1; $attempt -le 2; $attempt++) {
-		& $msbuild $project /t:$target /p:Configuration=$Configuration /p:Platform=$Platform /p:TrackFileAccess=false /p:MultiProcessorCompilation=false /m:1 /nr:false
-		$exitCode = $LASTEXITCODE
-		if ($exitCode -eq 0) {
-			return
+	$lockName = "Local\ofxGgml-msbuild-" + (Get-StableNameFragment $addonRoot.Path)
+	Invoke-WithNamedMutex -Name $lockName -Command {
+		$exitCode = 0
+		for ($attempt = 1; $attempt -le 2; $attempt++) {
+			& $msbuild $project /t:$target /p:Configuration=$Configuration /p:Platform=$Platform /p:TrackFileAccess=false /p:MultiProcessorCompilation=false /m:1 /nr:false
+			$exitCode = $LASTEXITCODE
+			if ($exitCode -eq 0) {
+				return
+			}
+			if ($attempt -lt 2) {
+				Write-Step "MSBuild failed with exit code $exitCode; retrying once"
+			}
 		}
-		if ($attempt -lt 2) {
-			Write-Step "MSBuild failed with exit code $exitCode; retrying once"
-		}
+		throw "MSBuild $Example failed with exit code $exitCode"
 	}
-	throw "MSBuild $Example failed with exit code $exitCode"
+	return
 }
 
 $makefile = Join-Path $exampleDir "Makefile"

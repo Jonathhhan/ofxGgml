@@ -1,4 +1,5 @@
 #include "test_harness.h"
+#include "ggml-backend.h"
 #include "../src/core/ofxGgmlRuntime.h"
 #include "../src/compute/ofxGgmlGraph.h"
 
@@ -130,4 +131,34 @@ OFXGGML_TEST(runtime_close_resets_state) {
 	OFXGGML_REQUIRE(!runtime.isReady());
 	OFXGGML_REQUIRE(runtime.state() == ofxGgmlRuntimeState::Uninitialized);
 	OFXGGML_REQUIRE(runtime.backendName().empty());
+}
+
+OFXGGML_TEST(runtime_move_assignment_releases_replaced_handles) {
+	const int backendCount = ggml_test_backend_live_count();
+	const int bufferCount = ggml_test_buffer_live_count();
+
+	{
+		ofxGgmlRuntime target;
+		ofxGgmlGraph graph;
+		ofxGgmlTensor tensor = graph.tensor1d(ofxGgmlType::F32, 4);
+		graph.build(tensor);
+
+		OFXGGML_REQUIRE(target.setup().isOk());
+		OFXGGML_REQUIRE(target.allocate(graph).isOk());
+		OFXGGML_REQUIRE(ggml_test_backend_live_count() == backendCount + 1);
+		OFXGGML_REQUIRE(ggml_test_buffer_live_count() == bufferCount + 1);
+
+		ofxGgmlRuntime source;
+		OFXGGML_REQUIRE(source.setup().isOk());
+		OFXGGML_REQUIRE(ggml_test_backend_live_count() == backendCount + 2);
+
+		target = std::move(source);
+
+		OFXGGML_REQUIRE(target.isReady());
+		OFXGGML_REQUIRE(ggml_test_backend_live_count() == backendCount + 1);
+		OFXGGML_REQUIRE(ggml_test_buffer_live_count() == bufferCount);
+	}
+
+	OFXGGML_REQUIRE(ggml_test_backend_live_count() == backendCount);
+	OFXGGML_REQUIRE(ggml_test_buffer_live_count() == bufferCount);
 }

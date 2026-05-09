@@ -3,5 +3,7 @@
 #include "ggml-backend.h"
 
 inline ggml_backend_t ggml_backend_cpu_init() {
-	return new ggml_backend();
+	auto * backend = new ggml_backend();
+	++ggml_test_backend_live_count();
+	return backend;
 }

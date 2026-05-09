@@ -16,11 +16,24 @@ struct ggml_backend_buffer {
 using ggml_backend_t = ggml_backend *;
 using ggml_backend_buffer_t = ggml_backend_buffer *;
 
+inline int & ggml_test_backend_live_count() {
+	static int count = 0;
+	return count;
+}
+
+inline int & ggml_test_buffer_live_count() {
+	static int count = 0;
+	return count;
+}
+
 inline const char * ggml_backend_name(ggml_backend_t backend) {
 	return backend ? backend->name.c_str() : "";
 }
 
 inline void ggml_backend_free(ggml_backend_t backend) {
+	if (backend) {
+		--ggml_test_backend_live_count();
+	}
 	delete backend;
 }
 
@@ -28,10 +41,14 @@ inline ggml_backend_buffer_t ggml_backend_alloc_ctx_tensors(ggml_context * ctx, 
 	if (!ctx || !backend) return nullptr;
 	auto * buffer = new ggml_backend_buffer();
 	buffer->ctx = ctx;
+	++ggml_test_buffer_live_count();
 	return buffer;
 }
 
 inline void ggml_backend_buffer_free(ggml_backend_buffer_t buffer) {
+	if (buffer) {
+		--ggml_test_buffer_live_count();
+	}
 	delete buffer;
 }
 

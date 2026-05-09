@@ -32,6 +32,23 @@
 #include <utility>
 
 struct ofxGgmlRuntime::Impl {
+	~Impl() {
+		releaseHandles();
+	}
+
+	void releaseHandles() {
+#if OFXGGML_HAS_GGML
+		if (buffer) {
+			ggml_backend_buffer_free(buffer);
+			buffer = nullptr;
+		}
+		if (backend) {
+			ggml_backend_free(backend);
+			backend = nullptr;
+		}
+#endif
+	}
+
 	ofxGgmlRuntimeState state = ofxGgmlRuntimeState::Uninitialized;
 	ofxGgmlRuntimeSettings settings;
 #if OFXGGML_HAS_GGML
@@ -98,6 +115,9 @@ ofxGgmlRuntime::ofxGgmlRuntime(ofxGgmlRuntime &&) noexcept = default;
 ofxGgmlRuntime & ofxGgmlRuntime::operator=(ofxGgmlRuntime &&) noexcept = default;
 
 ofxGgmlResult<void> ofxGgmlRuntime::setup(const ofxGgmlRuntimeSettings & settings) {
+	if (!impl) {
+		impl = std::make_unique<Impl>();
+	}
 	close();
 	impl->settings = settings;
 #if OFXGGML_HAS_GGML
@@ -148,17 +168,8 @@ ofxGgmlResult<void> ofxGgmlRuntime::setup(const ofxGgmlRuntimeSettings & setting
 }
 
 void ofxGgmlRuntime::close() {
-#if OFXGGML_HAS_GGML
-	if (impl && impl->buffer) {
-		ggml_backend_buffer_free(impl->buffer);
-		impl->buffer = nullptr;
-	}
-	if (impl && impl->backend) {
-		ggml_backend_free(impl->backend);
-		impl->backend = nullptr;
-	}
-#endif
 	if (impl) {
+		impl->releaseHandles();
 		impl->state = ofxGgmlRuntimeState::Uninitialized;
 	}
 }
