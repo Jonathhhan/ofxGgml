@@ -312,6 +312,7 @@ void ofApp::draw() {
 	}
 	ImGui::End();
 	gui.end();
+	gui.draw();
 
 	if (shouldRun) {
 		startPrompt();
