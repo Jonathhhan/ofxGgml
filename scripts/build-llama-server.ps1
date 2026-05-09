@@ -45,6 +45,41 @@ function Test-Command {
 	return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Normalize-WindowsPathEnvironment {
+	if ($IsLinux -or $IsMacOS) {
+		return
+	}
+	$variables = [Environment]::GetEnvironmentVariables("Process")
+	$pathNames = New-Object System.Collections.Generic.List[string]
+	foreach ($key in $variables.Keys) {
+		$name = [string]$key
+		if ($name.Equals("Path", [System.StringComparison]::OrdinalIgnoreCase)) {
+			$pathNames.Add($name)
+		}
+	}
+	if ($pathNames.Count -le 1) {
+		return
+	}
+
+	$preferredName = if ($pathNames.Contains("Path")) { "Path" } else { $pathNames[0] }
+	$pathValue = [string]$variables[$preferredName]
+	if ([string]::IsNullOrWhiteSpace($pathValue)) {
+		foreach ($name in $pathNames) {
+			$value = [string]$variables[$name]
+			if (![string]::IsNullOrWhiteSpace($value)) {
+				$pathValue = $value
+				break
+			}
+		}
+	}
+	foreach ($name in $pathNames) {
+		if (!$name.Equals("Path", [System.StringComparison]::Ordinal)) {
+			[Environment]::SetEnvironmentVariable($name, $null, "Process")
+		}
+	}
+	[Environment]::SetEnvironmentVariable("Path", $pathValue, "Process")
+}
+
 function Invoke-CheckedNative {
 	param(
 		[string]$Step,
@@ -163,7 +198,7 @@ function Get-CMakeConfigureArgs {
 		"-B", $BuildDir,
 		"-DLLAMA_BUILD_SERVER=ON",
 		"-DLLAMA_BUILD_TESTS=OFF",
-		"-DLLAMA_BUILD_EXAMPLES=OFF",
+		"-DLLAMA_BUILD_EXAMPLES=ON",
 		"-DLLAMA_CURL=OFF",
 		"-DGGML_CUDA=$(if ($Cuda) { 'ON' } else { 'OFF' })",
 		"-DGGML_VULKAN=$(if ($Vulkan) { 'ON' } else { 'OFF' })",
@@ -260,6 +295,8 @@ function Get-BuiltRuntimeFiles {
 	return @($files)
 }
 
+Normalize-WindowsPathEnvironment
+
 if (!(Test-Command "git")) {
 	throw "git was not found in PATH."
 }
@@ -333,11 +370,11 @@ New-Item -ItemType Directory -Path $BuildDir -Force | Out-Null
 Write-Step "Configuring llama.cpp: CUDA=$(if ($Cuda) { 'ON' } else { 'OFF' }) Vulkan=$(if ($Vulkan) { 'ON' } else { 'OFF' }) Metal=$(if ($Metal) { 'ON' } else { 'OFF' }) OpenCL=$(if ($OpenCL) { 'ON' } else { 'OFF' })"
 Invoke-CheckedNative "cmake configure llama.cpp" "cmake" (Get-CMakeConfigureArgs)
 
-foreach ($target in @("llama-server", "llama-cli")) {
+foreach ($target in @("llama-server", "llama-cli", "llama-embedding")) {
 	Write-Step "Building required target $target"
 	Invoke-CheckedNative "cmake build $target" "cmake" @("--build", $BuildDir, "--config", "Release", "--target", $target, "--parallel", $Jobs.ToString())
 }
-foreach ($target in @("llama-completion", "llama-embedding")) {
+foreach ($target in @("llama-completion")) {
 	Write-Step "Building optional target $target"
 	try {
 		Invoke-CheckedNative "cmake build $target" "cmake" @("--build", $BuildDir, "--config", "Release", "--target", $target, "--parallel", $Jobs.ToString())

@@ -174,9 +174,9 @@ On macOS/Linux, the matching wrappers call the same PowerShell implementation:
 ```
 
 Those scripts clone/build upstream `llama.cpp` under `libs/llama.cpp` and
-install `llama-server` plus `llama-cli` into `libs/llama/bin`. The text example
-tries the server first; if it is unavailable and a local CLI/model are found, it
-falls back to `llama-cli`.
+install `llama-server`, `llama-cli`, and `llama-embedding` into
+`libs/llama/bin`. The text example tries the server first; if it is unavailable
+and a local CLI/model are found, it falls back to `llama-cli`.
 
 If `-ModelPath` is omitted, the server launcher searches the text example data
 folders, this addon's `models` folder, and the sibling shared `addons/models`
