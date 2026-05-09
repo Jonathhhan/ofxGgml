@@ -41,6 +41,9 @@ public:
 	static ofxGgmlTextCommand buildCommand(
 		const ofxGgmlTextRequest & request,
 		const std::string & prompt);
+	static ofxGgmlTextCommandResult runCommand(
+		const ofxGgmlTextCommand & command,
+		const ofxGgmlTextChunkCallback & onChunk = nullptr);
 
 private:
 	ofxGgmlTextCommandRunner m_runner;

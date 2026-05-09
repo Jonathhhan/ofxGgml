@@ -44,7 +44,8 @@ The core public surface is:
 
 `ofxGgml.h` should remain a boring umbrella. Text belongs there only as a small
 backend-neutral API. Concrete llama.cpp CLI/server adapters must keep process
-execution behind a replaceable boundary and carry focused tests.
+execution behind a replaceable boundary, provide a default runner only when it
+is small and testable, and carry focused tests.
 
 ## Runtime Contract
 
@@ -152,4 +153,5 @@ layer.
 5. Done: build `ofxGgmlSimpleExample` through openFrameworks and run a tiny graph.
 6. Done: design the backend-neutral `ofxGgmlText.h` surface.
 7. Done: add the llama.cpp CLI adapter boundary.
-8. Next: add a real platform process runner and `ofxGgmlTextExample`.
+8. Done: add the real platform process runner.
+9. Next: add `ofxGgmlTextExample`.

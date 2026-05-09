@@ -44,17 +44,25 @@ OFXGGML_TEST(llama_cli_backend_validates_required_fields) {
 	OFXGGML_REQUIRE(!backend.generate(request).success);
 }
 
-OFXGGML_TEST(llama_cli_backend_requires_runner) {
+OFXGGML_TEST(llama_cli_backend_has_default_runner) {
+	ofxGgmlLlamaCliTextBackend backend;
+
+	OFXGGML_REQUIRE(backend.hasCommandRunner());
+	backend.setCommandRunner({});
+	OFXGGML_REQUIRE(backend.hasCommandRunner());
+}
+
+OFXGGML_TEST(llama_cli_default_runner_reports_missing_executable) {
 	ofxGgmlLlamaCliTextBackend backend;
 	ofxGgmlTextRequest request;
-	request.settings.executablePath = "llama-cli";
+	request.settings.executablePath = "__ofxggml_missing_llama_cli_executable__";
 	request.modelPath = "model.gguf";
 	request.prompt = "hello";
 
 	const auto result = backend.generate(request);
 
 	OFXGGML_REQUIRE(!result.success);
-	OFXGGML_REQUIRE(result.error.find("command runner") != std::string::npos);
+	OFXGGML_REQUIRE(!result.error.empty());
 }
 
 OFXGGML_TEST(llama_cli_builds_expected_command) {

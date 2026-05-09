@@ -31,9 +31,9 @@ Everything else should become a companion addon or an optional layer.
 | Optional companions | separate addons | vision, speech, SAM, assistants, workflows |
 
 The first text adapter is `ofxGgmlLlamaCliTextBackend`. It builds a llama.cpp
-CLI command from `ofxGgmlTextRequest` and runs through an injected command
-runner, so apps can choose their own process policy while the addon keeps the
-text API stable.
+CLI command from `ofxGgmlTextRequest` and runs it through a small native process
+runner. Apps can still inject a custom command runner when they need their own
+process policy while the addon keeps the text API stable.
 
 ## Status
 
