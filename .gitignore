@@ -22,6 +22,10 @@ libs/sam3.cpp/
 libs/sam3/lib/*
 !libs/sam3/lib/.gitkeep
 
+libs/llama.cpp/
+libs/llama/bin/*
+!libs/llama/bin/.gitkeep
+
 ofxGgmlSimpleExample/bin/
 ofxGgmlSimpleExample/config.make
 ofxGgmlSimpleExample/icon.rc

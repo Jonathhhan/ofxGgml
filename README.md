@@ -30,10 +30,9 @@ Everything else should become a companion addon or an optional layer.
 | Text | `ofxGgmlText.h` | small text request/result API with pluggable llama.cpp / server adapters |
 | Optional companions | separate addons | vision, speech, SAM, assistants, workflows |
 
-The first text adapter is `ofxGgmlLlamaCliTextBackend`. It builds a llama.cpp
-CLI command from `ofxGgmlTextRequest` and runs it through a small native process
-runner. Apps can still inject a custom command runner when they need their own
-process policy while the addon keeps the text API stable.
+The text layer has explicit llama.cpp adapters for a warm `llama-server` and a
+CLI fallback. The server runtime is optional and installed only through the
+dedicated scripts, so core builds and tests do not require llama.cpp.
 
 ## Status
 
@@ -149,6 +148,27 @@ scripts\build-text-example.ps1 -Configuration Release
 `OFXGGML_TEXT_SERVER_MODEL` to override routing. The request runs on a worker
 thread so the window paints immediately; use the ImGui buttons or press `R` to
 run again and `C` to cancel after the next output chunk.
+
+The optional local llama.cpp runtime is explicit:
+
+```powershell
+scripts\build-llama-server.bat
+scripts\build-llama-server.bat -Cuda
+scripts\build-llama-server.bat -CpuOnly
+scripts\start-llama-server.bat -ModelPath C:\path\to\model.gguf
+```
+
+On macOS/Linux, the matching wrappers call the same PowerShell implementation:
+
+```sh
+./scripts/build-llama-server.sh
+./scripts/start-llama-server.sh -ModelPath /path/to/model.gguf
+```
+
+Those scripts clone/build upstream `llama.cpp` under `libs/llama.cpp` and
+install `llama-server` plus `llama-cli` into `libs/llama/bin`. The text example
+tries the server first; if it is unavailable and a local CLI/model are found, it
+falls back to `llama-cli`.
 
 You can launch it without setting global environment variables:
 

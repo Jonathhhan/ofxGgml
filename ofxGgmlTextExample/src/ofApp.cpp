@@ -430,9 +430,7 @@ void ofApp::runPromptWorker() {
 	request.settings.temperature = 0.7f;
 	request.settings.gpuLayers = -1;
 
-	const auto result = generator.generate(
-		request,
-		[this](const std::string & chunk) {
+	auto onTextChunk = [this](const std::string & chunk) {
 			if (cancelRequested) {
 				return false;
 			}
@@ -441,7 +439,33 @@ void ofApp::runPromptWorker() {
 			status = "receiving text output...";
 			rebuildLinesLocked();
 			return !cancelRequested;
-		});
+		};
+
+	auto result = generator.generate(request, onTextChunk);
+	if (requestSettings.useServerBackend && !result.success && !cancelRequested) {
+		const std::string serverError = result.error;
+		const bool canFallbackToCli =
+			!requestSettings.executablePath.empty() &&
+			fileExists(requestSettings.executablePath) &&
+			!requestModelPath.empty() &&
+			fileExists(requestModelPath);
+		if (canFallbackToCli) {
+			{
+				std::lock_guard<std::mutex> lock(stateMutex);
+				output.clear();
+				status = "llama-server unavailable; falling back to llama.cpp CLI...";
+				rebuildLinesLocked();
+			}
+			ofxGgmlTextRequest fallbackRequest = request;
+			fallbackRequest.settings.useServerBackend = false;
+			ofxGgmlLlamaCliTextBackend fallbackBackend;
+			result = fallbackBackend.generate(fallbackRequest, onTextChunk);
+			if (!result.success) {
+				result.error = "llama-server failed: " + serverError +
+					"; CLI fallback failed: " + result.error;
+			}
+		}
+	}
 
 	std::lock_guard<std::mutex> lock(stateMutex);
 	if (result.success) {
