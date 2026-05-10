@@ -17,6 +17,8 @@
   CUDA+Vulkan, OpenCL, and AllBackends plans.
 - Added setup dry-run coverage for invalid option combinations so setup failures
   stay early and clear.
+- Added launch dry-run coverage for the explicit text/chat llama.cpp CLI
+  fallback path.
 - Breaking: renamed `ofxGgmlBackend::Cpu` and `ofxGgmlBackend::Cuda` to
   `ofxGgmlBackend::CPU` and `ofxGgmlBackend::CUDA` so acronym values use the
   same spelling as `OpenCL`.
