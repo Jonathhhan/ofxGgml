@@ -38,9 +38,12 @@ dedicated scripts, so core builds and tests do not require llama.cpp.
 
 ## Status
 
-This is the first rewrite commit. It intentionally favors a clear skeleton over
-feature volume. Use `legacy-full` if you need the prior broad implementation
-while this branch is rebuilt.
+`main` is the active pre-tag rewrite line. It now contains the core runtime,
+text, embedding, and segmentation boundaries plus focused examples and local
+validation scripts. Breaking changes are still allowed until the first rewrite
+tag. Use `legacy-full` if you need the prior broad implementation.
+
+See `docs/RELEASE_READINESS.md` before tagging or widening the public surface.
 
 ## Setup Direction
 
