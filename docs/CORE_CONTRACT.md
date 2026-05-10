@@ -166,4 +166,5 @@ layer.
 13. Done: add generated-project repair coverage for multiple examples.
 14. Done: tighten example launch scripts and model/server discovery consistency.
 15. Done: add focused smoke coverage for launch-script dry-run behavior.
-16. Next: make launch-script smoke checks part of a single local validation entrypoint.
+16. Done: make launch-script smoke checks part of a single local validation entrypoint.
+17. Next: decide the next optional layer boundary before adding more runtime surface.

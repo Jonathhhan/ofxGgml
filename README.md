@@ -121,6 +121,16 @@ scripts\test-addon.bat
 scripts\test-addon.ps1
 ```
 
+Run the fast local validation suite:
+
+```bat
+scripts\validate-local.bat
+```
+
+This runs the headless addon tests, generated-project repair checks, and launch
+dry-run smoke checks. It does not open example windows or start long-running
+servers.
+
 Build the generated openFrameworks simple example:
 
 ```powershell
