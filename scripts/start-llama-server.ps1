@@ -6,6 +6,7 @@ param(
 	[int]$GpuLayers = 28,
 	[int]$ContextSize = 4096,
 	[switch]$NoCudaGraphs,
+	[switch]$Embeddings,
 	[switch]$Detached,
 	[switch]$ForceNew,
 	[switch]$NoHealthCheck,
@@ -144,6 +145,10 @@ if (!(Test-Path -LiteralPath $ModelPath -PathType Leaf)) {
 $ModelPath = (Resolve-Path -LiteralPath $ModelPath).Path
 $ServerExe = (Resolve-Path -LiteralPath $ServerExe).Path
 
+if ($Embeddings -and !$PSBoundParameters.ContainsKey("Port")) {
+	$Port = 8081
+}
+
 $serverUrl = Get-ServerUrl $HostName $Port
 if (!$NoHealthCheck -and !$DryRun) {
 	$existing = Test-LlamaServer $serverUrl
@@ -171,6 +176,9 @@ $arguments = @(
 if ($NoCudaGraphs) {
 	$arguments += "--no-cuda-graphs"
 }
+if ($Embeddings) {
+	$arguments += "--embeddings"
+}
 
 Write-Host "Starting llama-server"
 Write-Host "  exe:       $ServerExe"
@@ -180,6 +188,10 @@ Write-Host "  backend:   llama.cpp auto"
 Write-Host "  ngl:       $GpuLayers"
 Write-Host "  ctx:       $ContextSize"
 Write-Host "  cudaGraph: $(if ($NoCudaGraphs) { 'off' } else { 'on' })"
+Write-Host "  embeddings: $(if ($Embeddings) { 'on' } else { 'off' })"
+if ($Embeddings) {
+	Write-Host "  serverMode: embeddings only"
+}
 Write-Host "  mode:      $(if ($Detached) { 'detached' } else { 'foreground' })"
 if (![string]::IsNullOrWhiteSpace($LogDir)) {
 	Write-Host "  logs:      $LogDir"

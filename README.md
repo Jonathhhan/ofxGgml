@@ -159,6 +159,7 @@ scripts\build-llama-server.bat -Cuda -CudaArchitectures 86
 scripts\build-llama-server.bat -CpuOnly
 scripts\build-llama-server.bat -WithCompletionTool
 scripts\start-llama-server.bat -ModelPath C:\path\to\model.gguf
+scripts\start-llama-server.bat -ModelPath C:\path\to\embedding-model.gguf -Embeddings
 scripts\start-llama-server.bat -Detached -LogDir logs\llama-server
 scripts\start-llama-server.bat -DryRun
 ```
@@ -197,6 +198,12 @@ searches the same local model folders as the text/chat scripts. Set
 general instruct models are useful only as smoke tests. The default output is
 OpenAI-style JSON. Use `-Format array`, `-Format json+`, or `-Raw` for other
 `llama-embedding` output formats.
+
+The addon also exposes `ofxGgmlEmbeddingGenerator` and
+`ofxGgmlLlamaServerEmbeddingBackend` for OpenAI-compatible `/v1/embeddings`
+requests. `llama-server --embeddings` is embedding-only, so the launcher uses
+port `8081` by default when `-Embeddings` is set. Keep the normal chat server on
+`8080` and run a dedicated embedding server on `8081`.
 
 If `-ModelPath` is omitted, the server launcher searches the text example data
 folders, this addon's `models` folder, and the sibling shared `addons/models`

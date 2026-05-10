@@ -13,6 +13,7 @@ add_executable(ofxGgml_rewrite_tests
 	test_runtime.cpp
 	test_model.cpp
 	test_text.cpp
+	test_embedding.cpp
 	test_llama_cli_text.cpp
 	test_llama_server_text.cpp
 	test_segmentation.cpp
@@ -20,6 +21,7 @@ add_executable(ofxGgml_rewrite_tests
 	../src/compute/ofxGgmlTensor.cpp
 	../src/compute/ofxGgmlGraph.cpp
 	../src/model/ofxGgmlModel.cpp
+	../src/inference/ofxGgmlEmbedding.cpp
 	../src/inference/ofxGgmlTextGeneration.cpp
 	../src/inference/ofxGgmlLlamaCliTextBackend.cpp
 	../src/inference/ofxGgmlLlamaServerTextBackend.cpp
