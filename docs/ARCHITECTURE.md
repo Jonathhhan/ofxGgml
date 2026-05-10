@@ -13,6 +13,7 @@ belong in the default addon.
   `ofxGgmlComputeResult`.
 - Keep inference result structs result-like (`isOk()`, `isError()`, bool
   conversion) while preserving their simple data fields.
+- Keep public adapter transport result structs similarly status-checkable.
 - Keep binary dependency setup reproducible.
 - Provide focused examples that each prove one concept.
 

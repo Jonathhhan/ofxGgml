@@ -21,6 +21,18 @@ bool containsPair(
 
 } // namespace
 
+OFXGGML_TEST(llama_cli_command_result_reports_status) {
+	ofxGgmlTextCommandResult result;
+	OFXGGML_REQUIRE(!result);
+	OFXGGML_REQUIRE(result.isError());
+
+	result.started = true;
+	result.exitCode = 0;
+	OFXGGML_REQUIRE(result);
+	OFXGGML_REQUIRE(result.isOk());
+	OFXGGML_REQUIRE(!result.isError());
+}
+
 OFXGGML_TEST(llama_cli_backend_validates_required_fields) {
 	ofxGgmlLlamaCliTextBackend backend(
 		[](const ofxGgmlTextCommand &, const ofxGgmlTextChunkCallback &) {

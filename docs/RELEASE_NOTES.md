@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added result-style status helpers to the llama CLI command result and
+  llama-server transport response helper structs.
 - Added result-style `isOk()`, `isError()`, and bool-conversion helpers to
   text, embedding, and segmentation result structs.
 - Split optional SAM3 adapter includes into `ofxGgmlSam3.h`; generic

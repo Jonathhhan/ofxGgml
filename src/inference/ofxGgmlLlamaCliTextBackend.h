@@ -17,6 +17,18 @@ struct ofxGgmlTextCommandResult {
 	int exitCode = -1;
 	std::string output;
 	std::string error;
+
+	explicit operator bool() const {
+		return isOk();
+	}
+
+	bool isOk() const {
+		return started && exitCode == 0;
+	}
+
+	bool isError() const {
+		return !isOk();
+	}
 };
 
 using ofxGgmlTextCommandRunner = std::function<ofxGgmlTextCommandResult(

@@ -22,6 +22,18 @@ struct ofxGgmlTextServerResponse {
 	std::string body;
 	std::string text;
 	std::string error;
+
+	explicit operator bool() const {
+		return isOk();
+	}
+
+	bool isOk() const {
+		return started && !cancelled && status >= 200 && status < 300;
+	}
+
+	bool isError() const {
+		return !isOk();
+	}
 };
 
 using ofxGgmlTextServerRunner = std::function<ofxGgmlTextServerResponse(

@@ -3,6 +3,21 @@
 
 #include <string>
 
+OFXGGML_TEST(llama_server_response_reports_status) {
+	ofxGgmlTextServerResponse response;
+	OFXGGML_REQUIRE(!response);
+	OFXGGML_REQUIRE(response.isError());
+
+	response.started = true;
+	response.status = 200;
+	OFXGGML_REQUIRE(response);
+	OFXGGML_REQUIRE(response.isOk());
+	OFXGGML_REQUIRE(!response.isError());
+
+	response.cancelled = true;
+	OFXGGML_REQUIRE(!response);
+}
+
 OFXGGML_TEST(llama_server_normalizes_urls) {
 	OFXGGML_REQUIRE(
 		ofxGgmlLlamaServerTextBackend::normalizeServerUrl("") ==
