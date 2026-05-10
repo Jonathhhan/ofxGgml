@@ -117,6 +117,8 @@ marker. By default, SAM3 builds against the addon ggml source under
 The smoke script always verifies the public segmentation boundary; when a model
 path is provided and the adapter is enabled, it also runs a tiny generated RGB
 point-prompt request.
+See `docs/SEGMENTATION.md` for the current decision to keep segmentation
+script-tested until a real model/image example workflow is available.
 
 ## Validation
 

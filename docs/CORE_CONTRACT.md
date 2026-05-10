@@ -136,6 +136,9 @@ Each example should demonstrate one idea:
 - `ofxGgmlChatExample`: interactive chat against a warm server, with CLI fallback
 - `ofxGgmlEmbeddingExample`: compare two texts through an embedding server
 
+Segmentation remains script-tested through `scripts/test-sam3-smoke.*` until
+the example gate in `docs/SEGMENTATION.md` is met.
+
 No all-in-one GUI example belongs in core.
 
 ## Expansion Gate
@@ -172,4 +175,5 @@ layer.
 16. Done: make launch-script smoke checks part of a single local validation entrypoint.
 17. Done: decide the next optional layer boundary before adding more runtime surface.
 18. Done: add a focused segmentation example or documented SAM3 smoke path.
-19. Next: decide whether segmentation needs an openFrameworks example or should remain script-tested until a real SAM3 model workflow is available.
+19. Done: decide whether segmentation needs an openFrameworks example or should remain script-tested until a real SAM3 model workflow is available.
+20. Next: tighten release/readiness docs around what belongs in `main` before the first rewrite tag.
