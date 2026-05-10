@@ -1,5 +1,7 @@
 #include "ofApp.h"
 
+#include "imgui_stdlib.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <cctype>
@@ -39,6 +41,20 @@ std::vector<std::string> wrapText(const std::string & text, std::size_t width) {
 		wrapped.push_back(line);
 	}
 	return wrapped;
+}
+
+std::string trimText(const std::string & text) {
+	std::size_t first = 0;
+	while (first < text.size() &&
+		std::isspace(static_cast<unsigned char>(text[first]))) {
+		++first;
+	}
+	std::size_t last = text.size();
+	while (last > first &&
+		std::isspace(static_cast<unsigned char>(text[last - 1]))) {
+		--last;
+	}
+	return text.substr(first, last - first);
 }
 
 std::string toString(const std::filesystem::path & path) {
@@ -222,6 +238,8 @@ void ofApp::setup() {
 	modelPath = normalizeEnvPath(envValue("OFXGGML_TEXT_MODEL"));
 	autoConfigureTextBackend(settings, modelPath);
 	prompt = "Write one concise sentence about local inference in openFrameworks.";
+	promptEdit = prompt;
+	promptEdit.reserve(4096);
 
 	const std::string backend = normalizeEnvPath(envValue("OFXGGML_TEXT_BACKEND"));
 	if (backend == "cli") {
@@ -230,7 +248,6 @@ void ofApp::setup() {
 	} else {
 		generator.setBackend(std::make_shared<ofxGgmlLlamaServerTextBackend>(settings.serverUrl));
 	}
-	std::copy(prompt.begin(), prompt.end(), promptBuffer.begin());
 	{
 		std::lock_guard<std::mutex> lock(stateMutex);
 		status = "ready";
@@ -301,8 +318,7 @@ void ofApp::draw() {
 		if (!runningSnapshot) {
 			ImGui::InputTextMultiline(
 				"##prompt",
-				promptBuffer.data(),
-				promptBuffer.size(),
+				&promptEdit,
 				ImVec2(0.0f, 70.0f));
 		} else {
 			ImGui::TextWrapped("%s", promptSnapshot.c_str());
@@ -332,6 +348,9 @@ void ofApp::draw() {
 }
 
 void ofApp::keyPressed(int key) {
+	if (ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard) {
+		return;
+	}
 	if (key == 'r' || key == 'R') {
 		startPrompt();
 		return;
@@ -365,7 +384,7 @@ void ofApp::startPrompt() {
 	{
 		std::lock_guard<std::mutex> lock(stateMutex);
 		output.clear();
-		prompt = normalizeEnvPath(promptBuffer.data());
+		prompt = trimText(promptEdit);
 		if (prompt.empty()) {
 			status = "type a prompt first";
 			rebuildLinesLocked();

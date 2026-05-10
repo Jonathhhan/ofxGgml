@@ -84,3 +84,26 @@ OFXGGML_TEST(llama_server_backend_runs_injected_runner) {
 		capturedRequest.url == "http://localhost:8080/v1/chat/completions");
 	OFXGGML_REQUIRE(capturedRequest.body.find("\"content\":\"hello\"") != std::string::npos);
 }
+
+OFXGGML_TEST(llama_server_backend_reports_unreachable_server) {
+	ofxGgmlLlamaServerTextBackend backend(
+		"http://127.0.0.1:8080",
+		[](const ofxGgmlTextServerRequest &) {
+			ofxGgmlTextServerResponse response;
+			response.started = true;
+			response.status = 0;
+			response.error = "connection refused";
+			return response;
+		});
+
+	ofxGgmlTextRequest request;
+	request.prompt = "hello";
+	request.settings.serverUrl = "http://127.0.0.1:8080";
+
+	const auto result = backend.generate(request);
+
+	OFXGGML_REQUIRE(!result.success);
+	OFXGGML_REQUIRE(
+		result.error.find("llama-server is not reachable") != std::string::npos);
+	OFXGGML_REQUIRE(result.error.find("connection refused") != std::string::npos);
+}

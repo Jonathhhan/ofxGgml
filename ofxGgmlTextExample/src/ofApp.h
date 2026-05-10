@@ -4,7 +4,6 @@
 #include "ofxGgmlText.h"
 #include "ofxImGui.h"
 
-#include <array>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -33,9 +32,9 @@ private:
 	ofxImGui::Gui gui;
 	std::string modelPath;
 	std::string prompt;
+	std::string promptEdit;
 	std::string output;
 	std::string status;
-	std::array<char, 2048> promptBuffer {};
 	std::vector<std::string> lines;
 	std::thread worker;
 	std::mutex stateMutex;

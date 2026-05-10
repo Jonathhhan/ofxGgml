@@ -213,13 +213,19 @@ ofxGgmlTextResult ofxGgmlLlamaServerTextBackend::generate(
 		result.error = response.error.empty()
 			? "llama-server request did not start"
 			: response.error;
+		result.error += " (" + requestUrl + ")";
+		return result;
+	}
+	if (response.status <= 0) {
+		result.error = "llama-server is not reachable at " + requestUrl;
+		if (!response.error.empty()) {
+			result.error += ": " + response.error;
+		}
 		return result;
 	}
 	if (response.status < 200 || response.status >= 300) {
-		result.error = "llama-server request failed";
-		if (response.status > 0) {
-			result.error += " with HTTP " + std::to_string(response.status);
-		}
+		result.error = "llama-server request failed with HTTP " +
+			std::to_string(response.status) + " at " + requestUrl;
 		if (!response.error.empty()) {
 			result.error += ": " + response.error;
 		} else if (!response.body.empty()) {
@@ -354,6 +360,7 @@ ofxGgmlTextServerResponse ofxGgmlLlamaServerTextBackend::runRequest(
 	httpRequest.body = request.body;
 	httpRequest.contentType = request.contentType;
 	httpRequest.headers["Accept"] = "application/json";
+	httpRequest.headers["Content-Type"] = request.contentType;
 	httpRequest.timeoutSeconds = request.timeoutSeconds;
 
 	ofURLFileLoader loader;
