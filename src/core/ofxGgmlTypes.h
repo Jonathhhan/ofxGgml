@@ -13,6 +13,18 @@ enum class ofxGgmlBackend {
 	OpenCL
 };
 
+inline const char * ofxGgmlBackendName(ofxGgmlBackend backend) {
+	switch (backend) {
+	case ofxGgmlBackend::Auto: return "Auto";
+	case ofxGgmlBackend::Cpu: return "CPU";
+	case ofxGgmlBackend::Cuda: return "CUDA";
+	case ofxGgmlBackend::Vulkan: return "Vulkan";
+	case ofxGgmlBackend::Metal: return "Metal";
+	case ofxGgmlBackend::OpenCL: return "OpenCL";
+	}
+	return "unknown";
+}
+
 enum class ofxGgmlType {
 	F32,
 	F16,

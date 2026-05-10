@@ -120,17 +120,6 @@ ggml_backend_t createOpenCLBackend() {
 #endif
 }
 
-std::string backendLabel(ofxGgmlBackend backend) {
-	switch (backend) {
-	case ofxGgmlBackend::Auto: return "Auto";
-	case ofxGgmlBackend::Cpu: return "CPU";
-	case ofxGgmlBackend::Cuda: return "CUDA";
-	case ofxGgmlBackend::Vulkan: return "Vulkan";
-	case ofxGgmlBackend::Metal: return "Metal";
-	case ofxGgmlBackend::OpenCL: return "OpenCL";
-	}
-	return "unknown";
-}
 #endif
 
 } // namespace
@@ -192,7 +181,10 @@ ofxGgmlResult<void> ofxGgmlRuntime::setup(const ofxGgmlRuntimeSettings & setting
 
 	if (!impl->backend) {
 		impl->state = ofxGgmlRuntimeState::Error;
-		return ofxGgmlResult<void>::failure("failed to initialize ggml " + backendLabel(settings.preferredBackend) + " backend");
+		return ofxGgmlResult<void>::failure(
+			"failed to initialize ggml " +
+			std::string(ofxGgmlBackendName(settings.preferredBackend)) +
+			" backend");
 	}
 	impl->state = ofxGgmlRuntimeState::Ready;
 	return ofxGgmlResult<void>::success();
