@@ -69,6 +69,9 @@ Last checked on 2026-05-10 on Windows x64 with Visual Studio 18:
   passed; 23 warnings, 0 errors.
 - README commands for setup, validation, llama-server, embedding, and SAM3 smoke
   were checked against the script parameters.
+- Generated project files, binaries, build caches, local dependency builds, and
+  model artifacts were checked against `.gitignore`; no untracked non-ignored
+  files remain.
 
 The remaining warnings are from openFrameworks/ofxImGui headers and generated
 Visual Studio project integration, not addon compile errors.
@@ -106,8 +109,8 @@ These items are intentionally not blockers for the first rewrite tag:
 
 These items should be closed before the first rewrite tag:
 
-- Confirm no generated project files, binaries, caches, or model files are
-  staged.
+- No open pre-tag hygiene items remain in this document. If new public API or
+  scripts are added, rerun this checklist before tagging.
 
 ## Versioning
 

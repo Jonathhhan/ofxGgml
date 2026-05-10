@@ -9,6 +9,20 @@ obj/
 *.VC.VC.opendb
 *.obj
 *.log
+*.dll
+*.exe
+*.exp
+*.ilk
+*.lib
+*.pdb
+
+*.gguf
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.ckpt
+models/
 
 libs/ggml/.source/
 libs/ggml/build/
@@ -33,6 +47,7 @@ ofxGgmlSimpleExample/*.sln
 ofxGgmlSimpleExample/*.vcxproj
 ofxGgmlSimpleExample/*.vcxproj.filters
 !ofxGgmlSimpleExample/bin/data/
+ofxGgmlSimpleExample/bin/data/*
 !ofxGgmlSimpleExample/bin/data/.gitkeep
 
 ofxGgmlTextExample/bin/
@@ -42,6 +57,7 @@ ofxGgmlTextExample/*.sln
 ofxGgmlTextExample/*.vcxproj
 ofxGgmlTextExample/*.vcxproj.filters
 !ofxGgmlTextExample/bin/data/
+ofxGgmlTextExample/bin/data/*
 !ofxGgmlTextExample/bin/data/.gitkeep
 
 ofxGgmlChatExample/bin/*
@@ -51,6 +67,7 @@ ofxGgmlChatExample/*.sln
 ofxGgmlChatExample/*.vcxproj
 ofxGgmlChatExample/*.vcxproj.filters
 !ofxGgmlChatExample/bin/data/
+ofxGgmlChatExample/bin/data/*
 !ofxGgmlChatExample/bin/data/.gitkeep
 
 ofxGgmlEmbeddingExample/bin/*
@@ -60,4 +77,5 @@ ofxGgmlEmbeddingExample/*.sln
 ofxGgmlEmbeddingExample/*.vcxproj
 ofxGgmlEmbeddingExample/*.vcxproj.filters
 !ofxGgmlEmbeddingExample/bin/data/
+ofxGgmlEmbeddingExample/bin/data/*
 !ofxGgmlEmbeddingExample/bin/data/.gitkeep
