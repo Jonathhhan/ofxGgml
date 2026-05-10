@@ -14,6 +14,8 @@
   files point to the next useful command.
 - Clarified llama.cpp install failures when runtime DLLs are locked by running
   server/example processes.
+- Added `build-llama-server -StopRunningRuntime` for explicitly stopping local
+  addon llama/example processes before reinstalling runtime DLLs.
 - Keep the narrowed rewritten addon scope unchanged while preserving the
   existing `1.0.0` foundation notes for history.
 

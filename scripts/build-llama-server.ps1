@@ -15,6 +15,7 @@ param(
 	[switch]$WithCompletionTool,
 	[switch]$Clean,
 	[switch]$Refetch,
+	[switch]$StopRunningRuntime,
 	[switch]$DryRun
 )
 
@@ -274,7 +275,7 @@ function Clear-InstallDirectory {
 	}
 }
 
-function Get-RuntimeProcessHint {
+function Get-RuntimeProcesses {
 	$processNames = @(
 		"llama-server",
 		"llama-cli",
@@ -283,13 +284,44 @@ function Get-RuntimeProcessHint {
 		"ofxGgmlChatExample",
 		"ofxGgmlEmbeddingExample"
 	)
-	$running = @(Get-Process -Name $processNames -ErrorAction SilentlyContinue |
-		Sort-Object ProcessName,Id |
+	$addonPath = (Resolve-Path -LiteralPath $addonRoot).Path
+	return @(Get-Process -Name $processNames -ErrorAction SilentlyContinue |
+		Where-Object {
+			$processPath = ""
+			try {
+				$processPath = $_.Path
+			} catch {
+				$processPath = ""
+			}
+			[string]::IsNullOrWhiteSpace($processPath) -or
+				$processPath.StartsWith($addonPath, [System.StringComparison]::OrdinalIgnoreCase)
+		} |
+		Sort-Object ProcessName,Id)
+}
+
+function Get-RuntimeProcessHint {
+	$running = @(Get-RuntimeProcesses |
 		ForEach-Object { "$($_.ProcessName)($($_.Id))" })
 	if ($running.Count -gt 0) {
-		return "Stop these running processes and rerun the build: $($running -join ', ')."
+		return "Stop these running processes and rerun the build, or pass -StopRunningRuntime: $($running -join ', ')."
 	}
 	return "Stop any running llama-server/example process that may be using files under libs\llama\bin, then rerun the build."
+}
+
+function Stop-RuntimeProcesses {
+	$running = @(Get-RuntimeProcesses)
+	if ($running.Count -eq 0) {
+		return
+	}
+	$labels = @($running | ForEach-Object { "$($_.ProcessName)($($_.Id))" })
+	Write-Step "Stopping running llama.cpp runtime processes: $($labels -join ', ')"
+	if ($DryRun) {
+		return
+	}
+	foreach ($process in $running) {
+		Stop-Process -Id $process.Id -Force -ErrorAction Stop
+	}
+	Start-Sleep -Milliseconds 500
 }
 
 function Get-BuiltRuntimeFiles {
@@ -369,6 +401,9 @@ if ($Cuda -and !$jobsSpecified -and !$IsLinux -and !$IsMacOS) {
 
 if ($Clean) {
 	Write-Step "Cleaning llama.cpp source/build/install outputs"
+	if ($StopRunningRuntime) {
+		Stop-RuntimeProcesses
+	}
 	Remove-Item -LiteralPath $SourceDir,$BuildDir -Recurse -Force -ErrorAction SilentlyContinue
 	Clear-InstallDirectory
 }
@@ -420,6 +455,9 @@ if (!$DryRun) {
 	}
 
 	Write-Step "Installing llama.cpp tools into $InstallDir"
+	if ($StopRunningRuntime) {
+		Stop-RuntimeProcesses
+	}
 	Clear-InstallDirectory
 	foreach ($file in Get-BuiltRuntimeFiles) {
 		try {

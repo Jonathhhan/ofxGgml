@@ -131,8 +131,8 @@ Dry-run launch resolution without opening windows:
 - No model found: pass `-Model C:\path\to\model.gguf` or place a GGUF in
   `addons/models`.
 - Rebuilding llama.cpp fails while installing DLLs: stop running
-  `llama-server`, text, chat, or embedding example processes, then rerun the
-  build.
+  `llama-server`, text, chat, or embedding example processes, or rerun
+  `build-llama-server.bat -StopRunningRuntime`.
 - Server request failed: start from the run scripts instead of opening the `.exe`
   directly; they set the needed environment variables and can start the server.
 - Embeddings fail on port `8080`: use the embedding launcher or start
