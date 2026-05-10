@@ -237,6 +237,7 @@ void ofApp::draw() {
 	std::string modelPathSnapshot;
 	bool runningSnapshot = false;
 	bool useServer = false;
+	bool cancelSupportedSnapshot = false;
 	int maxTokens = 0;
 	float temperature = 0.0f;
 	float topP = 0.0f;
@@ -245,6 +246,7 @@ void ofApp::draw() {
 		chatSnapshot = chat;
 		statusSnapshot = status;
 		useServer = settings.useServerBackend;
+		cancelSupportedSnapshot = !settings.useServerBackend;
 		backendSnapshot = settings.useServerBackend ? "llama-server" : "llama-cli";
 		serverUrlSnapshot = settings.serverUrl.empty() ? "(unset)" : settings.serverUrl;
 		serverModelSnapshot = settings.serverModel.empty() ? "(auto)" : settings.serverModel;
@@ -340,15 +342,17 @@ void ofApp::draw() {
 		if (ImGui::Button("Send") || ctrlEnter) {
 			shouldSend = true;
 		}
-		ImGui::SameLine();
-		if (!runningSnapshot) {
-			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.45f);
-		}
-		if (ImGui::Button("Cancel") && runningSnapshot) {
-			shouldCancel = true;
-		}
-		if (!runningSnapshot) {
-			ImGui::PopStyleVar();
+		if (cancelSupportedSnapshot) {
+			ImGui::SameLine();
+			if (!runningSnapshot) {
+				ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.45f);
+			}
+			if (ImGui::Button("Cancel") && runningSnapshot) {
+				shouldCancel = true;
+			}
+			if (!runningSnapshot) {
+				ImGui::PopStyleVar();
+			}
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Clear")) {
@@ -371,13 +375,22 @@ void ofApp::draw() {
 }
 
 void ofApp::keyPressed(int key) {
+	if (ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard) {
+		return;
+	}
 	if (key == OF_KEY_RETURN &&
 		(ofGetKeyPressed(OF_KEY_CONTROL) || ofGetKeyPressed(OF_KEY_COMMAND))) {
 		sendPrompt();
 		return;
 	}
 	if (key == 'c' || key == 'C') {
-		requestCancel();
+		std::lock_guard<std::mutex> lock(stateMutex);
+		if (!settings.useServerBackend) {
+			cancelRequested = true;
+			if (running) {
+				status = "cancelling after the next output chunk...";
+			}
+		}
 	}
 }
 
@@ -422,8 +435,11 @@ void ofApp::sendPrompt() {
 }
 
 void ofApp::requestCancel() {
-	cancelRequested = true;
 	std::lock_guard<std::mutex> lock(stateMutex);
+	if (settings.useServerBackend) {
+		return;
+	}
+	cancelRequested = true;
 	if (running) {
 		status = "cancelling after the next output chunk...";
 	}
