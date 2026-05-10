@@ -506,13 +506,22 @@ void ofApp::runChatWorker() {
 	request.settings = requestSettings;
 	request.settings.gpuLayers = -1;
 
-	auto onTextChunk = [this](const std::string & chunk) {
+	auto appendServerTextChunk = [this](const std::string & chunk) {
 		if (cancelRequested) {
 			return false;
 		}
 		appendAssistantText(chunk);
 		return !cancelRequested;
 	};
+	auto cancelOnlyChunk = [this](const std::string &) {
+		return !cancelRequested;
+	};
+	ofxGgmlTextChunkCallback onTextChunk;
+	if (requestSettings.useServerBackend) {
+		onTextChunk = appendServerTextChunk;
+	} else {
+		onTextChunk = cancelOnlyChunk;
+	}
 
 	auto result = generator.generate(request, onTextChunk);
 	if (requestSettings.useServerBackend && !result.success && !cancelRequested) {
@@ -534,7 +543,7 @@ void ofApp::runChatWorker() {
 			ofxGgmlTextRequest fallbackRequest = request;
 			fallbackRequest.settings.useServerBackend = false;
 			ofxGgmlLlamaCliTextBackend fallbackBackend;
-			result = fallbackBackend.generate(fallbackRequest, onTextChunk);
+			result = fallbackBackend.generate(fallbackRequest, cancelOnlyChunk);
 			if (!result.success) {
 				result.error = "llama-server failed: " + serverError +
 					"; CLI fallback failed: " + result.error;
@@ -544,7 +553,10 @@ void ofApp::runChatWorker() {
 
 	std::lock_guard<std::mutex> lock(stateMutex);
 	if (pendingAssistantIndex < chat.size()) {
-		if (result.success) {
+		if (cancelRequested) {
+			chat.erase(chat.begin() + static_cast<std::ptrdiff_t>(pendingAssistantIndex));
+			status = "cancelled";
+		} else if (result.success) {
 			chat[pendingAssistantIndex].content = result.text;
 			status = "complete via " + result.backendName + " in " +
 				std::to_string(static_cast<int>(result.elapsedMs)) + " ms";

@@ -447,16 +447,25 @@ void ofApp::runPromptWorker() {
 	request.settings.temperature = 0.7f;
 	request.settings.gpuLayers = -1;
 
-	auto onTextChunk = [this](const std::string & chunk) {
-			if (cancelRequested) {
-				return false;
-			}
-			std::lock_guard<std::mutex> lock(stateMutex);
-			output += chunk;
-			status = "receiving text output...";
-			rebuildLinesLocked();
-			return !cancelRequested;
-		};
+	auto appendServerTextChunk = [this](const std::string & chunk) {
+		if (cancelRequested) {
+			return false;
+		}
+		std::lock_guard<std::mutex> lock(stateMutex);
+		output += chunk;
+		status = "receiving text output...";
+		rebuildLinesLocked();
+		return !cancelRequested;
+	};
+	auto cancelOnlyChunk = [this](const std::string &) {
+		return !cancelRequested;
+	};
+	ofxGgmlTextChunkCallback onTextChunk;
+	if (requestSettings.useServerBackend) {
+		onTextChunk = appendServerTextChunk;
+	} else {
+		onTextChunk = cancelOnlyChunk;
+	}
 
 	auto result = generator.generate(request, onTextChunk);
 	if (requestSettings.useServerBackend && !result.success && !cancelRequested) {
@@ -476,7 +485,7 @@ void ofApp::runPromptWorker() {
 			ofxGgmlTextRequest fallbackRequest = request;
 			fallbackRequest.settings.useServerBackend = false;
 			ofxGgmlLlamaCliTextBackend fallbackBackend;
-			result = fallbackBackend.generate(fallbackRequest, onTextChunk);
+			result = fallbackBackend.generate(fallbackRequest, cancelOnlyChunk);
 			if (!result.success) {
 				result.error = "llama-server failed: " + serverError +
 					"; CLI fallback failed: " + result.error;
@@ -485,7 +494,10 @@ void ofApp::runPromptWorker() {
 	}
 
 	std::lock_guard<std::mutex> lock(stateMutex);
-	if (result.success) {
+	if (cancelRequested) {
+		output.clear();
+		status = "cancelled";
+	} else if (result.success) {
 		output = result.text;
 		status = "complete via " + result.backendName + " in " +
 			std::to_string(static_cast<int>(result.elapsedMs)) + " ms";

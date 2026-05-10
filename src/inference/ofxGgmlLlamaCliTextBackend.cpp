@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cctype>
 #include <cstring>
 #include <sstream>
 #include <utility>
@@ -39,6 +40,123 @@ std::string roleLabel(ofxGgmlTextRole role) {
 	case ofxGgmlTextRole::Assistant: return "Assistant";
 	}
 	return "User";
+}
+
+std::string trimCopy(const std::string & value) {
+	std::size_t first = 0;
+	while (first < value.size() &&
+		std::isspace(static_cast<unsigned char>(value[first]))) {
+		++first;
+	}
+	std::size_t last = value.size();
+	while (last > first &&
+		std::isspace(static_cast<unsigned char>(value[last - 1]))) {
+		--last;
+	}
+	return value.substr(first, last - first);
+}
+
+std::string stripAnsiSequences(const std::string & value) {
+	std::string stripped;
+	stripped.reserve(value.size());
+	for (std::size_t i = 0; i < value.size(); ++i) {
+		const unsigned char c = static_cast<unsigned char>(value[i]);
+		if (c != 0x1b) {
+			stripped.push_back(static_cast<char>(c));
+			continue;
+		}
+		if (i + 1 >= value.size() || value[i + 1] != '[') {
+			continue;
+		}
+		i += 2;
+		while (i < value.size()) {
+			const unsigned char code = static_cast<unsigned char>(value[i]);
+			if (code >= 0x40 && code <= 0x7e) {
+				break;
+			}
+			++i;
+		}
+	}
+	return stripped;
+}
+
+bool startsWith(const std::string & value, const std::string & prefix) {
+	return value.size() >= prefix.size() &&
+		value.compare(0, prefix.size(), prefix) == 0;
+}
+
+bool containsText(const std::string & value, const std::string & needle) {
+	return value.find(needle) != std::string::npos;
+}
+
+bool isQuestionMarkBannerLine(const std::string & line) {
+	std::size_t questionMarks = 0;
+	std::size_t visible = 0;
+	for (const unsigned char c : line) {
+		if (std::isspace(c)) {
+			continue;
+		}
+		++visible;
+		if (c == '?') {
+			++questionMarks;
+		}
+	}
+	return visible >= 2 && questionMarks * 2 >= visible;
+}
+
+bool isLlamaCliNoiseLine(const std::string & line) {
+	const std::string trimmed = trimCopy(line);
+	if (trimmed.empty()) {
+		return false;
+	}
+	if (isQuestionMarkBannerLine(trimmed)) {
+		return true;
+	}
+	const std::vector<std::string> prefixes = {
+		"ggml_",
+		"llama_",
+		"common_",
+		"sampling:",
+		"system_info:",
+		"build:",
+		"main:",
+		"load_",
+		"print_info:",
+		"generate:",
+		"Device ",
+		"CUDA ",
+		"Loading model"
+	};
+	for (const auto & prefix : prefixes) {
+		if (startsWith(trimmed, prefix)) {
+			return true;
+		}
+	}
+	return containsText(trimmed, "CUDA devices") ||
+		containsText(trimmed, "compute capability") ||
+		containsText(trimmed, "llama_perf_") ||
+		containsText(trimmed, "VRAM:");
+}
+
+std::string sanitizeLlamaCliOutput(const std::string & output) {
+	std::istringstream lines(stripAnsiSequences(output));
+	std::ostringstream cleaned;
+	std::string line;
+	bool wroteLine = false;
+	while (std::getline(lines, line)) {
+		if (!line.empty() && line.back() == '\r') {
+			line.pop_back();
+		}
+		if (isLlamaCliNoiseLine(line)) {
+			continue;
+		}
+		if (wroteLine) {
+			cleaned << '\n';
+		}
+		cleaned << line;
+		wroteLine = true;
+	}
+	return trimCopy(cleaned.str());
 }
 
 #if defined(_WIN32)
@@ -378,8 +496,14 @@ ofxGgmlTextResult ofxGgmlLlamaCliTextBackend::generate(
 		return result;
 	}
 
+	const std::string text = sanitizeLlamaCliOutput(commandResult.output);
+	if (text.empty()) {
+		result.error = "llama.cpp CLI returned no text output";
+		return result;
+	}
+
 	result.success = true;
-	result.text = commandResult.output;
+	result.text = text;
 	result.finishReason = "stop";
 	return result;
 }
@@ -440,6 +564,13 @@ ofxGgmlTextCommand ofxGgmlLlamaCliTextBackend::buildCommand(
 	}
 	args.push_back("--log-disable");
 	args.push_back("--no-display-prompt");
+	args.push_back("--no-show-timings");
+	args.push_back("--no-warmup");
+	args.push_back("--simple-io");
+	args.push_back("--color");
+	args.push_back("off");
+	args.push_back("--no-conversation");
+	args.push_back("--single-turn");
 	return command;
 }
 

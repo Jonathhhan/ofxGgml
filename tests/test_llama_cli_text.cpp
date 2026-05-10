@@ -105,6 +105,19 @@ OFXGGML_TEST(llama_cli_builds_expected_command) {
 		command.arguments.begin(),
 		command.arguments.end(),
 		"--no-display-prompt") != command.arguments.end());
+	OFXGGML_REQUIRE(std::find(
+		command.arguments.begin(),
+		command.arguments.end(),
+		"--log-disable") != command.arguments.end());
+	OFXGGML_REQUIRE(std::find(
+		command.arguments.begin(),
+		command.arguments.end(),
+		"--simple-io") != command.arguments.end());
+	OFXGGML_REQUIRE(std::find(
+		command.arguments.begin(),
+		command.arguments.end(),
+		"--no-conversation") != command.arguments.end());
+	OFXGGML_REQUIRE(containsPair(command.arguments, "--color", "off"));
 }
 
 OFXGGML_TEST(llama_cli_backend_runs_injected_runner) {
@@ -143,6 +156,35 @@ OFXGGML_TEST(llama_cli_backend_runs_injected_runner) {
 	OFXGGML_REQUIRE(streamed == "hello");
 	OFXGGML_REQUIRE(capturedCommand.executablePath == "llama-cli");
 	OFXGGML_REQUIRE(containsPair(capturedCommand.arguments, "-m", "model.gguf"));
+}
+
+OFXGGML_TEST(llama_cli_backend_strips_startup_noise_from_final_text) {
+	ofxGgmlLlamaCliTextBackend backend(
+		[](const ofxGgmlTextCommand &,
+			const ofxGgmlTextChunkCallback &) {
+			ofxGgmlTextCommandResult result;
+			result.started = true;
+			result.exitCode = 0;
+			result.output =
+				"ggml_cuda_init: found 1 CUDA devices (Total VRAM: 24575 MiB):\n"
+				"  Device 0: NVIDIA GeForce RTX 3090, compute capability 8.6, VRAM: 24575 MiB\n"
+				"Loading model...\n"
+				"?? ?? ????? ?????\n"
+				"Local inference keeps the model and data on your machine.\n"
+				"llama_perf_context_print:        load time = 1.00 ms\n";
+			return result;
+		});
+
+	ofxGgmlTextRequest request;
+	request.settings.executablePath = "llama-cli";
+	request.modelPath = "model.gguf";
+	request.prompt = "hello";
+
+	const auto result = backend.generate(request);
+
+	OFXGGML_REQUIRE(result.success);
+	OFXGGML_REQUIRE(result.text == "Local inference keeps the model and data on your machine.");
+	OFXGGML_REQUIRE(result.rawOutput.find("ggml_cuda_init") != std::string::npos);
 }
 
 OFXGGML_TEST(llama_cli_composes_messages_when_prompt_empty) {
