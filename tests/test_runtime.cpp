@@ -24,14 +24,14 @@ OFXGGML_TEST(runtime_setup_auto_falls_back_to_cpu_backend) {
 
 	auto devices = runtime.listDevices();
 	OFXGGML_REQUIRE(devices.size() == 1);
-	OFXGGML_REQUIRE(devices[0].backend == ofxGgmlBackend::Cpu);
+	OFXGGML_REQUIRE(devices[0].backend == ofxGgmlBackend::CPU);
 	OFXGGML_REQUIRE(devices[0].available);
 }
 
 OFXGGML_TEST(runtime_setup_explicit_cpu_backend) {
 	ofxGgmlRuntime runtime;
 	ofxGgmlRuntimeSettings settings;
-	settings.preferredBackend = ofxGgmlBackend::Cpu;
+	settings.preferredBackend = ofxGgmlBackend::CPU;
 
 	auto result = runtime.setup(settings);
 
@@ -41,7 +41,7 @@ OFXGGML_TEST(runtime_setup_explicit_cpu_backend) {
 
 OFXGGML_TEST(runtime_requested_gpu_falls_back_or_errors) {
 	for (const ofxGgmlBackend backend : {
-		ofxGgmlBackend::Cuda,
+		ofxGgmlBackend::CUDA,
 		ofxGgmlBackend::Vulkan,
 		ofxGgmlBackend::Metal,
 		ofxGgmlBackend::OpenCL

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Breaking: renamed `ofxGgmlBackend::Cpu` and `ofxGgmlBackend::Cuda` to
+  `ofxGgmlBackend::CPU` and `ofxGgmlBackend::CUDA` so acronym values use the
+  same spelling as `OpenCL`.
 - Breaking: renamed `ofxGgmlBackendName()` to `ofxGgmlGetBackendName()` for
   openFrameworks-style free-function getter naming.
 - Breaking: renamed public backend label accessors from `backendName()` to

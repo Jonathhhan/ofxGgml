@@ -6,8 +6,8 @@
 
 enum class ofxGgmlBackend {
 	Auto,
-	Cpu,
-	Cuda,
+	CPU,
+	CUDA,
 	Vulkan,
 	Metal,
 	OpenCL
@@ -16,8 +16,8 @@ enum class ofxGgmlBackend {
 inline const char * ofxGgmlGetBackendName(ofxGgmlBackend backend) {
 	switch (backend) {
 	case ofxGgmlBackend::Auto: return "Auto";
-	case ofxGgmlBackend::Cpu: return "CPU";
-	case ofxGgmlBackend::Cuda: return "CUDA";
+	case ofxGgmlBackend::CPU: return "CPU";
+	case ofxGgmlBackend::CUDA: return "CUDA";
 	case ofxGgmlBackend::Vulkan: return "Vulkan";
 	case ofxGgmlBackend::Metal: return "Metal";
 	case ofxGgmlBackend::OpenCL: return "OpenCL";
@@ -48,7 +48,7 @@ struct ofxGgmlRuntimeSettings {
 
 struct ofxGgmlDeviceInfo {
 	std::string name;
-	ofxGgmlBackend backend = ofxGgmlBackend::Cpu;
+	ofxGgmlBackend backend = ofxGgmlBackend::CPU;
 	std::size_t memoryBytes = 0;
 	bool available = false;
 };

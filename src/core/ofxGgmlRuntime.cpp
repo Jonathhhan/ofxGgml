@@ -145,9 +145,9 @@ ofxGgmlResult<void> ofxGgmlRuntime::setup(const ofxGgmlRuntimeSettings & setting
 		switch (backend) {
 		case ofxGgmlBackend::Auto:
 			return nullptr;
-		case ofxGgmlBackend::Cpu:
+		case ofxGgmlBackend::CPU:
 			return createCpuBackend();
-		case ofxGgmlBackend::Cuda:
+		case ofxGgmlBackend::CUDA:
 			return createCudaBackend(settings.deviceIndex);
 		case ofxGgmlBackend::Vulkan:
 			return createVulkanBackend(settings.deviceIndex);
@@ -161,11 +161,11 @@ ofxGgmlResult<void> ofxGgmlRuntime::setup(const ofxGgmlRuntimeSettings & setting
 
 	if (settings.preferredBackend == ofxGgmlBackend::Auto) {
 		for (const ofxGgmlBackend candidate : std::array<ofxGgmlBackend, 5> {
-			ofxGgmlBackend::Cuda,
+			ofxGgmlBackend::CUDA,
 			ofxGgmlBackend::Vulkan,
 			ofxGgmlBackend::Metal,
 			ofxGgmlBackend::OpenCL,
-			ofxGgmlBackend::Cpu
+			ofxGgmlBackend::CPU
 		}) {
 			impl->backend = tryBackend(candidate);
 			if (impl->backend) {
@@ -174,7 +174,7 @@ ofxGgmlResult<void> ofxGgmlRuntime::setup(const ofxGgmlRuntimeSettings & setting
 		}
 	} else {
 		impl->backend = tryBackend(settings.preferredBackend);
-		if (!impl->backend && settings.allowCpuFallback && settings.preferredBackend != ofxGgmlBackend::Cpu) {
+		if (!impl->backend && settings.allowCpuFallback && settings.preferredBackend != ofxGgmlBackend::CPU) {
 			impl->backend = createCpuBackend();
 		}
 	}
@@ -236,7 +236,7 @@ std::vector<ofxGgmlDeviceInfo> ofxGgmlRuntime::listDevices() const {
 		ggml_backend_cuda_get_device_memory(i, &freeMemory, &totalMemory);
 		devices.push_back({
 			description[0] ? description : "CUDA",
-			ofxGgmlBackend::Cuda,
+			ofxGgmlBackend::CUDA,
 			totalMemory,
 			true
 		});
@@ -259,7 +259,7 @@ std::vector<ofxGgmlDeviceInfo> ofxGgmlRuntime::listDevices() const {
 	}
 #endif
 #endif
-	devices.push_back({ "CPU", ofxGgmlBackend::Cpu, 0, true });
+	devices.push_back({ "CPU", ofxGgmlBackend::CPU, 0, true });
 	return devices;
 }
 

@@ -41,6 +41,8 @@ without widening the core surface.
   bool-style helpers instead of direct `.success` reads where possible.
 - Done after `v2.0.0-rewrite.0`: update the core contract and architecture
   notes to describe the current OF-style public backend naming.
+- Done after `v2.0.0-rewrite.0`: rename CPU/CUDA backend enum values to keep
+  acronym spelling consistent with OpenCL.
 - Review every public header for naming consistency and avoidable churn.
 - Add focused tests before changing any public type.
 - Keep `ofxGgml.h` as a small umbrella; avoid workflow-specific includes.
