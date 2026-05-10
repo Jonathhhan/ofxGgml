@@ -38,12 +38,13 @@ dedicated scripts, so core builds and tests do not require llama.cpp.
 
 ## Status
 
-`main` is the active pre-tag rewrite line. It now contains the core runtime,
-text, embedding, and segmentation boundaries plus focused examples and local
-validation scripts. Breaking changes are still allowed until the first rewrite
-tag. Use `legacy-full` if you need the prior broad implementation.
+`main` is the active rewrite line. It contains the core runtime, text,
+embedding, and segmentation boundaries plus focused examples and local
+validation scripts. Breaking changes after rewrite tags should be called out in
+release notes. Use `legacy-full` if you need the prior broad implementation.
 
-See `docs/RELEASE_READINESS.md` before tagging or widening the public surface.
+See `docs/RELEASE_NOTES.md` for the first rewrite checkpoint and
+`docs/RELEASE_READINESS.md` before tagging again or widening the public surface.
 
 ## Setup Direction
 

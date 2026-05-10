@@ -104,8 +104,8 @@ These items are intentionally not blockers for the first rewrite tag:
   setup switches on machines that have the relevant SDKs.
 - POSIX generated project builds: deferred. Shell wrappers are included, but
   platform projects still depend on local openFrameworks project generation.
-- Exact release version string: defer until the tag is created. Keep
-  `2.0.0-rewrite` while the API is still allowed to break.
+- Exact release version string: closed for the first rewrite tag as
+  `2.0.0-rewrite.0`.
 
 These items should be closed before the first rewrite tag:
 

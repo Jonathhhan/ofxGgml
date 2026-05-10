@@ -181,4 +181,5 @@ layer.
 22. Done: run a full generated-example build confidence pass before considering a rewrite tag.
 23. Done: confirm README setup, validation, llama-server, embedding, and SAM3 smoke commands match the scripts.
 24. Done: confirm no generated project files, binaries, caches, or model files are staged before the rewrite tag.
-25. Next: choose the first rewrite tag name and write release notes.
+25. Done: choose the first rewrite tag name and write release notes.
+26. Next: create and push the first rewrite tag.
