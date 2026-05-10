@@ -17,7 +17,7 @@ without widening the core surface.
 
 - Done after `v2.0.0-rewrite.0`: align `ofxGgmlBackend` with the setup backend
   switches by exposing OpenCL and wiring Metal/OpenCL initialization when built.
-- Done after `v2.0.0-rewrite.0`: add `ofxGgmlBackendName()` so examples and
+- Done after `v2.0.0-rewrite.0`: add `ofxGgmlGetBackendName()` so examples and
   downstream projects can use one stable backend label spelling.
 - Done after `v2.0.0-rewrite.0`: add result-style helpers to
   `ofxGgmlComputeResult` without changing the runtime compute return type.
@@ -35,6 +35,8 @@ without widening the core surface.
   inference layer to better match openFrameworks implementation style.
 - Done after `v2.0.0-rewrite.0`: rename public backend label accessors to
   `getBackendName()` for openFrameworks-style getter naming.
+- Done after `v2.0.0-rewrite.0`: rename the free backend label helper to
+  `ofxGgmlGetBackendName()` for openFrameworks-style helper naming.
 - Review every public header for naming consistency and avoidable churn.
 - Add focused tests before changing any public type.
 - Keep `ofxGgml.h` as a small umbrella; avoid workflow-specific includes.

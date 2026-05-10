@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Breaking: renamed `ofxGgmlBackendName()` to `ofxGgmlGetBackendName()` for
+  openFrameworks-style free-function getter naming.
 - Breaking: renamed public backend label accessors from `backendName()` to
   `getBackendName()` to better match openFrameworks getter style.
 - Added standalone compile coverage for each public umbrella header so hidden
@@ -20,7 +22,7 @@
   `ofxGgmlComputeResult`.
 - Added `ofxGgmlBackend::OpenCL` so the public runtime backend enum matches the
   setup script backend switches.
-- Added `ofxGgmlBackendName()` for stable public backend labels.
+- Added `ofxGgmlGetBackendName()` for stable public backend labels.
 - Wired Metal and OpenCL runtime initialization behind `OFXGGML_WITH_METAL` and
   `OFXGGML_WITH_OPENCL`; unbuilt or unavailable backends still fall back to CPU
   when allowed, or fail clearly in strict mode.

@@ -183,7 +183,7 @@ ofxGgmlResult<void> ofxGgmlRuntime::setup(const ofxGgmlRuntimeSettings & setting
 		impl->state = ofxGgmlRuntimeState::Error;
 		return ofxGgmlResult<void>::failure(
 			"failed to initialize ggml " +
-			std::string(ofxGgmlBackendName(settings.preferredBackend)) +
+			std::string(ofxGgmlGetBackendName(settings.preferredBackend)) +
 			" backend");
 	}
 	impl->state = ofxGgmlRuntimeState::Ready;

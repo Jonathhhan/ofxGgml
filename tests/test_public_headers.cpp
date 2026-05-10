@@ -8,12 +8,12 @@
 
 OFXGGML_TEST(public_core_header_compiles) {
 	OFXGGML_REQUIRE(OFXGGML_VERSION_MAJOR == 2);
-	OFXGGML_REQUIRE(std::string(ofxGgmlBackendName(ofxGgmlBackend::Auto)) == "Auto");
-	OFXGGML_REQUIRE(std::string(ofxGgmlBackendName(ofxGgmlBackend::Cpu)) == "CPU");
-	OFXGGML_REQUIRE(std::string(ofxGgmlBackendName(ofxGgmlBackend::Cuda)) == "CUDA");
-	OFXGGML_REQUIRE(std::string(ofxGgmlBackendName(ofxGgmlBackend::Vulkan)) == "Vulkan");
-	OFXGGML_REQUIRE(std::string(ofxGgmlBackendName(ofxGgmlBackend::Metal)) == "Metal");
-	OFXGGML_REQUIRE(std::string(ofxGgmlBackendName(ofxGgmlBackend::OpenCL)) == "OpenCL");
+	OFXGGML_REQUIRE(std::string(ofxGgmlGetBackendName(ofxGgmlBackend::Auto)) == "Auto");
+	OFXGGML_REQUIRE(std::string(ofxGgmlGetBackendName(ofxGgmlBackend::Cpu)) == "CPU");
+	OFXGGML_REQUIRE(std::string(ofxGgmlGetBackendName(ofxGgmlBackend::Cuda)) == "CUDA");
+	OFXGGML_REQUIRE(std::string(ofxGgmlGetBackendName(ofxGgmlBackend::Vulkan)) == "Vulkan");
+	OFXGGML_REQUIRE(std::string(ofxGgmlGetBackendName(ofxGgmlBackend::Metal)) == "Metal");
+	OFXGGML_REQUIRE(std::string(ofxGgmlGetBackendName(ofxGgmlBackend::OpenCL)) == "OpenCL");
 }
 
 OFXGGML_TEST(public_text_header_compiles) {

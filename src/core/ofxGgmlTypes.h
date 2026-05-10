@@ -13,7 +13,7 @@ enum class ofxGgmlBackend {
 	OpenCL
 };
 
-inline const char * ofxGgmlBackendName(ofxGgmlBackend backend) {
+inline const char * ofxGgmlGetBackendName(ofxGgmlBackend backend) {
 	switch (backend) {
 	case ofxGgmlBackend::Auto: return "Auto";
 	case ofxGgmlBackend::Cpu: return "CPU";

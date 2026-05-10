@@ -6,7 +6,7 @@
 namespace {
 
 std::string backendLabel(ofxGgmlBackend backend) {
-	return ofxGgmlBackendName(backend);
+	return ofxGgmlGetBackendName(backend);
 }
 
 std::string formatBytes(std::size_t bytes) {
