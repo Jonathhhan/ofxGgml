@@ -18,6 +18,8 @@
   addon llama/example processes before reinstalling runtime DLLs.
 - Added `scripts/doctor.*` to report first-run readiness for tools,
   dependencies, models, examples, and local llama-server endpoints.
+- Added `docs/EXAMPLES.md` as a compact guide to choosing, building, and
+  launching the focused examples.
 - Keep the narrowed rewritten addon scope unchanged while preserving the
   existing `1.0.0` foundation notes for history.
 

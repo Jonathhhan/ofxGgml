@@ -4,6 +4,8 @@ This is the boring path: clone the addon, build the local dependencies, and run
 the text, chat, and embedding examples without setting global environment
 variables.
 
+For a compact guide to what each example is for, see `docs/EXAMPLES.md`.
+
 ## 1. Prerequisites
 
 - openFrameworks installed locally

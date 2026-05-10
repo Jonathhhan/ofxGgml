@@ -138,12 +138,31 @@ if ($embeddingModel) {
 	Write-Check "WARN" "embedding model" "use an embedding-tuned GGUF for meaningful vectors"
 }
 
-foreach ($example in @("ofxGgmlTextExample", "ofxGgmlChatExample", "ofxGgmlEmbeddingExample")) {
-	$exe = Join-Path $addonRoot "$example\bin\$example$exeSuffix"
+$examples = @(
+	@{
+		Name = "ofxGgmlSimpleExample"
+		Command = "scripts\build-simple-example.bat"
+	},
+	@{
+		Name = "ofxGgmlTextExample"
+		Command = "scripts\run-text-example.bat -Build"
+	},
+	@{
+		Name = "ofxGgmlChatExample"
+		Command = "scripts\run-chat-example.bat -Build"
+	},
+	@{
+		Name = "ofxGgmlEmbeddingExample"
+		Command = "scripts\run-embedding-example.bat -Build"
+	}
+)
+foreach ($example in $examples) {
+	$exampleName = $example.Name
+	$exe = Join-Path $addonRoot "$exampleName\bin\$exampleName$exeSuffix"
 	if (Test-Path -LiteralPath $exe -PathType Leaf) {
-		Write-Check "OK" $example "built"
+		Write-Check "OK" $exampleName "built"
 	} else {
-		Write-Check "WARN" $example "run scripts\run-$($example.Replace('ofxGgml', '').Replace('Example', '').ToLower())-example.bat -Build"
+		Write-Check "WARN" $exampleName "run $($example.Command)"
 	}
 }
 
