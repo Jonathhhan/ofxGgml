@@ -179,4 +179,5 @@ layer.
 20. Done: tighten release/readiness docs around what belongs in `main` before the first rewrite tag.
 21. Done: review release readiness gaps and either close them or intentionally defer them.
 22. Done: run a full generated-example build confidence pass before considering a rewrite tag.
-23. Next: confirm README setup, validation, llama-server, embedding, and SAM3 smoke commands match the scripts.
+23. Done: confirm README setup, validation, llama-server, embedding, and SAM3 smoke commands match the scripts.
+24. Next: confirm no generated project files, binaries, caches, or model files are staged before the rewrite tag.

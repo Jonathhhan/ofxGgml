@@ -67,6 +67,8 @@ Last checked on 2026-05-10 on Windows x64 with Visual Studio 18:
   passed; 23 warnings, 0 errors.
 - `scripts\build-embedding-example.ps1 -Configuration Release -Platform x64`
   passed; 23 warnings, 0 errors.
+- README commands for setup, validation, llama-server, embedding, and SAM3 smoke
+  were checked against the script parameters.
 
 The remaining warnings are from openFrameworks/ofxImGui headers and generated
 Visual Studio project integration, not addon compile errors.
@@ -104,8 +106,6 @@ These items are intentionally not blockers for the first rewrite tag:
 
 These items should be closed before the first rewrite tag:
 
-- Confirm README commands for setup, validation, llama-server, embeddings, and
-  SAM3 smoke match the scripts.
 - Confirm no generated project files, binaries, caches, or model files are
   staged.
 

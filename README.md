@@ -16,13 +16,13 @@ Keep the default addon boring, dependable, and easy to embed:
 - backend/runtime ownership
 - tensor and graph wrappers
 - GGUF/model metadata inspection
-- basic text inference as a later explicit layer
+- basic text, chat, embedding, and segmentation adapter boundaries
 - stable result/error types
 - focused tests and examples
 
 Everything else should become a companion addon or an optional layer.
 
-## Planned Layers
+## Layers
 
 | Layer | Header | Scope |
 | --- | --- | --- |
@@ -47,8 +47,8 @@ See `docs/RELEASE_READINESS.md` before tagging or widening the public surface.
 
 ## Setup Direction
 
-The addon will not vendor large generated binaries by default. Build scripts
-will populate:
+The addon does not vendor large generated binaries by default. Build scripts
+populate:
 
 ```text
 libs/ggml/include
@@ -182,7 +182,8 @@ example runtime panel. The request runs on a worker thread and streams server
 output into the UI; use the ImGui buttons or press `R` to run again and `C` to
 cancel the active transport.
 
-The optional local llama.cpp runtime is explicit:
+The optional local llama.cpp runtime is explicit. Add `-DryRun` to inspect the
+resolved build plan without compiling:
 
 ```powershell
 scripts\build-llama-server.bat
@@ -190,6 +191,7 @@ scripts\build-llama-server.bat -Cuda
 scripts\build-llama-server.bat -Cuda -CudaArchitectures 86
 scripts\build-llama-server.bat -CpuOnly
 scripts\build-llama-server.bat -WithCompletionTool
+scripts\build-llama-server.bat -DryRun
 scripts\start-llama-server.bat -ModelPath C:\path\to\model.gguf
 scripts\start-llama-server.bat -ModelPath C:\path\to\embedding-model.gguf -Embeddings
 scripts\start-llama-server.bat -Detached -LogDir logs\llama-server
@@ -237,7 +239,8 @@ requests. `llama-server --embeddings` is embedding-only, so the launcher uses
 port `8081` by default when `-Embeddings` is set. Keep the normal chat server on
 `8080` and run a dedicated embedding server on `8081`. Embedding server launches
 default to OpenAI-compatible `--pooling mean`; pass `-EmbeddingPooling` to
-override it for a specific model.
+override it for a specific model. Set `OFXGGML_EMBEDDING_MODEL` or pass
+`-ModelPath` when launching an embedding server directly.
 
 If `-ModelPath` is omitted, the server launcher searches the text example data
 folders, this addon's `models` folder, and the sibling shared `addons/models`

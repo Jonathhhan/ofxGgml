@@ -109,6 +109,10 @@ if ([string]::IsNullOrWhiteSpace($ServerExe)) {
 	throw "Could not find llama-server. Build it with scripts\build-llama-server.bat or pass -ServerExe."
 }
 
+if ([string]::IsNullOrWhiteSpace($ModelPath) -and $Embeddings -and $env:OFXGGML_EMBEDDING_MODEL) {
+	$ModelPath = $env:OFXGGML_EMBEDDING_MODEL
+}
+
 if ([string]::IsNullOrWhiteSpace($ModelPath)) {
 	$primaryExample = if ($Embeddings) { "ofxGgmlEmbeddingExample" } else { "ofxGgmlTextExample" }
 	$extraExamples = if ($Embeddings) {
@@ -122,7 +126,8 @@ if ([string]::IsNullOrWhiteSpace($ModelPath)) {
 		-ExtraExampleNames $extraExamples)
 }
 if ([string]::IsNullOrWhiteSpace($ModelPath)) {
-	throw "Could not find a GGUF model. Pass -ModelPath or set OFXGGML_TEXT_MODEL."
+	$modelEnv = if ($Embeddings) { "OFXGGML_EMBEDDING_MODEL" } else { "OFXGGML_TEXT_MODEL" }
+	throw "Could not find a GGUF model. Pass -ModelPath or set $modelEnv."
 }
 if (!(Test-Path -LiteralPath $ModelPath -PathType Leaf)) {
 	throw "Model file was not found: $ModelPath"

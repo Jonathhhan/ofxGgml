@@ -161,4 +161,25 @@ Assert-Contains $embeddingServerOutput "pooling:   mean" "Embedding server dry-r
 Assert-Contains $embeddingServerOutput "--embeddings" "Embedding server dry-run"
 Assert-Contains $embeddingServerOutput "--pooling mean" "Embedding server dry-run"
 
+$previousEmbeddingModel = $env:OFXGGML_EMBEDDING_MODEL
+$env:OFXGGML_EMBEDDING_MODEL = $modelPath
+try {
+	$embeddingServerEnvOutput = Invoke-DryRun `
+		-Label "embedding llama-server env model dry-run" `
+		-Script (Join-Path $scriptRoot "start-llama-server.ps1") `
+		-Parameters @{
+			DryRun = $true
+			Embeddings = $true
+			ServerExe = $serverExe
+		}
+} finally {
+	if ($null -eq $previousEmbeddingModel) {
+		Remove-Item Env:\OFXGGML_EMBEDDING_MODEL -ErrorAction SilentlyContinue
+	} else {
+		$env:OFXGGML_EMBEDDING_MODEL = $previousEmbeddingModel
+	}
+}
+Assert-Contains $embeddingServerEnvOutput "model:     $modelPath" "Embedding server env model dry-run"
+Assert-Contains $embeddingServerEnvOutput "url:       http://127.0.0.1:8081" "Embedding server env model dry-run"
+
 Write-Step "Launch dry-run smoke coverage passed"
