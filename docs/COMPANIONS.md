@@ -1,9 +1,8 @@
 # Companion Addons
 
 `ofxGgml` should stay the boring core: ggml setup, runtime ownership, tensors,
-graphs, model metadata, result types, and small text/chat/embedding/segmentation
-boundaries. Domain workflows belong in companion addons that depend on
-`ofxGgml`.
+graphs, model metadata, result types, and small, stable inference boundaries.
+Domain workflows belong in companion addons that depend on `ofxGgml`.
 
 ## Split Rule
 
@@ -24,6 +23,7 @@ large external assets, and useful to most downstream companion addons.
 | Addon | Scope |
 | --- | --- |
 | `ofxGgmlSam` | SAM/SAM2/SAM3 segmentation models, masks, image prompts, segmentation UI |
+| `ofxGgmlLlama` | llama.cpp server/CLI tools, text/chat/embedding examples, launch scripts |
 | `ofxGgmlMusic` | music/audio analysis, music embeddings, generation workflows |
 | `ofxGgmlSpeech` | speech recognition, transcription, voice workflows |
 
@@ -45,3 +45,11 @@ addons.
 
 Shared code can move down into `ofxGgml` only when it becomes a stable,
 domain-neutral primitive with focused tests and no heavy runtime dependency.
+
+## Llama Split Timing
+
+`ofxGgmlLlama` is the planned home for llama.cpp-specific runtime tooling:
+server lifecycle scripts, CLI fallback, text/chat/embedding examples, and
+llama.cpp build helpers. Keep the current `v1.0.1` llama workflow in `ofxGgml`
+until `ofxGgmlSam` has one useful example and the move can preserve the
+clone/setup/run path for existing users.

@@ -107,6 +107,8 @@ These should not enter core by default:
 Named companion lanes:
 
 - `ofxGgmlSam` for SAM/SAM2/SAM3 image segmentation workflows.
+- `ofxGgmlLlama` for llama.cpp server/CLI tooling plus text, chat, and
+  embedding examples.
 - `ofxGgmlMusic` for music, audio analysis, and generation workflows.
 - `ofxGgmlSpeech` for speech recognition, transcription, and voice workflows.
 
@@ -123,6 +125,10 @@ Candidate companion lanes, only when a real project needs them:
 
 If one becomes important, start it as a companion addon that depends on
 `ofxGgml` instead of expanding the core contract.
+
+Split `ofxGgmlLlama` after `ofxGgmlSam` has one useful point-prompt example.
+Until then, keep the stable `v1.0.1` llama.cpp workflow in core so text/chat and
+embedding users keep the current clone/setup/run path.
 
 ## Release Rule
 

@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- No unreleased changes.
+- Documented `ofxGgmlLlama` as the planned future split for llama.cpp-specific
+  server/CLI tooling and text/chat/embedding examples.
 
 ## v1.0.1
 
