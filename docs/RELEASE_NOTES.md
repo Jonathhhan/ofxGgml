@@ -8,6 +8,7 @@
   agents, video, and larger UI tooling.
 - Added `docs/COMPANIONS.md` as the central split rule for core versus
   companion addon work.
+- Added `docs/README.md` as a compact map of the documentation set.
 
 ## v1.0.1
 
