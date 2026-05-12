@@ -66,10 +66,13 @@ void ofApp::configureRuntime(ofxGgmlBackend backend) {
 	}
 	if (runtime.isReady()) {
 		lines.push_back("press Run to execute the compute graph");
+		runtimeReady = true;
 	} else {
 		lines.push_back("runtime not ready - adjust backend and run again");
+		runtimeReady = false;
 	}
 	lines.push_back("legacy-full keeps the previous broad framework.");
+	lastComputeTime = "--";
 }
 
 void ofApp::runComputation() {
@@ -138,8 +141,8 @@ void ofApp::draw() {
 	ImGui::SetNextWindowPos(ImVec2(24.0f, 24.0f), ImGuiCond_Once);
 	ImGui::SetNextWindowSize(ImVec2(760.0f, 420.0f), ImGuiCond_Once);
 	if (ImGui::Begin("ofxGgml Simple Example")) {
-	ImGui::TextUnformatted("Runtime");
-	ImGui::Text("backend:");
+		ImGui::TextUnformatted("Runtime");
+		ImGui::Text("backend:");
 		if (ImGui::BeginCombo("##backend", backendLabel(kBackends[selectedBackendIndex].first))) {
 			for (std::size_t index = 0; index < kBackends.size(); ++index) {
 				const auto & backend = kBackends[index];
@@ -154,8 +157,14 @@ void ofApp::draw() {
 			}
 			ImGui::EndCombo();
 		}
+		if (!runtimeReady) {
+			ImGui::BeginDisabled();
+		}
 		if (ImGui::Button("Run")) {
 			runComputation();
+		}
+		if (!runtimeReady) {
+			ImGui::EndDisabled();
 		}
 		ImGui::SameLine();
 		ImGui::Text("calc time: %s", lastComputeTime.c_str());

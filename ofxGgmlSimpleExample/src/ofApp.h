@@ -21,4 +21,5 @@ private:
 	std::vector<std::string> lines;
 	int selectedBackendIndex = 0;
 	std::string lastComputeTime;
+	bool runtimeReady = false;
 };
