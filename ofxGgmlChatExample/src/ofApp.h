@@ -32,6 +32,7 @@ private:
 	void appendAssistantText(const std::string & text);
 	void refreshModelChoices();
 	static std::string envValue(const char * name);
+	static bool isTruthyEnvValue(const char * name, bool defaultValue = false);
 	static void autoConfigureTextBackend(ofxGgmlTextGenerationSettings & settings, std::string & modelPath);
 	static std::string normalizeEnvPath(const std::string & path);
 	static bool fileExists(const std::string & path);
@@ -54,4 +55,6 @@ private:
 	int selectedModelIndex = -1;
 	bool running = false;
 	bool scrollToBottom = true;
+	bool strictTextModel = false;
+	bool textModelWarningLogged = false;
 };

@@ -32,12 +32,14 @@ Text:
 
 ```powershell
 scripts\run-text-example.bat -Build -Model C:\path\to\model.gguf
+scripts\run-text-example.bat -Build -Model C:\path\to\model.gguf -StrictModel
 ```
 
 Chat:
 
 ```powershell
 scripts\run-chat-example.bat -Build -Model C:\path\to\model.gguf
+scripts\run-chat-example.bat -Build -Model C:\path\to\model.gguf -StrictModel
 ```
 
 Embeddings:
@@ -87,6 +89,7 @@ models.
 | `OFXGGML_TEXT_SERVER_MODEL` | Optional server-side model id |
 | `OFXGGML_TEXT_BACKEND` | `server` or `cli` |
 | `OFXGGML_LLAMA_CLI` | Explicit `llama-cli` path for CLI fallback |
+| `OFXGGML_TEXT_STRICT_MODEL` | Set to `1/true` for strict text model filtering |
 | `OFXGGML_EMBEDDING_MODEL` | Embedding model path |
 | `OFXGGML_EMBEDDING_SERVER_URL` | Embedding server URL |
 | `OFXGGML_EMBEDDING_SERVER_MODEL` | Optional embedding server model id |

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <memory>
 #include <sstream>
+#include <string_view>
 #include <utility>
 
 #if defined(_WIN32)
@@ -22,6 +23,97 @@
 #endif
 
 namespace {
+
+std::string toLowerAscii(std::string value) {
+	std::transform(
+		value.begin(),
+		value.end(),
+		value.begin(),
+		[](unsigned char c) {
+			return static_cast<char>(std::tolower(c));
+		});
+	return value;
+}
+
+std::string trimText(const std::string & text) {
+	std::size_t first = 0;
+	while (first < text.size() &&
+		std::isspace(static_cast<unsigned char>(text[first]))) {
+		++first;
+	}
+	std::size_t last = text.size();
+	while (last > first &&
+		std::isspace(static_cast<unsigned char>(text[last - 1]))) {
+		--last;
+	}
+	std::string normalized = text.substr(first, last - first);
+	if (normalized.size() >= 2 && normalized.front() == '"' && normalized.back() == '"') {
+		normalized = normalized.substr(1, normalized.size() - 2);
+	}
+	return normalized;
+}
+
+bool isLikelyTextModel(const std::string & modelPath) {
+	const std::string modelName = toLowerAscii(trimText(modelPath));
+	if (modelName.empty()) {
+		return false;
+	}
+	const std::string_view nonTextHints[] = {
+		"embed",
+		"embedding",
+		"bge",
+		"e5",
+		"nomic",
+		"gte",
+		"instructor",
+		"text-embedding",
+		"sentence-transformers",
+		"sentence_transformers",
+		"jina",
+		"intfloat",
+		"all-minilm",
+		"mpnet"
+	};
+	for (const auto & hint : nonTextHints) {
+		if (modelName.find(hint) != std::string::npos) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void logTextModelHint(const std::string & modelPath, bool & warningLogged) {
+	if (modelPath.empty() || isLikelyTextModel(modelPath)) {
+		warningLogged = false;
+		return;
+	}
+	if (warningLogged) {
+		return;
+	}
+	warningLogged = true;
+	ofLogWarning("ofxGgmlChatExample")
+		<< "Model looks like embedding GGUF: " << modelPath
+		<< "\nHint: use a text-oriented GGUF in llama-server/cli for chat text output.";
+}
+
+void failIfTextModelInvalid(
+	const std::string & modelPath,
+	bool strictTextModel,
+	std::string & errorOut,
+	bool & warningLogged) {
+	if (modelPath.empty() || isLikelyTextModel(modelPath)) {
+		warningLogged = false;
+		return;
+	}
+	if (!strictTextModel) {
+		logTextModelHint(modelPath, warningLogged);
+		return;
+	}
+	warningLogged = false;
+	errorOut = "Strict text model mode rejected non-text model: " + modelPath + "\n"
+		"Pass OFXGGML_TEXT_MODEL (or -Model) with a text-oriented GGUF, "
+		"or set OFXGGML_TEXT_STRICT_MODEL=0.";
+}
 
 std::string toString(const std::filesystem::path & path) {
 	return path.lexically_normal().string();
@@ -257,7 +349,26 @@ void ofApp::setup() {
 	if (backend == "cli") {
 		settings.useServerBackend = false;
 	}
+	strictTextModel = isTruthyEnvValue("OFXGGML_TEXT_STRICT_MODEL");
 	configureGenerator();
+	{
+		std::lock_guard<std::mutex> lock(stateMutex);
+		if (strictTextModel) {
+			if (!modelPath.empty()) {
+				std::string validationError;
+				failIfTextModelInvalid(modelPath, strictTextModel, validationError, textModelWarningLogged);
+				if (!validationError.empty()) {
+					status = "chat error: " + validationError;
+				}
+			} else {
+				std::string validationError;
+				failIfTextModelInvalid(settings.serverModel, strictTextModel, validationError, textModelWarningLogged);
+				if (!validationError.empty()) {
+					status = "chat error: " + validationError;
+				}
+			}
+		}
+	}
 
 	const std::string defaultSystem =
 		"You are a concise local assistant running inside an openFrameworks example.";
@@ -365,6 +476,15 @@ void ofApp::draw() {
 			if (ImGui::InputText("Server model", &serverModelEdit)) {
 				std::lock_guard<std::mutex> lock(stateMutex);
 				settings.serverModel = normalizeEnvPath(serverModelEdit);
+				if (strictTextModel) {
+					std::string validationError;
+					failIfTextModelInvalid(settings.serverModel, strictTextModel, validationError, textModelWarningLogged);
+					if (!validationError.empty()) {
+						status = "chat error: " + validationError;
+					}
+				} else {
+					logTextModelHint(settings.serverModel, textModelWarningLogged);
+				}
 			}
 			const std::string preview = selectedModelIndexSnapshot >= 0 &&
 				selectedModelIndexSnapshot < static_cast<int>(modelChoicesSnapshot.size())
@@ -389,6 +509,15 @@ void ofApp::draw() {
 			if (ImGui::InputText("Local model path", &modelPathEdit)) {
 				std::lock_guard<std::mutex> lock(stateMutex);
 				modelPath = normalizeEnvPath(modelPathEdit);
+				if (strictTextModel) {
+					std::string validationError;
+					failIfTextModelInvalid(modelPath, strictTextModel, validationError, textModelWarningLogged);
+					if (!validationError.empty()) {
+						status = "chat error: " + validationError;
+					}
+				} else {
+					logTextModelHint(modelPath, textModelWarningLogged);
+				}
 				selectedModelIndex = -1;
 				for (std::size_t i = 0; i < modelChoices.size(); ++i) {
 					if (modelChoices[i] == modelPath) {
@@ -411,6 +540,8 @@ void ofApp::draw() {
 					? "server-managed"
 					: (fileExists(modelPathSnapshot) ? "found" : "missing"));
 			ImGui::TextWrapped("CLI: %s", executableSnapshot.c_str());
+			ImGui::Text("Strict text filtering: %s",
+				strictTextModel ? "enabled (reject embedding GGUF patterns)" : "disabled");
 		}
 
 		ImGui::TextUnformatted("System");
@@ -593,6 +724,14 @@ void ofApp::runChatWorker() {
 			fail("No llama-server URL configured. Set OFXGGML_TEXT_SERVER_URL.");
 			return;
 		}
+		if (strictTextModel) {
+			std::string validationError;
+			failIfTextModelInvalid(requestSettings.serverModel, strictTextModel, validationError, textModelWarningLogged);
+			if (!validationError.empty()) {
+				fail("chat error: " + validationError);
+				return;
+			}
+		}
 	} else {
 		if (requestSettings.executablePath.empty()) {
 			fail("No llama.cpp CLI found. Set OFXGGML_LLAMA_CLI or use OFXGGML_TEXT_BACKEND=server.");
@@ -609,6 +748,14 @@ void ofApp::runChatWorker() {
 		if (!fileExists(requestModelPath)) {
 			fail("OFXGGML_TEXT_MODEL was not found: " + requestModelPath);
 			return;
+		}
+		if (strictTextModel) {
+			std::string validationError;
+			failIfTextModelInvalid(requestModelPath, strictTextModel, validationError, textModelWarningLogged);
+			if (!validationError.empty()) {
+				fail("chat error: " + validationError);
+				return;
+			}
 		}
 	}
 
@@ -731,6 +878,21 @@ std::string ofApp::normalizeEnvPath(const std::string & path) {
 
 bool ofApp::fileExists(const std::string & path) {
 	return !path.empty() && ofFile::doesFileExist(path, false);
+}
+
+bool ofApp::isTruthyEnvValue(const char * name, bool defaultValue) {
+	const auto raw = normalizeEnvPath(envValue(name));
+	if (raw.empty()) {
+		return defaultValue;
+	}
+	const auto lower = toLowerAscii(trimText(raw));
+	static const std::string trueValues[] = { "1", "true", "yes", "on", "y", "enabled" };
+	for (const auto & trueValue : trueValues) {
+		if (lower == trueValue) {
+			return true;
+		}
+	}
+	return false;
 }
 
 std::string ofApp::trimCopy(const std::string & value) {

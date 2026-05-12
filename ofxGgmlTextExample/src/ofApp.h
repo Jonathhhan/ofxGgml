@@ -25,6 +25,7 @@ private:
 	void configureGenerator();
 	void refreshModelChoices();
 	static std::string envValue(const char * name);
+	static bool isTruthyEnvValue(const char * name, bool defaultValue = false);
 	static void autoConfigureTextBackend(ofxGgmlTextGenerationSettings & settings, std::string & modelPath);
 	static std::string normalizeEnvPath(const std::string & path);
 	static bool fileExists(const std::string & path);
@@ -44,4 +45,6 @@ private:
 	std::atomic_bool cancelRequested { false };
 	int selectedModelIndex = -1;
 	bool running = false;
+	bool strictTextModel = false;
+	bool textModelWarningLogged = false;
 };

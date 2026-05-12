@@ -134,6 +134,12 @@ and a tiny graph without requiring a model or server.
 .\scripts\run-text-example.bat -Build -Model C:\path\to\model.gguf
 ```
 
+Use strict mode when you only want text GGUFs:
+
+```powershell
+.\scripts\run-text-example.bat -Build -Model C:\path\to\text-model.gguf -StrictModel
+```
+
 The launcher builds the example, starts `llama-server` on `127.0.0.1:8080` if
 needed, and opens the openFrameworks example. Use the editable prompt field in
 the UI, or press `R` to run again.
@@ -142,6 +148,12 @@ the UI, or press `R` to run again.
 
 ```powershell
 .\scripts\run-chat-example.bat -Build -Model C:\path\to\model.gguf
+```
+
+Use strict mode when you only want text GGUFs:
+
+```powershell
+.\scripts\run-chat-example.bat -Build -Model C:\path\to\text-model.gguf -StrictModel
 ```
 
 Chat uses the same text server on port `8080`. If the server is already healthy,

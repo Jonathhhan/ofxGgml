@@ -5,6 +5,7 @@ param(
 	[string]$LlamaCli = $env:OFXGGML_LLAMA_CLI,
 	[string]$Model = $env:OFXGGML_TEXT_MODEL,
 	[switch]$Build,
+	[switch]$StrictModel,
 	[switch]$NoAutoServer,
 	[switch]$DryRun,
 	[string]$Configuration = "Release",
@@ -55,9 +56,23 @@ if ($Backend -ieq "cli" -and [string]::IsNullOrWhiteSpace($LlamaCli)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Model)) {
-	$Model = Find-OfxGgmlFirstModel (Get-OfxGgmlModelSearchDirectories `
+	$modelDirs = Get-OfxGgmlModelSearchDirectories `
 		-AddonRoot $addonRoot `
-		-ExampleRoot $exampleRoot)
+		-ExampleRoot $exampleRoot
+	if ($StrictModel) {
+		$Model = Find-OfxGgmlFirstModelByRole -Directories $modelDirs -PreferredRoles @("text")
+	} else {
+		$Model = Find-OfxGgmlFirstModelByRole -Directories $modelDirs -PreferredRoles @("text", "embedding")
+	}
+}
+
+$strictModelCandidate = if ([string]::IsNullOrWhiteSpace($ServerModel)) { $Model } else { $ServerModel }
+$strictModelRole = Get-OfxGgmlModelRoleHint -Name ([IO.Path]::GetFileName($strictModelCandidate))
+if ($StrictModel -and [string]::IsNullOrWhiteSpace($strictModelCandidate)) {
+	throw "Strict text model mode requires a text GGUF. Pass -Model or -ServerModel."
+}
+if ($StrictModel -and $strictModelRole -ne "text") {
+	throw "Strict text model mode requires a text GGUF model; '$strictModelCandidate' does not match text model naming patterns."
 }
 
 if ($Backend -ieq "server") {
@@ -94,6 +109,14 @@ if (![string]::IsNullOrWhiteSpace($Model)) {
 	Write-OfxGgmlStep "Using text model: $Model"
 } elseif ($Backend -ieq "cli") {
 	Write-Warning "No GGUF model found. The example will show setup instructions."
+}
+if ($StrictModel) {
+	$env:OFXGGML_TEXT_STRICT_MODEL = "1"
+} else {
+	$env:OFXGGML_TEXT_STRICT_MODEL = "0"
+}
+if ($StrictModel) {
+	Write-OfxGgmlStep "Strict text model filtering: enabled"
 }
 
 if ($DryRun) {
