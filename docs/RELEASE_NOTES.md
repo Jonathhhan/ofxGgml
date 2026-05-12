@@ -4,6 +4,9 @@
 
 - Documented `ofxGgmlLlama` as the planned future split for llama.cpp-specific
   server/CLI tooling and text/chat/embedding examples.
+- Added strict text-model behavior to text and chat launchers/examples:
+  `-StrictModel` now enforces generative GGUF selection and rejects likely
+  embedding model usage in strict mode.
 
 ## v1.0.1
 
