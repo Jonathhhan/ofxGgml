@@ -112,17 +112,40 @@ function Assert-NotContains {
 	}
 }
 
+function Invoke-DryRunExpectFailure {
+	param(
+		[string]$Label,
+		[string]$Script,
+		[hashtable]$Parameters
+	)
+	Write-Step $Label
+	try {
+		$result = Invoke-DryRun -Script $Script -Parameters $Parameters
+		throw "$Label did not fail as expected."
+	} catch {
+		return @($_.ToString())
+	}
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $addonRoot = Resolve-Path (Join-Path $scriptRoot "..")
 $scratchDir = Join-Path $addonRoot "build\launch-dry-run-smoke"
 New-Item -ItemType Directory -Force -Path $scratchDir | Out-Null
 
 $modelPath = Join-Path $scratchDir "dry-run-model.gguf"
+$strictTextModelPath = Join-Path $scratchDir "dry-text-model.gguf"
+$strictEmbeddingModelPath = Join-Path $scratchDir "dry-embed-model.gguf"
 $serverExe = Join-Path $scratchDir "llama-server.exe"
 $llamaCliExe = Join-Path $scratchDir "llama-cli.exe"
 $llamaEmbeddingExe = Join-Path $scratchDir "llama-embedding.exe"
 if (!(Test-Path -LiteralPath $modelPath -PathType Leaf)) {
 	New-Item -ItemType File -Path $modelPath | Out-Null
+}
+if (!(Test-Path -LiteralPath $strictTextModelPath -PathType Leaf)) {
+	New-Item -ItemType File -Path $strictTextModelPath | Out-Null
+}
+if (!(Test-Path -LiteralPath $strictEmbeddingModelPath -PathType Leaf)) {
+	New-Item -ItemType File -Path $strictEmbeddingModelPath | Out-Null
 }
 if (!(Test-Path -LiteralPath $serverExe -PathType Leaf)) {
 	New-Item -ItemType File -Path $serverExe | Out-Null
@@ -182,6 +205,36 @@ Assert-Contains $textCliOutput "Auto server: off" "Text CLI dry-run"
 Assert-NotContains $textCliOutput "Using llama-server:" "Text CLI dry-run"
 Assert-NotContains $textCliOutput "Starting ofxGgmlTextExample" "Text CLI dry-run"
 
+$textStrictFailure = Invoke-DryRunExpectFailure `
+	-Label "Text strict mode rejects embedding model" `
+	-Script (Join-Path $scriptRoot "run-text-example.ps1") `
+	-Parameters @{
+		DryRun = $true
+		StrictModel = $true
+		NoAutoServer = $true
+		ServerUrl = "http://127.0.0.1:9080"
+		ServerModel = "dry-embed-model"
+		Model = $strictEmbeddingModelPath
+		Configuration = $Configuration
+		Platform = $Platform
+	}
+Assert-Contains $textStrictFailure "Strict text model mode requires a text GGUF" "Text strict mode rejection"
+
+$textStrictOutput = Invoke-DryRun `
+	-Label "Text strict mode passes for text-like model" `
+	-Script (Join-Path $scriptRoot "run-text-example.ps1") `
+	-Parameters @{
+		DryRun = $true
+		StrictModel = $true
+		NoAutoServer = $true
+		ServerUrl = "http://127.0.0.1:9080"
+		ServerModel = "dry-text-model"
+		Model = $strictTextModelPath
+		Configuration = $Configuration
+		Platform = $Platform
+	}
+Assert-Contains $textStrictOutput "Strict text model filtering: enabled" "Text strict mode enable"
+
 $chatOutput = Invoke-DryRun `
 	-Label "Chat example dry-run" `
 	-Script (Join-Path $scriptRoot "run-chat-example.ps1") `
@@ -200,6 +253,36 @@ Assert-Contains $chatOutput "Using text model: $modelPath" "Chat dry-run"
 Assert-Contains $chatOutput "Executable:" "Chat dry-run"
 Assert-Contains $chatOutput "Auto server: off" "Chat dry-run"
 Assert-NotContains $chatOutput "Starting ofxGgmlChatExample" "Chat dry-run"
+
+$chatStrictFailure = Invoke-DryRunExpectFailure `
+	-Label "Chat strict mode rejects embedding model" `
+	-Script (Join-Path $scriptRoot "run-chat-example.ps1") `
+	-Parameters @{
+		DryRun = $true
+		StrictModel = $true
+		NoAutoServer = $true
+		ServerUrl = "http://127.0.0.1:9080"
+		ServerModel = "dry-embed-model"
+		Model = $strictEmbeddingModelPath
+		Configuration = $Configuration
+		Platform = $Platform
+	}
+Assert-Contains $chatStrictFailure "Strict text model mode requires a text GGUF" "Chat strict mode rejection"
+
+$chatStrictOutput = Invoke-DryRun `
+	-Label "Chat strict mode passes for text-like model" `
+	-Script (Join-Path $scriptRoot "run-chat-example.ps1") `
+	-Parameters @{
+		DryRun = $true
+		StrictModel = $true
+		NoAutoServer = $true
+		ServerUrl = "http://127.0.0.1:9080"
+		ServerModel = "dry-text-model"
+		Model = $strictTextModelPath
+		Configuration = $Configuration
+		Platform = $Platform
+	}
+Assert-Contains $chatStrictOutput "Strict text model filtering: enabled" "Chat strict mode enable"
 
 $chatCliOutput = Invoke-DryRun `
 	-Label "Chat example CLI dry-run" `
