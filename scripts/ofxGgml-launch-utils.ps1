@@ -80,6 +80,51 @@ function Find-OfxGgmlFirstModel {
 	return ""
 }
 
+function Get-OfxGgmlModelRoleHint {
+	param([string]$Name)
+	$lower = $Name.ToLowerInvariant()
+	if ($lower -match "embed|embedding|bge|e5|gte|nomic|jina") {
+		return "embedding"
+	}
+	return "text"
+}
+
+function Find-OfxGgmlFirstModelByRole {
+	param(
+		[string[]]$Directories,
+		[string[]]$PreferredRoles
+	)
+	if ($null -eq $PreferredRoles -or $PreferredRoles.Count -eq 0) {
+		$PreferredRoles = @("text")
+	}
+	$preferredSet = New-Object System.Collections.Generic.HashSet[string]
+	foreach ($role in $PreferredRoles) {
+		$normalized = ($role.Trim()).ToLowerInvariant()
+		if (![string]::IsNullOrWhiteSpace($normalized)) {
+			$null = $preferredSet.Add($normalized)
+		}
+	}
+	if ($preferredSet.Count -eq 0) {
+		return Find-OfxGgmlFirstModel $Directories
+	}
+
+	foreach ($directory in $Directories) {
+		if (!(Test-Path -LiteralPath $directory -PathType Container)) {
+			continue
+		}
+		$models = Get-ChildItem -LiteralPath $directory -Filter "*.gguf" -File -ErrorAction SilentlyContinue |
+			Sort-Object Name
+		foreach ($preferred in $preferredSet) {
+			foreach ($model in $models) {
+				if (Get-OfxGgmlModelRoleHint $model.Name -eq $preferred) {
+					return $model.FullName
+				}
+			}
+		}
+	}
+	return ""
+}
+
 function Get-OfxGgmlModelSearchDirectories {
 	param(
 		[string]$AddonRoot,

@@ -155,6 +155,12 @@ Use an embedding-tuned GGUF model for meaningful vectors:
 .\scripts\run-embedding-example.bat -Build -Model C:\path\to\embedding-model.gguf
 ```
 
+Use strict mode when you only want embedding models:
+
+```powershell
+.\scripts\run-embedding-example.bat -Build -Model C:\path\to\embedding-model.gguf -StrictModel
+```
+
 The embedding launcher starts a dedicated `llama-server --embeddings` process on
 port `8081`, because embedding mode and chat mode should be separate.
 

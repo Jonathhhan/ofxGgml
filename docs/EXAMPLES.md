@@ -44,6 +44,7 @@ Embeddings:
 
 ```powershell
 scripts\run-embedding-example.bat -Build -Model C:\path\to\embedding-model.gguf
+scripts\run-embedding-example.bat -Build -Model C:\path\to\embedding-model.gguf -StrictModel
 ```
 
 The run scripts set the environment variables that the examples read, start a
@@ -89,6 +90,7 @@ models.
 | `OFXGGML_EMBEDDING_MODEL` | Embedding model path |
 | `OFXGGML_EMBEDDING_SERVER_URL` | Embedding server URL |
 | `OFXGGML_EMBEDDING_SERVER_MODEL` | Optional embedding server model id |
+| `OFXGGML_EMBEDDING_STRICT_MODEL` | Set to `1/true` for strict embedding model filtering |
 
 Prefer run-script parameters for normal use. Environment variables are useful
 when launching examples directly from an IDE.

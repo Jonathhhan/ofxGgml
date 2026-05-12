@@ -4,6 +4,7 @@ param(
 	[string]$Model = $(if ($env:OFXGGML_EMBEDDING_MODEL) { $env:OFXGGML_EMBEDDING_MODEL } elseif ($env:OFXGGML_TEXT_MODEL) { $env:OFXGGML_TEXT_MODEL } else { "" }),
 	[switch]$Build,
 	[switch]$NoAutoServer,
+	[switch]$StrictModel,
 	[switch]$DryRun,
 	[string]$Configuration = "Release",
 	[string]$Platform = "x64"
@@ -47,26 +48,55 @@ if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Model)) {
-	$Model = Find-OfxGgmlFirstModel (Get-OfxGgmlModelSearchDirectories `
+	$modelDirs = Get-OfxGgmlModelSearchDirectories `
 		-AddonRoot $addonRoot `
 		-ExampleRoot $exampleRoot `
-		-ExtraExampleNames @("ofxGgmlTextExample", "ofxGgmlChatExample"))
+		-ExtraExampleNames @("ofxGgmlTextExample", "ofxGgmlChatExample")
+	if ($StrictModel) {
+		$Model = Find-OfxGgmlFirstModelByRole -Directories $modelDirs -PreferredRoles @("embedding")
+	} else {
+		$Model = Find-OfxGgmlFirstModelByRole -Directories $modelDirs -PreferredRoles @("embedding", "text")
+	}
+}
+
+$strictModelCandidate = if ([string]::IsNullOrWhiteSpace($ServerModel)) { $Model } else { $ServerModel }
+$strictModelRole = Get-OfxGgmlModelRoleHint -Name ([IO.Path]::GetFileName($strictModelCandidate))
+if ($StrictModel -and [string]::IsNullOrWhiteSpace($strictModelCandidate)) {
+	throw "Strict embedding mode requires an embedding model path. Pass -Model or -ServerModel."
+}
+if ($StrictModel -and $strictModelRole -ne "embedding") {
+	throw "Strict embedding mode requires an embedding model path; '$strictModelCandidate' does not match embedding model naming patterns."
 }
 
 $env:OFXGGML_EMBEDDING_SERVER_URL = $ServerUrl
 if (![string]::IsNullOrWhiteSpace($ServerModel)) {
 	$env:OFXGGML_EMBEDDING_SERVER_MODEL = $ServerModel
+} elseif (![string]::IsNullOrWhiteSpace($Model)) {
+	$env:OFXGGML_EMBEDDING_SERVER_MODEL = $Model
 }
 if (![string]::IsNullOrWhiteSpace($Model)) {
 	$env:OFXGGML_EMBEDDING_MODEL = $Model
 	Write-OfxGgmlStep "Using embedding model: $Model"
 } else {
+	if ($StrictModel) {
+		throw "No embedding model found for strict mode. Pass -Model with an embedding GGUF."
+	}
 	Write-Warning "No GGUF model found. The example can still connect to an already-running server."
+}
+if ($StrictModel) {
+	$env:OFXGGML_EMBEDDING_STRICT_MODEL = "1"
+} else {
+	$env:OFXGGML_EMBEDDING_STRICT_MODEL = "0"
 }
 
 Write-OfxGgmlStep "Using embedding server: $ServerUrl"
 if (![string]::IsNullOrWhiteSpace($ServerModel)) {
 	Write-OfxGgmlStep "Using server model: $ServerModel"
+} elseif (![string]::IsNullOrWhiteSpace($Model)) {
+	Write-OfxGgmlStep "Using server model: $Model"
+}
+if ($StrictModel) {
+	Write-OfxGgmlStep "Strict embedding model filtering: enabled"
 }
 if ($DryRun) {
 	Write-OfxGgmlStep "Executable: $exampleExe"

@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <iomanip>
+#include <string_view>
 #include <memory>
 #include <sstream>
 #include <utility>
@@ -35,6 +36,84 @@ ImVec2 fitWindowSize(float preferredWidth, float preferredHeight) {
 		std::min(preferredHeight, availableHeight));
 }
 
+std::string toLowerAscii(const std::string & value) {
+	std::string lowered = value;
+	for (char & c : lowered) {
+		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	}
+	return lowered;
+}
+
+bool isLikelyEmbeddingEnvFlag(const std::string & value) {
+	const std::string normalized = toLowerAscii(trimText(value));
+	if (normalized.empty()) {
+		return false;
+	}
+	static const std::string trueValues[] = { "1", "true", "yes", "on", "y", "enabled" };
+	for (const auto & trueValue : trueValues) {
+		if (normalized == trueValue) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool isLikelyEmbeddingModel(const std::string & modelPath) {
+	const std::string normalized = trimText(modelPath);
+	if (normalized.empty()) {
+		return false;
+	}
+	const std::string modelName = toLowerAscii(normalized);
+	const std::string_view hints[] = {
+		"embed", "embedding", "bge", "e5", "nomic", "instructor", "text-embedding",
+		"gte", "text2vec", "sentence-transformers", "intfloat", "all-minilm", "mpnet"};
+	for (const auto & hint : hints) {
+		if (modelName.find(hint) != std::string::npos) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void logEmbeddingModelHint(const std::string & modelPath, bool & warningLogged) {
+	if (modelPath.empty() || isLikelyEmbeddingModel(modelPath)) {
+		warningLogged = false;
+		return;
+	}
+	if (warningLogged) {
+		return;
+	}
+	warningLogged = true;
+	ofLogWarning("example-emb")
+		<< "Model does not look like an embedding GGUF: " << modelPath
+		<< "\nHint: pass an embedding model via OFXGGML_EMBEDDING_MODEL or -ModelPath "
+			<< "(e.g. BGE / sentence-transformers family) to avoid degraded outputs.";
+}
+
+void failIfEmbeddingModelInvalid(
+	const std::string & modelPath,
+	bool strictEmbeddingModel,
+	std::string & errorOut,
+	bool & warningLogged
+) {
+	if (isLikelyEmbeddingModel(modelPath)) {
+		warningLogged = false;
+		return;
+	}
+	if (!strictEmbeddingModel) {
+		logEmbeddingModelHint(modelPath, warningLogged);
+		return;
+	}
+	warningLogged = false;
+	if (modelPath.empty()) {
+		errorOut =
+			"Strict embedding mode requires a recognized embedding model path (OFXGGML_EMBEDDING_SERVER_MODEL).";
+	} else {
+		errorOut = "Strict embedding mode rejected non-embedding model: " + modelPath +
+			"\nHint: set OFXGGML_EMBEDDING_SERVER_MODEL (or -Model when launching) to an embedding GGUF.";
+	}
+}
+
 } // namespace
 
 void ofApp::setup() {
@@ -47,6 +126,7 @@ void ofApp::setup() {
 	if (settings.serverUrl.empty()) {
 		settings.serverUrl = "http://127.0.0.1:8081";
 	}
+	strictEmbeddingModel = isTruthyEnvValue("OFXGGML_EMBEDDING_STRICT_MODEL");
 	configureGenerator();
 
 	inputA = "openFrameworks local inference";
@@ -58,6 +138,20 @@ void ofApp::setup() {
 
 	std::lock_guard<std::mutex> lock(stateMutex);
 	status = "ready";
+	if (strictEmbeddingModel) {
+		std::string initError;
+		failIfEmbeddingModelInvalid(
+			settings.serverModel,
+			strictEmbeddingModel,
+			initError,
+			embeddingModelWarningLogged);
+		if (!initError.empty()) {
+			error = initError;
+			status = "embedding error";
+		}
+	} else {
+		logEmbeddingModelHint(settings.serverModel, embeddingModelWarningLogged);
+	}
 }
 
 void ofApp::draw() {
@@ -122,12 +216,31 @@ void ofApp::draw() {
 			if (ImGui::InputText("Server model", &serverModelEdit)) {
 				std::lock_guard<std::mutex> lock(stateMutex);
 				settings.serverModel = normalizeEnvText(serverModelEdit);
+				if (strictEmbeddingModel) {
+					std::string validationError;
+					failIfEmbeddingModelInvalid(
+						settings.serverModel,
+						strictEmbeddingModel,
+						validationError,
+						embeddingModelWarningLogged);
+					if (!validationError.empty()) {
+						error = validationError;
+						status = "embedding error";
+					} else {
+						error.clear();
+						status = "ready";
+					}
+				} else {
+					logEmbeddingModelHint(settings.serverModel, embeddingModelWarningLogged);
+				}
 			}
 			if (runningSnapshot) {
 				ImGui::EndDisabled();
 			}
 			ImGui::TextWrapped(
 				"Use scripts/start-llama-server.bat -Embeddings to run a dedicated embedding server.");
+			ImGui::Text("Strict model filtering: %s",
+				strictEmbeddingModel ? "enabled (reject non-embedding GGUF)" : "disabled");
 		}
 
 		ImGui::Spacing();
@@ -241,6 +354,19 @@ void ofApp::runEmbeddingWorker() {
 		requestSettings = settings;
 		requestInputA = inputA;
 		requestInputB = inputB;
+		std::string validationError;
+		failIfEmbeddingModelInvalid(
+			requestSettings.serverModel,
+			strictEmbeddingModel,
+			validationError,
+			embeddingModelWarningLogged);
+		if (!validationError.empty()) {
+			status = "embedding error";
+			error = validationError;
+			running = false;
+			ofLogError("example-emb") << "request blocked\n" << validationError;
+			return;
+		}
 	}
 
 	if (requestSettings.serverUrl.empty()) {
@@ -299,6 +425,14 @@ void ofApp::runEmbeddingWorker() {
 		status = "embedding error";
 	}
 	running = false;
+}
+
+bool ofApp::isTruthyEnvValue(const char * name, bool defaultValue) {
+	const auto raw = normalizeEnvText(envValue(name));
+	if (raw.empty()) {
+		return defaultValue;
+	}
+	return isLikelyEmbeddingEnvFlag(raw);
 }
 
 void ofApp::configureGenerator() {

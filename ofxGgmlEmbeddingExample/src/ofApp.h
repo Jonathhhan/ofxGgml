@@ -24,6 +24,7 @@ private:
 	static std::string envValue(const char * name);
 	static std::string normalizeEnvText(const std::string & text);
 	static std::string embeddingPreview(const std::vector<float> & values);
+	static bool isTruthyEnvValue(const char * name, bool defaultValue = false);
 
 	ofxGgmlEmbeddingGenerator generator;
 	ofxGgmlEmbeddingSettings settings;
@@ -42,4 +43,6 @@ private:
 	std::thread worker;
 	std::mutex stateMutex;
 	bool running = false;
+	bool strictEmbeddingModel = false;
+	bool embeddingModelWarningLogged = false;
 };
