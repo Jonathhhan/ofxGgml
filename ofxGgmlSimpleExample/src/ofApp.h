@@ -12,8 +12,13 @@ public:
 	void draw() override;
 
 private:
+	void configureRuntime(ofxGgmlBackend backend);
+	void runComputation();
+
 	ofxGgml runtime;
 	ofxGgmlGraph graph;
 	ofxImGui::Gui gui;
 	std::vector<std::string> lines;
+	int selectedBackendIndex = 0;
+	std::string lastComputeTime;
 };
