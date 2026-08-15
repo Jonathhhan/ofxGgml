@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ofxGgmlCore.h"
-#include "ofxGgmlEmbedding.h"
-#include "ofxGgmlSegmentation.h"
-#include "ofxGgmlText.h"
+#include "chat/ofxGgmlChatSession.h"
+#include "chat/ofxGgmlChatTypes.h"
+#include "server/ofxGgmlServer.h"

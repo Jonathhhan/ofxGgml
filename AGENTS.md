@@ -1,0 +1,36 @@
+# ofxGgml V2
+
+This branch develops one small openFrameworks addon for using a local
+OpenAI-compatible model server.
+
+## Product boundary
+
+The supported path is:
+
+1. connect to or inspect a local `llama-server`;
+2. hold a chat session;
+3. search local documents through an allowlisted tool;
+4. return a grounded answer.
+
+Only the first two steps exist yet. Add the next vertical slice only after the
+previous one has focused tests.
+
+## Rules
+
+- Do not add a shared ggml runtime, tensor API, graph API, or generic model base.
+- Keep native model runtimes out of this addon. The process boundary is intentional.
+- Every public class must be used by an example.
+- Add abstractions only after two real consumers need the same non-trivial code.
+- Do not add new addons, ecosystem manifests, readiness scores, or cross-repo automation.
+- Keep model files, generated projects, binaries, caches, and runtime output out of Git.
+- Distinguish deterministic tests from real model-backed smoke evidence.
+
+## Validation
+
+Run:
+
+```sh
+cmake -S tests -B tests/build
+cmake --build tests/build
+ctest --test-dir tests/build --output-on-failure
+```
