@@ -107,3 +107,83 @@ jobs:
           make -C "$app" Release -j2
           test -x "$app/bin/ofxGgmlChatExample"
           echo "Built with $OF_NIGHTLY_ASSET"
+
+      - name: Install virtual display tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            imagemagick \
+            xauth \
+            xdotool \
+            xvfb
+
+      - name: Launch example and capture GUI
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          set -euo pipefail
+          app="$OF_ROOT/apps/myApps/ofxGgmlChatExample"
+          artifact_dir="$RUNNER_TEMP/gui-smoke"
+          mkdir -p "$artifact_dir"
+
+          xvfb-run \
+            --auto-servernum \
+            --server-args="-screen 0 1280x720x24 -nolisten tcp" \
+            bash -euo pipefail -c '
+              binary="$1"
+              log="$2"
+              screenshot="$3"
+              geometry="$4"
+
+              "$binary" >"$log" 2>&1 &
+              app_pid=$!
+              cleanup() {
+                kill "$app_pid" 2>/dev/null || true
+                wait "$app_pid" 2>/dev/null || true
+              }
+              trap cleanup EXIT
+
+              window_id=""
+              for _ in $(seq 1 60); do
+                if ! kill -0 "$app_pid" 2>/dev/null; then
+                  echo "Example exited before its window appeared" >&2
+                  cat "$log" >&2
+                  exit 1
+                fi
+                window_id="$(xdotool search --name "^ofxGgml V2 Document Tool$" 2>/dev/null | head -n 1 || true)"
+                [[ -n "$window_id" ]] && break
+                sleep 0.25
+              done
+
+              if [[ -z "$window_id" ]]; then
+                echo "Example window did not appear" >&2
+                cat "$log" >&2
+                exit 1
+              fi
+
+              sleep 1
+              xdotool getwindowgeometry --shell "$window_id" >"$geometry"
+              import -display "$DISPLAY" -window "$window_id" "$screenshot"
+              test -s "$screenshot"
+            ' bash \
+            "$app/bin/ofxGgmlChatExample" \
+            "$artifact_dir/ofxGgmlChatExample.log" \
+            "$artifact_dir/ofxGgmlChatExample.png" \
+            "$artifact_dir/window.txt"
+
+          {
+            echo "openFrameworks=$OF_NIGHTLY_ASSET"
+            echo "runner=${RUNNER_OS}-${RUNNER_ARCH}"
+          } >"$artifact_dir/build.txt"
+          file "$artifact_dir/ofxGgmlChatExample.png"
+
+      - name: Upload GUI smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ofxGgmlChatExample-gui-linux-nightly
+          path: ${{ runner.temp }}/gui-smoke
+          if-no-files-found: error
+          retention-days: 14
