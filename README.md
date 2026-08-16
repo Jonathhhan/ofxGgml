@@ -109,6 +109,18 @@ consume monthly credit or incur pay-as-you-go charges; see
 The same addon code works with local `llama-server`; only environment values
 change. Do not commit tokens or paste them into issue logs.
 
+Before building the openFrameworks example, verify that the selected hosted
+model supports the required two-request tool protocol:
+
+```powershell
+scripts\smoke-huggingface.bat
+```
+
+This live smoke asks the model to call `search_documents`, supplies one fixed
+read-only result, and requires the final response to contain its citation. It
+tests the hosted model/provider contract. The openFrameworks example then tests
+the same protocol through the addon itself.
+
 ## Tests
 
 ```sh
