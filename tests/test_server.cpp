@@ -92,7 +92,7 @@ OFXGGML_TEST(server_extracts_chat_response_text) {
 
 OFXGGML_TEST(server_extracts_openai_tool_calls) {
 	const auto calls = ofxGgml::Server::extractToolCalls(
-		R"({"choices":[{"message":{"tool_calls":[{"id":"call-7","type":"function","function":{"name":"search_documents","arguments":"{\"query\":\"Grüße\"}"}}]}}]})");
+		R"({"choices":[{"message":{"tool_calls":[{"function":{"arguments":"{\"query\":\"Grüße\"}","name":"search_documents"},"type":"function","id":"call-7"}]}}]})");
 	OFXGGML_REQUIRE(calls.size() == 1);
 	OFXGGML_REQUIRE(calls[0].id == "call-7");
 	OFXGGML_REQUIRE(calls[0].name == "search_documents");
