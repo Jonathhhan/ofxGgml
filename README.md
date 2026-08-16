@@ -121,6 +121,12 @@ read-only result, and requires the final response to contain its citation. It
 tests the hosted model/provider contract. The openFrameworks example then tests
 the same protocol through the addon itself.
 
+For a GitHub-hosted run, add a repository Actions secret named `HF_TOKEN`.
+Optionally set repository variables `HF_MODEL` and `HF_SERVER_URL`; otherwise
+the workflow uses `openai/gpt-oss-120b` and the Hugging Face router. On `v2`, the
+live job runs only when the pushed commit message contains `[hf-smoke]`, so
+normal pushes cannot consume provider credit accidentally.
+
 ## Tests
 
 ```sh
