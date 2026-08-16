@@ -103,8 +103,8 @@ $answer = [string]$second.choices[0].message.content
 if ([string]::IsNullOrWhiteSpace($answer)) {
     throw "The second completion returned no answer text."
 }
-if (-not $answer.Contains("[smoke.md#chunk-1]")) {
-    throw "The answer omitted the required citation [smoke.md#chunk-1]. Answer was: $answer"
+if (-not $answer.Contains("smoke.md#chunk-1")) {
+	throw "The answer omitted the required source identifier smoke.md#chunk-1. Answer was: $answer"
 }
 
 Write-Host "Hugging Face tool smoke passed."
