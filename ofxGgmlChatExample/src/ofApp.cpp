@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <utility>
 
 namespace {
@@ -25,6 +26,33 @@ void writeAutomationResult(const std::string & status, const std::string & outpu
 		return;
 	}
 	result << status << "\n" << output << "\n";
+}
+
+std::string wrapText(const std::string & text, std::size_t maxCharacters) {
+	std::istringstream source(text);
+	std::ostringstream wrapped;
+	std::string sourceLine;
+	bool firstSourceLine = true;
+	while (std::getline(source, sourceLine)) {
+		if (!firstSourceLine) wrapped << "\n";
+		firstSourceLine = false;
+		std::istringstream words(sourceLine);
+		std::string word;
+		std::size_t lineCharacters = 0;
+		while (words >> word) {
+			if (lineCharacters == 0) {
+				wrapped << word;
+				lineCharacters = word.size();
+			} else if (lineCharacters + 1 + word.size() > maxCharacters) {
+				wrapped << "\n" << word;
+				lineCharacters = word.size();
+			} else {
+				wrapped << " " << word;
+				lineCharacters += 1 + word.size();
+			}
+		}
+	}
+	return wrapped.str();
 }
 
 } // namespace
@@ -55,7 +83,7 @@ void ofApp::setup() {
 		"the addon behind an HTTP process boundary. The addon provides server "
 		"access, chat history, explicit document search, and allowlisted tools.");
 	tools.addDocumentSearch(documents);
-	status = "Press I to inspect " + server.getBaseUrl();
+	status = "Press F1 to inspect " + server.getBaseUrl();
 }
 
 void ofApp::update() {
@@ -71,12 +99,17 @@ void ofApp::update() {
 }
 
 void ofApp::draw() {
+	constexpr std::size_t textColumns = 105;
+	const std::string visibleMessage = input.empty() ? lastMessage : input;
 	ofSetColor(240);
 	ofDrawBitmapString("ofxGgml V2: document search tool", 30, 40);
-	ofDrawBitmapString(status, 30, 75);
+	ofDrawBitmapString(wrapText(status, textColumns), 30, 75);
 	ofDrawBitmapString("F1: inspect   Enter: send   F2: clear", 30, 105);
-	ofDrawBitmapString("Message: " + input + (busy ? "  [busy]" : ""), 30, 150);
-	ofDrawBitmapString("Response:\n" + output, 30, 205);
+	ofDrawBitmapString(
+		"Message:\n" + wrapText(visibleMessage + (busy ? "  [busy]" : ""), textColumns),
+		30,
+		150);
+	ofDrawBitmapString("Response:\n" + wrapText(output, textColumns), 30, 205);
 }
 
 void ofApp::keyPressed(int key) {
@@ -87,6 +120,7 @@ void ofApp::keyPressed(int key) {
 	if (key == OF_KEY_F2) {
 		if (!busy) {
 			chat.clear();
+			lastMessage.clear();
 			output.clear();
 			status = "Conversation cleared";
 		}
@@ -143,6 +177,7 @@ void ofApp::sendMessage() {
 	}
 	const std::string message = std::move(input);
 	input.clear();
+	lastMessage = message;
 	status = "Waiting for model...";
 	worker = std::thread([this, message]() {
 		const auto result = toolLoop.run(message);
