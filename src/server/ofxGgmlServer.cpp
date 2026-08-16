@@ -639,7 +639,7 @@ std::vector<ToolCall> Server::extractToolCalls(const std::string & responseBody)
 		if (functionStart == std::string::npos || functionEnd == std::string::npos || functionEnd > objectEnd) break;
 
 		ToolCall call;
-		call.id = extractScopedJsonStringField(responseBody, "id", objectStart, functionKey);
+		call.id = extractScopedJsonStringField(responseBody, "id", objectStart, objectEnd);
 		call.name = extractScopedJsonStringField(responseBody, "name", functionStart, functionEnd);
 		call.argumentsJson = extractScopedJsonStringField(
 			responseBody, "arguments", functionStart, functionEnd);
