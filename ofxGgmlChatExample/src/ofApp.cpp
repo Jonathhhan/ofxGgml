@@ -74,17 +74,17 @@ void ofApp::draw() {
 	ofSetColor(240);
 	ofDrawBitmapString("ofxGgml V2: document search tool", 30, 40);
 	ofDrawBitmapString(status, 30, 75);
-	ofDrawBitmapString("I: inspect   Enter: send   C: clear", 30, 105);
+	ofDrawBitmapString("F1: inspect   Enter: send   F2: clear", 30, 105);
 	ofDrawBitmapString("Message: " + input + (busy ? "  [busy]" : ""), 30, 150);
 	ofDrawBitmapString("Response:\n" + output, 30, 205);
 }
 
 void ofApp::keyPressed(int key) {
-	if (key == 'i' || key == 'I') {
+	if (key == OF_KEY_F1) {
 		inspectServer();
 		return;
 	}
-	if (key == 'c' || key == 'C') {
+	if (key == OF_KEY_F2) {
 		if (!busy) {
 			chat.clear();
 			output.clear();
