@@ -30,6 +30,7 @@ private:
 	ofxGgml::ToolRegistry tools;
 	ofxGgml::ToolLoop toolLoop;
 	std::string input;
+	std::string lastMessage;
 	std::string output;
 	std::string status;
 	std::thread worker;
