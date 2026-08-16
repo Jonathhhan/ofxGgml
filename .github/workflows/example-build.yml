@@ -187,3 +187,113 @@ jobs:
           path: ${{ runner.temp }}/gui-smoke
           if-no-files-found: error
           retention-days: 14
+
+      - name: Control GUI against Hugging Face
+        if: contains(github.event.head_commit.message, '[hf-gui-smoke]')
+        timeout-minutes: 5
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          OFXGGML_API_KEY: ${{ secrets.HF_TOKEN }}
+          OFXGGML_MODEL: ${{ vars.HF_MODEL || 'openai/gpt-oss-120b' }}
+          OFXGGML_SERVER_URL: ${{ vars.HF_SERVER_URL || 'https://router.huggingface.co/v1' }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$OFXGGML_API_KEY" ]]; then
+            echo "HF_TOKEN is missing" >&2
+            exit 1
+          fi
+
+          app="$OF_ROOT/apps/myApps/ofxGgmlChatExample"
+          artifact_dir="$RUNNER_TEMP/hf-gui-smoke"
+          result="$artifact_dir/result.txt"
+          mkdir -p "$artifact_dir"
+          export OFXGGML_GUI_RESULT_PATH="$result"
+
+          xvfb-run \
+            --auto-servernum \
+            --server-args="-screen 0 1280x720x24 -nolisten tcp" \
+            bash -euo pipefail -c '
+              binary="$1"
+              log="$2"
+              result="$3"
+              screenshot="$4"
+              prompt="$5"
+
+              "$binary" >"$log" 2>&1 &
+              app_pid=$!
+              cleanup() {
+                kill "$app_pid" 2>/dev/null || true
+                wait "$app_pid" 2>/dev/null || true
+              }
+              trap cleanup EXIT
+
+              window_id=""
+              for _ in $(seq 1 60); do
+                if ! kill -0 "$app_pid" 2>/dev/null; then
+                  echo "Example exited before its window appeared" >&2
+                  cat "$log" >&2
+                  exit 1
+                fi
+                window_id="$(xdotool search --name "^ofxGgml V2 Document Tool$" 2>/dev/null | head -n 1 || true)"
+                [[ -n "$window_id" ]] && break
+                sleep 0.25
+              done
+              [[ -n "$window_id" ]] || { echo "Example window did not appear" >&2; exit 1; }
+
+              xdotool type --window "$window_id" --clearmodifiers --delay 1 "$prompt"
+              xdotool key --window "$window_id" Return
+
+              for _ in $(seq 1 360); do
+                [[ -s "$result" ]] && break
+                if ! kill -0 "$app_pid" 2>/dev/null; then
+                  echo "Example exited while waiting for Hugging Face" >&2
+                  cat "$log" >&2
+                  exit 1
+                fi
+                sleep 0.5
+              done
+
+              if [[ ! -s "$result" ]]; then
+                echo "Timed out waiting for the GUI result" >&2
+                cat "$log" >&2
+                exit 1
+              fi
+              if ! grep -Fq "Completed with 2 model request(s)" "$result"; then
+                echo "GUI request did not complete the expected tool round" >&2
+                cat "$result" >&2
+                exit 1
+              fi
+              if ! grep -Fq "v2-architecture.md#chunk-1" "$result"; then
+                echo "GUI answer omitted the document source identifier" >&2
+                cat "$result" >&2
+                exit 1
+              fi
+
+              sleep 1
+              import -display "$DISPLAY" -window "$window_id" "$screenshot"
+              test -s "$screenshot"
+            ' bash \
+            "$app/bin/ofxGgmlChatExample" \
+            "$artifact_dir/ofxGgmlChatExample.log" \
+            "$result" \
+            "$artifact_dir/ofxGgmlChatExample-huggingface.png" \
+            "Why is the model runtime outside the addon? Answer in one short sentence."
+
+          {
+            echo "model=$OFXGGML_MODEL"
+            echo "server=$OFXGGML_SERVER_URL"
+            echo "openFrameworks=$OF_NIGHTLY_ASSET"
+          } >"$artifact_dir/build.txt"
+          cat "$result"
+
+      - name: Upload Hugging Face GUI artifacts
+        if: >-
+          always() &&
+          contains(github.event.head_commit.message, '[hf-gui-smoke]')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ofxGgmlChatExample-huggingface-gui
+          path: ${{ runner.temp }}/hf-gui-smoke
+          if-no-files-found: error
+          retention-days: 14
