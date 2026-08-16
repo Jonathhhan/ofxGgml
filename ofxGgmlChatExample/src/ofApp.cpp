@@ -1,6 +1,7 @@
 #include "ofApp.h"
 
 #include <cstdlib>
+#include <fstream>
 #include <utility>
 
 namespace {
@@ -13,6 +14,17 @@ std::string configuredServerUrl() {
 std::string environmentValue(const char * name) {
 	const char * value = std::getenv(name);
 	return value && *value ? value : "";
+}
+
+void writeAutomationResult(const std::string & status, const std::string & output) {
+	const std::string path = environmentValue("OFXGGML_GUI_RESULT_PATH");
+	if (path.empty()) return;
+	std::ofstream result(path, std::ios::binary | std::ios::trunc);
+	if (!result) {
+		ofLogError("ofxGgml") << "Could not write GUI result to " << path;
+		return;
+	}
+	result << status << "\n" << output << "\n";
 }
 
 } // namespace
@@ -55,6 +67,7 @@ void ofApp::update() {
 	std::lock_guard<std::mutex> lock(resultMutex);
 	output = std::move(pendingOutput);
 	status = std::move(pendingStatus);
+	writeAutomationResult(status, output);
 }
 
 void ofApp::draw() {
