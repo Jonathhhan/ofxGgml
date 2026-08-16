@@ -1,0 +1,109 @@
+name: openFrameworks example
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "addon_config.mk"
+      - "ofxGgmlChatExample/**"
+      - ".github/workflows/example-build.yml"
+  push:
+    branches:
+      - v2
+    paths:
+      - "src/**"
+      - "addon_config.mk"
+      - "ofxGgmlChatExample/**"
+      - ".github/workflows/example-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openframeworks-example-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-linux-nightly:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve current openFrameworks nightly
+        id: nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/openframeworks/openFrameworks/releases/tags/nightly)"
+          asset_url="$(jq -r '.assets[] | select(.name | endswith("_linux64_gcc6_release.tar.gz")) | .browser_download_url' <<<"$release_json")"
+          if [[ -z "$asset_url" || "$asset_url" == "null" ]]; then
+            echo "The nightly release has no linux64_gcc6 archive" >&2
+            exit 1
+          fi
+          asset_name="${asset_url##*/}"
+          echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
+          echo "asset_url=$asset_url" >> "$GITHUB_OUTPUT"
+          echo "Using $asset_name"
+
+      - name: Cache openFrameworks archive
+        id: of-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/of-download/${{ steps.nightly.outputs.asset_name }}
+          key: openframeworks-${{ runner.os }}-${{ steps.nightly.outputs.asset_name }}
+
+      - name: Download openFrameworks nightly
+        if: steps.of-cache.outputs.cache-hit != 'true'
+        env:
+          ASSET_NAME: ${{ steps.nightly.outputs.asset_name }}
+          ASSET_URL: ${{ steps.nightly.outputs.asset_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/of-download"
+          curl --fail --location --retry 3 --show-error \
+            "$ASSET_URL" \
+            --output "$RUNNER_TEMP/of-download/$ASSET_NAME"
+
+      - name: Extract openFrameworks
+        env:
+          ASSET_NAME: ${{ steps.nightly.outputs.asset_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          of_root="$RUNNER_TEMP/openframeworks/${ASSET_NAME%.tar.gz}"
+          mkdir -p "$RUNNER_TEMP/openframeworks"
+          tar -xzf "$RUNNER_TEMP/of-download/$ASSET_NAME" \
+            -C "$RUNNER_TEMP/openframeworks"
+          test -d "$of_root"
+          echo "OF_ROOT=$of_root" >> "$GITHUB_ENV"
+          echo "OF_NIGHTLY_ASSET=$ASSET_NAME" >> "$GITHUB_ENV"
+
+      - name: Install openFrameworks dependencies
+        shell: bash
+        run: sudo "$OF_ROOT/scripts/linux/ubuntu/install_dependencies.sh" -y
+
+      - name: Prepare addon example
+        shell: bash
+        run: |
+          set -euo pipefail
+          ln -s "$GITHUB_WORKSPACE" "$OF_ROOT/addons/ofxGgml"
+          app="$OF_ROOT/apps/myApps/ofxGgmlChatExample"
+          mkdir -p "${app%/*}"
+          cp -R "$GITHUB_WORKSPACE/ofxGgmlChatExample" "$app"
+          cp "$OF_ROOT/scripts/templates/linux64/Makefile" "$app/Makefile"
+          cp "$OF_ROOT/scripts/templates/linux64/config.make" "$app/config.make"
+
+      - name: Build example
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$OF_ROOT/apps/myApps/ofxGgmlChatExample"
+          make -C "$app" Release -j2
+          test -x "$app/bin/ofxGgmlChatExample"
+          echo "Built with $OF_NIGHTLY_ASSET"

@@ -139,6 +139,11 @@ The tests use an injected transport and do not claim real inference. The
 online or local example is the next model-backed smoke; its provider, model,
 date, and result should be recorded before stabilizing the API.
 
+GitHub Actions also builds `ofxGgmlChatExample` against the current official
+openFrameworks Linux nightly. The workflow records the resolved archive name,
+so a failure can be tied to the exact moving nightly snapshot. This verifies a
+real openFrameworks compile and link; it does not attempt to automate the GUI.
+
 ## Branch status
 
 V2 is under development on an isolated branch. The current `main` branch and
