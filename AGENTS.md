@@ -12,8 +12,8 @@ The supported path is:
 3. search local documents through an allowlisted tool;
 4. return a grounded answer.
 
-Only the first two steps exist yet. Add the next vertical slice only after the
-previous one has focused tests.
+All four steps now exist as a deterministic, injected-transport workflow. They
+are not considered proven until the same path passes a real model-backed smoke.
 
 ## Rules
 

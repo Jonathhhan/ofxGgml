@@ -4,10 +4,12 @@
 
 ```text
 openFrameworks app
+  -> ofxGgml::ToolLoop
+  -> DocumentIndex + allowlisted search_documents
   -> ofxGgml::ChatSession
   -> ofxGgml::Server
   -> OpenAI-compatible HTTP endpoint
-  -> external llama-server
+  -> external llama-server or hosted inference provider
 ```
 
 The process boundary is architectural. It prevents unrelated native runtimes
@@ -18,6 +20,9 @@ addon.
 
 - `Server` owns endpoint configuration and HTTP transport.
 - `ChatSession` owns conversation history.
+- `DocumentIndex` chunks explicitly loaded text and performs deterministic
+  lexical search. It does not watch directories or accept model-selected paths.
+- `ToolRegistry` is the execution allowlist; `ToolLoop` bounds repeated calls.
 - `ChatRequest`, `ChatOptions`, and `ChatResult` are explicit value types.
 - `HttpTransport` is injectable so protocol behavior can be tested without a
   model or network service.
@@ -27,7 +32,7 @@ addon.
 - No Core addon or common native runtime.
 - No tensor, graph, or universal model abstraction.
 - No automatic backend discovery beyond the configured server endpoint.
-- No agent framework before a real tool-using workflow exists.
+- No general agent framework around the one bounded document tool loop.
 - No ecosystem manifest or cross-repository control plane.
 
 ## Growth rule

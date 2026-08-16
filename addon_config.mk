@@ -9,3 +9,6 @@ common:
 	ADDON_INCLUDES = src
 	ADDON_SOURCES = src/server/ofxGgmlServer.cpp
 	ADDON_SOURCES += src/chat/ofxGgmlChatSession.cpp
+	ADDON_SOURCES += src/documents/ofxGgmlDocumentIndex.cpp
+	ADDON_SOURCES += src/tools/ofxGgmlToolRegistry.cpp
+	ADDON_SOURCES += src/tools/ofxGgmlToolLoop.cpp

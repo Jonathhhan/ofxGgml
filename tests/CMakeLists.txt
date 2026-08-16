@@ -8,9 +8,14 @@ add_executable(ofxGgml_v2_tests
 	test_main.cpp
 	test_server.cpp
 	test_chat_session.cpp
+	test_document_index.cpp
+	test_tool_loop.cpp
 	test_public_headers.cpp
 	../src/server/ofxGgmlServer.cpp
-	../src/chat/ofxGgmlChatSession.cpp)
+	../src/chat/ofxGgmlChatSession.cpp
+	../src/documents/ofxGgmlDocumentIndex.cpp
+	../src/tools/ofxGgmlToolRegistry.cpp
+	../src/tools/ofxGgmlToolLoop.cpp)
 
 target_include_directories(ofxGgml_v2_tests PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}

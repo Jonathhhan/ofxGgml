@@ -10,11 +10,18 @@ std::string configuredServerUrl() {
 	return value && *value ? value : "http://127.0.0.1:8080";
 }
 
+std::string environmentValue(const char * name) {
+	const char * value = std::getenv(name);
+	return value && *value ? value : "";
+}
+
 } // namespace
 
 ofApp::ofApp()
 	: server(configuredServerUrl())
-	, chat(server) {
+	, chat(server)
+	, toolLoop(chat, tools) {
+	server.setBearerToken(environmentValue("OFXGGML_API_KEY"));
 }
 
 ofApp::~ofApp() {
@@ -22,9 +29,20 @@ ofApp::~ofApp() {
 }
 
 void ofApp::setup() {
-	ofSetWindowTitle("ofxGgml V2 Chat");
+	ofSetWindowTitle("ofxGgml V2 Document Tool");
 	ofSetBackgroundColor(20);
-	chat.setSystemPrompt("Be concise and explicit when you are uncertain.");
+	chat.setSystemPrompt(
+		"Use search_documents for questions about the addon. "
+		"Ground answers only in returned text and include its citation values.");
+	ofxGgml::ChatOptions options;
+	options.model = environmentValue("OFXGGML_MODEL");
+	chat.setOptions(options);
+	documents.addText(
+		"v2-architecture.md",
+		"ofxGgml V2 keeps llama-server, ggml, CUDA, and model runtimes outside "
+		"the addon behind an HTTP process boundary. The addon provides server "
+		"access, chat history, explicit document search, and allowlisted tools.");
+	tools.addDocumentSearch(documents);
 	status = "Press I to inspect " + server.getBaseUrl();
 }
 
@@ -41,7 +59,7 @@ void ofApp::update() {
 
 void ofApp::draw() {
 	ofSetColor(240);
-	ofDrawBitmapString("ofxGgml V2", 30, 40);
+	ofDrawBitmapString("ofxGgml V2: document search tool", 30, 40);
 	ofDrawBitmapString(status, 30, 75);
 	ofDrawBitmapString("I: inspect   Enter: send   C: clear", 30, 105);
 	ofDrawBitmapString("Message: " + input + (busy ? "  [busy]" : ""), 30, 150);
@@ -91,8 +109,10 @@ void ofApp::inspectServer() {
 		std::lock_guard<std::mutex> lock(resultMutex);
 		if (!inspection) {
 			pendingStatus = "Inspection failed: " + inspection.error;
+		} else if (!chat.getOptions().model.empty()) {
+			pendingStatus = "Server ready; configured model: " + chat.getOptions().model;
 		} else if (inspection.models.empty()) {
-			pendingStatus = "Server reachable; no model id advertised";
+			pendingStatus = "Server reachable; set OFXGGML_MODEL";
 		} else {
 			ofxGgml::ChatOptions options = chat.getOptions();
 			options.model = inspection.models.front();
@@ -112,11 +132,11 @@ void ofApp::sendMessage() {
 	input.clear();
 	status = "Waiting for model...";
 	worker = std::thread([this, message]() {
-		const auto result = chat.send(message);
+		const auto result = toolLoop.run(message);
 		std::lock_guard<std::mutex> lock(resultMutex);
 		pendingOutput = result.text;
 		pendingStatus = result
-			? "Completed in " + ofToString(result.elapsedMs, 1) + " ms"
+			? "Completed with " + ofToString(result.modelRequests) + " model request(s)"
 			: "Request failed: " + result.error;
 		finished = true;
 	});

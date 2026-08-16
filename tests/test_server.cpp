@@ -56,6 +56,30 @@ OFXGGML_TEST(server_builds_chat_completions_body) {
 	OFXGGML_REQUIRE(body.find("\"stop\":[\"</s>\"]") != std::string::npos);
 }
 
+OFXGGML_TEST(server_adds_bearer_auth_without_exposing_it_in_the_body) {
+	ofxGgml::HttpRequest captured;
+	ofxGgml::Server server("https://router.huggingface.co/v1", [&](const ofxGgml::HttpRequest & request) {
+		captured = request;
+		ofxGgml::HttpResponse response;
+		response.started = true;
+		response.status = 200;
+		response.body = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}";
+		return response;
+	});
+	server.setBearerToken("hf_test_token");
+	ofxGgml::ChatRequest request;
+	request.messages.push_back({ ofxGgml::ChatRole::User, "hello" });
+	request.options.model = "org/model:provider";
+
+	OFXGGML_REQUIRE(server.chat(request));
+	OFXGGML_REQUIRE(server.hasBearerToken());
+	OFXGGML_REQUIRE(captured.url == "https://router.huggingface.co/v1/chat/completions");
+	OFXGGML_REQUIRE(captured.headers.size() == 1);
+	OFXGGML_REQUIRE(captured.headers[0].first == "Authorization");
+	OFXGGML_REQUIRE(captured.headers[0].second == "Bearer hf_test_token");
+	OFXGGML_REQUIRE(captured.body.find("hf_test_token") == std::string::npos);
+}
+
 OFXGGML_TEST(server_extracts_chat_response_text) {
 	OFXGGML_REQUIRE(
 		ofxGgml::Server::extractChatText(
@@ -64,6 +88,15 @@ OFXGGML_TEST(server_extracts_chat_response_text) {
 	OFXGGML_REQUIRE(
 		ofxGgml::Server::extractChatText(
 			"{\"choices\":[{\"text\":\"completion\"}]}") == "completion");
+}
+
+OFXGGML_TEST(server_extracts_openai_tool_calls) {
+	const auto calls = ofxGgml::Server::extractToolCalls(
+		R"({"choices":[{"message":{"tool_calls":[{"id":"call-7","type":"function","function":{"name":"search_documents","arguments":"{\"query\":\"Grüße\"}"}}]}}]})");
+	OFXGGML_REQUIRE(calls.size() == 1);
+	OFXGGML_REQUIRE(calls[0].id == "call-7");
+	OFXGGML_REQUIRE(calls[0].name == "search_documents");
+	OFXGGML_REQUIRE(calls[0].argumentsJson.find("Grüße") != std::string::npos);
 }
 
 OFXGGML_TEST(server_reports_http_failures) {
@@ -81,4 +114,20 @@ OFXGGML_TEST(server_reports_http_failures) {
 	OFXGGML_REQUIRE(!result);
 	OFXGGML_REQUIRE(result.httpStatus == 503);
 	OFXGGML_REQUIRE(result.error.find("HTTP 503") != std::string::npos);
+}
+
+OFXGGML_TEST(server_rejects_streaming_tools_before_transport) {
+	int calls = 0;
+	ofxGgml::Server server("http://localhost:8001", [&](const ofxGgml::HttpRequest &) {
+		++calls;
+		return ofxGgml::HttpResponse{};
+	});
+	ofxGgml::ChatRequest request;
+	request.messages.push_back({ ofxGgml::ChatRole::User, "Hello" });
+	request.tools.push_back({ "search_documents", "Search documents", "{}" });
+	request.options.stream = true;
+	const auto result = server.chat(request);
+	OFXGGML_REQUIRE(!result);
+	OFXGGML_REQUIRE(result.error.find("not supported") != std::string::npos);
+	OFXGGML_REQUIRE(calls == 0);
 }

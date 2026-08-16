@@ -26,6 +26,9 @@ private:
 
 	ofxGgml::Server server;
 	ofxGgml::ChatSession chat;
+	ofxGgml::DocumentIndex documents;
+	ofxGgml::ToolRegistry tools;
+	ofxGgml::ToolLoop toolLoop;
 	std::string input;
 	std::string output;
 	std::string status;

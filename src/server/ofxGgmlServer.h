@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ofxGgml {
@@ -18,6 +19,7 @@ struct HttpRequest {
 	std::string url;
 	std::string body;
 	std::string contentType = "application/json";
+	std::vector<std::pair<std::string, std::string>> headers;
 	int timeoutSeconds = 180;
 	bool stream = false;
 	ChatChunkCallback onChunk;
@@ -57,6 +59,8 @@ public:
 
 	void setTransport(HttpTransport transport);
 	bool hasTransport() const;
+	void setBearerToken(std::string token);
+	bool hasBearerToken() const;
 
 	ServerStatus inspect() const;
 	ChatResult chat(
@@ -68,11 +72,13 @@ public:
 	static std::string chatCompletionsUrl(const std::string & baseUrl);
 	static std::string buildChatBody(const ChatRequest & request);
 	static std::string extractChatText(const std::string & responseBody);
+	static std::vector<ToolCall> extractToolCalls(const std::string & responseBody);
 	static std::vector<std::string> extractModelIds(const std::string & responseBody);
 	static HttpResponse runHttpRequest(const HttpRequest & request);
 
 private:
 	std::string baseUrl;
+	std::string bearerToken;
 	HttpTransport transport;
 };
 

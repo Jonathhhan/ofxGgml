@@ -43,17 +43,33 @@ ChatResult ChatSession::send(
 		return result;
 	}
 
-	messages.push_back({ ChatRole::User, message });
+	ChatMessage userMessage;
+	userMessage.role = ChatRole::User;
+	userMessage.content = message;
+	return complete({ userMessage }, {}, std::move(onChunk));
+}
+
+ChatResult ChatSession::complete(
+	std::vector<ChatMessage> newMessages,
+	const std::vector<ToolDefinition> & tools,
+	ChatChunkCallback onChunk) {
+	const std::size_t checkpoint = messages.size();
+	messages.insert(messages.end(), newMessages.begin(), newMessages.end());
 	ChatRequest request;
 	request.systemPrompt = systemPrompt;
 	request.messages = messages;
+	request.tools = tools;
 	request.options = options;
 
 	ChatResult result = server.get().chat(request, std::move(onChunk));
 	if (result) {
-		messages.push_back({ ChatRole::Assistant, result.text });
+		ChatMessage assistantMessage;
+		assistantMessage.role = ChatRole::Assistant;
+		assistantMessage.content = result.text;
+		assistantMessage.toolCalls = result.toolCalls;
+		messages.push_back(std::move(assistantMessage));
 	} else {
-		messages.pop_back();
+		messages.resize(checkpoint);
 	}
 	return result;
 }

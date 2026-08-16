@@ -9,6 +9,7 @@
 namespace ofxGgml {
 
 class Server;
+class ToolLoop;
 
 class ChatSession {
 public:
@@ -28,6 +29,13 @@ public:
 		ChatChunkCallback onChunk = nullptr);
 
 private:
+	friend class ToolLoop;
+
+	ChatResult complete(
+		std::vector<ChatMessage> newMessages,
+		const std::vector<ToolDefinition> & tools,
+		ChatChunkCallback onChunk = nullptr);
+
 	std::reference_wrapper<Server> server;
 	std::string systemPrompt;
 	ChatOptions options;

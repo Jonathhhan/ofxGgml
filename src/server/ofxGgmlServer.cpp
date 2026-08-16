@@ -82,6 +82,42 @@ std::string escapeJson(const std::string & value) {
 	return escaped.str();
 }
 
+int hexValue(char value) {
+	if (value >= '0' && value <= '9') return value - '0';
+	if (value >= 'a' && value <= 'f') return 10 + value - 'a';
+	if (value >= 'A' && value <= 'F') return 10 + value - 'A';
+	return -1;
+}
+
+bool readHexCodeUnit(const std::string & value, std::size_t & index, unsigned int & codeUnit) {
+	if (index + 4 > value.size()) return false;
+	codeUnit = 0;
+	for (int i = 0; i < 4; ++i) {
+		const int digit = hexValue(value[index++]);
+		if (digit < 0) return false;
+		codeUnit = (codeUnit << 4U) | static_cast<unsigned int>(digit);
+	}
+	return true;
+}
+
+void appendUtf8(unsigned int codePoint, std::string & output) {
+	if (codePoint <= 0x7fU) {
+		output.push_back(static_cast<char>(codePoint));
+	} else if (codePoint <= 0x7ffU) {
+		output.push_back(static_cast<char>(0xc0U | (codePoint >> 6U)));
+		output.push_back(static_cast<char>(0x80U | (codePoint & 0x3fU)));
+	} else if (codePoint <= 0xffffU) {
+		output.push_back(static_cast<char>(0xe0U | (codePoint >> 12U)));
+		output.push_back(static_cast<char>(0x80U | ((codePoint >> 6U) & 0x3fU)));
+		output.push_back(static_cast<char>(0x80U | (codePoint & 0x3fU)));
+	} else {
+		output.push_back(static_cast<char>(0xf0U | (codePoint >> 18U)));
+		output.push_back(static_cast<char>(0x80U | ((codePoint >> 12U) & 0x3fU)));
+		output.push_back(static_cast<char>(0x80U | ((codePoint >> 6U) & 0x3fU)));
+		output.push_back(static_cast<char>(0x80U | (codePoint & 0x3fU)));
+	}
+}
+
 bool appendDecodedJsonChar(
 	const std::string & value,
 	std::size_t & index,
@@ -107,12 +143,23 @@ bool appendDecodedJsonChar(
 	case 'n': output.push_back('\n'); return true;
 	case 'r': output.push_back('\r'); return true;
 	case 't': output.push_back('\t'); return true;
-	case 'u':
-		if (index + 4 > value.size()) {
-			return false;
+	case 'u': {
+		unsigned int codePoint = 0;
+		if (!readHexCodeUnit(value, index, codePoint)) return false;
+		if (codePoint >= 0xd800U && codePoint <= 0xdbffU) {
+			if (index + 6 > value.size() || value[index] != '\\' || value[index + 1] != 'u') {
+				return false;
+			}
+			index += 2;
+			unsigned int low = 0;
+			if (!readHexCodeUnit(value, index, low) || low < 0xdc00U || low > 0xdfffU) {
+				return false;
+			}
+			codePoint = 0x10000U + ((codePoint - 0xd800U) << 10U) + (low - 0xdc00U);
 		}
-		index += 4;
+		appendUtf8(codePoint, output);
 		return true;
+	}
 	default:
 		return false;
 	}
@@ -154,6 +201,43 @@ std::string extractJsonStringField(
 	if (colon == std::string::npos) {
 		return {};
 	}
+	return extractJsonStringAt(json, colon + 1);
+}
+
+std::size_t findMatchingJsonDelimiter(
+	const std::string & json,
+	std::size_t openPosition,
+	char openDelimiter,
+	char closeDelimiter) {
+	if (openPosition >= json.size() || json[openPosition] != openDelimiter) return std::string::npos;
+	int depth = 0;
+	bool inString = false;
+	bool escaped = false;
+	for (std::size_t i = openPosition; i < json.size(); ++i) {
+		const char c = json[i];
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (c == '\\') escaped = true;
+			else if (c == '"') inString = false;
+			continue;
+		}
+		if (c == '"') inString = true;
+		else if (c == openDelimiter) ++depth;
+		else if (c == closeDelimiter && --depth == 0) return i;
+	}
+	return std::string::npos;
+}
+
+std::string extractScopedJsonStringField(
+	const std::string & json,
+	const std::string & key,
+	std::size_t begin,
+	std::size_t end) {
+	const std::string quotedKey = "\"" + key + "\"";
+	const std::size_t keyPosition = json.find(quotedKey, begin);
+	if (keyPosition == std::string::npos || keyPosition >= end) return {};
+	const std::size_t colon = json.find(':', keyPosition + quotedKey.size());
+	if (colon == std::string::npos || colon >= end) return {};
 	return extractJsonStringAt(json, colon + 1);
 }
 
@@ -246,6 +330,10 @@ HttpResponse runStreamingRequest(const HttpRequest & request) {
 	headers = curl_slist_append(headers, "Accept: text/event-stream");
 	const std::string contentType = "Content-Type: " + request.contentType;
 	headers = curl_slist_append(headers, contentType.c_str());
+	for (const auto & header : request.headers) {
+		const std::string value = header.first + ": " + header.second;
+		headers = curl_slist_append(headers, value.c_str());
+	}
 
 	CurlState state;
 	state.response = &result;
@@ -307,12 +395,23 @@ bool Server::hasTransport() const {
 	return static_cast<bool>(transport);
 }
 
+void Server::setBearerToken(std::string token) {
+	bearerToken = trimCopy(token);
+}
+
+bool Server::hasBearerToken() const {
+	return !bearerToken.empty();
+}
+
 ServerStatus Server::inspect() const {
 	ServerStatus status;
 	HttpRequest request;
 	request.method = HttpMethod::Get;
 	request.url = modelsUrl(baseUrl);
 	request.timeoutSeconds = 10;
+	if (!bearerToken.empty()) {
+		request.headers.emplace_back("Authorization", "Bearer " + bearerToken);
+	}
 	const HttpResponse response = transport(request);
 	status.httpStatus = response.status;
 	if (!response.started) {
@@ -339,6 +438,10 @@ ChatResult Server::chat(
 		result.error = "chat request has no messages";
 		return result;
 	}
+	if (request.options.stream && !request.tools.empty()) {
+		result.error = "streaming tool calls are not supported yet";
+		return result;
+	}
 
 	HttpRequest httpRequest;
 	httpRequest.method = HttpMethod::Post;
@@ -346,6 +449,9 @@ ChatResult Server::chat(
 	httpRequest.body = buildChatBody(request);
 	httpRequest.stream = request.options.stream;
 	httpRequest.onChunk = onChunk;
+	if (!bearerToken.empty()) {
+		httpRequest.headers.emplace_back("Authorization", "Bearer " + bearerToken);
+	}
 
 	const auto startedAt = std::chrono::steady_clock::now();
 	const HttpResponse response = transport(httpRequest);
@@ -382,7 +488,10 @@ ChatResult Server::chat(
 	result.text = request.options.stream
 		? response.streamedText
 		: extractChatText(response.body);
-	if (result.text.empty()) {
+	if (!request.options.stream) {
+		result.toolCalls = extractToolCalls(response.body);
+	}
+	if (result.text.empty() && result.toolCalls.empty()) {
 		result.error = "chat endpoint returned no text";
 		return result;
 	}
@@ -427,20 +536,41 @@ std::string Server::buildChatBody(const ChatRequest & request) {
 	}
 	body << "\"messages\":[";
 	bool needsComma = false;
-	auto appendMessage = [&](ChatRole role, const std::string & content) {
-		if (content.empty()) {
+	auto appendMessage = [&](const ChatMessage & message) {
+		if (message.content.empty() && message.toolCalls.empty()) {
 			return;
 		}
 		if (needsComma) {
 			body << ",";
 		}
-		body << "{\"role\":\"" << roleLabel(role) << "\",\"content\":\""
-			 << escapeJson(content) << "\"}";
+		body << "{\"role\":\"" << roleLabel(message.role) << "\"";
+		if (!message.content.empty()) {
+			body << ",\"content\":\"" << escapeJson(message.content) << "\"";
+		}
+		if (!message.toolCallId.empty()) {
+			body << ",\"tool_call_id\":\"" << escapeJson(message.toolCallId) << "\"";
+		}
+		if (!message.toolCalls.empty()) {
+			body << ",\"tool_calls\":[";
+			for (std::size_t i = 0; i < message.toolCalls.size(); ++i) {
+				if (i > 0) body << ",";
+				const ToolCall & call = message.toolCalls[i];
+				body << "{\"id\":\"" << escapeJson(call.id)
+					 << "\",\"type\":\"function\",\"function\":{\"name\":\""
+					 << escapeJson(call.name) << "\",\"arguments\":\""
+					 << escapeJson(call.argumentsJson) << "\"}}";
+			}
+			body << "]";
+		}
+		body << "}";
 		needsComma = true;
 	};
-	appendMessage(ChatRole::System, request.systemPrompt);
+	ChatMessage systemMessage;
+	systemMessage.role = ChatRole::System;
+	systemMessage.content = request.systemPrompt;
+	appendMessage(systemMessage);
 	for (const ChatMessage & message : request.messages) {
-		appendMessage(message.role, message.content);
+		appendMessage(message);
 	}
 	body << "],";
 	body << "\"max_tokens\":" << std::max(1, request.options.maxTokens) << ",";
@@ -460,6 +590,18 @@ std::string Server::buildChatBody(const ChatRequest & request) {
 		}
 		body << "]";
 	}
+	if (!request.tools.empty()) {
+		body << ",\"tools\":[";
+		for (std::size_t i = 0; i < request.tools.size(); ++i) {
+			if (i > 0) body << ",";
+			const ToolDefinition & tool = request.tools[i];
+			body << "{\"type\":\"function\",\"function\":{\"name\":\""
+				 << escapeJson(tool.name) << "\",\"description\":\""
+				 << escapeJson(tool.description) << "\",\"parameters\":"
+				 << (tool.parametersJson.empty() ? "{}" : tool.parametersJson) << "}}";
+		}
+		body << "],\"tool_choice\":\"auto\"";
+	}
 	body << "}";
 	return body.str();
 }
@@ -473,6 +615,40 @@ std::string Server::extractChatText(const std::string & responseBody) {
 		}
 	}
 	return {};
+}
+
+std::vector<ToolCall> Server::extractToolCalls(const std::string & responseBody) {
+	std::vector<ToolCall> calls;
+	const std::size_t keyPosition = responseBody.find("\"tool_calls\"");
+	if (keyPosition == std::string::npos) return calls;
+	const std::size_t arrayStart = responseBody.find('[', keyPosition);
+	if (arrayStart == std::string::npos) return calls;
+	const std::size_t arrayEnd = findMatchingJsonDelimiter(responseBody, arrayStart, '[', ']');
+	if (arrayEnd == std::string::npos) return calls;
+
+	std::size_t searchFrom = arrayStart + 1;
+	while (searchFrom < arrayEnd) {
+		const std::size_t objectStart = responseBody.find('{', searchFrom);
+		if (objectStart == std::string::npos || objectStart >= arrayEnd) break;
+		const std::size_t objectEnd = findMatchingJsonDelimiter(responseBody, objectStart, '{', '}');
+		if (objectEnd == std::string::npos || objectEnd > arrayEnd) break;
+		const std::size_t functionKey = responseBody.find("\"function\"", objectStart);
+		if (functionKey == std::string::npos || functionKey >= objectEnd) break;
+		const std::size_t functionStart = responseBody.find('{', functionKey);
+		const std::size_t functionEnd = findMatchingJsonDelimiter(responseBody, functionStart, '{', '}');
+		if (functionStart == std::string::npos || functionEnd == std::string::npos || functionEnd > objectEnd) break;
+
+		ToolCall call;
+		call.id = extractScopedJsonStringField(responseBody, "id", objectStart, functionKey);
+		call.name = extractScopedJsonStringField(responseBody, "name", functionStart, functionEnd);
+		call.argumentsJson = extractScopedJsonStringField(
+			responseBody, "arguments", functionStart, functionEnd);
+		if (!call.id.empty() && !call.name.empty()) {
+			calls.push_back(std::move(call));
+		}
+		searchFrom = objectEnd + 1;
+	}
+	return calls;
 }
 
 std::vector<std::string> Server::extractModelIds(const std::string & responseBody) {
@@ -522,6 +698,9 @@ HttpResponse Server::runHttpRequest(const HttpRequest & request) {
 	ofRequest.contentType = request.contentType;
 	ofRequest.headers["Accept"] = "application/json";
 	ofRequest.headers["Content-Type"] = request.contentType;
+	for (const auto & header : request.headers) {
+		ofRequest.headers[header.first] = header.second;
+	}
 	ofRequest.timeoutSeconds = request.timeoutSeconds;
 
 	ofURLFileLoader loader;

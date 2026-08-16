@@ -1,7 +1,8 @@
 # Contributing
 
-Keep changes on the smallest vertical path toward local chat, document search,
-and one allowlisted tool call.
+Keep changes on the smallest vertical path: OpenAI-compatible chat, explicit
+document search, and one allowlisted tool call. Local and hosted endpoints are
+transport configurations, not separate backends.
 
 Before proposing a public API, show where the canonical example uses it. Before
 adding an abstraction, identify two real consumers. Before adding a backend,

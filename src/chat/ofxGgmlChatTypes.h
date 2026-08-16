@@ -2,9 +2,22 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ofxGgml {
+
+struct ToolCall {
+	std::string id;
+	std::string name;
+	std::string argumentsJson;
+};
+
+struct ToolDefinition {
+	std::string name;
+	std::string description;
+	std::string parametersJson = "{\"type\":\"object\"}";
+};
 
 enum class ChatRole {
 	System,
@@ -14,8 +27,16 @@ enum class ChatRole {
 };
 
 struct ChatMessage {
+	ChatMessage() = default;
+	ChatMessage(ChatRole role, std::string content)
+		: role(role)
+		, content(std::move(content)) {
+	}
+
 	ChatRole role = ChatRole::User;
 	std::string content;
+	std::string toolCallId;
+	std::vector<ToolCall> toolCalls;
 };
 
 struct ChatOptions {
@@ -31,6 +52,7 @@ struct ChatOptions {
 struct ChatRequest {
 	std::string systemPrompt;
 	std::vector<ChatMessage> messages;
+	std::vector<ToolDefinition> tools;
 	ChatOptions options;
 };
 
@@ -40,6 +62,7 @@ struct ChatResult {
 	int httpStatus = 0;
 	float elapsedMs = 0.0f;
 	std::string text;
+	std::vector<ToolCall> toolCalls;
 	std::string error;
 	std::string rawResponse;
 
