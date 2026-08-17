@@ -1,13 +1,13 @@
 # ofxGgml V2
 
-This branch develops one small openFrameworks addon for using a local
-OpenAI-compatible model server.
+This branch develops one small openFrameworks addon for using an external
+OpenAI-compatible model endpoint.
 
 ## Product boundary
 
 The supported path is:
 
-1. connect to or inspect a local `llama-server`;
+1. connect to or inspect a local `llama-server` or hosted endpoint;
 2. hold a chat session;
 3. search local documents through an allowlisted tool;
 4. return a grounded answer.

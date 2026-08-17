@@ -241,6 +241,17 @@ std::string extractScopedJsonStringField(
 	return extractJsonStringAt(json, colon + 1);
 }
 
+std::string extractChatTextValue(const std::string & responseBody) {
+	for (const char * keyValue : { "content", "text", "response" }) {
+		const std::string key(keyValue);
+		const std::string value = extractJsonStringField(responseBody, key);
+		if (!trimCopy(value).empty()) {
+			return value;
+		}
+	}
+	return {};
+}
+
 #if defined(OFXGGML_HAS_CURL_HTTP_RUNTIME)
 bool processServerSentEventLine(
 	const std::string & line,
@@ -255,7 +266,7 @@ bool processServerSentEventLine(
 		return true;
 	}
 	response.body += payload + "\n";
-	const std::string text = Server::extractChatText(payload);
+	const std::string text = extractChatTextValue(payload);
 	if (text.empty()) {
 		return true;
 	}
@@ -385,14 +396,6 @@ void Server::setBaseUrl(std::string baseUrl) {
 
 const std::string & Server::getBaseUrl() const {
 	return baseUrl;
-}
-
-void Server::setTransport(HttpTransport transport) {
-	this->transport = transport ? std::move(transport) : Server::runHttpRequest;
-}
-
-bool Server::hasTransport() const {
-	return static_cast<bool>(transport);
 }
 
 void Server::setBearerToken(std::string token) {
@@ -607,14 +610,7 @@ std::string Server::buildChatBody(const ChatRequest & request) {
 }
 
 std::string Server::extractChatText(const std::string & responseBody) {
-	for (const char * keyValue : { "content", "text", "response" }) {
-		const std::string key(keyValue);
-		const std::string value = extractJsonStringField(responseBody, key);
-		if (!trimCopy(value).empty()) {
-			return value;
-		}
-	}
-	return {};
+	return extractChatTextValue(responseBody);
 }
 
 std::vector<ToolCall> Server::extractToolCalls(const std::string & responseBody) {

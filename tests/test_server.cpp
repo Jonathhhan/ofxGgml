@@ -4,18 +4,23 @@
 #include <string>
 
 OFXGGML_TEST(server_normalizes_openai_endpoint_urls) {
-	OFXGGML_REQUIRE(
-		ofxGgml::Server::normalizeBaseUrl("") == "http://127.0.0.1:8080");
-	OFXGGML_REQUIRE(
-		ofxGgml::Server::normalizeBaseUrl("http://localhost:8001/v1") ==
-		"http://localhost:8001");
-	OFXGGML_REQUIRE(
-		ofxGgml::Server::normalizeBaseUrl(
-			"http://localhost:8001/v1/chat/completions") ==
-		"http://localhost:8001");
-	OFXGGML_REQUIRE(
-		ofxGgml::Server::modelsUrl("http://localhost:8001/") ==
-		"http://localhost:8001/v1/models");
+	ofxGgml::HttpRequest captured;
+	auto transport = [&](const ofxGgml::HttpRequest & request) {
+		captured = request;
+		ofxGgml::HttpResponse response;
+		response.started = true;
+		response.status = 200;
+		response.body = "{\"data\":[]}";
+		return response;
+	};
+	ofxGgml::Server server(
+		"http://localhost:8001/v1/chat/completions", transport);
+	ofxGgml::Server defaultServer("", transport);
+
+	OFXGGML_REQUIRE(server.getBaseUrl() == "http://localhost:8001");
+	OFXGGML_REQUIRE(defaultServer.getBaseUrl() == "http://127.0.0.1:8080");
+	OFXGGML_REQUIRE(server.inspect());
+	OFXGGML_REQUIRE(captured.url == "http://localhost:8001/v1/models");
 }
 
 OFXGGML_TEST(server_inspects_models_endpoint) {
@@ -38,6 +43,15 @@ OFXGGML_TEST(server_inspects_models_endpoint) {
 }
 
 OFXGGML_TEST(server_builds_chat_completions_body) {
+	ofxGgml::HttpRequest captured;
+	ofxGgml::Server server("http://localhost:8001", [&](const ofxGgml::HttpRequest & httpRequest) {
+		captured = httpRequest;
+		ofxGgml::HttpResponse response;
+		response.started = true;
+		response.status = 200;
+		response.body = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}";
+		return response;
+	});
 	ofxGgml::ChatRequest request;
 	request.systemPrompt = "Be brief";
 	request.messages.push_back({ ofxGgml::ChatRole::User, "Hello \"world\"" });
@@ -47,7 +61,10 @@ OFXGGML_TEST(server_builds_chat_completions_body) {
 	request.options.seed = 7;
 	request.options.stopSequences = { "</s>" };
 
-	const std::string body = ofxGgml::Server::buildChatBody(request);
+	OFXGGML_REQUIRE(server.chat(request));
+	const std::string & body = captured.body;
+	OFXGGML_REQUIRE(captured.method == ofxGgml::HttpMethod::Post);
+	OFXGGML_REQUIRE(captured.url == "http://localhost:8001/v1/chat/completions");
 	OFXGGML_REQUIRE(body.find("\"model\":\"local/qwen\"") != std::string::npos);
 	OFXGGML_REQUIRE(body.find("\"role\":\"system\"") != std::string::npos);
 	OFXGGML_REQUIRE(body.find("Hello \\\"world\\\"") != std::string::npos);
@@ -81,18 +98,38 @@ OFXGGML_TEST(server_adds_bearer_auth_without_exposing_it_in_the_body) {
 }
 
 OFXGGML_TEST(server_extracts_chat_response_text) {
-	OFXGGML_REQUIRE(
-		ofxGgml::Server::extractChatText(
-			"{\"choices\":[{\"message\":{\"content\":\"Hello\\nthere\"}}]}") ==
-		"Hello\nthere");
-	OFXGGML_REQUIRE(
-		ofxGgml::Server::extractChatText(
-			"{\"choices\":[{\"text\":\"completion\"}]}") == "completion");
+	std::string responseBody =
+		"{\"choices\":[{\"message\":{\"content\":\"Hello\\nthere\"}}]}";
+	ofxGgml::Server server("http://localhost:8001", [&](const ofxGgml::HttpRequest &) {
+		ofxGgml::HttpResponse response;
+		response.started = true;
+		response.status = 200;
+		response.body = responseBody;
+		return response;
+	});
+	ofxGgml::ChatRequest request;
+	request.messages.push_back({ ofxGgml::ChatRole::User, "Hello" });
+
+	OFXGGML_REQUIRE(server.chat(request).text == "Hello\nthere");
+	responseBody = "{\"choices\":[{\"text\":\"completion\"}]}";
+	OFXGGML_REQUIRE(server.chat(request).text == "completion");
 }
 
 OFXGGML_TEST(server_extracts_openai_tool_calls) {
-	const auto calls = ofxGgml::Server::extractToolCalls(
-		R"({"choices":[{"message":{"tool_calls":[{"function":{"arguments":"{\"query\":\"Grüße\"}","name":"search_documents"},"type":"function","id":"call-7"}]}}]})");
+	ofxGgml::Server server("http://localhost:8001", [](const ofxGgml::HttpRequest &) {
+		ofxGgml::HttpResponse response;
+		response.started = true;
+		response.status = 200;
+		response.body = R"({"choices":[{"message":{"tool_calls":[{"function":{"arguments":"{\"query\":\"Grüße\"}","name":"search_documents"},"type":"function","id":"call-7"}]}}]})";
+		return response;
+	});
+	ofxGgml::ChatRequest request;
+	request.messages.push_back({ ofxGgml::ChatRole::User, "Search" });
+	request.tools.push_back({ "search_documents", "Search documents", "{}" });
+
+	const auto result = server.chat(request);
+	OFXGGML_REQUIRE(result);
+	const auto & calls = result.toolCalls;
 	OFXGGML_REQUIRE(calls.size() == 1);
 	OFXGGML_REQUIRE(calls[0].id == "call-7");
 	OFXGGML_REQUIRE(calls[0].name == "search_documents");

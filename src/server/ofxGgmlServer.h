@@ -57,8 +57,6 @@ public:
 	void setBaseUrl(std::string baseUrl);
 	const std::string & getBaseUrl() const;
 
-	void setTransport(HttpTransport transport);
-	bool hasTransport() const;
 	void setBearerToken(std::string token);
 	bool hasBearerToken() const;
 
@@ -67,6 +65,7 @@ public:
 		const ChatRequest & request,
 		ChatChunkCallback onChunk = nullptr) const;
 
+private:
 	static std::string normalizeBaseUrl(const std::string & baseUrl);
 	static std::string modelsUrl(const std::string & baseUrl);
 	static std::string chatCompletionsUrl(const std::string & baseUrl);
@@ -76,7 +75,6 @@ public:
 	static std::vector<std::string> extractModelIds(const std::string & responseBody);
 	static HttpResponse runHttpRequest(const HttpRequest & request);
 
-private:
 	std::string baseUrl;
 	std::string bearerToken;
 	HttpTransport transport;

@@ -53,6 +53,11 @@ ofxGgml::ToolLoop loop(chat, tools);
 const auto answer = loop.run("Why is llama-server a separate process?");
 ```
 
+These objects deliberately use non-owning references: keep `Server` alive while
+its `ChatSession` is used, keep both `ChatSession` and `ToolRegistry` alive while
+using `ToolLoop`, and keep `DocumentIndex` alive after registering document
+search.
+
 `search_documents` receives only a query. It cannot choose a file path or run
 an arbitrary function; it searches only text the application loaded first.
 
