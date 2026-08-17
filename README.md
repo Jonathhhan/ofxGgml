@@ -176,6 +176,8 @@ tool loop, verifies the source identifier, and captures the rendered answer.
 
 ## Branch status
 
-V2 is under development on an isolated branch. Its narrow vertical path is now
-proven; the current `main` branch and previous addon family remain untouched
-while the API and installation experience are stabilized.
+The next candidate is `v2.0.0-rewrite.1`. It continues the existing
+`v2.0.0-rewrite.0` prerelease line while replacing that broad in-process
+runtime design with the smaller server-first addon described here. See the
+[release notes](docs/RELEASE_NOTES.md) for its exact boundary. The current
+`main` branch and previous addon family remain untouched.

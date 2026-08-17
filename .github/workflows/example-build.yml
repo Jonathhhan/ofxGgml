@@ -10,6 +10,8 @@ on:
   push:
     branches:
       - v2
+    tags:
+      - "v2.*"
     paths:
       - "src/**"
       - "addon_config.mk"
@@ -189,7 +191,9 @@ jobs:
           retention-days: 14
 
       - name: Control GUI against Hugging Face
-        if: contains(github.event.head_commit.message, '[hf-gui-smoke]')
+        if: >-
+          github.ref == 'refs/heads/v2' &&
+          contains(github.event.head_commit.message, '[hf-gui-smoke]')
         timeout-minutes: 5
         shell: bash
         env:
@@ -290,6 +294,7 @@ jobs:
       - name: Upload Hugging Face GUI artifacts
         if: >-
           always() &&
+          github.ref == 'refs/heads/v2' &&
           contains(github.event.head_commit.message, '[hf-gui-smoke]')
         uses: actions/upload-artifact@v4
         with:
