@@ -1,12 +1,26 @@
 # ofxGgml V2
 
-`ofxGgml` connects an openFrameworks application to a local
-OpenAI-compatible model server. The V2 branch follows one narrow workflow:
+`ofxGgml` connects an openFrameworks application to an external
+OpenAI-compatible model endpoint. The V2 branch follows one narrow workflow:
 chat, search explicitly loaded documents through one allowlisted tool, and
-return a cited answer.
+return a cited answer. The endpoint can be a local `llama-server` or a hosted
+provider.
 
 The addon does **not** embed ggml, llama.cpp, CUDA, SAM, or another native model
 runtime. Run `llama-server` separately and update it independently.
+
+## Install
+
+Clone the V2 branch into the openFrameworks addons directory:
+
+```sh
+cd path/to/openFrameworks/addons
+git clone --branch v2 https://github.com/Jonathhhan/ofxGgml.git
+```
+
+Open `ofxGgmlChatExample` with the openFrameworks Project Generator, or add
+`ofxGgml` to an existing project. No model runtime or model file is installed
+with the addon.
 
 ## Current API
 
@@ -66,9 +80,17 @@ Implemented:
 - one allowlisted `search_documents` tool
 - bounded tool loop with source citations
 
-Still required before V2 is considered proven:
+Proven end to end:
 
-- one real model-backed document answer with citations
+- deterministic protocol tests on Linux and Windows
+- compilation and GUI launch against the current openFrameworks Linux nightly
+- automated keyboard input through the real example GUI
+- a marker-gated Hugging Face run with two model requests, local
+  `search_documents` execution, and a cited final answer
+
+The latest recorded live proof used `openai/gpt-oss-120b` and returned
+`v2-architecture.md#chunk-1` in the
+[successful GUI run](https://github.com/Jonathhhan/ofxGgml/actions/runs/31979160396).
 
 Not part of the supported V2 surface yet:
 
@@ -85,9 +107,9 @@ Not part of the supported V2 surface yet:
 - Set `OFXGGML_MODEL` when the endpoint does not advertise a model via
   `/v1/models`.
 - Set `OFXGGML_API_KEY` for endpoints that require Bearer authentication.
-- Press `I` to inspect `/v1/models`.
+- Press `F1` to inspect `/v1/models`.
 - Type a message and press Enter to send it.
-- Press `C` to clear the conversation.
+- Press `F2` to clear the conversation.
 
 ### Testing without a local GPU
 
@@ -123,9 +145,11 @@ the same protocol through the addon itself.
 
 For a GitHub-hosted run, add a repository Actions secret named `HF_TOKEN`.
 Optionally set repository variables `HF_MODEL` and `HF_SERVER_URL`; otherwise
-the workflow uses `openai/gpt-oss-120b` and the Hugging Face router. On `v2`, the
-live job runs only when the pushed commit message contains `[hf-smoke]`, so
-normal pushes cannot consume provider credit accidentally.
+the workflows use `openai/gpt-oss-120b` and the Hugging Face router. On `v2`,
+`[hf-smoke]` runs the provider protocol check and `[hf-gui-smoke]` runs the
+compiled openFrameworks GUI through the same hosted tool path. Normal pushes
+run neither live inference test, so they cannot consume provider credit
+accidentally.
 
 ## Tests
 
@@ -135,16 +159,18 @@ cmake --build tests/build
 ctest --test-dir tests/build --output-on-failure
 ```
 
-The tests use an injected transport and do not claim real inference. The
-online or local example is the next model-backed smoke; its provider, model,
-date, and result should be recorded before stabilizing the API.
+The deterministic tests use an injected transport; live inference remains a
+separate, explicitly triggered check so protocol failures and provider costs
+cannot be confused with unit-test failures.
 
 GitHub Actions also builds `ofxGgmlChatExample` against the current official
 openFrameworks Linux nightly. The workflow records the resolved archive name,
-so a failure can be tied to the exact moving nightly snapshot. This verifies a
-real openFrameworks compile and link; it does not attempt to automate the GUI.
+opens the GUI on a virtual display, and uploads its screenshot and log. With
+`[hf-gui-smoke]`, it additionally types a question, waits for the model-backed
+tool loop, verifies the source identifier, and captures the rendered answer.
 
 ## Branch status
 
-V2 is under development on an isolated branch. The current `main` branch and
-the previous addon family remain available until this smaller path is proven.
+V2 is under development on an isolated branch. Its narrow vertical path is now
+proven; the current `main` branch and previous addon family remain untouched
+while the API and installation experience are stabilized.

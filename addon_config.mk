@@ -1,6 +1,6 @@
 meta:
 	ADDON_NAME = ofxGgml
-	ADDON_DESCRIPTION = Local model-server chat and tool workflows for openFrameworks
+	ADDON_DESCRIPTION = OpenAI-compatible chat and tool workflows for openFrameworks
 	ADDON_AUTHOR = Jonathan Frank
 	ADDON_TAGS = "ai,llm,local,chat,tools"
 	ADDON_URL = https://github.com/Jonathhhan/ofxGgml

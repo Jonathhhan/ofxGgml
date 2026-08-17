@@ -12,8 +12,9 @@ The supported path is:
 3. search local documents through an allowlisted tool;
 4. return a grounded answer.
 
-All four steps now exist as a deterministic, injected-transport workflow. They
-are not considered proven until the same path passes a real model-backed smoke.
+All four steps are covered by deterministic injected-transport tests and have
+passed through the real example GUI against a hosted model. Keep deterministic
+tests and marker-gated live evidence distinct.
 
 ## Rules
 
