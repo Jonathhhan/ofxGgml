@@ -13,7 +13,7 @@ API compatibility with that earlier, broader runtime design.
 - conversation history and optional response streaming;
 - explicitly loaded local documents and one allowlisted search tool;
 - a bounded tool loop that returns source identifiers;
-- one keyboard-driven openFrameworks example;
+- one `ofxImGui` openFrameworks example with selectable endpoint profiles;
 - injectable-transport tests on Linux and Windows;
 - compilation and GUI launch against the current openFrameworks Linux nightly;
 - an explicitly triggered Hugging Face tool-path smoke test.

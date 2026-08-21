@@ -25,6 +25,9 @@ concurrency:
   group: openframeworks-example-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  OFXIMGUI_COMMIT: 4b5d04a3e73bbae34d564c9b78143e021f67377a
+
 jobs:
   build-linux-nightly:
     runs-on: ubuntu-24.04
@@ -95,6 +98,10 @@ jobs:
         run: |
           set -euo pipefail
           ln -s "$GITHUB_WORKSPACE" "$OF_ROOT/addons/ofxGgml"
+          git -C "$OF_ROOT/addons" init ofxImGui
+          git -C "$OF_ROOT/addons/ofxImGui" remote add origin https://github.com/jvcleave/ofxImGui.git
+          git -C "$OF_ROOT/addons/ofxImGui" fetch --depth 1 origin "$OFXIMGUI_COMMIT"
+          git -C "$OF_ROOT/addons/ofxImGui" checkout --detach FETCH_HEAD
           app="$OF_ROOT/apps/myApps/ofxGgmlChatExample"
           mkdir -p "${app%/*}"
           cp -R "$GITHUB_WORKSPACE/ofxGgmlChatExample" "$app"

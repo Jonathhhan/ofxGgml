@@ -16,6 +16,7 @@ Clone the V2 branch into the openFrameworks addons directory:
 ```sh
 cd path/to/openFrameworks/addons
 git clone --branch v2 https://github.com/Jonathhhan/ofxGgml.git
+git clone --branch develop https://github.com/jvcleave/ofxImGui.git
 ```
 
 Open `ofxGgmlChatExample` with the openFrameworks Project Generator, or add
@@ -106,15 +107,18 @@ Not part of the supported V2 surface yet:
 
 ## Example
 
-`ofxGgmlChatExample` is a minimal keyboard-driven openFrameworks example.
+`ofxGgmlChatExample` uses `ofxImGui` to switch between `llama-server`,
+LM Studio, Hugging Face, OpenAI, and a custom OpenAI-compatible endpoint.
 
-- Set `OFXGGML_SERVER_URL` to override `http://127.0.0.1:8080`.
-- Set `OFXGGML_MODEL` when the endpoint does not advertise a model via
-  `/v1/models`.
-- Set `OFXGGML_API_KEY` for endpoints that require Bearer authentication.
-- Press `F1` to inspect `/v1/models`.
-- Type a message and press Enter to send it.
-- Press `F2` to clear the conversation.
+- Choose an endpoint preset or enter a custom base URL.
+- Inspect `/v1/models` and select or enter the model ID.
+- Use `OFXGGML_API_KEY` as the universal token override. The Hugging Face and
+  OpenAI presets also recognize `HF_TOKEN` and `OPENAI_API_KEY` respectively.
+- Tokens are read from the environment; the GUI displays only whether one was
+  loaded and never displays or stores its value.
+- `OFXGGML_SERVER_URL`, `OFXGGML_MODEL`, and `OFXGGML_API_KEY` still configure
+  the initial state for scripts and CI.
+- `F1` and `F2` remain shortcuts for inspect and clear.
 
 ### Testing without a local GPU
 
