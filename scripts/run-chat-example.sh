@@ -52,8 +52,23 @@ find_example() {
 }
 
 server_ready() {
-  command -v curl >/dev/null 2>&1 && \
-    curl -fsS --max-time 2 "$SERVER_URL/health" >/dev/null 2>&1
+  command -v curl >/dev/null 2>&1 || return 1
+
+  case "$SERVER_URL" in
+    http://127.0.0.1:*|http://localhost:*)
+      curl -fsS --max-time 2 "$SERVER_URL/health" >/dev/null 2>&1
+      ;;
+    *)
+      API_KEY="${OFXGGML_API_KEY:-${HF_TOKEN:-}}"
+      if [ -n "$API_KEY" ]; then
+        curl -fsS --max-time 5 \
+          -H "Authorization: Bearer $API_KEY" \
+          "$SERVER_URL/models" >/dev/null 2>&1
+      else
+        curl -fsS --max-time 5 "$SERVER_URL/models" >/dev/null 2>&1
+      fi
+      ;;
+  esac
 }
 
 EXAMPLE_BIN=$(find_example || true)
@@ -61,6 +76,9 @@ EXAMPLE_BIN=$(find_example || true)
 export OFXGGML_SERVER_URL="$SERVER_URL"
 if [ -n "$MODEL" ]; then
   export OFXGGML_MODEL="$MODEL"
+fi
+if [ -z "${OFXGGML_API_KEY:-}" ] && [ -n "${HF_TOKEN:-}" ]; then
+  export OFXGGML_API_KEY="$HF_TOKEN"
 fi
 
 READY=0
@@ -93,7 +111,7 @@ if [ "$READY" -eq 0 ] && [ "$NO_AUTO_SERVER" -eq 0 ]; then
       fi
       ;;
     *)
-      echo "Endpoint is not reachable at $SERVER_URL." >&2
+      echo "Endpoint is not reachable at $SERVER_URL/models." >&2
       echo "Hosted endpoints are never auto-started by this script." >&2
       ;;
   esac
