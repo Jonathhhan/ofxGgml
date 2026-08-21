@@ -6,6 +6,7 @@ PORT="8080"
 MODEL="${OFXGGML_MODEL:-}"
 SERVER="${OFXGGML_LLAMA_SERVER:-llama-server}"
 CTX="4096"
+STARTUP_TIMEOUT="${OFXGGML_SERVER_STARTUP_TIMEOUT:-120}"
 DETACHED=0
 DRY_RUN=0
 
@@ -19,6 +20,7 @@ Options:
   --host HOST        bind host (default 127.0.0.1)
   --port PORT        bind port (default 8080)
   --ctx N            context size (default 4096)
+  --startup-timeout N seconds to wait for /health (default 120)
   --detached         start in background
   --dry-run          print command only
   -h, --help         show this help
@@ -32,6 +34,7 @@ while [ "$#" -gt 0 ]; do
     --host) HOST=$2; shift 2 ;;
     --port) PORT=$2; shift 2 ;;
     --ctx) CTX=$2; shift 2 ;;
+    --startup-timeout) STARTUP_TIMEOUT=$2; shift 2 ;;
     --detached) DETACHED=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -87,7 +90,8 @@ if [ "$DETACHED" -eq 1 ]; then
   echo "log: $LOG_FILE"
   if command -v curl >/dev/null 2>&1; then
     i=0
-    while [ "$i" -lt 60 ]; do
+    max_tries=$((STARTUP_TIMEOUT * 2))
+    while [ "$i" -lt "$max_tries" ]; do
       if curl -fsS --max-time 2 "$URL/health" >/dev/null 2>&1; then
         echo "llama-server is ready at $URL"
         echo "export OFXGGML_SERVER_URL=$URL"
@@ -95,15 +99,18 @@ if [ "$DETACHED" -eq 1 ]; then
       fi
       if ! kill -0 "$PID" 2>/dev/null; then
         echo "llama-server exited before becoming ready. See $LOG_FILE" >&2
+        tail -n 30 "$LOG_FILE" >&2 2>/dev/null || true
         exit 1
       fi
       sleep 0.5
       i=$((i + 1))
     done
-    echo "llama-server is still loading. Check $URL/health and $LOG_FILE" >&2
+    echo "llama-server did not become ready within ${STARTUP_TIMEOUT}s. See $LOG_FILE" >&2
+    tail -n 30 "$LOG_FILE" >&2 2>/dev/null || true
+    exit 1
   fi
-  echo "export OFXGGML_SERVER_URL=$URL"
-  exit 0
+  echo "curl is required to verify llama-server readiness." >&2
+  exit 1
 fi
 
 echo "llama-server is running in this terminal. Press Ctrl+C to stop it."
