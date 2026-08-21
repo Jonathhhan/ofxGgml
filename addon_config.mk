@@ -3,7 +3,7 @@ meta:
 	ADDON_DESCRIPTION = Inference connector for local and hosted model endpoints in openFrameworks
 	ADDON_AUTHOR = Jonathan Frank
 	ADDON_TAGS = "ai,inference,endpoints,llm,chat,tools,openai"
-	ADDON_URL = https://github.com/Jonathhhan/ofxIC
+	ADDON_URL = https://github.com/Jonathhhan/ofxGgml
 
 common:
 	ADDON_INCLUDES = src

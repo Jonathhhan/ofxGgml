@@ -15,7 +15,7 @@ Clone the V2 branch into the openFrameworks addons directory:
 
 ```sh
 cd path/to/openFrameworks/addons
-git clone --branch v2 https://github.com/Jonathhhan/ofxIC.git
+git clone --branch v2 https://github.com/Jonathhhan/ofxGgml.git ofxIC
 git clone --branch develop https://github.com/jvcleave/ofxImGui.git
 ```
 
@@ -96,7 +96,7 @@ Proven end to end:
 
 The latest recorded live proof used `openai/gpt-oss-120b` and returned
 `v2-architecture.md#chunk-1` in the
-[successful GUI run](https://github.com/Jonathhhan/ofxIC/actions/runs/31979160396).
+[successful GUI run](https://github.com/Jonathhhan/ofxGgml/actions/runs/31979160396).
 
 Not part of the supported V2 surface yet:
 
