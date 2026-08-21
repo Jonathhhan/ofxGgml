@@ -1,14 +1,14 @@
 #include "test_harness.h"
-#include "../src/ofxGgml.h"
+#include "../src/ofxIC.h"
 
-OFXGGML_TEST(public_umbrella_header_exposes_v2_api) {
-	ofxGgml::Server server("http://localhost:8001/v1");
-	ofxGgml::ChatSession chat(server);
-	ofxGgml::DocumentIndex documents;
-	ofxGgml::ToolRegistry tools;
+OFXIC_TEST(public_umbrella_header_exposes_v2_api) {
+	ofxIC::Endpoint endpoint("http://localhost:8001/v1");
+	ofxIC::ChatSession chat(endpoint);
+	ofxIC::DocumentIndex documents;
+	ofxIC::ToolRegistry tools;
 	tools.addDocumentSearch(documents);
-	ofxGgml::ToolLoop loop(chat, tools);
-	OFXGGML_REQUIRE(server.getBaseUrl() == "http://localhost:8001");
-	OFXGGML_REQUIRE(chat.getMessages().empty());
-	OFXGGML_REQUIRE(tools.contains("search_documents"));
+	ofxIC::ToolLoop loop(chat, tools);
+	OFXIC_REQUIRE(endpoint.getBaseUrl() == "http://localhost:8001");
+	OFXIC_REQUIRE(chat.getMessages().empty());
+	OFXIC_REQUIRE(tools.contains("search_documents"));
 }

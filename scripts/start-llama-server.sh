@@ -3,10 +3,10 @@ set -eu
 
 HOST="127.0.0.1"
 PORT="8080"
-MODEL="${OFXGGML_MODEL:-}"
-SERVER="${OFXGGML_LLAMA_SERVER:-llama-server}"
+MODEL="${OFXIC_MODEL:-}"
+SERVER="${OFXIC_LLAMA_SERVER:-llama-server}"
 CTX="4096"
-STARTUP_TIMEOUT="${OFXGGML_SERVER_STARTUP_TIMEOUT:-120}"
+STARTUP_TIMEOUT="${OFXIC_SERVER_STARTUP_TIMEOUT:-120}"
 DETACHED=0
 DRY_RUN=0
 
@@ -15,8 +15,8 @@ usage() {
 Usage: sh scripts/start-llama-server.sh [options]
 
 Options:
-  --model PATH       GGUF model path (or OFXGGML_MODEL)
-  --server PATH      llama-server executable (or OFXGGML_LLAMA_SERVER)
+  --model PATH       GGUF model path (or OFXIC_MODEL)
+  --server PATH      llama-server executable (or OFXIC_LLAMA_SERVER)
   --host HOST        bind host (default 127.0.0.1)
   --port PORT        bind port (default 8080)
   --ctx N            context size (default 4096)
@@ -43,7 +43,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$MODEL" ]; then
-  echo "No GGUF model configured. Pass --model /path/to/model.gguf or set OFXGGML_MODEL." >&2
+  echo "No GGUF model configured. Pass --model /path/to/model.gguf or set OFXIC_MODEL." >&2
   exit 1
 fi
 
@@ -65,7 +65,7 @@ fi
 URL="http://$HOST:$PORT"
 if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 2 "$URL/health" >/dev/null 2>&1; then
   echo "llama-server is already ready at $URL"
-  echo "export OFXGGML_SERVER_URL=$URL"
+  echo "export OFXIC_ENDPOINT_URL=$URL"
   exit 0
 fi
 
@@ -81,7 +81,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 if [ "$DETACHED" -eq 1 ]; then
-  LOG_DIR="${TMPDIR:-/tmp}/ofxGgml"
+  LOG_DIR="${TMPDIR:-/tmp}/ofxIC"
   mkdir -p "$LOG_DIR"
   LOG_FILE="$LOG_DIR/llama-server-$PORT.log"
   "$@" >"$LOG_FILE" 2>&1 &
@@ -94,7 +94,7 @@ if [ "$DETACHED" -eq 1 ]; then
     while [ "$i" -lt "$max_tries" ]; do
       if curl -fsS --max-time 2 "$URL/health" >/dev/null 2>&1; then
         echo "llama-server is ready at $URL"
-        echo "export OFXGGML_SERVER_URL=$URL"
+        echo "export OFXIC_ENDPOINT_URL=$URL"
         exit 0
       fi
       if ! kill -0 "$PID" 2>/dev/null; then
@@ -114,5 +114,5 @@ if [ "$DETACHED" -eq 1 ]; then
 fi
 
 echo "llama-server is running in this terminal. Press Ctrl+C to stop it."
-echo "Use OFXGGML_SERVER_URL=$URL in the example."
+echo "Use OFXIC_ENDPOINT_URL=$URL in the example."
 exec "$@"

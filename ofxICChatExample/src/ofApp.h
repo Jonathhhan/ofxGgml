@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ofMain.h"
-#include "ofxGgml.h"
+#include "ofxIC.h"
 #include "ofxImGui.h"
 
 #include <array>
@@ -25,18 +25,18 @@ public:
 private:
 	void applyConfiguration();
 	void selectEndpointProfile(int profileIndex);
-	void inspectServer();
+	void inspectEndpoint();
 	void sendMessage();
 	void finishWorker();
 	std::string configuredToken() const;
 	std::string configuredTokenSource() const;
 
 	ofxImGui::Gui gui;
-	ofxGgml::Server server;
-	ofxGgml::ChatSession chat;
-	ofxGgml::DocumentIndex documents;
-	ofxGgml::ToolRegistry tools;
-	ofxGgml::ToolLoop toolLoop;
+	ofxIC::Endpoint endpoint;
+	ofxIC::ChatSession chat;
+	ofxIC::DocumentIndex documents;
+	ofxIC::ToolRegistry tools;
+	ofxIC::ToolLoop toolLoop;
 	std::array<char, 512> endpointUrl{};
 	std::array<char, 256> modelId{};
 	std::array<char, 2048> input{};

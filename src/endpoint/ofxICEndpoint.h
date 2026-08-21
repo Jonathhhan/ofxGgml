@@ -1,13 +1,13 @@
 #pragma once
 
-#include "../chat/ofxGgmlChatTypes.h"
+#include "../chat/ofxICChatTypes.h"
 
 #include <functional>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace ofxGgml {
+namespace ofxIC {
 
 enum class HttpMethod {
 	Get,
@@ -37,7 +37,7 @@ struct HttpResponse {
 
 using HttpTransport = std::function<HttpResponse(const HttpRequest &)>;
 
-struct ServerStatus {
+struct EndpointStatus {
 	bool reachable = false;
 	int httpStatus = 0;
 	std::vector<std::string> models;
@@ -48,9 +48,9 @@ struct ServerStatus {
 	}
 };
 
-class Server {
+class Endpoint {
 public:
-	explicit Server(
+	explicit Endpoint(
 		std::string baseUrl = "http://127.0.0.1:8080",
 		HttpTransport transport = {});
 
@@ -60,7 +60,7 @@ public:
 	void setBearerToken(std::string token);
 	bool hasBearerToken() const;
 
-	ServerStatus inspect() const;
+	EndpointStatus inspect() const;
 	ChatResult chat(
 		const ChatRequest & request,
 		ChatChunkCallback onChunk = nullptr) const;
@@ -80,4 +80,4 @@ private:
 	HttpTransport transport;
 };
 
-} // namespace ofxGgml
+} // namespace ofxIC

@@ -1,13 +1,13 @@
-#include "ofxGgmlChatSession.h"
+#include "ofxICChatSession.h"
 
-#include "../server/ofxGgmlServer.h"
+#include "../endpoint/ofxICEndpoint.h"
 
 #include <utility>
 
-namespace ofxGgml {
+namespace ofxIC {
 
-ChatSession::ChatSession(Server & server)
-	: server(server) {
+ChatSession::ChatSession(Endpoint & endpoint)
+	: endpoint(endpoint) {
 }
 
 void ChatSession::setSystemPrompt(std::string systemPrompt) {
@@ -61,7 +61,7 @@ ChatResult ChatSession::complete(
 	request.tools = tools;
 	request.options = options;
 
-	ChatResult result = server.get().chat(request, std::move(onChunk));
+	ChatResult result = endpoint.get().chat(request, std::move(onChunk));
 	if (result) {
 		ChatMessage assistantMessage;
 		assistantMessage.role = ChatRole::Assistant;
@@ -74,4 +74,4 @@ ChatResult ChatSession::complete(
 	return result;
 }
 
-} // namespace ofxGgml
+} // namespace ofxIC

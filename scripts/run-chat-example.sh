@@ -3,11 +3,11 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ADDON_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-EXAMPLE_ROOT="$ADDON_ROOT/ofxGgmlChatExample"
-SERVER_URL="${OFXGGML_SERVER_URL:-http://127.0.0.1:8080}"
-MODEL="${OFXGGML_MODEL:-}"
-SERVER="${OFXGGML_LLAMA_SERVER:-llama-server}"
-STARTUP_TIMEOUT="${OFXGGML_SERVER_STARTUP_TIMEOUT:-120}"
+EXAMPLE_ROOT="$ADDON_ROOT/ofxICChatExample"
+ENDPOINT_URL="${OFXIC_ENDPOINT_URL:-http://127.0.0.1:8080}"
+MODEL="${OFXIC_MODEL:-}"
+SERVER="${OFXIC_LLAMA_SERVER:-llama-server}"
+STARTUP_TIMEOUT="${OFXIC_SERVER_STARTUP_TIMEOUT:-120}"
 NO_AUTO_SERVER=0
 DRY_RUN=0
 
@@ -16,7 +16,7 @@ usage() {
 Usage: sh scripts/run-chat-example.sh [options]
 
 Options:
-  --server-url URL   endpoint (default http://127.0.0.1:8080)
+  --endpoint-url URL endpoint (default http://127.0.0.1:8080)
   --model PATH       local GGUF model used when auto-starting llama-server
   --server PATH      llama-server executable
   --startup-timeout N seconds to wait for local server readiness (default 120)
@@ -28,7 +28,7 @@ EOF
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --server-url) SERVER_URL=$2; shift 2 ;;
+    --endpoint-url) ENDPOINT_URL=$2; shift 2 ;;
     --model) MODEL=$2; shift 2 ;;
     --server) SERVER=$2; shift 2 ;;
     --startup-timeout) STARTUP_TIMEOUT=$2; shift 2 ;;
@@ -41,8 +41,8 @@ done
 
 find_example() {
   for candidate in \
-    "$EXAMPLE_ROOT/bin/ofxGgmlChatExample" \
-    "$EXAMPLE_ROOT/bin/ofxGgmlChatExample.app/Contents/MacOS/ofxGgmlChatExample"; do
+    "$EXAMPLE_ROOT/bin/ofxICChatExample" \
+    "$EXAMPLE_ROOT/bin/ofxICChatExample.app/Contents/MacOS/ofxICChatExample"; do
     if [ -x "$candidate" ]; then
       printf '%s\n' "$candidate"
       return 0
@@ -51,21 +51,21 @@ find_example() {
   return 1
 }
 
-server_ready() {
+endpoint_ready() {
   command -v curl >/dev/null 2>&1 || return 1
 
-  case "$SERVER_URL" in
+  case "$ENDPOINT_URL" in
     http://127.0.0.1:*|http://localhost:*)
-      curl -fsS --max-time 2 "$SERVER_URL/health" >/dev/null 2>&1
+      curl -fsS --max-time 2 "$ENDPOINT_URL/health" >/dev/null 2>&1
       ;;
     *)
-      API_KEY="${OFXGGML_API_KEY:-${HF_TOKEN:-}}"
+      API_KEY="${OFXIC_API_KEY:-${HF_TOKEN:-}}"
       if [ -n "$API_KEY" ]; then
         curl -fsS --max-time 5 \
           -H "Authorization: Bearer $API_KEY" \
-          "$SERVER_URL/models" >/dev/null 2>&1
+          "$ENDPOINT_URL/models" >/dev/null 2>&1
       else
-        curl -fsS --max-time 5 "$SERVER_URL/models" >/dev/null 2>&1
+        curl -fsS --max-time 5 "$ENDPOINT_URL/models" >/dev/null 2>&1
       fi
       ;;
   esac
@@ -73,45 +73,45 @@ server_ready() {
 
 EXAMPLE_BIN=$(find_example || true)
 
-export OFXGGML_SERVER_URL="$SERVER_URL"
+export OFXIC_ENDPOINT_URL="$ENDPOINT_URL"
 if [ -n "$MODEL" ]; then
-  export OFXGGML_MODEL="$MODEL"
+  export OFXIC_MODEL="$MODEL"
 fi
-if [ -z "${OFXGGML_API_KEY:-}" ] && [ -n "${HF_TOKEN:-}" ]; then
-  export OFXGGML_API_KEY="$HF_TOKEN"
+if [ -z "${OFXIC_API_KEY:-}" ] && [ -n "${HF_TOKEN:-}" ]; then
+  export OFXIC_API_KEY="$HF_TOKEN"
 fi
 
 READY=0
-if server_ready; then
+if endpoint_ready; then
   READY=1
 fi
 
 if [ "$READY" -eq 0 ] && [ "$NO_AUTO_SERVER" -eq 0 ]; then
-  case "$SERVER_URL" in
+  case "$ENDPOINT_URL" in
     http://127.0.0.1:*|http://localhost:*)
       if [ -n "$MODEL" ]; then
-        PORT=$(printf '%s' "$SERVER_URL" | sed -n 's#^http://[^:]*:\([0-9][0-9]*\).*$#\1#p')
+        PORT=$(printf '%s' "$ENDPOINT_URL" | sed -n 's#^http://[^:]*:\([0-9][0-9]*\).*$#\1#p')
         [ -n "$PORT" ] || PORT=8080
-        echo "llama-server is not responding at $SERVER_URL; starting local server"
+        echo "llama-server is not responding at $ENDPOINT_URL; starting local server"
         sh "$SCRIPT_DIR/start-llama-server.sh" \
           --server "$SERVER" \
           --model "$MODEL" \
           --port "$PORT" \
           --startup-timeout "$STARTUP_TIMEOUT" \
           --detached
-        if server_ready; then
+        if endpoint_ready; then
           READY=1
         else
-          echo "llama-server was started but is still not healthy at $SERVER_URL/health." >&2
+          echo "llama-server was started but is still not healthy at $ENDPOINT_URL/health." >&2
           exit 1
         fi
       else
-        echo "llama-server is not reachable at $SERVER_URL." >&2
+        echo "llama-server is not reachable at $ENDPOINT_URL." >&2
         echo "Pass --model /path/to/model.gguf to auto-start it, or start an OpenAI-compatible endpoint separately." >&2
       fi
       ;;
     *)
-      echo "Endpoint is not reachable at $SERVER_URL/models." >&2
+      echo "Endpoint is not reachable at $ENDPOINT_URL/models." >&2
       echo "Hosted endpoints are never auto-started by this script." >&2
       ;;
   esac
@@ -119,23 +119,23 @@ fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "Example: ${EXAMPLE_BIN:-not built}"
-  echo "Server URL: $SERVER_URL"
-  echo "Model: ${MODEL:-auto/server-advertised}"
-  echo "Server reachable: $READY"
+  echo "Endpoint URL: $ENDPOINT_URL"
+  echo "Model: ${MODEL:-auto/endpoint-advertised}"
+  echo "Endpoint reachable: $READY"
   exit 0
 fi
 
 if [ -z "$EXAMPLE_BIN" ]; then
-  echo "ofxGgmlChatExample executable was not found." >&2
-  echo "Generate/build ofxGgmlChatExample first; on macOS the expected path is:" >&2
-  echo "  $EXAMPLE_ROOT/bin/ofxGgmlChatExample.app/Contents/MacOS/ofxGgmlChatExample" >&2
+  echo "ofxICChatExample executable was not found." >&2
+  echo "Generate/build ofxICChatExample first; on macOS the expected path is:" >&2
+  echo "  $EXAMPLE_ROOT/bin/ofxICChatExample.app/Contents/MacOS/ofxICChatExample" >&2
   exit 1
 fi
 
 if [ "$READY" -eq 0 ]; then
-  echo "Server is not reachable; refusing to launch the example with a known-bad endpoint." >&2
+  echo "Endpoint is not reachable; refusing to launch the example with a known-bad endpoint." >&2
   exit 1
 fi
 
-echo "Starting ofxGgmlChatExample"
+echo "Starting ofxICChatExample"
 exec "$EXAMPLE_BIN"

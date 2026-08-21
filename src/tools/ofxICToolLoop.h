@@ -1,13 +1,13 @@
 #pragma once
 
-#include "ofxGgmlToolRegistry.h"
+#include "ofxICToolRegistry.h"
 
 #include <cstddef>
 #include <functional>
 #include <string>
 #include <vector>
 
-namespace ofxGgml {
+namespace ofxIC {
 
 class ChatSession;
 
@@ -36,4 +36,4 @@ private:
 	std::reference_wrapper<const ToolRegistry> tools;
 };
 
-} // namespace ofxGgml
+} // namespace ofxIC

@@ -1,4 +1,4 @@
-#include "ofxGgmlServer.h"
+#include "ofxICEndpoint.h"
 
 #include <algorithm>
 #include <chrono>
@@ -8,18 +8,18 @@
 
 #if __has_include("ofMain.h")
 #include "ofMain.h"
-#define OFXGGML_HAS_OF_HTTP_RUNTIME 1
+#define OFXIC_HAS_OF_HTTP_RUNTIME 1
 #endif
 
-#if defined(OFXGGML_HAS_OF_HTTP_RUNTIME) && __has_include("curl/curl.h")
+#if defined(OFXIC_HAS_OF_HTTP_RUNTIME) && __has_include("curl/curl.h")
 #if defined(_WIN32) && !defined(CURL_STATICLIB)
 #define CURL_STATICLIB
 #endif
 #include "curl/curl.h"
-#define OFXGGML_HAS_CURL_HTTP_RUNTIME 1
+#define OFXIC_HAS_CURL_HTTP_RUNTIME 1
 #endif
 
-namespace ofxGgml {
+namespace ofxIC {
 namespace {
 
 std::string trimCopy(const std::string & value) {
@@ -252,7 +252,7 @@ std::string extractChatTextValue(const std::string & responseBody) {
 	return {};
 }
 
-#if defined(OFXGGML_HAS_CURL_HTTP_RUNTIME)
+#if defined(OFXIC_HAS_CURL_HTTP_RUNTIME)
 bool processServerSentEventLine(
 	const std::string & line,
 	HttpResponse & response,
@@ -360,7 +360,7 @@ HttpResponse runStreamingRequest(const HttpRequest & request) {
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &state);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, static_cast<long>(request.timeoutSeconds));
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-	curl_easy_setopt(curl, CURLOPT_USERAGENT, "ofxGgml/v2");
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "ofxIC/v2");
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curlProgress);
 	curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &state);
@@ -385,29 +385,29 @@ HttpResponse runStreamingRequest(const HttpRequest & request) {
 
 } // namespace
 
-Server::Server(std::string baseUrl, HttpTransport transport)
+Endpoint::Endpoint(std::string baseUrl, HttpTransport transport)
 	: baseUrl(normalizeBaseUrl(baseUrl))
-	, transport(transport ? std::move(transport) : Server::runHttpRequest) {
+	, transport(transport ? std::move(transport) : Endpoint::runHttpRequest) {
 }
 
-void Server::setBaseUrl(std::string baseUrl) {
+void Endpoint::setBaseUrl(std::string baseUrl) {
 	this->baseUrl = normalizeBaseUrl(baseUrl);
 }
 
-const std::string & Server::getBaseUrl() const {
+const std::string & Endpoint::getBaseUrl() const {
 	return baseUrl;
 }
 
-void Server::setBearerToken(std::string token) {
+void Endpoint::setBearerToken(std::string token) {
 	bearerToken = trimCopy(token);
 }
 
-bool Server::hasBearerToken() const {
+bool Endpoint::hasBearerToken() const {
 	return !bearerToken.empty();
 }
 
-ServerStatus Server::inspect() const {
-	ServerStatus status;
+EndpointStatus Endpoint::inspect() const {
+	EndpointStatus status;
 	HttpRequest request;
 	request.method = HttpMethod::Get;
 	request.url = modelsUrl(baseUrl);
@@ -433,7 +433,7 @@ ServerStatus Server::inspect() const {
 	return status;
 }
 
-ChatResult Server::chat(
+ChatResult Endpoint::chat(
 	const ChatRequest & request,
 	ChatChunkCallback onChunk) const {
 	ChatResult result;
@@ -474,7 +474,7 @@ ChatResult Server::chat(
 		return result;
 	}
 	if (response.status <= 0) {
-		result.error = "server is not reachable at " + httpRequest.url;
+		result.error = "endpoint is not reachable at " + httpRequest.url;
 		if (!response.error.empty()) {
 			result.error += ": " + response.error;
 		}
@@ -505,7 +505,7 @@ ChatResult Server::chat(
 	return result;
 }
 
-std::string Server::normalizeBaseUrl(const std::string & baseUrl) {
+std::string Endpoint::normalizeBaseUrl(const std::string & baseUrl) {
 	std::string normalized = stripTrailingSlash(trimCopy(baseUrl));
 	if (normalized.empty()) {
 		normalized = "http://127.0.0.1:8080";
@@ -523,15 +523,15 @@ std::string Server::normalizeBaseUrl(const std::string & baseUrl) {
 	return stripTrailingSlash(normalized);
 }
 
-std::string Server::modelsUrl(const std::string & baseUrl) {
+std::string Endpoint::modelsUrl(const std::string & baseUrl) {
 	return normalizeBaseUrl(baseUrl) + "/v1/models";
 }
 
-std::string Server::chatCompletionsUrl(const std::string & baseUrl) {
+std::string Endpoint::chatCompletionsUrl(const std::string & baseUrl) {
 	return normalizeBaseUrl(baseUrl) + "/v1/chat/completions";
 }
 
-std::string Server::buildChatBody(const ChatRequest & request) {
+std::string Endpoint::buildChatBody(const ChatRequest & request) {
 	std::ostringstream body;
 	body << "{";
 	if (!request.options.model.empty()) {
@@ -609,11 +609,11 @@ std::string Server::buildChatBody(const ChatRequest & request) {
 	return body.str();
 }
 
-std::string Server::extractChatText(const std::string & responseBody) {
+std::string Endpoint::extractChatText(const std::string & responseBody) {
 	return extractChatTextValue(responseBody);
 }
 
-std::vector<ToolCall> Server::extractToolCalls(const std::string & responseBody) {
+std::vector<ToolCall> Endpoint::extractToolCalls(const std::string & responseBody) {
 	std::vector<ToolCall> calls;
 	const std::size_t keyPosition = responseBody.find("\"tool_calls\"");
 	if (keyPosition == std::string::npos) return calls;
@@ -647,7 +647,7 @@ std::vector<ToolCall> Server::extractToolCalls(const std::string & responseBody)
 	return calls;
 }
 
-std::vector<std::string> Server::extractModelIds(const std::string & responseBody) {
+std::vector<std::string> Endpoint::extractModelIds(const std::string & responseBody) {
 	std::vector<std::string> models;
 	const std::string key = "\"id\"";
 	std::size_t searchFrom = 0;
@@ -669,14 +669,14 @@ std::vector<std::string> Server::extractModelIds(const std::string & responseBod
 	return models;
 }
 
-HttpResponse Server::runHttpRequest(const HttpRequest & request) {
+HttpResponse Endpoint::runHttpRequest(const HttpRequest & request) {
 	HttpResponse result;
 	if (request.url.empty()) {
 		result.error = "request URL is empty";
 		return result;
 	}
-#if defined(OFXGGML_HAS_OF_HTTP_RUNTIME)
-#if defined(OFXGGML_HAS_CURL_HTTP_RUNTIME)
+#if defined(OFXIC_HAS_OF_HTTP_RUNTIME)
+#if defined(OFXIC_HAS_CURL_HTTP_RUNTIME)
 	if (request.stream) {
 		return runStreamingRequest(request);
 	}
@@ -686,7 +686,7 @@ HttpResponse Server::runHttpRequest(const HttpRequest & request) {
 		return result;
 	}
 #endif
-	ofHttpRequest ofRequest(request.url, "ofxGgml-server");
+	ofHttpRequest ofRequest(request.url, "ofxIC-endpoint");
 	ofRequest.method = request.method == HttpMethod::Post
 		? ofHttpRequest::POST
 		: ofHttpRequest::GET;
@@ -712,4 +712,4 @@ HttpResponse Server::runHttpRequest(const HttpRequest & request) {
 #endif
 }
 
-} // namespace ofxGgml
+} // namespace ofxIC

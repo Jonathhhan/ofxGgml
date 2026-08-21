@@ -1,13 +1,13 @@
 $ErrorActionPreference = "Stop"
 
-if ([string]::IsNullOrWhiteSpace($env:OFXGGML_API_KEY)) {
-    throw "OFXGGML_API_KEY is missing. Set it to a Hugging Face token with Inference Providers permission."
+if ([string]::IsNullOrWhiteSpace($env:OFXIC_API_KEY)) {
+    throw "OFXIC_API_KEY is missing. Set it to a Hugging Face token with Inference Providers permission."
 }
-if ([string]::IsNullOrWhiteSpace($env:OFXGGML_MODEL)) {
-    throw "OFXGGML_MODEL is missing. Set it to a tool-capable Hugging Face model."
+if ([string]::IsNullOrWhiteSpace($env:OFXIC_MODEL)) {
+    throw "OFXIC_MODEL is missing. Set it to a tool-capable Hugging Face model."
 }
 
-$baseUrl = $env:OFXGGML_SERVER_URL
+$baseUrl = $env:OFXIC_ENDPOINT_URL
 if ([string]::IsNullOrWhiteSpace($baseUrl)) {
     $baseUrl = "https://router.huggingface.co/v1"
 }
@@ -19,7 +19,7 @@ if ($baseUrl.EndsWith("/v1")) {
 }
 
 $headers = @{
-    Authorization = "Bearer " + $env:OFXGGML_API_KEY
+    Authorization = "Bearer " + $env:OFXIC_API_KEY
 }
 $systemMessage = @{
     role = "system"
@@ -27,7 +27,7 @@ $systemMessage = @{
 }
 $userMessage = @{
     role = "user"
-    content = "Why does ofxGgml keep the model runtime outside the addon?"
+    content = "Why does ofxIC keep the model runtime outside the addon?"
 }
 $tool = @{
     type = "function"
@@ -51,7 +51,7 @@ function Invoke-ChatCompletion {
         [Parameter(Mandatory = $true)] $Tools
     )
     $request = @{
-        model = $env:OFXGGML_MODEL
+        model = $env:OFXIC_MODEL
         messages = $Messages
         tools = $Tools
         tool_choice = "auto"
@@ -63,7 +63,7 @@ function Invoke-ChatCompletion {
     Invoke-RestMethod -Method Post -Uri $chatUrl -Headers $headers -ContentType "application/json" -Body $json
 }
 
-Write-Host "Calling Hugging Face model '$($env:OFXGGML_MODEL)'..."
+Write-Host "Calling Hugging Face model '$($env:OFXIC_MODEL)'..."
 $first = Invoke-ChatCompletion -Messages @($systemMessage, $userMessage) -Tools @($tool)
 $assistant = $first.choices[0].message
 $calls = @($assistant.tool_calls)
@@ -81,7 +81,7 @@ $searchResult = @{
         @{
             citation = "[smoke.md#chunk-1]"
             source = "smoke.md"
-            text = "ofxGgml keeps ggml, CUDA, and the model runtime outside the addon behind an HTTP process boundary."
+            text = "ofxIC keeps ggml, CUDA, and the model runtime outside the addon behind an HTTP process boundary."
         }
     )
 } | ConvertTo-Json -Depth 6 -Compress

@@ -1,8 +1,8 @@
-#include "ofxGgmlToolLoop.h"
+#include "ofxICToolLoop.h"
 
-#include "../chat/ofxGgmlChatSession.h"
+#include "../chat/ofxICChatSession.h"
 
-namespace ofxGgml {
+namespace ofxIC {
 
 ToolLoop::ToolLoop(ChatSession & chat, const ToolRegistry & tools)
 	: chat(chat)
@@ -67,4 +67,4 @@ ToolLoopResult ToolLoop::run(const std::string & userMessage, std::size_t maxToo
 	return loopResult;
 }
 
-} // namespace ofxGgml
+} // namespace ofxIC

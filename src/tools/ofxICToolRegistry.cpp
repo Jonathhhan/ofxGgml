@@ -1,13 +1,13 @@
-#include "ofxGgmlToolRegistry.h"
+#include "ofxICToolRegistry.h"
 
-#include "../documents/ofxGgmlDocumentIndex.h"
+#include "../documents/ofxICDocumentIndex.h"
 
 #include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <utility>
 
-namespace ofxGgml {
+namespace ofxIC {
 namespace {
 
 bool validToolName(const std::string & name) {
@@ -164,4 +164,4 @@ ToolExecutionResult ToolRegistry::execute(const ToolCall & call) const {
 	return entry->second.handler(call.argumentsJson);
 }
 
-} // namespace ofxGgml
+} // namespace ofxIC

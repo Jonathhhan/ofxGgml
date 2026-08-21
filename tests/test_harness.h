@@ -6,21 +6,21 @@
 #include <utility>
 #include <vector>
 
-struct ofxGgmlTestCase {
+struct ofxICTestCase {
 	std::string name;
 	std::function<void()> run;
 };
 
-inline std::vector<ofxGgmlTestCase> & ofxGgmlTests() {
-	static std::vector<ofxGgmlTestCase> tests;
+inline std::vector<ofxICTestCase> & ofxICTests() {
+	static std::vector<ofxICTestCase> tests;
 	return tests;
 }
 
-struct ofxGgmlRegisterTest {
-	ofxGgmlRegisterTest(std::string name, std::function<void()> run) {
-		ofxGgmlTests().push_back({ std::move(name), std::move(run) });
+struct ofxICRegisterTest {
+	ofxICRegisterTest(std::string name, std::function<void()> run) {
+		ofxICTests().push_back({ std::move(name), std::move(run) });
 	}
 };
 
-#define OFXGGML_TEST(name) static void name(); static ofxGgmlRegisterTest register_##name(#name, name); static void name()
-#define OFXGGML_REQUIRE(expr) do { if (!(expr)) throw std::runtime_error("require failed: " #expr); } while(false)
+#define OFXIC_TEST(name) static void name(); static ofxICRegisterTest register_##name(#name, name); static void name()
+#define OFXIC_REQUIRE(expr) do { if (!(expr)) throw std::runtime_error("require failed: " #expr); } while(false)

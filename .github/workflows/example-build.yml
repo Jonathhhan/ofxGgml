@@ -5,7 +5,7 @@ on:
     paths:
       - "src/**"
       - "addon_config.mk"
-      - "ofxGgmlChatExample/**"
+      - "ofxICChatExample/**"
       - ".github/workflows/example-build.yml"
   push:
     branches:
@@ -15,7 +15,7 @@ on:
     paths:
       - "src/**"
       - "addon_config.mk"
-      - "ofxGgmlChatExample/**"
+      - "ofxICChatExample/**"
       - ".github/workflows/example-build.yml"
 
 permissions:
@@ -97,14 +97,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ln -s "$GITHUB_WORKSPACE" "$OF_ROOT/addons/ofxGgml"
+          ln -s "$GITHUB_WORKSPACE" "$OF_ROOT/addons/ofxIC"
           git -C "$OF_ROOT/addons" init ofxImGui
           git -C "$OF_ROOT/addons/ofxImGui" remote add origin https://github.com/jvcleave/ofxImGui.git
           git -C "$OF_ROOT/addons/ofxImGui" fetch --depth 1 origin "$OFXIMGUI_COMMIT"
           git -C "$OF_ROOT/addons/ofxImGui" checkout --detach FETCH_HEAD
-          app="$OF_ROOT/apps/myApps/ofxGgmlChatExample"
+          app="$OF_ROOT/apps/myApps/ofxICChatExample"
           mkdir -p "${app%/*}"
-          cp -R "$GITHUB_WORKSPACE/ofxGgmlChatExample" "$app"
+          cp -R "$GITHUB_WORKSPACE/ofxICChatExample" "$app"
           cp "$OF_ROOT/scripts/templates/linux64/Makefile" "$app/Makefile"
           cp "$OF_ROOT/scripts/templates/linux64/config.make" "$app/config.make"
 
@@ -112,9 +112,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app="$OF_ROOT/apps/myApps/ofxGgmlChatExample"
+          app="$OF_ROOT/apps/myApps/ofxICChatExample"
           make -C "$app" Release -j2
-          test -x "$app/bin/ofxGgmlChatExample"
+          test -x "$app/bin/ofxICChatExample"
           echo "Built with $OF_NIGHTLY_ASSET"
 
       - name: Install virtual display tools
@@ -133,7 +133,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           set -euo pipefail
-          app="$OF_ROOT/apps/myApps/ofxGgmlChatExample"
+          app="$OF_ROOT/apps/myApps/ofxICChatExample"
           artifact_dir="$RUNNER_TEMP/gui-smoke"
           mkdir -p "$artifact_dir"
 
@@ -161,7 +161,7 @@ jobs:
                   cat "$log" >&2
                   exit 1
                 fi
-                window_id="$(xdotool search --name "^ofxGgml V2 Document Tool$" 2>/dev/null | head -n 1 || true)"
+                window_id="$(xdotool search --name "^ofxIC V2 Document Tool$" 2>/dev/null | head -n 1 || true)"
                 [[ -n "$window_id" ]] && break
                 sleep 0.25
               done
@@ -177,22 +177,22 @@ jobs:
               import -display "$DISPLAY" -window "$window_id" "$screenshot"
               test -s "$screenshot"
             ' bash \
-            "$app/bin/ofxGgmlChatExample" \
-            "$artifact_dir/ofxGgmlChatExample.log" \
-            "$artifact_dir/ofxGgmlChatExample.png" \
+            "$app/bin/ofxICChatExample" \
+            "$artifact_dir/ofxICChatExample.log" \
+            "$artifact_dir/ofxICChatExample.png" \
             "$artifact_dir/window.txt"
 
           {
             echo "openFrameworks=$OF_NIGHTLY_ASSET"
             echo "runner=${RUNNER_OS}-${RUNNER_ARCH}"
           } >"$artifact_dir/build.txt"
-          file "$artifact_dir/ofxGgmlChatExample.png"
+          file "$artifact_dir/ofxICChatExample.png"
 
       - name: Upload GUI smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ofxGgmlChatExample-gui-linux-nightly
+          name: ofxICChatExample-gui-linux-nightly
           path: ${{ runner.temp }}/gui-smoke
           if-no-files-found: error
           retention-days: 14
@@ -205,21 +205,21 @@ jobs:
         shell: bash
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
-          OFXGGML_API_KEY: ${{ secrets.HF_TOKEN }}
-          OFXGGML_MODEL: ${{ vars.HF_MODEL || 'openai/gpt-oss-120b' }}
-          OFXGGML_SERVER_URL: ${{ vars.HF_SERVER_URL || 'https://router.huggingface.co/v1' }}
+          OFXIC_API_KEY: ${{ secrets.HF_TOKEN }}
+          OFXIC_MODEL: ${{ vars.HF_MODEL || 'openai/gpt-oss-120b' }}
+          OFXIC_ENDPOINT_URL: ${{ vars.HF_SERVER_URL || 'https://router.huggingface.co/v1' }}
         run: |
           set -euo pipefail
-          if [[ -z "$OFXGGML_API_KEY" ]]; then
+          if [[ -z "$OFXIC_API_KEY" ]]; then
             echo "HF_TOKEN is missing" >&2
             exit 1
           fi
 
-          app="$OF_ROOT/apps/myApps/ofxGgmlChatExample"
+          app="$OF_ROOT/apps/myApps/ofxICChatExample"
           artifact_dir="$RUNNER_TEMP/hf-gui-smoke"
           result="$artifact_dir/result.txt"
           mkdir -p "$artifact_dir"
-          export OFXGGML_GUI_RESULT_PATH="$result"
+          export OFXIC_GUI_RESULT_PATH="$result"
 
           xvfb-run \
             --auto-servernum \
@@ -246,7 +246,7 @@ jobs:
                   cat "$log" >&2
                   exit 1
                 fi
-                window_id="$(xdotool search --name "^ofxGgml V2 Document Tool$" 2>/dev/null | head -n 1 || true)"
+                window_id="$(xdotool search --name "^ofxIC V2 Document Tool$" 2>/dev/null | head -n 1 || true)"
                 [[ -n "$window_id" ]] && break
                 sleep 0.25
               done
@@ -285,15 +285,15 @@ jobs:
               import -display "$DISPLAY" -window "$window_id" "$screenshot"
               test -s "$screenshot"
             ' bash \
-            "$app/bin/ofxGgmlChatExample" \
-            "$artifact_dir/ofxGgmlChatExample.log" \
+            "$app/bin/ofxICChatExample" \
+            "$artifact_dir/ofxICChatExample.log" \
             "$result" \
-            "$artifact_dir/ofxGgmlChatExample-huggingface.png" \
+            "$artifact_dir/ofxICChatExample-huggingface.png" \
             "Why is the model runtime outside the addon? Answer in one short sentence."
 
           {
-            echo "model=$OFXGGML_MODEL"
-            echo "server=$OFXGGML_SERVER_URL"
+            echo "model=$OFXIC_MODEL"
+            echo "endpoint=$OFXIC_ENDPOINT_URL"
             echo "openFrameworks=$OF_NIGHTLY_ASSET"
           } >"$artifact_dir/build.txt"
           cat "$result"
@@ -305,7 +305,7 @@ jobs:
           contains(github.event.head_commit.message, '[hf-gui-smoke]')
         uses: actions/upload-artifact@v4
         with:
-          name: ofxGgmlChatExample-huggingface-gui
+          name: ofxICChatExample-huggingface-gui
           path: ${{ runner.temp }}/hf-gui-smoke
           if-no-files-found: error
           retention-days: 14

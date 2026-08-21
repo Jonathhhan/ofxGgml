@@ -1,19 +1,19 @@
 #pragma once
 
-#include "ofxGgmlChatTypes.h"
+#include "ofxICChatTypes.h"
 
 #include <functional>
 #include <string>
 #include <vector>
 
-namespace ofxGgml {
+namespace ofxIC {
 
-class Server;
+class Endpoint;
 class ToolLoop;
 
 class ChatSession {
 public:
-	explicit ChatSession(Server & server);
+	explicit ChatSession(Endpoint & endpoint);
 
 	void setSystemPrompt(std::string systemPrompt);
 	const std::string & getSystemPrompt() const;
@@ -36,10 +36,10 @@ private:
 		const std::vector<ToolDefinition> & tools,
 		ChatChunkCallback onChunk = nullptr);
 
-	std::reference_wrapper<Server> server;
+	std::reference_wrapper<Endpoint> endpoint;
 	std::string systemPrompt;
 	ChatOptions options;
 	std::vector<ChatMessage> messages;
 };
 
-} // namespace ofxGgml
+} // namespace ofxIC

@@ -1,4 +1,4 @@
-#include "ofxGgmlDocumentIndex.h"
+#include "ofxICDocumentIndex.h"
 
 #include <algorithm>
 #include <cctype>
@@ -7,7 +7,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace ofxGgml {
+namespace ofxIC {
 namespace {
 
 constexpr std::size_t chunkCharacters = 900;
@@ -145,4 +145,4 @@ void DocumentIndex::clear() {
 	chunks.clear();
 }
 
-} // namespace ofxGgml
+} // namespace ofxIC

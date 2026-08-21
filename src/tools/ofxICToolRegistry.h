@@ -1,13 +1,13 @@
 #pragma once
 
-#include "../chat/ofxGgmlChatTypes.h"
+#include "../chat/ofxICChatTypes.h"
 
 #include <functional>
 #include <map>
 #include <string>
 #include <vector>
 
-namespace ofxGgml {
+namespace ofxIC {
 
 class DocumentIndex;
 
@@ -37,4 +37,4 @@ private:
 	std::map<std::string, Entry> entries;
 };
 
-} // namespace ofxGgml
+} // namespace ofxIC

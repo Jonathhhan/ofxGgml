@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-namespace ofxGgml {
+namespace ofxIC {
 
 struct ToolCall {
 	std::string id;
@@ -73,4 +73,4 @@ struct ChatResult {
 
 using ChatChunkCallback = std::function<bool(const std::string &)>;
 
-} // namespace ofxGgml
+} // namespace ofxIC

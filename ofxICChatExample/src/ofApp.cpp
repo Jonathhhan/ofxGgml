@@ -16,11 +16,11 @@ struct EndpointProfile {
 };
 
 constexpr std::array<EndpointProfile, 5> endpointProfiles{{
-	{ "llama-server", "http://127.0.0.1:8080", "OFXGGML_API_KEY" },
-	{ "LM Studio", "http://127.0.0.1:1234", "OFXGGML_API_KEY" },
+	{ "llama-server", "http://127.0.0.1:8080", "OFXIC_API_KEY" },
+	{ "LM Studio", "http://127.0.0.1:1234", "OFXIC_API_KEY" },
 	{ "Hugging Face", "https://router.huggingface.co/v1", "HF_TOKEN" },
 	{ "OpenAI", "https://api.openai.com/v1", "OPENAI_API_KEY" },
-	{ "Custom", "", "OFXGGML_API_KEY" },
+	{ "Custom", "", "OFXIC_API_KEY" },
 }};
 
 std::string environmentValue(const char * name) {
@@ -28,8 +28,8 @@ std::string environmentValue(const char * name) {
 	return value && *value ? value : "";
 }
 
-std::string configuredServerUrl() {
-	const std::string value = environmentValue("OFXGGML_SERVER_URL");
+std::string configuredEndpointUrl() {
+	const std::string value = environmentValue("OFXIC_ENDPOINT_URL");
 	return value.empty() ? "http://127.0.0.1:8080" : value;
 }
 
@@ -60,11 +60,11 @@ int profileForUrl(const std::string & url) {
 }
 
 void writeAutomationResult(const std::string & status, const std::string & output) {
-	const std::string path = environmentValue("OFXGGML_GUI_RESULT_PATH");
+	const std::string path = environmentValue("OFXIC_GUI_RESULT_PATH");
 	if (path.empty()) return;
 	std::ofstream result(path, std::ios::binary | std::ios::trunc);
 	if (!result) {
-		ofLogError("ofxGgml") << "Could not write GUI result to " << path;
+		ofLogError("ofxIC") << "Could not write GUI result to " << path;
 		return;
 	}
 	result << status << "\n" << output << "\n";
@@ -73,13 +73,13 @@ void writeAutomationResult(const std::string & status, const std::string & outpu
 } // namespace
 
 ofApp::ofApp()
-	: server(configuredServerUrl())
-	, chat(server)
+	: endpoint(configuredEndpointUrl())
+	, chat(endpoint)
 	, toolLoop(chat, tools) {
-	selectedProfile = profileForUrl(configuredServerUrl());
-	setTextBuffer(endpointUrl, configuredServerUrl());
-	setTextBuffer(modelId, environmentValue("OFXGGML_MODEL"));
-	server.setBearerToken(configuredToken());
+	selectedProfile = profileForUrl(configuredEndpointUrl());
+	setTextBuffer(endpointUrl, configuredEndpointUrl());
+	setTextBuffer(modelId, environmentValue("OFXIC_MODEL"));
+	endpoint.setBearerToken(configuredToken());
 }
 
 ofApp::~ofApp() {
@@ -87,19 +87,19 @@ ofApp::~ofApp() {
 }
 
 void ofApp::setup() {
-	ofSetWindowTitle("ofxGgml V2 Document Tool");
+	ofSetWindowTitle("ofxIC V2 Document Tool");
 	ofSetBackgroundColor(20);
 	gui.setup(nullptr, true);
 	chat.setSystemPrompt(
 		"Use search_documents for questions about the addon. "
 		"Ground answers only in returned text and include its citation values.");
-	ofxGgml::ChatOptions options;
+	ofxIC::ChatOptions options;
 	options.model = modelId.data();
 	chat.setOptions(options);
 	documents.addText(
 		"v2-architecture.md",
-		"ofxGgml V2 keeps llama-server, ggml, CUDA, and model runtimes outside "
-		"the addon behind an HTTP process boundary. The addon provides server "
+		"ofxIC V2 keeps llama-server, ggml, CUDA, and model runtimes outside "
+		"the addon behind an HTTP process boundary. The addon provides endpoint "
 		"access, chat history, explicit document search, and allowlisted tools.");
 	tools.addDocumentSearch(documents);
 	status = "Ready. Inspect the endpoint, then send a message.";
@@ -115,7 +115,7 @@ void ofApp::update() {
 	availableModels = std::move(pendingModels);
 	if (!pendingModelSelection.empty()) {
 		setTextBuffer(modelId, pendingModelSelection);
-		ofxGgml::ChatOptions options = chat.getOptions();
+		ofxIC::ChatOptions options = chat.getOptions();
 		options.model = pendingModelSelection;
 		chat.setOptions(options);
 		pendingModelSelection.clear();
@@ -215,7 +215,7 @@ void ofApp::draw() {
 	if (applyRequested) applyConfiguration();
 	if (inspectRequested) {
 		if (configurationDirty) applyConfiguration();
-		inspectServer();
+		inspectEndpoint();
 	}
 	if (clearRequested && !busy) {
 		chat.clear();
@@ -234,7 +234,7 @@ void ofApp::keyPressed(int key) {
 	if (ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard) return;
 	if (key == OF_KEY_F1) {
 		if (configurationDirty) applyConfiguration();
-		inspectServer();
+		inspectEndpoint();
 		return;
 	}
 	if (key == OF_KEY_F2) {
@@ -271,9 +271,9 @@ void ofApp::exit() {
 
 void ofApp::applyConfiguration() {
 	if (busy) return;
-	server.setBaseUrl(endpointUrl.data());
-	server.setBearerToken(configuredToken());
-	ofxGgml::ChatOptions options = chat.getOptions();
+	endpoint.setBaseUrl(endpointUrl.data());
+	endpoint.setBearerToken(configuredToken());
+	ofxIC::ChatOptions options = chat.getOptions();
 	options.model = modelId.data();
 	chat.setOptions(options);
 	chat.clear();
@@ -282,7 +282,7 @@ void ofApp::applyConfiguration() {
 	output.clear();
 	configurationDirty = false;
 	status = "Applied " + std::string(endpointProfiles[selectedProfile].name) +
-		" at " + server.getBaseUrl();
+		" at " + endpoint.getBaseUrl();
 }
 
 void ofApp::selectEndpointProfile(int profileIndex) {
@@ -298,35 +298,35 @@ void ofApp::selectEndpointProfile(int profileIndex) {
 }
 
 std::string ofApp::configuredToken() const {
-	const std::string generic = environmentValue("OFXGGML_API_KEY");
+	const std::string generic = environmentValue("OFXIC_API_KEY");
 	if (!generic.empty()) return generic;
 	return environmentValue(endpointProfiles[selectedProfile].tokenEnvironment);
 }
 
 std::string ofApp::configuredTokenSource() const {
-	if (!environmentValue("OFXGGML_API_KEY").empty()) return "OFXGGML_API_KEY";
+	if (!environmentValue("OFXIC_API_KEY").empty()) return "OFXIC_API_KEY";
 	return endpointProfiles[selectedProfile].tokenEnvironment;
 }
 
-void ofApp::inspectServer() {
+void ofApp::inspectEndpoint() {
 	if (busy.exchange(true)) return;
-	status = "Inspecting server...";
+	status = "Inspecting endpoint...";
 	const std::string currentOutput = output;
 	const std::string currentModel = chat.getOptions().model;
 	worker = std::thread([this, currentOutput, currentModel]() {
-		const auto inspection = server.inspect();
+		const auto inspection = endpoint.inspect();
 		std::lock_guard<std::mutex> lock(resultMutex);
 		pendingModels = inspection.models;
 		pendingModelSelection.clear();
 		if (!inspection) {
 			pendingStatus = "Inspection failed: " + inspection.error;
 		} else if (!currentModel.empty()) {
-			pendingStatus = "Server ready; configured model: " + currentModel;
+			pendingStatus = "Endpoint ready; configured model: " + currentModel;
 		} else if (inspection.models.empty()) {
-			pendingStatus = "Server reachable; enter a model ID";
+			pendingStatus = "Endpoint reachable; enter a model ID";
 		} else {
 			pendingModelSelection = inspection.models.front();
-			pendingStatus = "Server ready; model: " + pendingModelSelection;
+			pendingStatus = "Endpoint ready; model: " + pendingModelSelection;
 		}
 		pendingOutput = currentOutput;
 		finished = true;

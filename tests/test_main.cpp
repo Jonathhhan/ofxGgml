@@ -5,7 +5,7 @@
 
 int main() {
 	int failed = 0;
-	for (const auto & test : ofxGgmlTests()) {
+	for (const auto & test : ofxICTests()) {
 		try {
 			test.run();
 			std::cout << "[ok] " << test.name << "\n";

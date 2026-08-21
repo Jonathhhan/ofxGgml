@@ -1,13 +1,16 @@
 # V2 Architecture
 
+`ofxIC` means **Inference Connector**. The addon owns client-side protocol and
+workflow state; inference remains in a separate local or hosted process.
+
 ## Product path
 
 ```text
 openFrameworks app
-  -> ofxGgml::ToolLoop
+  -> ofxIC::ToolLoop
   -> DocumentIndex + allowlisted search_documents
-  -> ofxGgml::ChatSession
-  -> ofxGgml::Server
+  -> ofxIC::ChatSession
+  -> ofxIC::Endpoint
   -> OpenAI-compatible HTTP endpoint
   -> external llama-server or hosted inference provider
 ```
@@ -18,7 +21,7 @@ addon.
 
 ## Public surface
 
-- `Server` owns endpoint configuration and HTTP transport.
+- `Endpoint` owns endpoint configuration and HTTP transport.
 - `ChatSession` owns conversation history.
 - `DocumentIndex` chunks explicitly loaded text and performs deterministic
   lexical search. It does not watch directories or accept model-selected paths.
@@ -31,7 +34,7 @@ addon.
 
 - No Core addon or common native runtime.
 - No tensor, graph, or universal model abstraction.
-- No automatic backend discovery beyond the configured server endpoint.
+- No automatic backend discovery beyond the configured endpoint.
 - No general agent framework around the one bounded document tool loop.
 - No ecosystem manifest or cross-repository control plane.
 

@@ -2,9 +2,15 @@
 
 ## v2.0.0-rewrite.1 — candidate
 
-This is the first release candidate for the reduced server-first V2. The name
+This is the first release candidate for the reduced endpoint-first V2. The name
 continues the existing `v2.0.0-rewrite.0` prerelease sequence; it does not claim
 API compatibility with that earlier, broader runtime design.
+
+The addon is renamed from `ofxGgml` to `ofxIC`, short for **Inference
+Connector**. The previous name implied an embedded ggml runtime even though the
+new architecture deliberately owns only the client side of a process boundary.
+The public namespace is now `ofxIC`, `Server` is now `Endpoint`, and environment
+variables use the `OFXIC_` prefix.
 
 ### Included
 

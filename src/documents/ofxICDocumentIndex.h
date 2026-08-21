@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace ofxGgml {
+namespace ofxIC {
 
 struct DocumentSearchHit {
 	std::string citation;
@@ -37,4 +37,4 @@ private:
 	std::vector<Chunk> chunks;
 };
 
-} // namespace ofxGgml
+} // namespace ofxIC

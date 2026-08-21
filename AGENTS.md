@@ -1,7 +1,8 @@
-# ofxGgml V2
+# ofxIC
 
-This branch develops one small openFrameworks addon for using an external
-OpenAI-compatible model endpoint.
+ofxIC means "Inference Connector". This branch develops one small
+openFrameworks addon that connects to external inference endpoints without
+embedding their model runtimes.
 
 ## Product boundary
 

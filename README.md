@@ -1,10 +1,10 @@
-# ofxGgml V2
+# ofxIC
 
-`ofxGgml` connects an openFrameworks application to an external
-OpenAI-compatible model endpoint. The V2 branch follows one narrow workflow:
-chat, search explicitly loaded documents through one allowlisted tool, and
-return a cited answer. The endpoint can be a local `llama-server` or a hosted
-provider.
+**Inference Connector for openFrameworks.** `ofxIC` connects an openFrameworks
+application to an external model endpoint. The V2 branch currently follows one
+narrow OpenAI-compatible workflow: chat, search explicitly loaded documents
+through one allowlisted tool, and return a cited answer. The endpoint can be a
+local `llama-server` or a hosted provider.
 
 The addon does **not** embed ggml, llama.cpp, CUDA, SAM, or another native model
 runtime. Run `llama-server` separately and update it independently.
@@ -15,21 +15,21 @@ Clone the V2 branch into the openFrameworks addons directory:
 
 ```sh
 cd path/to/openFrameworks/addons
-git clone --branch v2 https://github.com/Jonathhhan/ofxGgml.git
+git clone --branch v2 https://github.com/Jonathhhan/ofxIC.git
 git clone --branch develop https://github.com/jvcleave/ofxImGui.git
 ```
 
-Open `ofxGgmlChatExample` with the openFrameworks Project Generator, or add
-`ofxGgml` to an existing project. No model runtime or model file is installed
+Open `ofxICChatExample` with the openFrameworks Project Generator, or add
+`ofxIC` to an existing project. No model runtime or model file is installed
 with the addon.
 
 ## Current API
 
 ```cpp
-#include "ofxGgml.h"
+#include "ofxIC.h"
 
-ofxGgml::Server server("http://127.0.0.1:8080");
-ofxGgml::ChatSession chat(server);
+ofxIC::Endpoint endpoint("http://127.0.0.1:8080");
+ofxIC::ChatSession chat(endpoint);
 
 chat.setSystemPrompt("Be concise.");
 const auto result = chat.send("Hello");
@@ -44,17 +44,17 @@ if (result) {
 The complete document workflow remains small:
 
 ```cpp
-ofxGgml::DocumentIndex documents;
+ofxIC::DocumentIndex documents;
 documents.addFile("notes/architecture.md");
 
-ofxGgml::ToolRegistry tools;
+ofxIC::ToolRegistry tools;
 tools.addDocumentSearch(documents);
 
-ofxGgml::ToolLoop loop(chat, tools);
+ofxIC::ToolLoop loop(chat, tools);
 const auto answer = loop.run("Why is llama-server a separate process?");
 ```
 
-These objects deliberately use non-owning references: keep `Server` alive while
+These objects deliberately use non-owning references: keep `Endpoint` alive while
 its `ChatSession` is used, keep both `ChatSession` and `ToolRegistry` alive while
 using `ToolLoop`, and keep `DocumentIndex` alive after registering document
 search.
@@ -62,12 +62,12 @@ search.
 `search_documents` receives only a query. It cannot choose a file path or run
 an arbitrary function; it searches only text the application loaded first.
 
-Inspect the server and advertised model identity before use:
+Inspect the endpoint and advertised model identity before use:
 
 ```cpp
-const auto status = server.inspect();
+const auto status = endpoint.inspect();
 if (status && !status.models.empty()) {
-	ofxGgml::ChatOptions options;
+	ofxIC::ChatOptions options;
 	options.model = status.models.front();
 	chat.setOptions(options);
 }
@@ -77,7 +77,7 @@ if (status && !status.models.empty()) {
 
 Implemented:
 
-- `/v1/models` server inspection
+- `/v1/models` endpoint inspection
 - `/v1/chat/completions`
 - conversational history
 - optional streaming transport when openFrameworks exposes curl
@@ -96,7 +96,7 @@ Proven end to end:
 
 The latest recorded live proof used `openai/gpt-oss-120b` and returned
 `v2-architecture.md#chunk-1` in the
-[successful GUI run](https://github.com/Jonathhhan/ofxGgml/actions/runs/31979160396).
+[successful GUI run](https://github.com/Jonathhhan/ofxIC/actions/runs/31979160396).
 
 Not part of the supported V2 surface yet:
 
@@ -107,16 +107,16 @@ Not part of the supported V2 surface yet:
 
 ## Example
 
-`ofxGgmlChatExample` uses `ofxImGui` to switch between `llama-server`,
+`ofxICChatExample` uses `ofxImGui` to switch between `llama-server`,
 LM Studio, Hugging Face, OpenAI, and a custom OpenAI-compatible endpoint.
 
 - Choose an endpoint preset or enter a custom base URL.
 - Inspect `/v1/models` and select or enter the model ID.
-- Use `OFXGGML_API_KEY` as the universal token override. The Hugging Face and
+- Use `OFXIC_API_KEY` as the universal token override. The Hugging Face and
   OpenAI presets also recognize `HF_TOKEN` and `OPENAI_API_KEY` respectively.
 - Tokens are read from the environment; the GUI displays only whether one was
   loaded and never displays or stores its value.
-- `OFXGGML_SERVER_URL`, `OFXGGML_MODEL`, and `OFXGGML_API_KEY` still configure
+- `OFXIC_ENDPOINT_URL`, `OFXIC_MODEL`, and `OFXIC_API_KEY` configure
   the initial state for scripts and CI.
 - `F1` and `F2` remain shortcuts for inspect and clear.
 
@@ -126,9 +126,9 @@ Hugging Face Inference Providers exposes an OpenAI-compatible endpoint and
 supports tools. Configure the example without putting the token in source:
 
 ```sh
-export OFXGGML_SERVER_URL=https://router.huggingface.co/v1
-export OFXGGML_API_KEY=hf_your_token
-export OFXGGML_MODEL=your-tool-capable-model:provider
+export OFXIC_ENDPOINT_URL=https://router.huggingface.co/v1
+export OFXIC_API_KEY=hf_your_token
+export OFXIC_MODEL=your-tool-capable-model:provider
 ```
 
 Create a token with the `Inference Providers` permission and choose a currently
@@ -172,7 +172,7 @@ The deterministic tests use an injected transport; live inference remains a
 separate, explicitly triggered check so protocol failures and provider costs
 cannot be confused with unit-test failures.
 
-GitHub Actions also builds `ofxGgmlChatExample` against the current official
+GitHub Actions also builds `ofxICChatExample` against the current official
 openFrameworks Linux nightly. The workflow records the resolved archive name,
 opens the GUI on a virtual display, and uploads its screenshot and log. With
 `[hf-gui-smoke]`, it additionally types a question, waits for the model-backed
@@ -182,6 +182,6 @@ tool loop, verifies the source identifier, and captures the rendered answer.
 
 The next candidate is `v2.0.0-rewrite.1`. It continues the existing
 `v2.0.0-rewrite.0` prerelease line while replacing that broad in-process
-runtime design with the smaller server-first addon described here. See the
+runtime design with the smaller endpoint-first addon described here. See the
 [release notes](docs/RELEASE_NOTES.md) for its exact boundary. The current
 `main` branch and previous addon family remain untouched.
