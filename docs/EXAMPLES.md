@@ -53,6 +53,26 @@ The run scripts set the environment variables that the examples read, start a
 bundled server when possible, and reuse an already healthy local server instead
 of starting duplicates.
 
+### macOS / Linux
+
+The text example has a native shell launcher and does not require PowerShell:
+
+```bash
+bash scripts/run-text-example.sh --model /path/to/model.gguf
+```
+
+It checks `http://127.0.0.1:8080/health`, reuses an already healthy server, or
+starts the bundled `llama-server` in the background when one is available.
+You can also start only the server:
+
+```bash
+bash scripts/start-llama-server.sh --model /path/to/model.gguf
+```
+
+On macOS the text launcher discovers the openFrameworks app executable under
+`ofxGgmlTextExample/bin/*.app/Contents/MacOS/` as well as a plain binary under
+`bin/`.
+
 ## Ports
 
 | Port | Purpose |
@@ -75,10 +95,10 @@ openFrameworks/addons/ofxGgml/<Example>/bin/data/models
 openFrameworks/addons/ofxGgml/<Example>/models
 ```
 
-Passing `-Model C:\path\to\model.gguf` is the most explicit option and is
-recommended for first runs.
-Use `scripts\list-models.bat` to print the same search folders and discovered
-models.
+Passing `-Model C:\path\to\model.gguf` is the most explicit option on Windows.
+On macOS/Linux use `--model /path/to/model.gguf`.
+Use `scripts\list-models.bat` on Windows to print the same search folders and
+discovered models.
 
 ## Environment Overrides
 
@@ -100,7 +120,9 @@ when launching examples directly from an IDE.
 
 ## Dry Runs
 
-Dry runs show what would launch without opening an example window:
+Dry runs show what would launch without opening an example window.
+
+Windows:
 
 ```powershell
 scripts\run-simple-example.bat -DryRun
@@ -112,14 +134,23 @@ scripts\status-llama-server.bat
 scripts\stop-llama-server.bat -DryRun -IncludeExamples
 ```
 
+macOS/Linux:
+
+```bash
+bash scripts/run-text-example.sh --dry-run --model /path/to/model.gguf
+bash scripts/start-llama-server.sh --dry-run --model /path/to/model.gguf
+```
+
 ## Common Fixes
 
 - If a GUI example cannot find `ofxImGui.h`, install `ofxImGui` beside
   `ofxGgml`, then rebuild or regenerate the project.
-- If a model is missing, pass `-Model` or put a GGUF under `addons/models`.
+- If a model is missing, pass `-Model` on Windows or `--model` on macOS/Linux,
+  or put a GGUF under `addons/models`.
 - If a server request fails, launch through the run scripts instead of opening
-  the `.exe` directly.
+  the example executable directly.
 - If rebuilding llama.cpp cannot replace DLLs, close running examples and
   servers, or run `scripts\build-llama-server.bat -StopRunningRuntime`.
-- If a detached server is still running, use `scripts\stop-llama-server.bat`.
-- If you are not sure what is running, use `scripts\status-llama-server.bat`.
+- If a detached Windows server is still running, use `scripts\stop-llama-server.bat`.
+- If you are not sure what is running on macOS/Linux, check
+  `curl http://127.0.0.1:8080/health`.
